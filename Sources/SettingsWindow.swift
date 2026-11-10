@@ -1084,21 +1084,27 @@ struct GeneralPage: View {
         }
     }
 
-    /// Only what needs saying: a shortcut macOS wouldn't take, or one that clashes, with a one-click way out.
+    /// Only what needs saying, with a one-click way out: macOS refused the key when it was registered (what it said, as
+    /// it is), or one of macOS's own shortcuts uses it. Other apps' shortcuts can't be read, so nothing is guessed.
     @ViewBuilder private var shortcutNote: some View {
         let s = state.settings.shortcut
         if state.settings.shortcutOn {
-            if let st = sample?.registered ?? QuickChat.shared.shortcutState, st != "on" {
-                note(st + " Pick another.", face.danger, lamp: true)
+            if let st = sample != nil ? sample?.registered : QuickChat.shared.shortcutState, st != "on" {
+                wayOut(st, face.danger, from: s)
             } else if let c = sample != nil ? sample?.clash : s.clash() {
-                VStack(alignment: .leading, spacing: 3) {
-                    note(c, face.caution, lamp: true)
-                    if let free = QuickChatShortcut.presets.first(where: { $0 != s && (sample != nil || $0.clash() == nil) }) {
-                        Button("Pick \(free.title) instead") { pick(free.id) }
-                            .buttonStyle(.plain).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.hex(0x9cc7ff))
-                            .padding(.leading, 12)
-                    }
-                }
+                wayOut(c, face.caution, from: s)
+            }
+        }
+    }
+
+    /// A line under the shortcut and, under it, the first preset that's free as far as this Mac says.
+    private func wayOut(_ words: String, _ color: Color, from s: QuickChatShortcut) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            note(words, color, lamp: true)
+            if let free = QuickChatShortcut.presets.first(where: { $0 != s && $0.clash() == nil }) {
+                Button("Pick \(free.title) instead") { pick(free.id) }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.hex(0x9cc7ff))
+                    .padding(.leading, 12)
             }
         }
     }
@@ -1248,16 +1254,17 @@ enum SettingsRender {
                 SField(placeholder: "Name, e.g. Personal", text: .constant("Personal"), width: 150)
             })
         default:
-            // General with sample settings: ⌃Space with nothing to say, ⌥Space clashing with Quick Entry, the shortcut
-            // off, Other… listening for keys, and a shortcut another app holds
+            // General with sample settings: ⌃Space with nothing to say, ⌘Space clashing with macOS's Spotlight, the
+            // shortcut off, Other… listening for keys, and ⌥Space refused by macOS when registered
             at = .general
-            st.settings.shortcut = page == "general-clash" || page == "general-taken" ? .optionSpace : .controlSpace
+            st.settings.shortcut = page == "general-clash" ? .commandSpace : page == "general-taken" ? .optionSpace : .controlSpace
             st.settings.shortcutOn = page != "general-off"
             st.settings.model = .haiku
             st.settings.thinking = .off
             if page == "general-recording" { st.recording = .some(nil) }
-            let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.optionSpace.title + " also opens the Claude app's Quick Entry, if that's turned on." : nil,
-                                       registered: page == "general-taken" ? "Another app already uses ⌥Space." : nil)
+            // the words as clash() and registering put them
+            let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.commandSpace.title + " opens Spotlight in macOS." : nil,
+                                       registered: page == "general-taken" ? QuickChatShortcut.optionSpace.title + " is taken by another app." : nil)
             view = AnyView(GeneralPage(state: st, store: ProfileStore.shared, sample: sample))
         }
         let whole = VStack(alignment: .leading, spacing: 14) {
