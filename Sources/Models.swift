@@ -31,11 +31,16 @@ final class ModelCatalog {
     }
 
     /// The four families as a picker offers them for a list: the ones the account has, each by its newest name and
-    /// Claude Code's words for it; with no list known, all four by family.
+    /// version ("Opus 5.5") and Claude Code's words for it; with no list known, or one that names none of the four, all
+    /// four by family (their aliases).
     static func choices(_ list: [QuickChatModelEntry]?) -> [(choice: QuickChatModelChoice, title: String, detail: String)] {
-        guard let list else { return QuickChatModelChoice.allCases.map { ($0, $0.title, $0.blurb) } }
+        let all = QuickChatModelChoice.allCases.map { (choice: $0, title: $0.title, detail: $0.blurb) }
+        guard let list else { return all }
         let have = QuickChatModels.newest(list)
-        return QuickChatModelChoice.allCases.compactMap { c in have[c].map { (c, $0.displayName, $0.description ?? c.blurb) } }
+        let found = QuickChatModelChoice.allCases.compactMap { c in
+            have[c].map { (choice: c, title: QuickChatModels.title($0), detail: $0.description ?? c.blurb) }
+        }
+        return found.isEmpty ? all : found
     }
 
     /// The thinking steps for a family on a list (Off, then what its model takes), and the step a saved one becomes.

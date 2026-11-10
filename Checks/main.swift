@@ -320,6 +320,22 @@ check("models: a tie goes to the plain one, not a variant", tie[.opus]?.value ==
 check("thinking: clamped to the nearest, lighter first", QuickChatModels.clamp("max", to: ["off", "low", "medium", "high"]) == "high"
       && QuickChatModels.clamp("medium", to: ["off", "low", "high"]) == "low" && QuickChatModels.clamp("high", to: ["off"]) == "off"
       && QuickChatModels.clamp("xhigh", to: ["off", "low", "medium", "high", "xhigh"]) == "xhigh")
+// a list as Claude Code gives it on some accounts: each family by name alone, the version in its description
+let bare: [QuickChatModelEntry] = [
+    .init(value: "default", displayName: "Default (recommended)", description: "Opus 5.5 · Best for everyday, complex tasks"),
+    .init(value: "opus", displayName: "Opus", description: "Opus 5.5 · Best for everyday, complex tasks"),
+    .init(value: "claude-fable-5-1[1m]", displayName: "Fable", description: "Fable 5.1 · Most capable for your hardest tasks"),
+    .init(value: "sonnet", displayName: "Sonnet", description: "Sonnet 5.5 · Efficient for routine tasks"),
+    .init(value: "haiku", displayName: "Haiku", description: "Haiku 5.5 · Fastest for quick answers"),
+]
+let bareNewest = QuickChatModels.newest(bare)
+check("models: bare names count, all four families", bareNewest.count == 4 && bareNewest[.fable]?.value == "claude-fable-5-1[1m]", bareNewest)
+check("models: the version from the description", QuickChatModels.family(bare[1])! == (.opus, [5, 5])
+      && QuickChatModels.title(bare[2]) == "Fable 5.1")
+check("models: a bare name with no version anywhere", QuickChatModels.family(.init(value: "x", displayName: "Sonnet"))! == (.sonnet, [])
+      && QuickChatModels.title(.init(value: "x", displayName: "Sonnet")) == "Sonnet")
+check("models: a numbered one beats a bare one", QuickChatModels.newest([.init(value: "sonnet", displayName: "Sonnet"),
+      .init(value: "s55", displayName: "Sonnet 5.5")])[.sonnet]?.value == "s55")
 // settings.json's model: an old "profile" doesn't decode (the settings read it as Haiku, the default), "fable" does
 struct SavedModel: Decodable { var model: QuickChatModelChoice }
 check("settings: an old saved \"profile\" isn't a model", (try? JSONDecoder().decode(SavedModel.self, from: Data(#"{"model":"profile"}"#.utf8))) == nil)

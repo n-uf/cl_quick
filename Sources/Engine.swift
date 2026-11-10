@@ -88,12 +88,26 @@ enum QuickChatModels {
     /// Before any list is known (a first run): the aliases, and Low to High.
     static let fallbackEfforts = ["low", "medium", "high"]
 
-    /// "Fable 5.2" → (fable, [5, 2]); a name that isn't one of the four families, or has no version, is nil.
+    /// The family and version of an entry: "Fable 5.2" → (fable, [5, 2]). Claude Code may name a model by its family
+    /// alone ("Opus") and give the version in its description ("Opus 5.5 · Best for everyday, complex tasks"): the
+    /// version comes from there; with none anywhere, the family with no version ([], older than any numbered one). A
+    /// name that isn't one of the four families is nil.
     static func family(_ e: QuickChatModelEntry) -> (QuickChatModelChoice, [Int])? {
-        let words = e.displayName.split(separator: " ")
-        guard words.count >= 2, let f = QuickChatModelChoice(rawValue: words[0].lowercased()) else { return nil }
-        let v = words[1].split(separator: ".").compactMap { Int($0) }
-        return v.isEmpty ? nil : (f, v)
+        guard let first = e.displayName.split(separator: " ").first,
+              let f = QuickChatModelChoice(rawValue: first.lowercased()) else { return nil }
+        for text in [e.displayName, e.description ?? ""] {
+            let words = text.split(separator: " ")
+            guard words.count >= 2, words[0].lowercased() == f.rawValue else { continue }
+            let v = words[1].split(separator: ".").compactMap { Int($0) }
+            if !v.isEmpty { return (f, v) }
+        }
+        return (f, [])
+    }
+
+    /// What a step shows for an entry: its family and version ("Opus 5.5"), or its name when no version is known.
+    static func title(_ e: QuickChatModelEntry) -> String {
+        guard let (f, v) = family(e), !v.isEmpty else { return e.displayName }
+        return f.title + " " + v.map(String.init).joined(separator: ".")
     }
 
     /// The newest of each family in the list ("default" and older versions are left out). A family the account

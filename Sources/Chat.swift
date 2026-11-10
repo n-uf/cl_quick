@@ -213,7 +213,7 @@ final class QuickChatModel: ObservableObject {
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
-    var modelTitle: String { resolvedModel.entry?.displayName ?? knownModels[choice] ?? choice.title }
+    var modelTitle: String { resolvedModel.entry.map(QuickChatModels.title) ?? knownModels[choice] ?? choice.title }
     /// A limit holds the account back: nothing is sent until it resets or another profile is picked.
     var blocked: Bool { level?.full() != nil }
 
