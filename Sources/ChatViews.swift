@@ -67,20 +67,23 @@ struct QCBar: View {
     @ObservedObject var model: QuickChatModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let p = model.barProblem { QCProblemView(problem: p, model: model, answered: false) }
-            else if model.switchNotice != nil { QCSwitchView(model: model) }
-            else if model.blocked { QCProblemView(problem: .limitFull, model: model, answered: false) }
-            if let note = model.accountNote { QCNote(text: note).padding(.horizontal, 8) }
-            QCField(model: model, placeholder: "Ask anything", size: 17, grows: true)
-                .padding(.horizontal, 8)
+        // the field box on its own: the same text size and rows as in the window, with the window's corners
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if let p = model.barProblem { QCProblemView(problem: p, model: model, answered: false) }
+                else if model.switchNotice != nil { QCSwitchView(model: model) }
+                else if model.blocked { QCProblemView(problem: .limitFull, model: model, answered: false) }
+            }
+            .padding(.bottom, 4)
+            if let note = model.accountNote { QCNote(text: note) }
+            QCField(model: model, placeholder: "Ask anything", size: 15, grows: true)
             QCControls(model: model, inBar: true)
         }
-        .padding(EdgeInsets(top: 16, leading: 10, bottom: 10, trailing: 10))
+        .padding(QCSpace.barPadding)
         .frame(maxHeight: .infinity, alignment: .top)       // a bar dragged taller gives the height to the field
         .qcDraggable()
-        .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(QCColor.surface.opacity(0.97)))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(QCColor.line))
+        .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(QCColor.surface.opacity(0.97)))
+        .overlay(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).strokeBorder(QCColor.line))
     }
 }
 
@@ -96,9 +99,9 @@ struct QCWindow: View {
             if rendering {
                 // a picture can't draw a scroll view: the chat's end, clipped to the window, as if scrolled down
                 Color.clear
-                    .overlay(VStack(alignment: .leading, spacing: 0) { turns }.padding(.horizontal, 20).padding(.bottom, 12),
-                             alignment: .bottom)
+                    .overlay(VStack(alignment: .leading, spacing: 0) { turns }.padding(Self.chatPadding), alignment: .bottom)
                     .clipped()
+                    .overlay(alignment: .top) { fade }
             } else {
                 // the chat is at least as tall as the scroll view, so the empty space below a short one drags too
                 GeometryReader { geo in
@@ -108,8 +111,7 @@ struct QCWindow: View {
                                 turns
                                 Color.clear.frame(height: 1).id("end")
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 12)
+                            .padding(Self.chatPadding)
                             .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
                             .qcDraggable()
                         }
@@ -117,22 +119,33 @@ struct QCWindow: View {
                         .onAppear { proxy.scrollTo("end", anchor: .bottom) }
                     }
                 }
+                .overlay(alignment: .top) { fade }
                 .frame(minHeight: 44)         // a line of chat stays, whatever the window
             }
+            // the field box: 10 pt from the window's sides and bottom, its text and controls 12 pt inside it
             VStack(alignment: .leading, spacing: 8) {
-                QCField(model: model, placeholder: "Reply…", size: 15).padding(.horizontal, 8)
+                QCField(model: model, placeholder: "Reply…", size: 15)
                 QCControls(model: model, inBar: false)
             }
-            .padding(EdgeInsets(top: 12, leading: 8, bottom: 8, trailing: 8))
+            .padding(QCSpace.boxPadding)
             .qcDraggable()
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(QCColor.surface))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(QCColor.line))
-            .padding([.horizontal, .bottom], 12)
+            .background(RoundedRectangle(cornerRadius: QCSpace.boxCorner, style: .continuous).fill(QCColor.surface))
+            .overlay(RoundedRectangle(cornerRadius: QCSpace.boxCorner, style: .continuous).strokeBorder(QCColor.line))
+            .padding([.horizontal, .bottom], QCSpace.gap)
         }
         .frame(maxHeight: .infinity)
         .qcDraggable()
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(QCColor.window.opacity(0.98)))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(QCColor.line))
+        .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(QCColor.window.opacity(0.98)))
+        .overlay(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).strokeBorder(QCColor.line))
+    }
+
+    /// The answers start on the same 10 pt line as the header's name and the field box.
+    static let chatPadding = EdgeInsets(top: 4, leading: QCSpace.gap, bottom: 12, trailing: QCSpace.gap)
+
+    /// The answers scroll under the header through a short fade, not a hard edge.
+    private var fade: some View {
+        LinearGradient(colors: [QCColor.window, QCColor.window.opacity(0)], startPoint: .top, endPoint: .bottom)
+            .frame(height: 10).allowsHitTesting(false)
     }
 
     @ViewBuilder private var turns: some View {
@@ -162,26 +175,29 @@ struct QCHeader: View {
 
     var body: some View {
         let on = hover || pictureHover
+        // identity on the left (name, address), usage on the right next to New chat and Hide; 40 pt high, centred, the
+        // name on the window's 10 pt line and the ✕ glyph about as far in from the right
         HStack(spacing: 8) {
             QCHeaderInfo(target: model.target, level: model.level, openProfile: {
                 // Settings opens and the chat steps aside (hidden, not closed: the shortcut brings it back as it was)
                 if let id = model.target?.profileID { model.openSettings(id); model.hide() }
             }, nameHover: $nameHover, reveal: on, state: $line)
-            Spacer(minLength: 8)
-            // a tight pair, each a 24 pt target
             HStack(spacing: 0) {
-                QCIconButton(symbol: "square.and.pencil", help: "New chat", width: 24) { model.newChat() }
-                QCIconButton(symbol: "xmark", help: "Hide (Esc)", width: 24) { model.hide() }
+                QCIconButton(symbol: "square.and.pencil", help: "New chat (⌘N)", size: QCSpace.row) { model.newChat() }
+                QCIconButton(symbol: "xmark", help: "Hide (Esc)", size: QCSpace.row) { model.hide() }
             }
         }
-        .padding(EdgeInsets(top: 10, leading: 12, bottom: 6, trailing: 13))
+        .padding(.leading, QCSpace.gap).padding(.trailing, 3)
+        .frame(height: QCSpace.header)
         .qcDraggable(hover: $hover)       // the pointer anywhere on the line: hover, without taking the mouse from the drag
-        .overlay(alignment: .topLeading) {
-            // the line can't hold everything: on hover, a card under it does
+        .overlay(alignment: .topTrailing) {
+            // the reset times are never on the line, and the address may be cut or gone: on hover a card under the
+            // meters, right-aligned to the 10 pt line, says it all
             let email = line.addressComplete ? nil : model.target?.email
-            let meters = (!line.metersComplete ? model.level : nil).flatMap { QCHeaderLine.hasMeters($0) ? $0 : nil }
+            let meters = model.level.flatMap { QCHeaderLine.hasMeters($0) ? $0 : nil }
             if on, email != nil || meters != nil {
-                QCHeaderCard(email: email, level: meters).offset(x: 12, y: 46).allowsHitTesting(false)
+                QCHeaderCard(email: email, level: meters)
+                    .padding(.trailing, QCSpace.gap).offset(y: QCSpace.header - 2).allowsHitTesting(false)
             }
         }
     }
@@ -195,18 +211,26 @@ struct QCHeaderCard: View {
 
     var body: some View {
         let full = level?.full()
-        let all = QCHeaderDetail.steps[0]
-        VStack(alignment: .leading, spacing: 7) {
-            if let email { Text(email).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1) }
+        let all = QCHeaderDetail.card
+        VStack(alignment: .leading, spacing: 6) {
+            if let email {
+                Text(email).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1)
+                if level != nil { Rectangle().fill(QCColor.line).frame(height: 1).padding(.bottom, 1) }
+            }
             if let level {
-                QCLevelGroup(label: "session", short: "5h", p: level.fiveHourNow(), full: full?.id == "5h" ? full : nil, resets: level.fiveHourResets, detail: all)
-                QCLevelGroup(label: "week", short: "wk", p: level.weekNow(), full: full?.id == "wk" ? full : nil, resets: level.weekResets, detail: all)
+                // a grid, so the bars and numbers of both lines line up
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                    QCLevelGroup(label: "session", short: "5h", p: level.fiveHourNow(), full: full?.id == "5h" ? full : nil,
+                                 resets: level.fiveHourResets, detail: all, inGrid: true)
+                    QCLevelGroup(label: "week", short: "wk", p: level.weekNow(), full: full?.id == "wk" ? full : nil,
+                                 resets: level.weekResets, detail: all, inGrid: true)
+                }
             }
         }
         .fixedSize()
         .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(QCColor.surface))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(QCColor.line))
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(QCColor.surface))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(QCColor.line))
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
     }
 }
@@ -222,45 +246,33 @@ extension EnvironmentValues {
 
 /// How much of the header's account line is drawn. Never an ellipsis: the line takes the first step that fits the width it
 /// has (ViewThatFits: measured, no fixed thresholds), richest first, so the numbers show whenever there is room for them.
-/// As the window narrows it drops parts in this order:
-///   1. "resets Sun 13:00" loses its word: "Sun 13:00";
-///   2. the reset times go;
-///   3. both labels shorten together: "session" / "week" become "5h" / "wk";
-///   4. the percentages go (bars only; "full" stays), labels first full again, then short;
-///   5. the labels go, both;
-///   6. the address smudge is cut to a short one;
-///   7. the address goes (and a profile name too long for the window on its own is cut: the only ellipsis).
-/// The address is drawn at its own width (`natural`) only where the line has room to spare after the numbers: at each of
-/// the first levels the natural width comes before the capped one (96 pt), so the numbers win over the address's width.
-/// The address keeps its width on hover; it un-blurs there. While the pointer is on the header, a card under it shows
-/// what the line couldn't: the whole address, and both meters with percentage and reset time (the tooltip has the
-/// meters as words).
+/// The reset times are never on the line (the card has them), so the line doesn't change length on hover. As the window
+/// narrows it drops parts in this order:
+///   1. both labels shorten together: "session" / "week" become "5h" / "wk";
+///   2. the address leaves the line (the card shows it), so the percentages can stay;
+///   3. the percentages go (bars only; "full" stays), labels first full again, then short;
+///   4. the labels go, both (and a profile name too long for the window on its own is cut: the only ellipsis).
+/// The address sits in a capsule at most 132 pt wide, blurred at rest; on hover it turns readable in place, the capsule
+/// keeping its width. While the pointer is on the header, a card under the meters shows both with percentage and reset
+/// time, and the whole address when the line cut it or left it out (the tooltip has the meters as words).
 struct QCHeaderDetail: Equatable {
     enum Resets { case words, time, none }
     enum Labels { case full, short, none }
-    enum Address { case natural, capped, short, none }
-    var resets: Resets
+    var resets: Resets = .none
     var pct: Bool
     var labels: Labels
-    var address: Address = .capped
-
-    /// All the meters say: the reset times are there (the word "resets" or not).
-    var showsMeters: Bool { resets != .none }
+    var address = true
 
     static let steps: [QCHeaderDetail] = [
-        .init(resets: .words, pct: true, labels: .full, address: .natural),
-        .init(resets: .words, pct: true, labels: .full),
-        .init(resets: .time, pct: true, labels: .full, address: .natural),
-        .init(resets: .time, pct: true, labels: .full),
-        .init(resets: .none, pct: true, labels: .full, address: .natural),
-        .init(resets: .none, pct: true, labels: .full),
-        .init(resets: .none, pct: true, labels: .short),
-        .init(resets: .none, pct: false, labels: .full),
-        .init(resets: .none, pct: false, labels: .short),
-        .init(resets: .none, pct: false, labels: .none),
-        .init(resets: .none, pct: false, labels: .none, address: .short),
-        .init(resets: .none, pct: false, labels: .none, address: .none),
+        .init(pct: true, labels: .full),
+        .init(pct: true, labels: .short),
+        .init(pct: true, labels: .short, address: false),
+        .init(pct: false, labels: .full, address: false),
+        .init(pct: false, labels: .short, address: false),
+        .init(pct: false, labels: .none, address: false),
     ]
+    /// The card under the header: everything.
+    static let card = QCHeaderDetail(resets: .words, pct: true, labels: .full)
 }
 
 /// What the line on screen leaves out (told by the step that is shown), so the hover card adds exactly that.
@@ -283,11 +295,13 @@ struct QCHeaderInfo: View {
 
     var body: some View {
         let steps = QCHeaderDetail.steps
+        // each candidate is measured at its ideal width (its spacer at its least) and, once picked, spreads to the width
+        // the header gives it, so the meters sit on the right next to the buttons
+        let whole = target?.email.map { QCBlurred.fits($0) } ?? true
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
                 QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover, reveal: reveal)
-                    .fixedSize()
-                    .onAppear { state = QCLineState(metersComplete: steps[i].showsMeters, addressComplete: steps[i].address == .natural) }
+                    .onAppear { state = QCLineState(metersComplete: false, addressComplete: steps[i].address && whole) }
             }
             // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
             // pushes the buttons off the panel
@@ -314,10 +328,13 @@ struct QCHeaderLine: View {
     var body: some View {
         HStack(spacing: 8) {
             if let t = target {
-                QCProfileName(name: t.name, hover: $nameHover, action: openProfile).layoutPriority(flexible ? -1 : 0)
+                // the name's hover fill reaches 6 pt past its text, which sits on the 10 pt line
+                QCProfileName(name: t.name, hover: $nameHover, action: openProfile).padding(.leading, -6)
+                    .layoutPriority(flexible ? -1 : 0)
                 // a plain label: a drag that starts on it moves the panel
-                if detail.address != .none, let e = t.email { QCBlurred(text: e, mode: detail.address, reveal: reveal).allowsHitTesting(false) }
+                if detail.address, let e = t.email { QCBlurred(text: e, reveal: reveal).allowsHitTesting(false) }
             }
+            Spacer(minLength: 0)
             if let l = level {
                 let full = l.full()
                 HStack(spacing: 12) {
@@ -326,7 +343,7 @@ struct QCHeaderLine: View {
                     QCLevelGroup(label: "week", short: "wk", p: l.weekNow(), full: full?.id == "wk" ? full : nil,
                                  resets: l.weekResets, detail: detail)
                 }
-                .padding(.leading, 4)
+                .fixedSize()
                 .help(Self.tooltip(l))        // the meters take the pointer (a tooltip needs it); the labels leave it to the drag
             }
         }
@@ -369,8 +386,8 @@ struct QCProfileName: View {
 
     var body: some View {
         Button(action: action) {
-            Text(name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
-                .padding(.horizontal, 6).padding(.vertical, 3)
+            Text(name).font(.system(size: 13, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
+                .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover || pictureHover ? QCColor.hover : .clear))
         }
         .buttonStyle(.plain)
@@ -390,19 +407,30 @@ extension EnvironmentValues {
     }
 }
 
-/// The address as a smudge: the real text, cut to at most 96 pt (48 when `short`) and blurred.
+/// The address in a capsule: the real text, cut to the capsule's at most 132 pt, blurred at rest and readable while the
+/// pointer is on the header. The blur stays inside the capsule, so it has a clear edge rather than a smear.
 struct QCBlurred: View {
     let text: String
-    var mode: QCHeaderDetail.Address = .capped
     /// The pointer is on the header: the blur fades out (and back in when it leaves).
     var reveal = false
 
+    static let font = NSFont.systemFont(ofSize: 12)
+    static let maxWidth: CGFloat = 132, inset: CGFloat = 7
+    /// Whether the whole address fits in the capsule (else the hover card shows it whole).
+    static func fits(_ s: String) -> Bool {
+        (s as NSString).size(withAttributes: [.font: font]).width + 2 * inset <= maxWidth
+    }
+
     var body: some View {
         Text(text).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
-            .frame(minWidth: 0, maxWidth: mode == .natural ? .infinity : mode == .short ? 48 : 96, alignment: .leading).clipped()
-            .padding(.horizontal, 4)
-            .blur(radius: reveal ? 0 : 4.5)
+            .frame(minWidth: 0, maxWidth: Self.maxWidth - 2 * Self.inset, alignment: .leading).clipped()
+            .blur(radius: reveal ? 0 : 3.4)
             .animation(.easeOut(duration: 0.18), value: reveal)
+            .padding(.horizontal, Self.inset).frame(height: 18)
+            .background(Capsule().fill(QCColor.text.opacity(0.06)))
+            .overlay(Capsule().strokeBorder(QCColor.text.opacity(0.05)))
+            .clipShape(Capsule())
+            .fixedSize()
     }
 }
 
@@ -415,30 +443,40 @@ struct QCLevelGroup: View {
     let full: FullLimit?
     let resets: Date?
     let detail: QCHeaderDetail
+    /// In the hover card's grid: one row, the bar twice as long and the text a little larger.
+    var inGrid = false
 
     var body: some View {
         if full != nil || p != nil {
-            let share = full != nil ? 100 : p
-            let color = QuickChatLevel.color(share)
-            let when = (full?.resets ?? resets)
-            HStack(spacing: 5) {
-                if detail.labels != .none {
-                    Text(detail.labels == .full ? label : short).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1)
-                }
-                ZStack(alignment: .leading) {
-                    Capsule().fill(QCColor.text.opacity(0.13))
-                    Capsule().fill(color).frame(width: 38 * CGFloat(min(100, share ?? 0)) / 100)
-                }
-                .frame(width: 38, height: 4)
-                if full != nil || detail.pct {
-                    Text(full != nil ? "full" : QuickChatLevel.pct(share))
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundColor(color).lineLimit(1)
-                }
-                if let when, detail.resets != .none {
-                    Text(detail.resets == .words ? "resets \(TimeWords.when(when))" : TimeWords.when(when))
-                        .font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1)
-                }
+            if inGrid {
+                GridRow { parts }
+            } else {
+                HStack(spacing: 5) { parts }
             }
+        }
+    }
+
+    @ViewBuilder private var parts: some View {
+        let share = full != nil ? 100 : p
+        let color = QuickChatLevel.color(share)
+        let when = (full?.resets ?? resets)
+        let size: CGFloat = inGrid ? 12 : 11.5
+        let bar: CGFloat = inGrid ? 48 : 24
+        if detail.labels != .none {
+            Text(detail.labels == .full ? label : short).font(.system(size: size)).foregroundColor(QCColor.muted).lineLimit(1)
+        }
+        ZStack(alignment: .leading) {
+            Capsule().fill(QCColor.text.opacity(0.13))
+            Capsule().fill(color).frame(width: bar * CGFloat(min(100, share ?? 0)) / 100)
+        }
+        .frame(width: bar, height: 4)
+        if full != nil || detail.pct {
+            Text(full != nil ? "full" : QuickChatLevel.pct(share))
+                .font(.system(size: size, weight: .semibold).monospacedDigit()).foregroundColor(color).lineLimit(1)
+        }
+        if let when, detail.resets != .none {
+            Text(detail.resets == .words ? "resets \(TimeWords.when(when))" : TimeWords.when(when))
+                .font(.system(size: size)).foregroundColor(QCColor.muted).lineLimit(1)
         }
     }
 }
@@ -834,22 +872,24 @@ struct QCControls: View {
             }
             if model.busy {
                 Button(action: model.stop) {
-                    Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold))
-                        .frame(width: 34, height: 34).foregroundColor(QCColor.bubble)
+                    Image(systemName: "stop.fill").font(.system(size: 10, weight: .bold))
+                        .frame(width: QCSpace.row, height: QCSpace.row).foregroundColor(QCColor.bubble)
                         .background(Circle().fill(QCColor.text))
                 }
                 .buttonStyle(.plain).help("Stop")
             } else {
                 let empty = model.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.blocked
                 Button(action: model.send) {
-                    Image(systemName: "arrow.up").font(.system(size: 14, weight: .semibold))
-                        .frame(width: 34, height: 34)
+                    Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold))
+                        .frame(width: QCSpace.row, height: QCSpace.row)
                         .foregroundColor(empty ? QCColor.text.opacity(0.38) : .white)
-                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(empty ? QCColor.text.opacity(0.1) : QCColor.send))
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(empty ? QCColor.text.opacity(0.1) : QCColor.send))
                 }
                 .buttonStyle(.plain).disabled(empty).help("Send (Return)")
             }
         }
+        // the first control's text sits on the box's padding, its hover fill reaching past it
+        .padding(.leading, -QCSpace.keyPadding)
     }
 
     private func pickProfile() {
@@ -894,8 +934,8 @@ struct QCChip: View {
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.7)
             }
             .foregroundColor(hover ? QCColor.text : QCColor.soft)
-            .padding(.horizontal, 9).frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hover ? QCColor.hover : .clear))
+            .padding(.horizontal, QCSpace.keyPadding).frame(height: QCSpace.row)
+            .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).fill(hover ? QCColor.hover : .clear))
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
     }
@@ -957,17 +997,18 @@ struct QCButton: View {
 struct QCIconButton: View {
     let symbol: String
     let help: String
+    /// A 24 pt target with a smaller glyph (an answer's actions, a code block's Copy); else 28.
     var small = false
-    /// A narrower target than the default 28 or 30 pt.
-    var width: CGFloat? = nil
+    var size: CGFloat? = nil
     let action: () -> Void
     @State private var hover = false
     var body: some View {
+        let side = size ?? (small ? QCSpace.small : QCSpace.row)
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: small ? 12 : 13, weight: .medium))
-                .frame(width: width ?? (small ? 28 : 30), height: small ? 28 : 30)
+            Image(systemName: symbol).font(.system(size: small ? 12 : 13.5, weight: .medium))
+                .frame(width: side, height: side)
                 .foregroundColor(hover ? QCColor.text : QCColor.muted)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover ? QCColor.hover : .clear))
+                .background(RoundedRectangle(cornerRadius: small ? 6 : QCSpace.keyCorner, style: .continuous).fill(hover ? QCColor.hover : .clear))
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
     }
