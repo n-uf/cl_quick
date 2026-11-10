@@ -227,6 +227,8 @@ final class QuickChatModel: ObservableObject {
     var pickProfile: (String) -> Void = { _ in }
     /// Claude Code reported the account's limits after an answer: the profile, its account's uuid, the level.
     var levelReported: (String, String, QuickChatLevel) -> Void = { _, _, _ in }
+    /// The field has more or fewer lines now: the panel may need to grow to hold it (QuickChat.fit).
+    var fieldChanged: () -> Void = {}
     /// An answer failed to authenticate (true) or worked (false), on the account the `claude` started on: profile, account.
     var authResult: (String, String, Bool) -> Void = { _, _, _ in }
     /// Switch to …: the controller asks first, then opens Claude Code's sign-in and watches the folder.
@@ -740,6 +742,7 @@ final class QuickChat {
         }
         model.pickProfile = { [weak self] id in self?.move(to: id) }
         // refresh() may end the chat (profile removed, account or folder changed): never from inside the answer's own handling
+        model.fieldChanged = { [weak self] in DispatchQueue.main.async { self?.fit() } }
         model.levelReported = { [weak self] id, account, l in
             self?.store.record(id, account: account, l)
             DispatchQueue.main.async { self?.refresh() }
@@ -927,7 +930,9 @@ final class QuickChat {
         let m = 2 * QuickChatRoot.margin
         let vis = (panel?.screen ?? NSScreen.main)?.visibleFrame
         let hi = NSSize(width: vis?.width ?? 10000, height: vis?.height ?? 10000)
-        let leastHeight = model.isWindow ? QuickChatRoot.minWindowHeight + m : max(0, host?.intrinsicContentSize.height ?? 0)
+        // the chat's content asks for its own least too: header, a line of chat and the field at the lines it has
+        let ideal = max(0, host?.intrinsicContentSize.height ?? 0)
+        let leastHeight = model.isWindow ? max(QuickChatRoot.minWindowHeight + m, ideal) : ideal
         return (NSSize(width: QuickChatRoot.minWidth + m, height: leastHeight), hi)
     }
 
@@ -940,7 +945,13 @@ final class QuickChat {
         guard let p = panel, let host, !p.isResizing else { return }
         let vis = (p.screen ?? NSScreen.main)?.visibleFrame
         let chat = model.isWindow
-        if chat, sizedForChat { return }
+        if chat, sizedForChat {
+            // the chat is the user's, but not smaller than its content needs (the field grew to more lines)
+            host.layoutSubtreeIfNeeded()
+            let need = host.intrinsicContentSize.height
+            if need > 0, p.frame.height < need - 0.5 { growTo(need, p) }
+            return
+        }
         if !chat { sizedForChat = false }
         host.layoutSubtreeIfNeeded()         // the content for the mode we are in now, before anything is read or set
         var h: CGFloat
@@ -962,6 +973,19 @@ final class QuickChat {
         }
         // the chat is the user's from here on, once it really has its height (else the next change tries again)
         if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
+        p.invalidateShadow()
+    }
+
+    /// Taller, the top edge staying, within the screen.
+    private func growTo(_ height: CGFloat, _ p: NSPanel) {
+        let vis = (p.screen ?? NSScreen.main)?.visibleFrame
+        let h = min(height, vis?.height ?? height)
+        var f = p.frame
+        let top = f.maxY
+        f.size.height = h
+        f.origin.y = top - h
+        if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
+        p.setFrame(f, display: true)
         p.invalidateShadow()
     }
 

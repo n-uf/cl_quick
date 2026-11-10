@@ -43,8 +43,8 @@ extension EnvironmentValues {
 struct QuickChatRoot: View {
     static let width: CGFloat = 520            // the first width of the card
     static let windowHeight: CGFloat = 580     // the chat's first height
-    static let minWidth: CGFloat = 440         // the bar's row (profile, model, thinking, week, send) needs 394 + 20 of padding
-    static let minWindowHeight: CGFloat = 340  // header, a few lines of chat, and the field at six lines
+    static let minWidth: CGFloat = 320         // the key row fits on one line from here (QCControls drops the week, then words)
+    static let minWindowHeight: CGFloat = 220  // header, a line of chat and the field at one line; a taller field asks for more
     static let margin: CGFloat = 8             // the transparent margin around the card: the edge handles
     @ObservedObject var model: QuickChatModel
     @Environment(\.qcRendering) private var rendering
@@ -132,6 +132,7 @@ struct QCWindow: View {
                         .onAppear { proxy.scrollTo("end", anchor: .bottom) }
                     }
                 }
+                .frame(minHeight: 44)         // a line of chat stays, whatever the window
             }
             VStack(alignment: .leading, spacing: 8) {
                 QCField(model: model, placeholder: "Reply…", size: 15).padding(.horizontal, 8)
@@ -822,16 +823,28 @@ struct QCControls: View {
     @ObservedObject var model: QuickChatModel
     var inBar: Bool
 
+    /// The row on one line, whatever the width (ViewThatFits, richest first): the bar's week meter goes first, then the
+    /// thinking key keeps just its bulb (lit while thinking is on), then the profile key keeps just its dot.
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(level: true, thinkingWords: true, profileWords: true)
+            row(level: false, thinkingWords: true, profileWords: true)
+            row(level: false, thinkingWords: false, profileWords: true)
+            row(level: false, thinkingWords: false, profileWords: false)
+        }
+    }
+
+    private func row(level showLevel: Bool, thinkingWords: Bool, profileWords: Bool) -> some View {
         HStack(spacing: 4) {
             if let t = model.target {
-                QCChip(title: t.name, dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()), help: "Profile") { pickProfile() }
+                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()), help: "Profile: \(t.name)") { pickProfile() }
             }
             QCChip(title: model.modelTitle, help: "Model") { pickModel() }
-            QCChip(title: model.effectiveThinking == .off ? "Thinking off" : model.effectiveThinking.title, symbol: "lightbulb",
-                   lit: model.effectiveThinking != .off, help: "Thinking") { pickThinking() }
+            QCChip(title: thinkingWords ? (model.effectiveThinking == .off ? "Thinking off" : model.effectiveThinking.title) : "", symbol: "lightbulb",
+                   lit: model.effectiveThinking != .off,
+                   help: model.effectiveThinking == .off ? "Thinking off" : "Thinking \(model.effectiveThinking.title.lowercased())") { pickThinking() }
             Spacer(minLength: 4)
-            if inBar, let l = model.level, l.weekNow() != nil || l.full() != nil {
+            if inBar, showLevel, let l = model.level, l.weekNow() != nil || l.full() != nil {
                 QCLevelView(level: l).padding(.horizontal, 6)
             }
             if model.busy {
@@ -892,7 +905,7 @@ struct QCChip: View {
             HStack(spacing: 5) {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
                 if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundColor(lit ? QCColor.accent : QCColor.soft) }
-                Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                if !title.isEmpty { Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1) }
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.7)
             }
             .foregroundColor(hover ? QCColor.text : QCColor.soft)
@@ -1035,6 +1048,7 @@ struct QCField: View {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
                         onSubmit: { model.send() }, onEscape: { model.hide() }, onCaps: { caps = $0 })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
+                .onChange(of: height) { _ in model.fieldChanged() }
                 .overlay(alignment: .topTrailing) {
                     // macOS's own Caps Lock badge would land on the keys below (QuickChatPanel.addChildWindow): this says it
                     if caps {
