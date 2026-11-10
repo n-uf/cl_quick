@@ -2,9 +2,10 @@
 //
 // It's registered the way macOS's own app shortcuts are (RegisterEventHotKey), so macOS asks for no Accessibility
 // permission and it sees no other key. Before it's kept, it's checked against macOS's own shortcuts that use Space
-// (Spotlight, Finder's search, the input sources, as this Mac has them) and the Claude app's Quick Entry; a key without
-// ⌘, ⌃ or ⌥, or one of macOS's fixed app keys (⌘Q, ⌘W, ⌘H, ⌘M, ⌘Tab), is never kept. Registering it also fails, and says
-// so, when another app holds it already.
+// (Spotlight, Finder's search, the input sources, as this Mac has them); a key without ⌘, ⌃ or ⌥, or one of macOS's fixed
+// app keys (⌘Q, ⌘W, ⌘H, ⌘M, ⌘Tab), is never kept. Other apps' shortcuts can't be read, and macOS lets two apps register
+// the same key (it refused one here only when both asked for it exclusively, and this one doesn't), so a clash with
+// another app isn't caught; what registering says is shown as it is.
 
 import AppKit
 import Carbon.HIToolbox
@@ -97,8 +98,8 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
         return nil
     }
 
-    /// Who else uses it on this Mac, in words, or nil when nothing known does. macOS's own come from its settings
-    /// (com.apple.symbolichotkeys; one never changed there is as macOS ships it).
+    /// Which of macOS's own shortcuts uses it on this Mac, in words, or nil. Read from macOS's settings
+    /// (com.apple.symbolichotkeys; one never changed there is as macOS ships it). Other apps aren't guessed at.
     func clash(symbolic: [String: Any]? = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")) -> String? {
         // macOS's shortcuts that use Space: id, what it does, its usual modifiers, and whether it's on as macOS ships
         let system: [(id: String, does: String, usual: Int, onByDefault: Bool)] = [
@@ -114,10 +115,6 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
             } else if s.onByDefault, keyCode == UInt32(kVK_Space), s.usual == cocoaModifiers {
                 return "\(title) \(s.does) in macOS."
             }
-        }
-        // the Claude app's Quick Entry is ⌥Space unless changed there; only worth saying where the app is
-        if self == .optionSpace, NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") != nil {
-            return "\(title) also opens the Claude app's Quick Entry, if that's turned on."
         }
         return nil
     }
@@ -147,7 +144,7 @@ final class QuickChatHotKey {
         let status = RegisterEventHotKey(s.keyCode, s.carbonModifiers, id, GetApplicationEventTarget(), 0, &ref)
         switch status {
         case noErr: return nil
-        case OSStatus(eventHotKeyExistsErr): return "Another app already uses \(s.title)."
+        case OSStatus(eventHotKeyExistsErr): return "\(s.title) is taken by another app."
         default: return "macOS didn't take \(s.title) (\(status))."
         }
     }
