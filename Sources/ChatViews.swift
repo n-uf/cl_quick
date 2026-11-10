@@ -254,7 +254,7 @@ struct QCHeaderInfo: View {
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
                 QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover).fixedSize()
-                    .onAppear { complete = (i == 0) }
+                    .onAppear { complete = (i <= 1) }      // step 2 only lacks the word "resets": nothing a card would add
             }
             // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
             // pushes the buttons off the panel
@@ -363,7 +363,7 @@ struct QCBlurred: View {
 
     var body: some View {
         Text(text).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
-            .frame(maxWidth: short ? 48 : 96, alignment: .leading).clipped()
+            .frame(minWidth: 0, maxWidth: short ? 48 : 96, alignment: .leading).clipped()
             .padding(.horizontal, 4)
             .blur(radius: 4.5)
     }
