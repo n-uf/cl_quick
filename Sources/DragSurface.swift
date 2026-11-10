@@ -8,27 +8,54 @@ import AppKit
 import SwiftUI
 
 struct QCDragSurface: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { QCDragView() }
-    func updateNSView(_ view: NSView, context: Context) {}
+    /// Set: the pointer being over this area is told to it (a tracking area, so SwiftUI's hit-testing, which would
+    /// take the mouse from the drag, isn't involved).
+    var hover: Binding<Bool>?
+
+    func makeNSView(context: Context) -> NSView {
+        let v = QCDragView()
+        v.onHover = hover.map { b in { b.wrappedValue = $0 } }
+        return v
+    }
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? QCDragView)?.onHover = hover.map { b in { b.wrappedValue = $0 } }
+    }
 }
 
 final class QCDragView: NSView {
+    var onHover: ((Bool) -> Void)? {
+        didSet { if (onHover == nil) != (oldValue == nil) { updateTrackingAreas() } }
+    }
+    private var tracking: NSTrackingArea?
+
     override var mouseDownCanMoveWindow: Bool { true }
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t); tracking = nil }
+        guard onHover != nil else { return }
+        let t = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
 }
 
 private struct QCDraggable: ViewModifier {
+    var hover: Binding<Bool>?
     @Environment(\.qcRendering) private var rendering
 
     func body(content: Content) -> some View {
         // a picture (`--render-quick-chat`) can't draw an AppKit view, and has no mouse
-        if rendering { content } else { content.background(QCDragSurface()) }
+        if rendering { content } else { content.background(QCDragSurface(hover: hover)) }
     }
 }
 
 extension View {
-    /// The panel can be dragged from this view's empty areas.
-    func qcDraggable() -> some View { modifier(QCDraggable()) }
+    /// The panel can be dragged from this view's empty areas. `hover`: also tells whether the pointer is over the view.
+    func qcDraggable(hover: Binding<Bool>? = nil) -> some View { modifier(QCDraggable(hover: hover)) }
 }

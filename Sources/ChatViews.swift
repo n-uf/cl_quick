@@ -149,23 +149,174 @@ struct QCWindow: View {
 /// The account line: the profile and the address signed in to its folder (masked), its week, then New chat and Hide.
 struct QCHeader: View {
     @ObservedObject var model: QuickChatModel
+    @State private var hover = false
+    @Environment(\.qcHover) private var pictureHover
 
     var body: some View {
         HStack(spacing: 8) {
-            if let t = model.target {
-                // plain labels: a drag that starts on them moves the panel
-                Text(t.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text).allowsHitTesting(false)
-                if let e = t.email {
-                    Text(maskEmail(e)).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).truncationMode(.middle)
-                        .allowsHitTesting(false)
-                }
-            }
-            if let l = model.level, l.weekNow() != nil || l.full() != nil { QCLevelView(level: l).padding(.leading, 4) }
+            QCHeaderInfo(target: model.target, level: model.level, hover: hover || pictureHover)
             Spacer(minLength: 8)
             QCIconButton(symbol: "square.and.pencil", help: "New chat") { model.newChat() }
             QCIconButton(symbol: "xmark", help: "Hide (Esc)") { model.hide() }
         }
         .padding(EdgeInsets(top: 10, leading: 18, bottom: 6, trailing: 10))
+        .qcDraggable(hover: $hover)       // the pointer anywhere on the line: hover, without taking the mouse from the drag
+    }
+}
+
+/// Set while drawing a picture: the header as if the pointer were over it.
+private struct QCHoverKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var qcHover: Bool {
+        get { self[QCHoverKey.self] }
+        set { self[QCHoverKey.self] = newValue }
+    }
+}
+
+/// How much of the header's account line is drawn. Never an ellipsis: the line takes the first step that fits its width
+/// (ViewThatFits), richest first, and drops parts in this order as the window narrows:
+///   1. "resets Sun 13:00" loses its word: "Sun 13:00";
+///   2. the reset times go;
+///   3. the percentages go (bars only; "full" stays);
+///   4. the "session" label goes (the session bar is the first one, the week's carries its label);
+///   5. the address smudge is cut to a short one.
+/// While the pointer is on the header the numbers come back first: the address is cut short before they go, and the line
+/// shows what it can of them; the tooltip has all of them, as words, always.
+struct QCHeaderDetail: Equatable {
+    enum Resets { case words, time, none }
+    var resets: Resets
+    var pct: Bool
+    var sessionLabel: Bool
+    var shortAddress: Bool
+
+    static let steps: [QCHeaderDetail] = [
+        .init(resets: .words, pct: true, sessionLabel: true, shortAddress: false),
+        .init(resets: .time, pct: true, sessionLabel: true, shortAddress: false),
+        .init(resets: .none, pct: true, sessionLabel: true, shortAddress: false),
+        .init(resets: .none, pct: false, sessionLabel: true, shortAddress: false),
+        .init(resets: .none, pct: false, sessionLabel: false, shortAddress: false),
+        .init(resets: .none, pct: false, sessionLabel: false, shortAddress: true),
+    ]
+    static let hoverSteps: [QCHeaderDetail] = [
+        steps[0], steps[1], steps[2],
+        .init(resets: .none, pct: true, sessionLabel: true, shortAddress: true),
+        .init(resets: .none, pct: true, sessionLabel: false, shortAddress: true),
+        steps[3], steps[4], steps[5],
+    ]
+}
+
+/// The profile, its address (smudged) and the session and week meters.
+struct QCHeaderInfo: View {
+    let target: QuickChatTarget?
+    let level: QuickChatLevel?
+    let hover: Bool
+
+    var body: some View {
+        let steps = hover ? QCHeaderDetail.hoverSteps : QCHeaderDetail.steps
+        ViewThatFits(in: .horizontal) {
+            ForEach(steps.indices, id: \.self) { i in
+                QCHeaderLine(target: target, level: level, detail: steps[i]).fixedSize()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(QCHeaderLine.spoken(target: target, level: level))
+    }
+}
+
+struct QCHeaderLine: View {
+    let target: QuickChatTarget?
+    let level: QuickChatLevel?
+    let detail: QCHeaderDetail
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let t = target {
+                // plain labels: a drag that starts on them moves the panel
+                Text(t.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
+                    .allowsHitTesting(false)
+                if let e = t.email { QCBlurred(text: e, short: detail.shortAddress).allowsHitTesting(false) }
+            }
+            if let l = level {
+                let full = l.full()
+                HStack(spacing: 12) {
+                    QCLevelGroup(label: "session", p: l.fiveHourNow(), full: full?.id == "5h" ? full : nil, resets: l.fiveHourResets, detail: detail,
+                                 showLabel: detail.sessionLabel)
+                    QCLevelGroup(label: "week", p: l.weekNow(), full: full?.id == "wk" ? full : nil, resets: l.weekResets, detail: detail,
+                                 showLabel: true)
+                }
+                .padding(.leading, 4)
+                .help(Self.tooltip(l))        // the meters take the pointer (a tooltip needs it); the labels leave it to the drag
+            }
+        }
+    }
+
+    /// The same numbers as words, for the tooltip and VoiceOver: both windows with their share and reset.
+    static func tooltip(_ level: QuickChatLevel?) -> String {
+        guard let l = level else { return "" }
+        let full = l.full()
+        func line(_ name: String, _ p: Double?, _ f: FullLimit?, _ resets: Date?) -> String? {
+            guard f != nil || p != nil else { return nil }
+            let when = (f?.resets ?? resets).map { ", resets \(TimeWords.when($0))" } ?? ""
+            return f != nil ? "\(name): full\(when)" : "\(name): \(QuickChatLevel.pct(p)) used\(when)"
+        }
+        return [line("Session (5-hour window)", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets),
+                line("Week", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    static func spoken(target: QuickChatTarget?, level: QuickChatLevel?) -> String {
+        var parts: [String] = []
+        if let t = target { parts.append(t.name); if let e = t.email { parts.append(maskEmail(e)) } }
+        let words = tooltip(level)
+        if !words.isEmpty { parts.append(words.replacingOccurrences(of: "\n", with: ". ")) }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// The address as a smudge: the real text, blurred. `short`: cut to a short width first.
+struct QCBlurred: View {
+    let text: String
+    var short = false
+
+    var body: some View {
+        Text(text).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
+            .frame(width: short ? 48 : nil, alignment: .leading).clipped()
+            .padding(.horizontal, 4)
+            .blur(radius: 4.5)
+    }
+}
+
+/// One window's meter: its label, a thin bar in the level's colour, then the share and when it resets (as far as the
+/// detail says). A full limit says "full" whatever the detail. Nothing at all while the window isn't known.
+struct QCLevelGroup: View {
+    let label: String
+    let p: Double?
+    let full: FullLimit?
+    let resets: Date?
+    let detail: QCHeaderDetail
+    let showLabel: Bool
+
+    var body: some View {
+        if full != nil || p != nil {
+            let share = full != nil ? 100 : p
+            let color = QuickChatLevel.color(share)
+            let when = (full?.resets ?? resets)
+            HStack(spacing: 5) {
+                if showLabel { Text(label).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1) }
+                ZStack(alignment: .leading) {
+                    Capsule().fill(QCColor.text.opacity(0.13))
+                    Capsule().fill(color).frame(width: 38 * CGFloat(min(100, share ?? 0)) / 100)
+                }
+                .frame(width: 38, height: 4)
+                if full != nil || detail.pct {
+                    Text(full != nil ? "full" : QuickChatLevel.pct(share))
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundColor(color).lineLimit(1)
+                }
+                if let when, detail.resets != .none {
+                    Text(detail.resets == .words ? "resets \(TimeWords.when(when))" : TimeWords.when(when))
+                        .font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1)
+                }
+            }
+        }
     }
 }
 
@@ -544,7 +695,7 @@ struct QCControls: View {
                    lit: model.thinking != .off, help: "Thinking") { pickThinking() }
             Spacer(minLength: 4)
             if inBar, let l = model.level, l.weekNow() != nil || l.full() != nil {
-                QCLevelView(level: l, long: false).padding(.horizontal, 6)
+                QCLevelView(level: l).padding(.horizontal, 6)
             }
             if model.busy {
                 Button(action: model.stop) {
@@ -915,6 +1066,27 @@ enum QuickChatRender {
         case "ended-closed": m.turns = [t1]; m.ended = .closed
         case "level95": level.week = 96; m.level = level; m.turns = [t1]
         default: break
+        }
+        // the chat's account line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
+        // reported), header-long (a long profile name and address), each also with -hover (the pointer on it)
+        if state.hasPrefix("header") {
+            var l = QuickChatLevel()
+            l.week = 58; l.weekResets = Date().addingTimeInterval(3 * 86400)
+            if !state.contains("nosession") { l.fiveHour = 41; l.fiveHourResets = Date().addingTimeInterval(2 * 3600 + 600) }
+            if state.contains("full") { l.week = 100; l.weekResets = Date().addingTimeInterval(26 * 3600) }
+            m.level = l
+            if state.contains("long") {
+                target.name = "Personal-work"; target.email = "long.address.name@example.com"; m.target = target
+            }
+            let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
+            let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover"))
+                .frame(width: width).background(QCColor.window).environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))
+            let r = ImageRenderer(content: header)
+            r.scale = 2
+            if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
+            return
         }
         // the panel gives the root its size: the first width, and for the chat the first height
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true)

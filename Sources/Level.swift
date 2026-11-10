@@ -100,10 +100,10 @@ struct QuickChatLevel: Codable, Equatable {
     static func pct(_ p: Double?) -> String { p.map { "\(Int($0.rounded()))%" } ?? "–" }
 }
 
-/// The level in the chat's account line and the bar: a thin meter in the level's colour, then the number.
+/// The week in the bar's key row: a thin meter in the level's colour, then the number. (The chat's account line has the
+/// session and the week with their reset times: QCHeaderInfo in ChatViews.swift.)
 struct QCLevelView: View {
     let level: QuickChatLevel
-    var long = true
 
     var body: some View {
         let full = level.full()
@@ -117,15 +117,7 @@ struct QCLevelView: View {
             Text(full != nil ? "full" : QuickChatLevel.pct(p))
                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 .foregroundColor(p == nil ? QCColor.muted : QuickChatLevel.color(p))
-            if long, let words = words(full) {
-                Text(words).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1)
-            }
         }
         .help(full != nil ? "Full" : "The week, as Claude Code last reported it")
-    }
-
-    private func words(_ full: FullLimit?) -> String? {
-        if let full { return full.resets.map { "\(full.name) · resets \(TimeWords.when($0))" } ?? full.name }
-        return level.weekResets.map { "week · resets \(TimeWords.when($0))" }
     }
 }
