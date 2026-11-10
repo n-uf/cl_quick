@@ -124,13 +124,13 @@ enum AccountBook {
         return failedOn == signedIn.uuid ? .stopped : nil
     }
 
-    /// A standby account's week in Settings: the share Claude Code reported after the last answer on it, while it was
-    /// in use, and how long ago that was ("98% · 2 days ago"); ", reset since" when the week has started over since.
-    /// Nothing is read live: cl_quick keeps no standby account signed in anywhere. Nil: never reported.
-    static func standbyWeek(_ week: Double?, at: Date?, resets: Date?, now: Date = Date()) -> String? {
-        guard let week, let at else { return nil }
-        let reset = resets.map { $0 <= now } ?? false
-        return "\(Int(week.rounded()))% · \(ago(at, now: now))" + (reset ? ", reset since" : "")
+    /// What a switch affects, for its confirmation: Claude Code on the folder (in Terminal and editors for ~/.claude,
+    /// the uses pointed at it with CLAUDE_CONFIG_DIR for any other), sessions running now included; not the Claude app,
+    /// which runs its own claude with its own sign-in. `email` as it should be shown (masked where the caller masks).
+    static func switchWords(folder: String, email: String, isDefault: Bool) -> String {
+        (isDefault ? "Claude Code in Terminal and editors on \(folder)" : "Claude Code pointed at \(folder) with CLAUDE_CONFIG_DIR")
+            + " moves to \(email), sessions running now included; the Claude app keeps its own sign-in."
+            + " Finish the sign-in in Terminal and the browser as that account."
     }
 
     /// "just now", "12 min ago", "3 h ago", "yesterday", "4 days ago", "3 weeks ago".

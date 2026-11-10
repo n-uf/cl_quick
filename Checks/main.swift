@@ -427,11 +427,14 @@ do {
     check("broken: a failure on another account says nothing about this one", AccountBook.signInProblem(signedIn: inUse1, failedOn: "u2") == nil)
     check("broken: the words", SignInProblem.signedOut.words == "Signed out." && SignInProblem.stopped.words == "The sign-in stopped working.")
     check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
-    // a standby account's week: as last reported while in use, and how long ago; nothing live
+    // a switch's confirmation says what it affects: Claude Code on the folder, not the Claude app
+    let sw0 = AccountBook.switchWords(folder: "~/.claude", email: "a•••@example.com", isDefault: true)
+    check("switch words: ~/.claude", sw0.hasPrefix("Claude Code in Terminal and editors on ~/.claude moves to a•••@example.com, sessions running now included")
+          && sw0.contains("the Claude app keeps its own sign-in"))
+    check("switch words: another folder", AccountBook.switchWords(folder: "~/.claude-work", email: "s•••@work.example", isDefault: false)
+          .hasPrefix("Claude Code pointed at ~/.claude-work with CLAUDE_CONFIG_DIR moves to s•••@work.example"))
+    // a standby account's "last in use"
     let n0 = Date(timeIntervalSince1970: 1_800_000_000)
-    check("standby week: two days ago", AccountBook.standbyWeek(97.6, at: n0.addingTimeInterval(-2 * 86400 - 60), resets: n0.addingTimeInterval(86400), now: n0) == "98% · 2 days ago")
-    check("standby week: reset since", AccountBook.standbyWeek(40, at: n0.addingTimeInterval(-9 * 86400), resets: n0.addingTimeInterval(-3600), now: n0) == "40% · 9 days ago, reset since")
-    check("standby week: never reported", AccountBook.standbyWeek(nil, at: n0, resets: nil, now: n0) == nil && AccountBook.standbyWeek(50, at: nil, resets: nil, now: n0) == nil)
     check("ago: the steps", AccountBook.ago(n0.addingTimeInterval(-30), now: n0) == "just now" && AccountBook.ago(n0.addingTimeInterval(-720), now: n0) == "12 min ago"
           && AccountBook.ago(n0.addingTimeInterval(-3 * 3600), now: n0) == "3 h ago" && AccountBook.ago(n0.addingTimeInterval(-30 * 3600), now: n0) == "yesterday"
           && AccountBook.ago(n0.addingTimeInterval(-21 * 86400), now: n0) == "3 weeks ago" && AccountBook.ago(n0.addingTimeInterval(60), now: n0) == "just now")

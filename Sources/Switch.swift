@@ -65,7 +65,7 @@ final class AccountSwitcher {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = "Switch \(p.name) to \(maskEmail(email))?"
-        a.informativeText = "Every Claude Code session using \(tilde(p.path)) moves to that account when it next renews its sign-in. Claude Code's sign-in opens in Terminal; finish it in the browser as that account."
+        a.informativeText = AccountBook.switchWords(folder: tilde(p.path), email: maskEmail(email), isDefault: ClaudeFolder.isDefault(p.path))
         a.addButton(withTitle: "Switch"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         begin(p, uuid: uuid, email: email, origin: origin)

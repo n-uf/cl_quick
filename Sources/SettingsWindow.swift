@@ -237,7 +237,10 @@ struct AccountEntry: Identifiable, Equatable {
     var plan: String? = nil
     /// The one signed in to the folder now; the others are standby.
     var inUse: Bool
+    /// The account in use only: its limits as Claude Code last reported them. A standby account shows none.
     var level: QuickChatLevel?
+    /// A standby account: when cl_quick last saw it signed in to the folder.
+    var lastSeen: Date? = nil
     /// A sign-in for it is being waited for.
     var signing = false
     /// The account in use, when its sign-in is broken: said in a line, with Sign in again…. Nil: it works, no button.
@@ -386,8 +389,8 @@ struct SignedOutBox: View {
     }
 }
 
-/// An account on standby: a slim row on the same dark well, its week as last reported while it was in use and how long
-/// ago, and Switch… and Forget….
+/// An account on standby: a slim row on the same dark well, when it was last in use, and Switch… and Forget…. No usage:
+/// one folder holds one sign-in, so a standby account's limits aren't known here, and an old week isn't shown.
 struct StandbyRow: View {
     let entry: AccountEntry
     var busy = false
@@ -418,8 +421,8 @@ struct StandbyRow: View {
 
     private var detail: String {
         if entry.signing { return "Waiting for its sign-in…" }
-        let l = entry.level
-        return "On standby · week " + (AccountBook.standbyWeek(l?.week, at: l?.at, resets: l?.weekResets, now: now) ?? "not reported yet")
+        return (["On standby", entry.plan, entry.lastSeen.map { "last in use " + AccountBook.ago($0, now: now) }]
+            .compactMap { $0 }).joined(separator: " · ")
     }
 }
 
@@ -521,7 +524,9 @@ struct ProfileContent<Name: View, Add: View>: View {
                 Spacer(minLength: 8)
                 Button("Show in Finder", action: actions.reveal).buttonStyle(.sentenceKey())
             }
-            SCard(title: "Accounts", line: "One account is signed in to this folder at a time. Switching signs in again here, in Terminal.") {
+            SCard(title: "Accounts", line: "One account is signed in to this folder at a time. Switching moves "
+                  + (ClaudeFolder.isDefault(model.path) ? "Claude Code in Terminal and editors" : "Claude Code pointed at \(tilde(model.path))")
+                  + " to the other account, sessions running now included; the Claude app keeps its own sign-in.") {
                 VStack(alignment: .leading, spacing: 8) {
                     SwitchNotice(waiting: model.waiting, ended: model.ended, signedAgain: model.signedAgain, profileName: model.name,
                                  showTerminal: actions.showTerminal, drop: actions.drop, retry: actions.retry)
@@ -705,8 +710,8 @@ struct ProfilePage: View {
         }
         for a in store.standby(profile) {
             let signing = waiting.map { $0.wantedUUID == a.id || $0.wantedEmail.lowercased() == a.email.lowercased() } ?? false
-            out.append(AccountEntry(id: a.uuid, email: a.email, inUse: false,
-                                    level: store.level(of: profile, account: a.uuid), signing: signing))
+            // no level: a standby account shows no usage (an old week stays in levels.json, unshown)
+            out.append(AccountEntry(id: a.uuid, email: a.email, inUse: false, level: nil, lastSeen: a.lastSeen, signing: signing))
         }
         return out
     }
@@ -1148,8 +1153,8 @@ enum SettingsRender {
             return l
         }
         let alex = AccountEntry(id: "u1", email: "alex@example.com", plan: "Max", inUse: true, level: level(34, 62, ago: 600))
-        let kim = AccountEntry(id: "u2", email: "kim@example.org", inUse: false, level: level(nil, 98, ago: 2 * 86400 + 600))
-        let lee = AccountEntry(id: "u3", email: "lee@example.com", inUse: false, level: nil)
+        let kim = AccountEntry(id: "u2", email: "kim@example.org", inUse: false, level: nil, lastSeen: now.addingTimeInterval(-2 * 86400 - 600))
+        let lee = AccountEntry(id: "u3", email: "lee@example.com", inUse: false, level: nil, lastSeen: now.addingTimeInterval(-9 * 86400))
         let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2",
                               wantedEmail: "kim@example.org", fromUUID: "u1", fromEmail: "alex@example.com", origin: .settings)
         var tiles: [SettingsTiles.Item] = [.init(id: "main", name: "Main", sub: "default · alex@example.com", lamp: .ok),
@@ -1179,7 +1184,7 @@ enum SettingsRender {
         case "accounts-wrong":
             // the browser signed in someone else: robin is in use now, alex went to standby
             let robin = AccountEntry(id: "u4", email: "robin@example.net", plan: "Pro", inUse: true, level: nil)
-            var a = alex; a.inUse = false; a.plan = nil
+            var a = alex; a.inUse = false; a.plan = nil; a.level = nil; a.lastSeen = now.addingTimeInterval(-30)
             tiles[0] = .init(id: "main", name: "Main", sub: "default · robin@example.net", lamp: .ok)
             view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [robin, a, kim], ended: SwitchEnded(goal: goal, signedIn: "robin@example.net"), isDefault: true))
         case "accounts-timedout":
@@ -1192,7 +1197,7 @@ enum SettingsRender {
             view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [a, kim], isDefault: true))
         case "accounts-signedout", "accounts-signing":
             // a folder with no account signed in (its earlier account on standby), or its sign-in being waited for
-            var a = alex; a.inUse = false; a.plan = nil
+            var a = alex; a.inUse = false; a.plan = nil; a.level = nil; a.lastSeen = now.addingTimeInterval(-3 * 3600)
             let signing = page == "accounts-signing"
             tiles[0] = .init(id: "main", name: "Main", sub: "default · " + (signing ? "switching…" : "signed out"), lamp: signing ? .waiting : .broken)
             view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [a], folderSignedOut: true, folderSigning: signing, isDefault: true))
@@ -1201,17 +1206,19 @@ enum SettingsRender {
             at = .profile("work")
             let sam = AccountEntry(id: "u5", email: "sam@work.example", plan: "Team", inUse: true, level: level(8, 18, ago: 3 * 3600))
             view = profile(ProfileModel(name: "Work", path: "~/.claude-work", entries: [sam], inPicker: false))
-        case "accounts-forget":
-            // Forget…'s question: an alert, so drawn here from its words
+        case "accounts-forget", "accounts-confirm":
+            // Forget…'s question, or Switch…'s (what a switch affects): alerts, so drawn here from their words
+            let confirm = page == "accounts-confirm"
             view = AnyView(VStack(alignment: .leading, spacing: 14) {
                 profile(main)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(ForgetWords.title("kim@example.org")).font(.system(size: 13, weight: .bold))
-                    Text(ForgetWords.detail(profile: "Main")).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    Text(confirm ? "Switch Main to \(maskEmail("kim@example.org"))?" : ForgetWords.title("kim@example.org")).font(.system(size: 13, weight: .bold))
+                    Text(confirm ? AccountBook.switchWords(folder: "~/.claude", email: maskEmail("kim@example.org"), isDefault: true)
+                                 : ForgetWords.detail(profile: "Main")).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Spacer()
                         Button("Cancel") {}
-                        Button("Forget") {}
+                        Button(confirm ? "Switch" : "Forget") {}
                     }.buttonStyle(.sentenceKey())
                 }
                 .padding(16).frame(width: 340)
