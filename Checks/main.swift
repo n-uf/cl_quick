@@ -258,6 +258,17 @@ do {
     wait(5) { second != nil }
     check("folder: a reload behind another read sees the new account", seen == "u2", seen as Any)
     check("folder: the first read said an account changed, the next had nothing new", first == true && second == false, (first as Any, second as Any))
+    // an older read finishing after a newer one never takes its place
+    let file2 = dir + "/second.json"
+    _ = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(20), email: "ultra-2@example.com", uuid: "u2", plan: nil), for: file2)
+    let late = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(10), email: "ultra-1@example.com", uuid: "u1", plan: nil), for: file2)
+    check("folder: an older read doesn't overwrite a newer one", FolderFiles.kept(file2).uuid == "u2" && late.uuid == "u2", late)
+    _ = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(30), email: "ultra-3@example.com", uuid: "u3", plan: nil), for: file2)
+    check("folder: a newer read replaces an older one", FolderFiles.kept(file2).uuid == "u3")
+    _ = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(30), email: "ultra-4@example.com", uuid: "u4", plan: nil), for: file2)
+    check("folder: the same time takes the later read", FolderFiles.kept(file2).uuid == "u4")
+    _ = FolderFiles.keep(FolderRead(mtime: nil, email: nil, uuid: nil, plan: nil), for: file2)
+    check("folder: a file that went away takes its place", FolderFiles.kept(file2).uuid == nil)
     try? FileManager.default.removeItem(atPath: dir)
 
     // what a `claude` reports belongs to the account it started on, whatever the chat's target says later

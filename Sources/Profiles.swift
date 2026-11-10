@@ -97,8 +97,9 @@ enum ClaudeFolder {
     /// A folder cl_quick can chat on: signed in to Claude Code, and not the home folder itself.
     static func usable(_ path: String) -> Bool {
         let p = (expand(path) as NSString).standardizingPath
-        // the kept value: a folder looked at before isn't parsed again on the main thread (the file is MBs)
-        return p != (NSHomeDirectory() as NSString).standardizingPath && email(p) != nil
+        // read fresh, not the kept value: a folder signed in since it was last looked at must be accepted (one parse on
+        // the main thread, for a one-off action)
+        return p != (NSHomeDirectory() as NSString).standardizingPath && FolderFiles.fresh(json(p)).email != nil
     }
 
     /// ~/.claude and every ~/.claude-* folder, the plain one first. `home` is for the checks.

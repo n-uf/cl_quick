@@ -75,7 +75,15 @@ enum FolderFiles {
                 r.plan = p == p.lowercased() ? p.capitalized : p
             }
         }
-        lock.lock(); cache[file] = r; lock.unlock()
+        return keep(r, for: file)
+    }
+
+    /// Keeps a value read, unless the value kept was read from a newer file (an older read, say on the main thread,
+    /// finished after a newer one on the queue). Returns the value to go by: the newer of the two.
+    static func keep(_ r: FolderRead, for file: String) -> FolderRead {
+        lock.lock(); defer { lock.unlock() }
+        if let cur = cache[file], let have = cur.mtime, let read = r.mtime, have > read { return cur }
+        cache[file] = r
         return r
     }
 }
