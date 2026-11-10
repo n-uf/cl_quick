@@ -18,14 +18,18 @@ final class SettingsState: ObservableObject {
     @Published var signingIn: Set<String> = []
     @Published var tick = 0
     private var timer: Timer?
+    private var since = Date()
 
-    /// While a sign-in is under way, its folder is looked at every 2 s.
+    /// While a sign-in is under way, its folder is looked at every 2 s; after 10 minutes it's given up.
     func watchSignIns() {
         timer?.invalidate()
+        since = Date()
         guard !signingIn.isEmpty else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.signingIn = self.signingIn.filter { ClaudeFolder.email($0) == nil }
+            let used = Set(ProfileStore.shared.profiles.map(\.path))
+            self.signingIn = self.signingIn.filter { ClaudeFolder.email($0) == nil && used.contains($0) }
+            if Date().timeIntervalSince(self.since) > 600 { self.signingIn = [] }
             self.tick += 1
             if self.signingIn.isEmpty { self.timer?.invalidate() }
         }
@@ -42,7 +46,9 @@ final class SettingsWindow {
     /// Opens the window (and brings cl_quick forward, as a settings window should) on a profile's card, or General.
     func show(profile: String?, firstRun: Bool = false) {
         state.settings = QuickChat.shared.settings
-        state.page = profile.map(SettingsPage.profile) ?? (firstRun ? .add : .general)
+        let first = ProfileStore.shared.profiles.first?.id
+        // the first run: the first profile found, or Add a profile when none was
+        state.page = profile.map(SettingsPage.profile) ?? (firstRun ? (first.map(SettingsPage.profile) ?? .add) : .general)
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 600), styleMask: [.titled, .closable, .resizable],
                              backing: .buffered, defer: false)
@@ -249,6 +255,7 @@ struct ProfilePage: View {
         a.addButton(withTitle: "Remove"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         store.remove(profile.id)
+        state.signingIn.remove(profile.path)
         if state.settings.defaultProfile == profile.id { state.settings.defaultProfile = nil; state.save() }
         state.page = .general
     }
@@ -307,6 +314,11 @@ struct AddPage: View {
         panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
         panel.message = "Choose a Claude Code folder"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        // only a Claude Code folder that is signed in: any other would get Claude Code's files written into it
+        guard ClaudeFolder.usable(url.path) else {
+            problem = "\(tilde(url.path)) isn't a signed-in Claude Code folder. Choose one with a .claude.json that is signed in, or use Sign in another account."
+            return
+        }
         add(url.path)
     }
 
@@ -316,13 +328,23 @@ struct AddPage: View {
         let slug = String(n.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" })
         let folder = "~/.claude-" + slug
         guard !FileManager.default.fileExists(atPath: expand(folder)) else { problem = "\(folder) is there already: add it with Choose a folder…."; return }
-        guard let claude = ClaudeLocator.find()?.path else { problem = ClaudeInstall.missing + "."; return }
+        // the full look for claude can take a few seconds (the login shell): off the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            let claude = ClaudeLocator.find()?.path
+            DispatchQueue.main.async { startSignIn(name: n, folder: folder, claude: claude) }
+        }
+    }
+
+    private func startSignIn(name n: String, folder: String, claude: String?) {
+        guard let claude else { problem = ClaudeInstall.missing + "."; return }
         do { try FileManager.default.createDirectory(atPath: expand(folder), withIntermediateDirectories: true) } catch {
             problem = "\(folder) can't be made: \(error.localizedDescription)"; return
         }
         func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let script = Files.folder.appendingPathComponent("sign-in.command")
         let text = "#!/bin/zsh\n# cl_quick: Claude Code on \(folder), to sign in. Close this window when it says you're signed in.\n"
+            // a key or another provider from the shell's own settings would sign it in some other way: not here
+            + "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY\n"
             + "export CLAUDE_CONFIG_DIR=\(q(expand(folder)))\nexec \(q(claude))\n"
         do {
             try FileManager.default.createDirectory(at: Files.folder, withIntermediateDirectories: true)
