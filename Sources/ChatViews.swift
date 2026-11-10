@@ -855,6 +855,21 @@ enum QuickChatRender {
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
             m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
+        case "switch", "switching", "wrong":
+            // a full week, with the profile's standby account offered besides Ask on …
+            m.field = q1
+            level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
+            m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
+            m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com", week: nil)
+            if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
+            if state == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
+        case "switched":
+            // after a switch: a new chat on the same profile, the typed question sent, one line on where it is
+            var t = QuickChatTurn(question: q1); t.phase = .waiting
+            target.email = "ultra-2@example.com"; m.target = target
+            m.level = nil
+            m.accountNote = "Main is on \(maskEmail("ultra-2@example.com")) now."
+            m.turns = [t]
         case "level95": level.week = 96; m.level = level; m.turns = [t1]
         default: break
         }

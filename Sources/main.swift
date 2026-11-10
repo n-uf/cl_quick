@@ -4,8 +4,10 @@
 //
 // Command line, for checking:
 //   --render-quick-chat OUT.png STATE   the bar or the chat window with sample data (bar, typing, notinstalled,
-//                                       streaming, answer, failed, notsigned, thinking, full, level95)
-//   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, general)
+//                                       streaming, answer, failed, notsigned, thinking, full, level95; with accounts:
+//                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
+//                                       wrong (another account signed in), switched (the new chat's first line))
+//   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts, general)
 //   --version
 
 import AppKit
@@ -19,11 +21,13 @@ if args.count >= 2, args[1] == "--version" {
 }
 
 if args.count >= 4, args[1] == "--render-quick-chat" {
+    Files.readOnly = true
     if #available(macOS 14, *) { MainActor.assumeIsolated { QuickChatRender.write(to: args[2], state: args[3]) } }
     exit(0)
 }
 
 if args.count >= 4, args[1] == "--render-settings" {
+    Files.readOnly = true
     if #available(macOS 14, *) { MainActor.assumeIsolated { SettingsRender.write(to: args[2], page: args[3]) } }
     exit(0)
 }

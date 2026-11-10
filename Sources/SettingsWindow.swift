@@ -719,6 +719,32 @@ enum SettingsRender {
                     SRow(label: "In the chat") { SSwitch(isOn: .constant(true), on: "in the profile picker", off: "left out") }
                 }
             })
+        case "accounts":
+            // one account in use with its week, one on standby with no numbers yet (sample addresses only)
+            view = AnyView(VStack(alignment: .leading, spacing: 14) {
+                SCard(title: "Profile") {
+                    SRow(label: "Name", first: true) { Text("Main").font(.system(size: 13)) }
+                    SRow(label: "Accounts", stacked: true) {
+                        AccountList(entries: [
+                            AccountEntry(id: "u1", email: "ultra-1@example.com", detail: "Max · ~/.claude", inUse: true, level: lvl),
+                            AccountEntry(id: "u2", email: "ultra-2@example.com", detail: "Last in use \(TimeWords.when(Date().addingTimeInterval(-2 * 86400)))", inUse: false, level: nil),
+                        ])
+                    }
+                    SRow(label: "Another account", stacked: true) {
+                        HStack(spacing: 8) {
+                            Text(verbatim: "Address, e.g. you@example.com").font(.system(size: 13)).foregroundStyle(FaceTheme.std.muted)
+                            Button("Add an account…") {}.buttonStyle(PillButtonStyle(compact: true)).disabled(true)
+                        }
+                    }
+                    SRow(label: "Default") { SSwitch(isOn: .constant(true), on: "the shortcut chats on Main", off: "not the default") }
+                    SRow(label: "In the chat") { SSwitch(isOn: .constant(true), on: "in the profile picker", off: "left out") }
+                    HStack(spacing: 8) {
+                        Button("Show in Finder") {}
+                        Button("Remove from cl_quick…") {}
+                    }
+                    .buttonStyle(PillButtonStyle(compact: true)).padding(.top, 8)
+                }
+            })
         default:
             view = AnyView(GeneralPage(state: st, store: ProfileStore.shared))
         }

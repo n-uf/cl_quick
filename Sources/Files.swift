@@ -25,8 +25,12 @@ enum Files {
         return try? dec.decode(type, from: d)
     }
 
+    /// Set by the --render-… commands: a picture writes nothing.
+    static var readOnly = false
+
     @discardableResult
     static func write<T: Encodable>(_ value: T, _ url: URL) -> Bool {
+        guard !readOnly else { return false }
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]; enc.dateEncodingStrategy = .iso8601
