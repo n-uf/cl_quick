@@ -125,32 +125,26 @@ struct QCWindow: View {
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
             QCTurnView(turn: t, last: i == model.turns.count - 1, model: model)
         }
-        if let n = model.note {
-            Text(n).font(.system(size: 11.5)).foregroundColor(QCColor.muted)
-                .frame(maxWidth: .infinity).padding(.top, 10)
-        }
-        // a limit filled since the last answer: said once, under the chat, with the switch
+        // a limit filled since the last answer: said once, under the chat, with the profile to ask on instead
         if model.blocked, model.turns.last?.problem != .limitFull {
             QCProblemView(problem: .limitFull, model: model, answered: false).padding(.top, 12)
         }
     }
 }
 
-/// The account line: the profile and the address of its account in use (masked unless Privacy shows addresses), then
-/// New chat and Hide.
+/// The account line: the profile and the address signed in to its folder (masked), its week, then New chat and Hide.
 struct QCHeader: View {
     @ObservedObject var model: QuickChatModel
-    @ObservedObject private var privacy = Privacy.shared
 
     var body: some View {
         HStack(spacing: 8) {
             if let t = model.target {
                 Text(t.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text)
                 if let e = t.email {
-                    Text(Privacy.masked(e)).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).truncationMode(.middle)
+                    Text(maskEmail(e)).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).truncationMode(.middle)
                 }
             }
-            if let l = model.level, l.week != nil || l.full() != nil { QCLevelView(level: l).padding(.leading, 4) }
+            if let l = model.level, l.weekNow() != nil || l.full() != nil { QCLevelView(level: l).padding(.leading, 4) }
             Spacer(minLength: 8)
             QCIconButton(symbol: "square.and.pencil", help: "New chat") { model.newChat() }
             QCIconButton(symbol: "xmark", help: "Hide (Esc)") { model.hide() }
@@ -393,20 +387,21 @@ struct QCProblemView: View {
         case .noProfile: return "There's no profile to chat on yet."
         case .limitFull:
             let f = model.level?.full()
-            return "This account's \(f?.id == "5h" ? "5-hour limit" : "week") is full" + (f?.resets.map { ", " + TimeWords.back($0) } ?? "") + "."
+            let who = model.target?.name ?? "This profile"
+            return "\(who)'s \(f?.name ?? "week") is full" + (f?.resets.map { ", resets " + TimeWords.when($0) } ?? "") + "."
         }
     }
 
     private var more: String {
         switch problem {
         case .notInstalled: return "The quick chat answers through it."
-        case .notSignedIn: return "Sign in from its settings, then try again."
+        case .notSignedIn: return "Sign in with Claude Code in its folder, then try again."
         case .stopped: return answered ? "What arrived is kept above." : ""
         case .refused: return ""
-        case .noProfile: return "Set one up in cl_audit."
+        case .noProfile: return "Pick a Claude Code folder in Settings."
         case .limitFull:
-            guard let o = model.offer, let name = model.target?.name else { return "" }
-            return "\(name)'s other account, \(o.short), has room (\(o.words) used)." + (model.field.isEmpty ? "" : " What you typed goes once the switch is done.")
+            guard let o = model.offer else { return "" }
+            return "\(o.name) has room (\(Int(o.week.rounded()))% at its last answer)."
         }
     }
 
@@ -421,14 +416,14 @@ struct QCProblemView: View {
             QCButton(title: "Install…") { NSWorkspace.shared.open(ClaudeInstall.docs) }
             QCButton(title: "Try again", ghost: true) { retry() }
         case .notSignedIn(_, let id):
-            QCButton(title: "Open its settings") { model.openProfileSettings(id) }
+            QCButton(title: "Open its settings") { model.openSettings(id) }
             QCButton(title: "Try again", ghost: true) { retry() }
         case .stopped, .refused:
             if last { QCButton(title: "Retry") { retry() } }
         case .noProfile:
-            QCButton(title: "Open cl_audit") { Installer.openDashboard() }
+            QCButton(title: "Open Settings") { model.openSettings(nil) }
         case .limitFull:
-            if model.offer != nil { QCButton(title: "Switch account…") { model.switchAccount() } }
+            if let o = model.offer { QCButton(title: "Ask on \(o.name)") { model.askOnOffer() } }
         }
     }
 
@@ -444,16 +439,15 @@ struct QCControls: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            if let t = model.target {
+                QCChip(title: t.name, dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()), help: "Profile") { pickProfile() }
+            }
             QCChip(title: model.modelTitle, help: "Model") { pickModel() }
             QCChip(title: model.thinking == .off ? "Thinking off" : model.thinking.title, symbol: "lightbulb",
                    lit: model.thinking != .off, help: "Thinking") { pickThinking() }
             Spacer(minLength: 4)
-            if inBar, let t = model.target, let l = model.level, l.week != nil || l.full() != nil {
-                HStack(spacing: 6) {
-                    Text(t.name).font(.system(size: 12)).foregroundColor(QCColor.muted)
-                    QCLevelView(level: l, long: false)
-                }
-                .padding(.horizontal, 6)
+            if inBar, let l = model.level, l.weekNow() != nil || l.full() != nil {
+                QCLevelView(level: l, long: false).padding(.horizontal, 6)
             }
             if model.busy {
                 Button(action: model.stop) {
@@ -473,6 +467,15 @@ struct QCControls: View {
                 .buttonStyle(.plain).disabled(empty).help("Send (Return)")
             }
         }
+    }
+
+    private func pickProfile() {
+        let list = model.pickable()
+        QCMenu.pop(header: "Profile", items: list.map { p, l in
+            let f = l?.full()
+            let words = f != nil ? "full" : l?.weekNow().map { "week \(Int($0.rounded()))%" } ?? "no numbers yet"
+            return QCMenu.Item(title: p.name, detail: words, on: p.id == model.target?.profileID) { model.pickProfile(p.id) }
+        }, footer: "Weeks as last reported. A new chat goes back to the default. Add or change profiles in Settings.")
     }
 
     private func pickModel() {
@@ -495,6 +498,8 @@ struct QCChip: View {
     let title: String
     var symbol: String? = nil
     var lit = false
+    /// A small dot before the title (the profile's level colour).
+    var dot: Color? = nil
     var help = ""
     let action: () -> Void
     @State private var hover = false
@@ -502,6 +507,7 @@ struct QCChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
+                if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
                 if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundColor(lit ? QCColor.accent : QCColor.soft) }
                 Text(title).font(.system(size: 13, weight: .medium))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.7)
@@ -753,11 +759,11 @@ final class QCTextView: NSTextView {
 enum QuickChatRender {
     @MainActor static func write(to path: String, state: String) {
         let m = QuickChatModel()
-        var e = AccountEntry(id: "main", name: "Main", label: "MAIN", configDir: "~/.claude-sample")
-        e.seat = Seat(account: "sample", email: "ultra-1@example.com")
-        m.target = QuickChatTarget(e)
+        var target = QuickChatTarget(Profile(id: "main", name: "Main", folder: "~/.claude-sample"))
+        target.email = "ultra-1@example.com"
+        m.target = target
         m.knownModels[.haiku] = "Haiku 5.5"
-        var level = QuickChatLevel(nil)
+        var level = QuickChatLevel()
         level.week = 62; level.weekResets = Date().addingTimeInterval(3 * 86400)
         m.level = level
         let q1 = "How do I find which process is using port 3000 on macOS?"
@@ -780,7 +786,7 @@ enum QuickChatRender {
         case "full":
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
-            m.offer = QuickChatSwitchOffer(key: "main~u3", short: "ultra-3", words: "week 12%")
+            m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
         case "level95": level.week = 96; m.level = level; m.turns = [t1]
         default: break
         }
