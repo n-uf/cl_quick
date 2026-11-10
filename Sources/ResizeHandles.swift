@@ -84,6 +84,7 @@ final class QCResizeHandle: NSView {
         start = w.frame
         from = w.convertPoint(toScreen: event.locationInWindow)
         w.isResizing = true
+        w.endResize = { [weak self] in self?.finish() }       // also when the panel is hidden mid-drag (no mouse-up comes then)
         Self.cursor(for: edges).push()
     }
 
@@ -106,10 +107,17 @@ final class QCResizeHandle: NSView {
         if f != w.frame { w.setFrame(f, display: true); w.invalidateShadow() }
     }
 
-    override func mouseUp(with event: NSEvent) {
-        guard let w = window as? QuickChatPanel else { return }
-        NSCursor.pop()
+    override func mouseUp(with event: NSEvent) { finish() }
+
+    /// The drag is over (button let go, or the panel hidden): the cursor and the panel's state go back, once.
+    private func finish() {
+        guard let w = window as? QuickChatPanel, w.isResizing else { return }
         w.isResizing = false
+        w.endResize = nil
+        NSCursor.pop()
+        // still over the handle: its cursor, not whatever was under the push
+        let inside = bounds.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil))
+        (inside && w.isVisible ? Self.cursor(for: edges) : NSCursor.arrow).set()
         w.onResized()
     }
 

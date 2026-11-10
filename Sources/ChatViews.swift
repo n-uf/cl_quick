@@ -1092,7 +1092,11 @@ struct QCTextField: NSViewRepresentable {
         apply(tv)
         if context.coordinator.focusTick != focusTick {
             context.coordinator.focusTick = focusTick
-            DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
+            DispatchQueue.main.async {
+                tv.window?.makeFirstResponder(tv)
+                // Caps Lock may have been pressed while the panel was hidden (the field's own mark stands for macOS's badge)
+                onCaps(NSEvent.modifierFlags.contains(.capsLock))
+            }
         }
         context.coordinator.measure()
     }

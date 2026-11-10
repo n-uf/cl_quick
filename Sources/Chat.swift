@@ -1036,7 +1036,13 @@ final class QuickChatPanel: NSPanel {
     var onNewChat: () -> Void = {}
     /// The user is dragging an edge or corner (ResizeHandles.swift), and has finished.
     var isResizing = false
+    /// Ends a drag that is under way (set by the handle that began it).
+    var endResize: (() -> Void)?
     var onResized: () -> Void = {}
+    override func orderOut(_ sender: Any?) {
+        endResize?()
+        super.orderOut(sender)
+    }
     /// The least and the most the panel may be now (frame sizes).
     var limits: () -> (NSSize, NSSize) = { (NSSize(width: 0, height: 0), NSSize(width: 10000, height: 10000)) }
 
@@ -1088,6 +1094,17 @@ final class QuickChatPanel: NSPanel {
             child.alphaValue = 0
             child.ignoresMouseEvents = true
         }
+    }
+
+    /// Caps Lock off again: a text-input window kept invisible for it is back to normal (macOS may reuse it).
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .flagsChanged, !event.modifierFlags.contains(.capsLock) {
+            for w in childWindows ?? [] where String(describing: type(of: w)).hasPrefix("TUI") && w.alphaValue == 0 {
+                w.alphaValue = 1
+                w.ignoresMouseEvents = false
+            }
+        }
+        super.sendEvent(event)
     }
 
     override var canBecomeKey: Bool { true }
