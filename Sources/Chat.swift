@@ -270,6 +270,8 @@ final class QuickChatModel: ObservableObject {
         turns[i].seconds = Date().timeIntervalSince(turns[i].started)
         // the process goes at once, so the next message never meets one still stopping; the session stays
         closeProcess()
+        // a message still waiting for its folder to be read (ask()) is let go: Retry or a new message asks on its own
+        generation += 1
     }
 
     /// Retry a failed answer, or ask the last question again.
