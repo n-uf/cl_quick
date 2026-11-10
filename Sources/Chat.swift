@@ -263,6 +263,12 @@ final class QuickChatModel: ObservableObject {
     private var generation = 0
     /// A chat ends this long after its last answer (window open or hidden); nothing is kept.
     static let idleSeconds: TimeInterval = 15 * 60
+    /// A `claude` started as the bar opened, with nothing asked yet, ends sooner (the next open starts another).
+    static let warmIdleSeconds: TimeInterval = 3 * 60
+    /// Opening the bar again asks for the limits at most this often (Claude Code's usage endpoint is asked each time).
+    static let usageAgainSeconds: TimeInterval = 60
+    /// When the running `claude` was last asked for the limits.
+    private var usageAsked = Date.distantPast
     /// Stop waits this long without a word from Claude Code for it to end the answer (longer while it has said nothing
     /// yet, a cold start); then the chat ends instead of hanging.
     static let stopSeconds: TimeInterval = 5
@@ -494,6 +500,7 @@ final class QuickChatModel: ObservableObject {
         process = p
         p.initialize()          // the account's models, for the pickers
         p.getUsage()            // its limits now, before anything is asked
+        usageAsked = Date()
         processKey = key
         appliedModel = cmd.model
         confirmedModel = cmd.model
@@ -503,18 +510,21 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// The bar opened: its `claude` starts now (the one the chat then uses, not an extra one), so the account's limits
-    /// arrive before anything is asked; with nothing asked it ends after the same 15 minutes as a chat. One already
-    /// running is asked for them again. Nothing goes to a model either way; a `claude` that can't start says so only
-    /// when a message is sent.
+    /// arrive before anything is asked; with nothing asked it ends after 3 minutes. One already running is asked for
+    /// them again, at most once a minute. Nothing goes to a model either way, and it starts no MCP servers or hooks
+    /// (--strict-mcp-config, no setting sources); a `claude` that can't start says so only when a message is sent.
     func warm() {
-        if let p = process, p.isRunning { p.getUsage(); return }
+        if let p = process, p.isRunning {
+            if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() { usageAsked = Date() }
+            return
+        }
         guard process == nil, !busy, target != nil else { return }
         let gen = generation
         resolveClaude { [weak self] path in
             guard let self, let path, gen == self.generation, self.process == nil, !self.busy, let t = self.target else { return }
             let cmd = QuickChatCommand(claude: path, configDir: t.configDir, isDefaultDir: t.isDefaultDir,
                                        workFolder: t.workFolder, model: self.resolvedModel.value, effort: self.effectiveThinking.effort)
-            if self.launch(cmd, key: self.keyFor(path, t), target: t) == nil { self.armIdle() }
+            if self.launch(cmd, key: self.keyFor(path, t), target: t) == nil { self.armIdle(Self.warmIdleSeconds) }
         }
     }
 
@@ -532,7 +542,8 @@ final class QuickChatModel: ObservableObject {
             var l = (trail.reportAccount == target?.accountUUID ? level : nil) ?? QuickChatLevel()
             let before = l
             l.apply(usage: u)
-            if l != before { reportLevel(l) }
+            var same = l; same.at = before.at          // only a change of numbers is written and drawn again
+            if same != before { reportLevel(l) }
             return
         default: break
         }
@@ -595,7 +606,7 @@ final class QuickChatModel: ObservableObject {
                 turns[i].phase = .done
                 if let t = target, let u = trail.reportAccount { authResult(t.profileID, u, false) }      // it signed in fine
             }
-            process?.getUsage()         // the limits after this answer (rate_limit_event above stays as the fallback)
+            if process?.getUsage() == true { usageAsked = Date() }    // the limits after this answer (rate_limit_event stays as the fallback)
             // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
             guard turns.indices.contains(i) else { return }
             scrollTick += 1
@@ -649,9 +660,9 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// 15 minutes with no message: the chat ends, window open or hidden.
-    private func armIdle() {
+    private func armIdle(_ seconds: TimeInterval = QuickChatModel.idleSeconds) {
         idleTimer?.invalidate()
-        let t = Timer(timeInterval: Self.idleSeconds, repeats: false) { [weak self] _ in
+        let t = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
             guard let self, !self.busy, self.process != nil, !self.stale.waiting else { return }
             self.endChat(.idle)
         }

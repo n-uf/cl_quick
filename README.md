@@ -66,7 +66,8 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   default). A pick holds for that chat; a new chat goes back to the defaults.
 - The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from the
   chat's own Claude Code: it starts as the bar opens (the same `claude` the chat then uses; with nothing asked it ends
-  after 15 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again
+  after 3 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again (at most
+  once a minute)
   (Claude Code's `get_usage`, which sends nothing to a model and uses its own sign-in, never the Keychain). After each
   answer Claude Code also reports them on its own, which stays as the fallback. Standby accounts show no usage.
 - When a profile's week (or 5-hour limit) is full, the chat says when it resets and offers the profile with the most

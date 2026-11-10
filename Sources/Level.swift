@@ -71,9 +71,10 @@ struct QuickChatLevel: Codable, Equatable {
         if let w = u.fiveHour { if let p = w.used { fiveHour = p }; if let r = w.resets { fiveHourResets = r } }
         if let w = u.week { if let p = w.used { week = p }; if let r = w.resets { weekResets = r } }
         let locked = [u.fiveHour, u.week].compactMap { $0 }.filter(\.locked)
-        // a lock lasts until the window that holds it resets (the later one when both do); none: nothing holds it now
-        if !locked.isEmpty { refusedUntil = locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600) }
-        else { refusedUntil = nil }
+        // a lock lasts until the window that holds it resets (the later one when both do). No lock here never lifts a
+        // refusal Claude Code made: it may come from a limit get_usage files elsewhere, so it ends at its own time or
+        // on a rate_limit_event "allowed"
+        if !locked.isEmpty { refusedUntil = max(refusedUntil ?? .distantPast, locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600)) }
         at = now
     }
 
