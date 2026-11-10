@@ -23,26 +23,43 @@ struct QCDragSurface: NSViewRepresentable {
 }
 
 final class QCDragView: NSView {
-    var onHover: ((Bool) -> Void)? {
-        didSet { if (onHover == nil) != (oldValue == nil) { updateTrackingAreas() } }
-    }
+    var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
 
     override var mouseDownCanMoveWindow: Bool { true }
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
 
+    override func mouseDown(with event: NSEvent) {
+        // the closed hand for as long as the drag lasts (performDrag returns when the button is let go)
+        NSCursor.closedHand.push()
+        window?.performDrag(with: event)
+        NSCursor.pop()
+        setCursor(at: NSEvent.mouseLocation)
+    }
+
+    // One tracking area (events when the pointer enters, leaves and moves: nothing is polled) for the hover and the cursor.
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let t = tracking { removeTrackingArea(t); tracking = nil }
-        guard onHover != nil else { return }
-        let t = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        let t = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(t)
         tracking = t
     }
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseEntered(with event: NSEvent) { onHover?(true); setCursor(at: NSEvent.mouseLocation) }
     override func mouseExited(with event: NSEvent) { onHover?(false) }
+    override func mouseMoved(with event: NSEvent) { setCursor(at: NSEvent.mouseLocation) }
+
+    /// The open hand where the window would be dragged from: where the hit view is a drag surface. Over a SwiftUI button
+    /// or label (the hosting view takes those) the arrow; over anything else (the field, a scroll bar, a resize handle)
+    /// whatever that view sets.
+    private func setCursor(at screen: NSPoint) {
+        guard let w = window, let content = w.contentView else { return }
+        let inWindow = w.convertPoint(fromScreen: screen)
+        let hit = content.hitTest((content.superview ?? content).convert(inWindow, from: nil))
+        if hit is QCDragView { NSCursor.openHand.set() }
+        else if hit is NSHostingView<QuickChatRoot> { (QCCursorView.hovered ? NSCursor.pointingHand : NSCursor.arrow).set() }
+    }
 
     // A window that is ordered out (Esc, ✕) is sent no mouseExited: when it is hidden or shown again, ask where the pointer is.
     override func viewDidMoveToWindow() {
@@ -92,6 +109,8 @@ extension View {
 }
 
 final class QCCursorView: NSView {
+    /// The pointer is on one of these (the drag surfaces' arrow must not undo the hand).
+    static var hovered = false
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -100,8 +119,8 @@ final class QCCursorView: NSView {
                                        owner: self, userInfo: nil))
     }
     override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
-    override func mouseEntered(with event: NSEvent) { NSCursor.pointingHand.set() }
-    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+    override func mouseEntered(with event: NSEvent) { Self.hovered = true; NSCursor.pointingHand.set() }
+    override func mouseExited(with event: NSEvent) { Self.hovered = false; NSCursor.arrow.set() }
 
     // A window that is ordered out gets no mouseExited: the hand must not stay over what is under it.
     override func viewDidMoveToWindow() {
@@ -111,6 +130,6 @@ final class QCCursorView: NSView {
         NotificationCenter.default.addObserver(self, selector: #selector(windowChanged), name: NSWindow.didChangeOcclusionStateNotification, object: w)
     }
     @objc private func windowChanged() {
-        if window?.isVisible != true { NSCursor.arrow.set() }
+        if window?.isVisible != true { Self.hovered = false; NSCursor.arrow.set() }
     }
 }
