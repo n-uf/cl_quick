@@ -150,13 +150,14 @@ struct QCWindow: View {
 struct QCHeader: View {
     @ObservedObject var model: QuickChatModel
     @State private var hover = false
+    @State private var nameHover = false
     @Environment(\.qcHover) private var pictureHover
 
     var body: some View {
         HStack(spacing: 8) {
-            QCHeaderInfo(target: model.target, level: model.level, hover: hover || pictureHover) {
+            QCHeaderInfo(target: model.target, level: model.level, hover: hover || pictureHover, openProfile: {
                 if let id = model.target?.profileID { model.openSettings(id) }      // the chat stays where it is
-            }
+            }, nameHover: $nameHover)
             Spacer(minLength: 8)
             // a tight pair, each a 24 pt target
             HStack(spacing: 0) {
@@ -220,19 +221,22 @@ struct QCHeaderInfo: View {
     let hover: Bool
     /// The profile's name was clicked.
     let openProfile: () -> Void
+    @Binding var nameHover: Bool
 
     var body: some View {
         let steps = hover ? QCHeaderDetail.hoverSteps : QCHeaderDetail.steps
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
-                QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile).fixedSize()
+                QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover).fixedSize()
             }
             // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
             // pushes the buttons off the panel
-            QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, flexible: true)
+            QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, nameHover: $nameHover,
+                         flexible: true)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QCHeaderLine.spoken(target: target, level: level))
+        .accessibilityAction(named: "Open profile in Settings", openProfile)
     }
 }
 
@@ -241,13 +245,14 @@ struct QCHeaderLine: View {
     let level: QuickChatLevel?
     let detail: QCHeaderDetail
     let openProfile: () -> Void
+    @Binding var nameHover: Bool
     /// The name may give way (be cut) to what the window has room for.
     var flexible = false
 
     var body: some View {
         HStack(spacing: 8) {
             if let t = target {
-                QCProfileName(name: t.name, action: openProfile).layoutPriority(flexible ? -1 : 0)
+                QCProfileName(name: t.name, hover: $nameHover, action: openProfile).layoutPriority(flexible ? -1 : 0)
                 // a plain label: a drag that starts on it moves the panel
                 if detail.address, let e = t.email { QCBlurred(text: e, short: detail.shortAddress).allowsHitTesting(false) }
             }
@@ -290,8 +295,9 @@ struct QCHeaderLine: View {
 /// The profile's name, a button to its page in Settings: a soft highlight and the pointing hand while the pointer is on it.
 struct QCProfileName: View {
     let name: String
+    /// Kept by the header, not here: the line's candidates (ViewThatFits) replace each other while the pointer is on it.
+    @Binding var hover: Bool
     let action: () -> Void
-    @State private var hover = false
     @Environment(\.qcNameHover) private var pictureHover
 
     var body: some View {
@@ -302,6 +308,7 @@ struct QCProfileName: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .onDisappear { hover = false }
         .qcPointingHand()
         .help("\(name) in Settings")
     }

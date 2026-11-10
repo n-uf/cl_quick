@@ -102,4 +102,15 @@ final class QCCursorView: NSView {
     override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
     override func mouseEntered(with event: NSEvent) { NSCursor.pointingHand.set() }
     override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+
+    // A window that is ordered out gets no mouseExited: the hand must not stay over what is under it.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        guard let w = window else { return }
+        NotificationCenter.default.addObserver(self, selector: #selector(windowChanged), name: NSWindow.didChangeOcclusionStateNotification, object: w)
+    }
+    @objc private func windowChanged() {
+        if window?.isVisible != true { NSCursor.arrow.set() }
+    }
 }
