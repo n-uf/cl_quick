@@ -334,8 +334,13 @@ check("models: the version from the description", QuickChatModels.family(bare[1]
       && QuickChatModels.title(bare[2]) == "Fable 5.1")
 check("models: a bare name with no version anywhere", QuickChatModels.family(.init(value: "x", displayName: "Sonnet"))! == (.sonnet, [])
       && QuickChatModels.title(.init(value: "x", displayName: "Sonnet")) == "Sonnet")
-check("models: a numbered one beats a bare one", QuickChatModels.newest([.init(value: "sonnet", displayName: "Sonnet"),
+check("models: a numbered one beats a bare one that isn't the alias", QuickChatModels.newest([.init(value: "sonnet-x", displayName: "Sonnet"),
       .init(value: "s55", displayName: "Sonnet 5.5")])[.sonnet]?.value == "s55")
+check("models: the bare alias stands for the newest, beating an older numbered one",
+      QuickChatModels.newest([.init(value: "claude-opus-4-1", displayName: "Opus 4.1"), .init(value: "opus", displayName: "Opus")])[.opus]?.value == "opus"
+      && QuickChatModels.newest([.init(value: "opus", displayName: "Opus"), .init(value: "claude-opus-4-1", displayName: "Opus 4.1")])[.opus]?.value == "opus")
+check("models: a description starting with Claude", QuickChatModels.title(.init(value: "opus", displayName: "Opus", description: "Claude Opus 5.5 · …")) == "Opus 5.5"
+      && QuickChatModels.title(.init(value: "x", displayName: "Claude Sonnet 5.5")) == "Sonnet 5.5")
 // the model and thinking controls: a step up or down a list of 2 to 6 (the scroll wheel, ⌥⌘ arrows), and the cost tint
 let fams: [QuickChatModelChoice] = [.haiku, .sonnet, .opus]
 check("steps: up and down", QuickChatModels.step(fams, from: .sonnet, by: 1) == .opus && QuickChatModels.step(fams, from: .sonnet, by: -1) == .haiku)

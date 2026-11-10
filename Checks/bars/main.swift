@@ -69,6 +69,11 @@ func click(_ key: String) -> Bool {
     return true
 }
 func centre(_ key: String) -> CGPoint { let f = targets.controls[key]?.frame ?? .zero; return CGPoint(x: f.midX, y: f.midY) }
+/// A point of the hosting view (SwiftUI's top-left frames) in the window, as an event's locationInWindow would be.
+func inWindow(_ q: CGPoint) -> NSPoint {
+    guard let cv = p.contentView else { return .zero }
+    return cv.convert(NSPoint(x: q.x, y: cv.isFlipped ? q.y : cv.bounds.height - q.y), to: nil)
+}
 
 func width(_ w: CGFloat) {
     var f = p.frame
@@ -99,6 +104,28 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
             check("\(name): \(f.rawValue) / \(l.rawValue) moves nothing", same(frames(), base), moved(base, frames()))
         }
     }
+    // the window's own hit test, at the real coordinates: a press on any bar or label never starts a move, and the
+    // empty gap after the controls does (so the frames are where the window sees them)
+    for k in keys {
+        let f = base[k] ?? .zero
+        let pts = k.count == 1 ? [CGPoint(x: f.minX + 3, y: f.midY), CGPoint(x: f.midX, y: f.midY)] : [CGPoint(x: f.midX, y: f.midY), CGPoint(x: f.midX, y: f.minY + 2)]
+        for q in pts {
+            check("\(name): a press at \(k) (\(Int(q.x)), \(Int(q.y))) is not a move", QCDragView.surface(at: inWindow(q), in: p) == nil)
+        }
+    }
+    if let tf = base["t"] {
+        check("\(name): the gap after the controls moves the window", QCDragView.surface(at: inWindow(CGPoint(x: tf.maxX + 2, y: tf.midY)), in: p) != nil)
+    }
+    // the week arriving or going (the bar's meter) moves nothing (a full week is another matter: its notice opens
+    // above the field and the row moves down with the field, as it always has)
+    let week = m.level
+    m.level = nil; spin()
+    check("\(name): no week known moves nothing", same(frames(), base), moved(base, frames()))
+    var l = QuickChatLevel(); l.week = 99; m.level = l; spin()
+    check("\(name): a week of 99% moves nothing", same(frames(), base), moved(base, frames()))
+    l.week = 7; m.level = l; spin()
+    check("\(name): a week of 7% moves nothing", same(frames(), base), moved(base, frames()))
+    m.level = week; spin()
     // a click on each bar's centre picks it
     for (j, f) in families.enumerated() {
         check("\(name): the bar at m\(j)'s centre is m\(j)", click("m\(j)"))
@@ -132,6 +159,13 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     targets.scroll(at: centre("m"), by: 1, precise: false, began: true); spin()
     check("\(name): a notch up over the model: \(top.rawValue)", m.resolvedModel.family == top, "\(m.resolvedModel.family)")
     check("\(name): scrolling elsewhere is left alone", !targets.scroll(at: CGPoint(x: 1, y: 1), by: 1, precise: false, began: true))
+    // a trackpad gesture that began in the chat and drifts onto the row is the chat's, its momentum too
+    let was = m.effectiveThinking
+    check("\(name): a gesture begun elsewhere is not taken", !targets.scroll(at: CGPoint(x: 1, y: 1), by: 5, precise: true, began: true)
+          && !targets.scroll(at: centre("t"), by: 40, precise: true, began: false)
+          && !targets.scroll(at: centre("t"), by: 40, precise: true, began: false, momentum: true))
+    spin()
+    check("\(name): and steps nothing", m.effectiveThinking == was, "\(m.effectiveThinking)")
     check("\(name): after it all, nothing moved", same(frames(), base), moved(base, frames()))
 }
 

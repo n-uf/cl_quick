@@ -2,7 +2,8 @@
 // cl_audit's front panel: it should feel like Claude. The bar is a field over one row of controls; the first message
 // turns it into a chat window: the account line on top, the chat, and the field box at the bottom, all on one 10 pt
 // outer gap (QCSpace). Answers are Markdown in the system font, code blocks have Copy, and the last answer says which
-// model gave it. The profile, the model and thinking are pickers that open a menu.
+// model gave it. The profile is a picker that opens a menu; the model and thinking are bars picked directly
+// (QCStepControl).
 
 import AppKit
 import SwiftUI
@@ -988,13 +989,14 @@ struct QCControls: View {
     var inBar: Bool
 
     /// How much a control's label says: the model's name and version ("Sonnet 5.5"), its family ("Sonnet"), or no
-    /// label (the bars alone; the hovered step's name shows above them).
+    /// label (the bars alone; each bar's tooltip names it).
     enum Labels { case full, family, none }
 
     /// The row on one line, whatever the width (ViewThatFits, richest first): the bar's week meter drops its number,
     /// then the model's label keeps its family only, then the meter goes, then the profile key keeps just its dot, then
-    /// the labels go (the profile's name back). Every control is as wide for every value it can take, so which row is
-    /// drawn depends on the width alone: picking a model or a level never moves anything.
+    /// the labels go (the profile's name back). Every control is as wide for every value it can take, and the bar's
+    /// meter keeps its room before the week is known, so which row is drawn depends on the width alone: picking a model
+    /// or a level, or the week arriving, never moves anything.
     var body: some View {
         ViewThatFits(in: .horizontal) {
             row(level: 2, labels: .full, profileWords: true)
@@ -1017,8 +1019,12 @@ struct QCControls: View {
             modelSteps(labels)
             thinkingSteps(labels)
             Spacer(minLength: 4)
-            if inBar, showLevel > 0, let l = model.level, l.weekNow() != nil || l.full() != nil {
-                QCLevelView(level: l, number: showLevel == 2).padding(.trailing, 8)
+            if inBar, showLevel > 0 {
+                if let l = model.level, l.weekNow() != nil || l.full() != nil {
+                    QCLevelView(level: l, number: showLevel == 2).padding(.trailing, 8)
+                } else {
+                    Color.clear.frame(width: QCLevelView.width(number: showLevel == 2), height: 4).padding(.trailing, 8)
+                }
             }
             if model.busy {
                 Button(action: model.stop) {
@@ -1057,13 +1063,16 @@ struct QCControls: View {
         let choices = model.modelChoices
         let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
         return QCStepControl(
-            what: "Model", key: "m", keys: "⌥⌘← ⌥⌘→", hintEdge: .leading,
+            what: "Model", key: "m", keys: "⌥⌘← ⌥⌘→",
             steps: choices.map { .init(title: $0.title, label: labels == .full ? $0.title : $0.choice.title,
                                        costly: QuickChatModels.costly($0.choice)) },
             index: choices.firstIndex { $0.choice == now }, offSlot: false, labelled: labels != .none,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(now), other: thinkingCostly),
-            pick: { j in if model.modelChoices.indices.contains(j) { model.choose(model.modelChoices[j].choice) } },
-            step: { model.stepModel($0) })
+            pick: { [weak model] j in
+                guard let model, model.modelChoices.indices.contains(j) else { return }
+                model.choose(model.modelChoices[j].choice)
+            },
+            step: { [weak model] in model?.stepModel($0) ?? false })
     }
 
     /// Thinking: Off (a dash), then a bar per level Low … Max. The levels the model doesn't take stay in their place,
@@ -1074,7 +1083,7 @@ struct QCControls: View {
         let now = model.effectiveThinking
         let modelName = model.modelTitle
         return QCStepControl(
-            what: "Thinking", key: "t", keys: "⌥⌘↓ ⌥⌘↑", hintEdge: .trailing,
+            what: "Thinking", key: "t", keys: "⌥⌘↓ ⌥⌘↑",
             steps: all.map { t in
                 .init(title: t == .off ? "Thinking off" : t.title, label: t.title,
                       costly: QuickChatModels.costly(effort: t.effort), takes: takes.contains(t),
@@ -1082,24 +1091,25 @@ struct QCControls: View {
             },
             index: all.firstIndex(of: now), offSlot: true, labelled: labels != .none,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(effort: now.effort), other: QuickChatModels.costly(model.resolvedModel.family)),
-            pick: { j in
-                guard all.indices.contains(j), model.thinkingSteps.contains(all[j]) else { return }
+            pick: { [weak model] j in
+                guard let model, all.indices.contains(j), model.thinkingSteps.contains(all[j]) else { return }
                 model.choose(all[j])
             },
-            step: { model.stepThinking($0) })
+            step: { [weak model] in model?.stepThinking($0) ?? false })
     }
 }
 
 /// A step control (the model, thinking): a label and a bar per step, rising, filled up to the one in use. Each bar is a
 /// target of its own (a 10 × 28 pt column, a control: a press there never moves the window): a click picks that step.
-/// Thinking's Off is a dash before the bars. The pointer on a bar lights it and the label says that step's name (or,
-/// with no label, a short hint above the bars does); the scroll wheel and the ⌥⌘ arrows step it. The control is as wide
+/// Thinking's Off is a dash before the bars. The pointer on a bar lights it and the label says that step's name (with no
+/// label, the bar's tooltip does: anything drawn above the row would sit under the field, an AppKit view); the scroll
+/// wheel and the ⌥⌘ arrows step it. The control is as wide
 /// for every step: its label is sized for the longest one, so nothing in it or the row moves when the value changes. A
 /// step that uses the limits faster (Fable, Extra, Max) has an ember bar, and the control is warm while on one (warmer
 /// when both controls are).
 struct QCStepControl: View {
     struct Step {
-        /// The full name (the hint, the tooltip, VoiceOver) and the label's words.
+        /// The full name (the tooltip, VoiceOver) and the label's words.
         let title: String
         let label: String
         let costly: Bool
@@ -1113,9 +1123,6 @@ struct QCStepControl: View {
     let key: String
     /// The keys that step it, for the bars' tooltips.
     let keys: String
-    /// Which edge of the control the hint lines up with: the model's grows right, thinking's left, so it stays inside a
-    /// narrow window.
-    let hintEdge: HorizontalAlignment
     let steps: [Step]
     /// The step in use (nil: none of them).
     let index: Int?
@@ -1128,6 +1135,8 @@ struct QCStepControl: View {
     /// A step up (1) or down (-1), for the scroll wheel.
     let step: (Int) -> Bool
     @State private var hover: Int?
+    /// This drawn control, in QCStepTargets.
+    @State private var token = UUID()
     @Environment(\.qcStepHover) private var pictureHover
     @Environment(\.qcRendering) private var rendering
 
@@ -1164,16 +1173,11 @@ struct QCStepControl: View {
         .qcControl()      // the label too: a press anywhere on the control never moves the window
         .background(rendering ? nil : GeometryReader { g in
             Color.clear
-                .onAppear { QCStepTargets.shared.control(key, g.frame(in: .global), bars: steps.count, step: step) }
-                .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.control(key, $0, bars: steps.count, step: step) }
-                .onChange(of: steps.count) { QCStepTargets.shared.control(key, g.frame(in: .global), bars: $0, step: step) }
+                .onAppear { QCStepTargets.shared.control(key, g.frame(in: .global), bars: steps.count, token: token, step: step) }
+                .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.control(key, $0, bars: steps.count, token: token, step: step) }
+                .onChange(of: steps.count) { QCStepTargets.shared.control(key, g.frame(in: .global), bars: $0, token: token, step: step) }
+                .onDisappear { QCStepTargets.shared.drop(key, token: token) }
         })
-        // with no label, the hovered step's name hangs above the bars from a zero-size frame: it never counts in the row
-        .overlay(alignment: hintEdge == .leading ? .topLeading : .topTrailing) {
-            if !labelled, let j = hovered, steps.indices.contains(j) {
-                hint(steps[j]).frame(width: 0, height: 0, alignment: hintEdge == .leading ? .bottomLeading : .bottomTrailing).offset(y: -4)
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(what)
         .accessibilityValue(index.flatMap { steps.indices.contains($0) ? steps[$0].title : nil } ?? "")
@@ -1205,11 +1209,11 @@ struct QCStepControl: View {
             if inside { hover = j } else if hover == j { hover = nil }
         }
         .help((s.why ?? (s.costly ? "\(s.title): uses your limits faster" : s.title)) + " (\(keys))")
-        .qcPointingHand()
+        .modifier(QCHandIf(on: s.takes))      // a level the model doesn't take does nothing: no pointing hand
         .background(rendering ? nil : GeometryReader { g in
             Color.clear
-                .onAppear { QCStepTargets.shared.bar("\(key)\(j)", g.frame(in: .global)) { if s.takes { pick(j) } } }
-                .onChange(of: g.frame(in: .global)) { f in QCStepTargets.shared.bar("\(key)\(j)", f) { if s.takes { pick(j) } } }
+                .onAppear { QCStepTargets.shared.bar(key, j, g.frame(in: .global), token: token) { if s.takes { pick(j) } } }
+                .onChange(of: g.frame(in: .global)) { f in QCStepTargets.shared.bar(key, j, f, token: token) { if s.takes { pick(j) } } }
         })
     }
 
@@ -1217,20 +1221,13 @@ struct QCStepControl: View {
         let warm = tint == 2 ? 0.27 : tint == 1 ? 0.13 : 0
         return warm > 0 ? QCColor.accent.opacity(warm) : .clear
     }
+}
 
-    /// Above the bars when there's no label: the hovered step's name and whether it uses the limits faster (short, so it
-    /// stays inside a narrow window; the keys are in the tooltip).
-    private func hint(_ s: Step) -> some View {
-        var words = Text(s.title).fontWeight(.semibold).foregroundColor(s.takes ? QCColor.text : QCColor.muted)
-        if let why = s.why { words = Text(why).foregroundColor(QCColor.muted) }
-        else if s.costly { words = words + Text(" · uses limits faster").foregroundColor(QCColor.hex(0xF1B59B)) }
-        return words
-            .font(.system(size: 11.5)).lineLimit(1).fixedSize()
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(QCColor.hex(0x1C1C1B)))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(QCColor.line))
-            .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
-            .allowsHitTesting(false)
+/// The pointing hand only where a click does something.
+private struct QCHandIf: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on { content.qcPointingHand() } else { content }
     }
 }
 
@@ -1242,16 +1239,30 @@ final class QCStepTargets {
     static let shared = QCStepTargets()
     private(set) var controls: [String: (frame: CGRect, step: (Int) -> Bool)] = [:]
     private(set) var bars: [String: (frame: CGRect, pick: () -> Void)] = [:]
+    /// Which drawn control (its token) owns each key: a row that went (the bar became the window, another width picked
+    /// another row) can't overwrite or remove the one on screen.
+    private var owners: [String: UUID] = [:]
     private var monitor: Any?
     private var scrolled: (key: String, sum: CGFloat)?
 
     /// A control laid out: its frame, and how many bars it has now (a profile with fewer families leaves none behind).
-    func control(_ key: String, _ frame: CGRect, bars count: Int, step: @escaping (Int) -> Bool) {
+    func control(_ key: String, _ frame: CGRect, bars count: Int, token: UUID, step: @escaping (Int) -> Bool) {
+        owners[key] = token
         controls[key] = (frame, step)
         for k in bars.keys where k.hasPrefix(key) && (Int(k.dropFirst(key.count)) ?? 0) >= count { bars[k] = nil }
         if monitor == nil { watchScrolls() }
     }
-    func bar(_ key: String, _ frame: CGRect, pick: @escaping () -> Void) { bars[key] = (frame, pick) }
+    func bar(_ control: String, _ j: Int, _ frame: CGRect, token: UUID, pick: @escaping () -> Void) {
+        guard owners[control] == nil || owners[control] == token else { return }
+        bars["\(control)\(j)"] = (frame, pick)
+    }
+    /// The control went: its entries go, unless another drawn one has taken its key since.
+    func drop(_ key: String, token: UUID) {
+        guard owners[key] == token else { return }
+        owners[key] = nil
+        controls[key] = nil
+        for k in bars.keys where k.hasPrefix(key) { bars[k] = nil }
+    }
 
     /// The scroll wheel (or two fingers) over a step control steps it: up or right is a step up. One local monitor (an
     /// event handler, not a timer), set up with the first control.
@@ -1262,17 +1273,30 @@ final class QCStepTargets {
             if !cv.isFlipped { p.y = cv.bounds.height - p.y }
             let inverted: CGFloat = e.isDirectionInvertedFromDevice ? -1 : 1
             let d = (abs(e.scrollingDeltaY) >= abs(e.scrollingDeltaX) ? e.scrollingDeltaY : -e.scrollingDeltaX) * inverted
-            return self.scroll(at: p, by: d, precise: e.hasPreciseScrollingDeltas, began: e.phase == .began,
+            return self.scroll(at: p, by: d, precise: e.hasPreciseScrollingDeltas,
+                               began: e.phase.contains(.began) || e.phase.contains(.mayBegin),
                                momentum: e.momentumPhase != []) ? nil : e
         }
     }
 
     /// A scroll of `d` (up or right positive) at a point of the hosting view: whether a step control took it. A wheel's
-    /// notch is a step; a trackpad's deltas add up to 24 pt a step; momentum is taken and steps nothing.
+    /// notch over a control is a step. A trackpad gesture belongs to the control it began over: its deltas add up to
+    /// 24 pt a step and its momentum is taken and steps nothing; a gesture that began anywhere else (the chat scrolling
+    /// onto the row) passes through whole, momentum too.
     @discardableResult func scroll(at p: CGPoint, by d: CGFloat, precise: Bool, began: Bool, momentum: Bool = false) -> Bool {
-        guard let (key, c) = controls.first(where: { $0.value.frame.contains(p) }) else { scrolled = nil; return false }
-        if momentum { return true }
-        if began || scrolled?.key != key { scrolled = (key, 0) }
+        let over = controls.first(where: { $0.value.frame.contains(p) })?.key
+        let key: String
+        if precise {
+            if began && !momentum { scrolled = over.map { ($0, 0) } }
+            guard let owner = scrolled?.key else { return false }
+            if momentum { return true }
+            key = owner
+        } else {
+            guard let over else { return false }
+            if scrolled?.key != over { scrolled = (over, 0) }
+            key = over
+        }
+        guard let c = controls[key] else { return false }
         let threshold: CGFloat = precise ? 24 : 0.9
         var sum = (scrolled?.sum ?? 0) + d
         while abs(sum) >= threshold {
@@ -1294,7 +1318,7 @@ extension EnvironmentValues {
     }
 }
 
-/// The profile picker's key: a dot, its title and a chevron; it opens a menu.
+/// The profile picker's key: a dot, then its title and a chevron (a narrow row: the dot alone); it opens a menu.
 struct QCChip: View {
     let title: String
     /// A small dot before the title (the profile's level colour).

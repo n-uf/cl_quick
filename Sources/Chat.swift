@@ -236,7 +236,7 @@ final class QuickChatModel: ObservableObject {
     private var processKey = ""
     /// The account the running `claude` started on: what it reports belongs to it, and the chat goes on only on it.
     private var trail = AccountTrail()
-    /// The model and thinking the running `claude` has now; the pickers change them with control requests.
+    /// The model and thinking the running `claude` has now; the controls change them with control requests.
     private var appliedModel = "", appliedEffort: String?
     /// The question being answered reached `claude` (not still waiting for the folder to be read or `claude` to be found).
     private var messageSent = false
@@ -319,7 +319,7 @@ final class QuickChatModel: ObservableObject {
         ask(turns[i].question)
     }
 
-    /// A new chat: the process goes and the old chat with it (nothing was saved), the pickers go back to the defaults.
+    /// A new chat: the process goes and the old chat with it (nothing was saved), the model and thinking go back to the defaults.
     /// `keepField`: what you typed stays (another profile was picked). `dropsSwitch`: a switch of account under way or
     /// gone wrong is forgotten too (not when the chat starts anew because the account changed, which is what it says).
     func newChat(keepField: Bool = false, dropsSwitch: Bool = true) {
@@ -336,7 +336,8 @@ final class QuickChatModel: ObservableObject {
         focusTick += 1
     }
 
-    /// The pickers: from the next message on (the running `claude` is told, so the chat keeps its conversation).
+    /// A click on a model or thinking bar: from the next message on (the running `claude` is told, so the chat keeps its
+    /// conversation).
     func choose(_ c: QuickChatModelChoice) { choice = c; focusTick += 1 }
     func choose(_ t: QuickChatThinking) { thinking = t; focusTick += 1 }
 
@@ -501,7 +502,7 @@ final class QuickChatModel: ObservableObject {
         }
         do { try p.start() } catch { return "Claude Code couldn't start: \(error.localizedDescription)" }
         process = p
-        p.initialize()          // the account's models, for the pickers
+        p.initialize()          // the account's models, for the model and thinking bars (nothing goes to a model)
         p.getUsage()            // its limits now, before anything is asked
         usageAsked = Date()
         processKey = key
@@ -635,7 +636,7 @@ final class QuickChatModel: ObservableObject {
         levelReported(t.profileID, u, l)
     }
 
-    /// The model an answer came from, as Claude Code says it. It names the picker's choice only when it is that family: a
+    /// The model an answer came from, as Claude Code says it. It names the chosen family's model only when it is that family: a
     /// `set_model` Claude Code refused leaves the old model answering, and that name isn't the new choice's.
     private func setModel(_ id: String, turn i: Int) {
         let name = QuickChatParse.modelName(id)

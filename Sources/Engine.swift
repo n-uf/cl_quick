@@ -80,14 +80,18 @@ enum QuickChatModels {
     static let fallbackEfforts = ["low", "medium", "high"]
 
     /// The family and version of an entry: "Fable 5.2" → (fable, [5, 2]). Claude Code may name a model by its family
-    /// alone ("Opus") and give the version in its description ("Opus 5.5 · Best for everyday, complex tasks"): the
-    /// version comes from there; with none anywhere, the family with no version ([], older than any numbered one). A
-    /// name that isn't one of the four families is nil.
+    /// alone ("Opus") and give the version in its description ("Opus 5.5 · Best for everyday, complex tasks", or
+    /// "Claude Opus 5.5 · …"): the version comes from there; with none anywhere, the family with no version ([]). A name
+    /// that isn't one of the four families is nil.
     static func family(_ e: QuickChatModelEntry) -> (QuickChatModelChoice, [Int])? {
-        guard let first = e.displayName.split(separator: " ").first,
+        func words(_ s: String) -> [Substring] {
+            let w = s.split(separator: " ")
+            return w.first?.lowercased() == "claude" ? Array(w.dropFirst()) : w
+        }
+        guard let first = words(e.displayName).first,
               let f = QuickChatModelChoice(rawValue: first.lowercased()) else { return nil }
         for text in [e.displayName, e.description ?? ""] {
-            let words = text.split(separator: " ")
+            let words = words(text)
             guard words.count >= 2, words[0].lowercased() == f.rawValue else { continue }
             let v = words[1].split(separator: ".").compactMap { Int($0) }
             if !v.isEmpty { return (f, v) }
@@ -101,14 +105,21 @@ enum QuickChatModels {
         return f.title + " " + v.map(String.init).joined(separator: ".")
     }
 
-    /// The newest of each family in the list ("default" and older versions are left out). A family the account
-    /// doesn't have is missing.
+    /// The newest of each family in the list ("default" and older versions are left out). The family's own alias with
+    /// no version known ("opus", named "Opus" with nothing numbered) stands for the newest: Claude Code resolves it so,
+    /// and it beats any numbered entry. A family the account doesn't have is missing.
     static func newest(_ list: [QuickChatModelEntry]) -> [QuickChatModelChoice: QuickChatModelEntry] {
         var best: [QuickChatModelChoice: (QuickChatModelEntry, [Int])] = [:]
+        func latestAlias(_ e: QuickChatModelEntry, _ v: [Int], _ f: QuickChatModelChoice) -> Bool { v.isEmpty && e.value == f.rawValue }
         for e in list where e.value != "default" {
             guard let (f, v) = family(e) else { continue }
-            // a tie (the same version twice, "opus" and "opus[1m]"): the plain one, not a variant
-            if let b = best[f], !newer(v, than: b.1), !(v == b.1 && b.0.value.contains("[") && !e.value.contains("[")) { continue }
+            if let b = best[f] {
+                let mine = latestAlias(e, v, f), theirs = latestAlias(b.0, b.1, f)
+                // a tie (the same version twice, "opus" and "opus[1m]"): the plain one, not a variant
+                let wins = mine != theirs ? mine
+                    : newer(v, than: b.1) || (v == b.1 && b.0.value.contains("[") && !e.value.contains("["))
+                if !wins { continue }
+            }
             best[f] = (e, v)
         }
         return best.mapValues(\.0)
