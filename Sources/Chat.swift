@@ -366,7 +366,7 @@ final class QuickChatModel: ObservableObject {
         field.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
     }
 
-    /// The profile is on another account now: a new chat on the same profile (a session may not go on across accounts),
+    /// The profile is on another account now: a new chat on the same profile (a chat may not go on across accounts),
     /// what was typed (or the question the full limit stopped) is sent, and one line says where it is.
     /// The caller has set the new target.
     func continueSwitched(note: String) {
@@ -377,7 +377,7 @@ final class QuickChatModel: ObservableObject {
         send()
     }
 
-    /// The profile's folder is on another account than this chat's. A session belongs to its account, so a new chat
+    /// The profile's folder is on another account than this chat's. A chat belongs to its account, so a new chat
     /// starts on the same profile; what was typed (or the question a full limit stopped) stays in the field, and one
     /// line says where it is. Not while an answer is on its way: the next message meets the same rule in ask().
     func accountChanged(to t: QuickChatTarget) {
@@ -746,7 +746,7 @@ final class QuickChat {
         store.noteAccount(of: id)
         guard let p = store.profile(id) else { return }
         // the folder is on another account than the chat's (a switch from Settings, a sign-in as someone else, Sign in
-        // again…, or one outside cl_quick): a session belongs to its account, so a new chat starts and says so
+        // again…, or one outside cl_quick): a chat belongs to its account, so a new chat starts and says so
         let now = QuickChatTarget(p)
         if let old = model.target, old.profileID == id, let was = old.accountUUID, let to = now.accountUUID, was != to, !model.busy {
             model.accountChanged(to: now)

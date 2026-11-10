@@ -22,7 +22,16 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **Model and thinking pickers**, Haiku and thinking off by default; every answer says which model gave it.
 - **Any shortcut**: five Space shortcuts or Record another… (checked against macOS's Space shortcuts), with no
   Accessibility permission.
-- **Light**: one menu bar app with no Dock icon, one `claude` at a time (closed after 2 minutes idle), no usage reading
-  of its own; the app is about 3 MB.
-- **Its files in one place**, listed in Settings, and Remove cl_quick data… moves them to the Trash.
+- **Incognito chats.** Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under
+  the profile's account. `claude` runs with `--no-session-persistence`, so it writes no transcript, and nothing is ever
+  resumed: a chat lives only in its running `claude` and ends with it. It ends after 15 minutes idle (window open or
+  hidden), on New chat (⌘N), on another profile or account, if `claude` crashes or needs a sign-in, and when cl_quick
+  quits; the window says so ("This chat ended after 15 minutes idle. Nothing was saved.") and the next message starts a
+  new chat. Retry after a crash asks the last question in a new chat. **Stop** interrupts the answer and the chat goes
+  on (if Claude Code doesn't stop in 5 seconds, the chat ends). The model and thinking pickers change the running
+  `claude`, so a chat keeps its conversation. A chat never continues on another account.
+- **Light**: one menu bar app with no Dock icon, one `claude` at a time (kept while a chat is open, ended after
+  15 minutes idle), no usage reading of its own; the app is about 3 MB.
+- **Its files in one place**, listed in Settings, and Remove cl_quick data… moves them to the Trash. Quick chats write no
+  files; chats saved by earlier versions are listed as old chats and removed with the rest.
 - Settings in cl_audit's look; the chat in Claude's colours.

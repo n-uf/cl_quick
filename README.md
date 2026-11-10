@@ -4,7 +4,13 @@ A floating Claude chat for the Mac, on a shortcut. Press it over any app: a bar 
 chat window that stays floating, on every Space, until Esc hides it. It never brings another app forward.
 
 Your own Claude Code answers, on the profile's account in use, and it counts against that account's limits. cl_quick
-is one menu bar app with no Dock icon and one `claude` at a time, closed after 2 minutes idle.
+is one menu bar app with no Dock icon and one `claude` at a time, kept while a chat is open and ended after 15 minutes
+idle.
+
+**Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under the profile's
+account.** A chat lives only in the running `claude` (it runs with `--no-session-persistence`), so it ends with it: after
+15 minutes idle, on New chat (⌘N), on another profile or account, if `claude` crashes, or when cl_quick quits. The
+window then says "This chat ended after 15 minutes idle. Nothing was saved." and the next message starts a new chat.
 
 ## Install
 
@@ -61,11 +67,14 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   its own: the numbers are what Claude Code reports after each answer.
 - When a profile's week (or 5-hour limit) is full, the chat says when it resets and offers the profile with the most
   room: **Ask on Work** sends your question there. If the profile has a standby account with room, it also offers
-  **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a session may not
+  **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a chat may not
   carry across accounts) and sends what you had typed, with a line saying "Main is on p•••@example.com now."
 - If a profile's Claude Code isn't signed in, the notice offers **Sign in…** (Claude Code's own sign-in, in Terminal)
-  and Try again.
-- If Claude Code stops mid-answer, the window keeps what arrived and offers Retry.
+  and Try again, which asks the question in a new chat.
+- **Stop** ends the answer where it is and the chat goes on (an interrupt to the same `claude`, which still remembers
+  the conversation). If Claude Code doesn't stop in 5 seconds, the chat ends instead.
+- If Claude Code stops mid-answer, the window keeps what arrived and says the chat ended; Retry asks the last question
+  in a new chat. The model and thinking pickers change the running `claude`, so a chat keeps its conversation.
 
 ## Settings ▸ General
 
@@ -75,17 +84,21 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   shortcuts are, so there's no Accessibility permission to give.
 - **Model** and **Thinking** for a new chat.
 - **Open at login**: in the menu bar, ready for the shortcut.
-- **Files**: each profile's quick chats, cl_quick's own folder, and **Remove cl_quick data…**.
+- **Files**: the incognito note, cl_quick's own folder, any old chats saved by earlier versions, and
+  **Remove cl_quick data…**.
 
 ## What it keeps, and what it sends
 
 - `~/Library/Application Support/cl_quick/`: its profiles (with the addresses and ids of their accounts, never tokens),
   settings, the weeks last reported per account, and the work folders Claude Code runs in. Outside it: the login item, and any folder Sign in another account… made (a Claude Code
   folder, which Remove leaves).
-- Each chat is a Claude Code session, which Claude Code keeps in the profile's folder under
-  `projects/<cl_quick's work folder>/` and deletes after 30 days by default.
-- Remove cl_quick data… moves cl_quick's folder and each profile's quick chats to the Trash, turns the login item off
-  and quits. Your Claude Code folders, their sign-ins and their other sessions stay.
+- Chats: nothing. Claude Code runs with `--no-session-persistence`, so it writes no transcript, and a chat is never
+  resumed. (While it runs, Claude Code still notes the session's id in a small file under the profile's `plugins/store/`;
+  no message text.) Chats saved by earlier versions are Claude Code sessions in the profile's folder under
+  `projects/<cl_quick's work folder>/`, deleted after 30 days by default; cl_quick doesn't touch them except in
+  Remove cl_quick data….
+- Remove cl_quick data… moves cl_quick's folder and any old quick chats to the Trash, turns the login item off and
+  quits. Your Claude Code folders, their sign-ins and their other sessions stay.
 - It sends nothing but your messages, through Claude Code. Claude Code runs with no tools, no MCP servers, no settings
   files and its non-essential traffic (telemetry, error reports, update checks) off. It gets only an allowlisted part of
   the Mac's environment (who you are, the language, proxies and certificates) and answers on the profile's own sign-in;
@@ -100,7 +113,9 @@ On its first run it copies cl_audit's old quick chat settings (the shortcut, mod
 
 `Checks/run.sh` checks the engine and the Markdown against a stand-in `claude` (no account, no network).
 `Checks/real.sh` asks one real question on a throwaway, signed-out folder; with `QC_CONFIG=<folder>` it uses that
-folder's account and removes its session afterwards.
+folder's account (a little of its usage) and checks the incognito chat end to end: a multi-turn conversation in one
+`claude` still remembers, Stop keeps the conversation, the model changes in the running chat, and no transcript
+appears under the folder's `projects/`.
 
 ## Versioning
 

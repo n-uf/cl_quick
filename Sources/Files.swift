@@ -1,12 +1,14 @@
 // Files: where cl_quick keeps things, and Remove cl_quick data….
 //
 //   ~/Library/Application Support/cl_quick/   profiles.json, settings.json, levels.json, work/<profile id>/
-//   each profile's chats: Claude Code sessions, which Claude Code keeps in the profile's folder under
-//   projects/<the work folder, each non-ASCII-alphanumeric UTF-16 unit a "-">/ (and deletes after 30 days by default).
+//
+// Quick chats are incognito: Claude Code runs with --no-session-persistence, so a chat writes nothing. Chats saved by
+// earlier versions are Claude Code sessions in the profile's folder under projects/<the work folder, each
+// non-ASCII-alphanumeric UTF-16 unit a "-">/ (deleted after 30 days by default); they are only looked for and removed here.
 //
 // Outside it: the login item (Open at login), and any folder Sign in another account… made (a Claude Code folder, which
-// Remove leaves). Remove moves the chats and the folder above to the Trash and turns the login item off; your Claude Code
-// folders and their other sessions stay.
+// Remove leaves). Remove moves any old chats and the folder above to the Trash and turns the login item off; your Claude
+// Code folders and their other sessions stay.
 
 import AppKit
 
@@ -39,13 +41,13 @@ enum Files {
         } catch { return false }
     }
 
-    /// The folder Claude Code keeps a profile's quick chats in.
+    /// The folder earlier versions' quick chats were kept in by Claude Code (this version writes none).
     static func chatsFolder(_ p: Profile) -> URL {
         URL(fileURLWithPath: p.path).appendingPathComponent("projects")
             .appendingPathComponent(QuickChatCommand.projectKey(p.workFolder))
     }
 
-    /// One profile's chats: how many and how big.
+    /// One profile's old chats, saved by earlier versions: how many and how big.
     static func chats(_ p: Profile) -> (count: Int, bytes: Int64) {
         let dir = chatsFolder(p)
         var count = 0, bytes: Int64 = 0
@@ -67,7 +69,7 @@ enum Files {
         return bytes
     }
 
-    /// Moves every profile's quick chats and cl_quick's own folder to the Trash; only a chats folder whose name is
+    /// Moves every profile's old quick chats (if any) and cl_quick's own folder to the Trash; only a chats folder whose name is
     /// exactly cl_quick's own, directly in a profile's projects/, is taken. Returns what couldn't be moved.
     static func remove(_ list: [Profile]) -> [String] {
         let fm = FileManager.default

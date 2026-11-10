@@ -650,11 +650,17 @@ struct GeneralPage: View {
                 }
             }
             SCard(title: "Files", info: "Everything cl_quick keeps, and one button to remove it all.") {
-                SRow(label: "Chats", info: "Claude Code sessions, kept by Claude Code in each profile's folder under projects/, and deleted after 30 days by default.", first: true, stacked: true) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if chats.isEmpty { Text("None yet.").font(.system(size: 12)).foregroundStyle(face.muted) }
-                        ForEach(chats, id: \.0.id) { p, n, b in
-                            Text("\(p.name): \(n == 1 ? "1 chat" : "\(n) chats"), \(Files.size(b))").font(.system(size: 12)).foregroundStyle(face.soft)
+                SRow(label: "Chats", info: "cl_quick runs Claude Code without keeping a session, so no transcript is written anywhere. A chat lives only in the running Claude Code, which ends after 15 minutes idle, on New chat (⌘N), on another profile or account, or when cl_quick quits.", first: true, stacked: true) {
+                    Text("Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under the profile's account.")
+                        .font(.system(size: 12)).foregroundStyle(face.soft).fixedSize(horizontal: false, vertical: true)
+                }
+                // chats saved by earlier versions, which Remove cl_quick data… still takes
+                if !chats.isEmpty {
+                    SRow(label: "Old chats", info: "Quick chats saved by earlier versions: Claude Code sessions in each profile's folder under projects/, deleted by Claude Code after 30 days by default.", stacked: true) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(chats, id: \.0.id) { p, n, b in
+                                Text("\(p.name): \(n == 1 ? "1 chat" : "\(n) chats"), \(Files.size(b))").font(.system(size: 12)).foregroundStyle(face.soft)
+                            }
                         }
                     }
                 }
@@ -750,7 +756,8 @@ struct GeneralPage: View {
         let n = chats.reduce(0) { $0 + $1.1 }
         let a = NSAlert()
         a.messageText = "Move cl_quick's data to the Trash?"
-        a.informativeText = "This moves \(n == 1 ? "1 quick chat" : "\(n) quick chats") and cl_quick's profiles, settings and work folders to the Trash. Open at login turns off and cl_quick quits. Your Claude Code folders, their sign-ins and their other sessions stay; you can bring these back from the Trash."
+        let old = n == 0 ? "" : "\(n == 1 ? "1 old quick chat" : "\(n) old quick chats") saved by earlier versions and "
+        a.informativeText = "This moves \(old)cl_quick's profiles, settings and work folders to the Trash. Open at login turns off and cl_quick quits. Your Claude Code folders, their sign-ins and their other sessions stay; you can bring these back from the Trash."
         a.addButton(withTitle: "Move to Trash"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         QuickChat.shared.closeForRemoval()
