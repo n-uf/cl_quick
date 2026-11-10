@@ -17,7 +17,7 @@
 #
 # Signing is the same as cl_audit's: ad hoc (build.sh), no Developer ID and no notarization, so the README and the
 # release notes tell people to use Open Anyway the first time. Nothing here names a certificate or a keychain profile.
-# Test overrides: CALENDAR_VERSION_TODAY=YYYY-MM-DD, CALENDAR_VERSION_CURRENT=YY.M.R
+# Test overrides: CALENDAR_VERSION_TODAY=YYYY-MM-DD, CALENDAR_VERSION_CURRENT=YY.M.R (the second only with --dry-run)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -44,7 +44,7 @@ fi
 # Builds dist/cl_quick.zip and dist/cl_quick.dmg from build/cl_quick.app, as cl_audit does, and checks that the app on
 # the image is the zip's app (same code directory hash) and still passes its signature check.
 package() {
-  local ver stage zip_cd dmg_cd
+  local ver zip_cd dmg_cd
   ver="$(tr -d '[:space:]' < VERSION)"
   ./build.sh --no-install >/dev/null
   mkdir -p dist && rm -f "dist/$name.zip" "dist/$name.dmg"
@@ -53,8 +53,9 @@ package() {
 
   # The same app as a disk image: the app and an Applications shortcut to drag it onto.
   stage="$(mktemp -d)"
-  # whatever fails from here on, no image stays mounted and no temp folder stays behind
-  trap 'hdiutil detach -quiet -force "$stage/mnt" 2>/dev/null || true; rm -rf "$stage"' RETURN
+  # whatever fails from here on (an EXIT trap also runs when set -e aborts), no image stays mounted and no temp folder
+  # stays behind. $stage is global so the trap can still see it.
+  trap 'hdiutil detach -quiet -force "$stage/mnt" 2>/dev/null || true; rm -rf "$stage"' EXIT
   ditto "build/$name.app" "$stage/$name.app"
   ln -s /Applications "$stage/Applications"
   hdiutil create -quiet -volname "$name $ver" -srcfolder "$stage" -fs HFS+ -format UDZO -imagekey zlib-level=9 "dist/$name.dmg"
@@ -74,6 +75,9 @@ if [ $local_only = 1 ]; then
   exit 0
 fi
 
+if [ -n "${CALENDAR_VERSION_CURRENT:-}" ] && [ $dry = 0 ]; then
+  echo "CALENDAR_VERSION_CURRENT is a test override and works only with --dry-run" >&2; exit 1
+fi
 current="${CALENDAR_VERSION_CURRENT:-$(tr -d '[:space:]' < VERSION)}"
 if [[ ! $current =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   echo "VERSION \"$current\" is not a three-part number such as 26.11.0" >&2; exit 1
@@ -84,7 +88,14 @@ today="${CALENDAR_VERSION_TODAY:-$(date +%F)}"
 if [[ ! $today =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "date \"$today\" is not YYYY-MM-DD" >&2; exit 1; fi
 ty=$((10#${today:2:2})) tm=$((10#${today:5:2}))
 
+if [ $((cy * 100 + cm)) -gt $((ty * 100 + tm)) ]; then
+  echo "VERSION $current is from a later month than $today; versions never go backwards" >&2; exit 1
+fi
+
 if [ $nobump = 1 ]; then
+  if [ $cy != $ty ] || [ $cm != $tm ]; then
+    echo "--nobump keeps VERSION $current, but a release is numbered by the month it is made in ($ty.$tm.x); drop --nobump" >&2; exit 1
+  fi
   next="$current"
 else
   if [ $cy = $ty ] && [ $cm = $tm ]; then
