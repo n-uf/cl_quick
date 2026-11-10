@@ -333,7 +333,7 @@ struct InUseBox: View {
                               tone: entry.signing ? .amber : broken ? .warn : .ok, height: 18, size: 9)
             }
             if broken, !entry.signing {
-                NoticeBox(tone: .bad, title: "The sign-in stopped working.", text: "The chat can't answer on \(profileName) until you sign in again.") {
+                NoticeBox(tone: .bad, title: entry.problem?.words ?? "", text: "The chat can't answer on \(profileName) until you sign in again.") {
                     Button("Sign in again…", action: signInAgain).buttonStyle(.sentenceKey(next: true)).disabled(busy)
                 }
             }
@@ -620,19 +620,23 @@ struct AddAccountForm: View {
     var inUse: String? = nil
     var busy = false
     var signIn: () -> Void = {}
+    /// Cancel: the form's own problem line goes with it.
+    var cancel: () -> Void = {}
     @Environment(\.face) private var face
 
     var body: some View {
-        if !open {
+        // while a sign-in is waited for, the form is closed: nothing in it may start a second one
+        if !open || busy {
             Button("Add an account…") { open = true }.buttonStyle(.sentenceKey()).disabled(busy)
         } else {
             VStack(alignment: .leading, spacing: 7) {
                 Text("Address of the account to add").font(.system(size: 12)).foregroundStyle(face.soft)
                 HStack(spacing: 8) {
-                    SField(placeholder: "name@domain", text: $address, width: 240, onCommit: { if ProfilePage.looksLikeAddress(address) { signIn() } })
+                    SField(placeholder: "name@domain", text: $address, width: 240,
+                           onCommit: { if !busy && ProfilePage.looksLikeAddress(address) { signIn() } })
                     Button("Sign in…", action: signIn).buttonStyle(.sentenceKey(next: true))
                         .disabled(!ProfilePage.looksLikeAddress(address) || busy)
-                    Button("Cancel") { open = false; address = "" }.buttonStyle(.sentenceKey())
+                    Button("Cancel") { open = false; address = ""; cancel() }.buttonStyle(.sentenceKey())
                 }
                 if let problem { Text(problem).font(.system(size: 11)).foregroundStyle(face.danger) }
                 Text("Claude Code's sign-in opens in Terminal; finish it in the browser as this address."
@@ -671,7 +675,7 @@ struct ProfilePage: View {
                 .onChange(of: profile.id) { _ in name = profile.name; problem = nil; address = ""; adding = false }
         } addAccount: {
             AddAccountForm(open: $adding, address: $address, problem: problem, inUse: store.inUse(profile)?.email,
-                           busy: model.busy, signIn: addAccount)
+                           busy: model.busy, signIn: addAccount, cancel: { problem = nil })
         }
     }
 
@@ -1052,6 +1056,10 @@ struct GeneralPage: View {
 
     private func pick(_ id: String) {
         if id == "off" { state.settings.shortcutOn = false; state.save(); return }
+        // a recorded shortcut that is off comes back on with one click, as the old on/off switch did; on, it records again
+        if id == "record", !state.settings.shortcutOn, !state.settings.shortcut.isPreset {
+            state.settings.shortcutOn = true; state.save(); return
+        }
         if id == "record" { state.startRecording(); return }
         guard let s = QuickChatShortcut.presets.first(where: { $0.id == id }) else { return }
         state.settings.shortcut = s; state.settings.shortcutOn = true; state.save()
