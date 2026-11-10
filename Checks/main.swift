@@ -284,6 +284,19 @@ check("models: a tie goes to the plain one, not a variant", tie[.opus]?.value ==
 check("thinking: clamped to the nearest, lighter first", QuickChatModels.clamp("max", to: ["off", "low", "medium", "high"]) == "high"
       && QuickChatModels.clamp("medium", to: ["off", "low", "high"]) == "low" && QuickChatModels.clamp("high", to: ["off"]) == "off"
       && QuickChatModels.clamp("xhigh", to: ["off", "low", "medium", "high", "xhigh"]) == "xhigh")
+// the step controls: one step up or down a list of 2 to 6, nothing past either end
+let fams: [QuickChatModelChoice] = [.haiku, .sonnet, .opus]
+check("steps: up and down", QuickChatModels.step(fams, from: .sonnet, by: 1) == .opus && QuickChatModels.step(fams, from: .sonnet, by: -1) == .haiku)
+check("steps: nothing past the ends", QuickChatModels.step(fams, from: .opus, by: 1) == nil && QuickChatModels.step(fams, from: .haiku, by: -1) == nil)
+check("steps: a step not in the list steps from the start", QuickChatModels.step(fams, from: .fable, by: 1) == .sonnet)
+check("steps: thinking, Off to Low and Max as the top",
+      QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "off", by: 1) == "low"
+      && QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "max", by: 1) == nil)
+check("cost: Fable, Extra and Max", QuickChatModels.costly(.fable) && !QuickChatModels.costly(.opus)
+      && QuickChatModels.costly(effort: "xhigh") && QuickChatModels.costly(effort: "max") && !QuickChatModels.costly(effort: "high")
+      && !QuickChatModels.costly(effort: nil))
+check("cost: the tint is stronger when both are costly", QuickChatModels.tint(own: true, other: false) == 1
+      && QuickChatModels.tint(own: true, other: true) == 2 && QuickChatModels.tint(own: false, other: true) == 0)
 // settings.json's model: an old "profile" doesn't decode (the settings read it as Haiku, the default), "fable" does
 struct SavedModel: Decodable { var model: QuickChatModelChoice }
 check("settings: an old saved \"profile\" isn't a model", (try? JSONDecoder().decode(SavedModel.self, from: Data(#"{"model":"profile"}"#.utf8))) == nil)
