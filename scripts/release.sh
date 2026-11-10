@@ -144,8 +144,15 @@ git tag -a "v$next" -m "$name $next"
 echo "released $next (commit and tag v$next)"
 
 if [ $push = 1 ]; then
-  # Build and check both files before anything leaves the Mac.
-  package
+  # Build and check both files before anything leaves the Mac. It runs as its own process (--local) so that set -e
+  # and its cleanup trap stay in force inside it. If it fails, undo exactly what this run made (a release commit and
+  # its tag; the tree was clean, and --keep rolls back nothing else) so the next run doesn't skip a number.
+  if ! ./scripts/release.sh --local; then
+    git tag -d "v$next" >/dev/null
+    git reset -q --keep HEAD~1
+    echo "packaging failed: the release commit and tag v$next are undone, nothing was pushed" >&2
+    exit 1
+  fi
   zip_sha="$(shasum -a 256 "dist/$name.zip" | awk '{print $1}')"
   dmg_sha="$(shasum -a 256 "dist/$name.dmg" | awk '{print $1}')"
 
