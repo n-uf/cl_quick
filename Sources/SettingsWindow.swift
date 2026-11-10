@@ -1,7 +1,8 @@
-// SettingsWindow: cl_quick's settings, in cl_audit's look (Faces, Style, Parts): a tile per profile, the + tile to add
-// one, and General. A profile's card: its name, the account signed in to its folder with the week as Claude Code last
-// reported it, whether the shortcut chats on it and whether the chat's picker offers it. General: the shortcut, the
-// default model and thinking, Open at login, and where cl_quick keeps things with Remove cl_quick data….
+// SettingsWindow: cl_quick's settings, in cl_audit's look (Faces, Style, Parts): General, a tile per profile with its
+// lamp, and the + tile to add one. A profile's page in three layers: its name and folder; its accounts (the one in use
+// with its 5 hours and week, standby ones with their week as last reported, Add an account…); how the chat uses it
+// (the default, the picker); then Remove. General: one grid for the shortcut, the model and thinking new chats start
+// with, and Open at login, then one strip for cl_quick's own data. No (i): a plain line where something needs saying.
 
 import AppKit
 import Carbon.HIToolbox
@@ -143,7 +144,7 @@ struct SettingsRoot: View {
             }
             .padding(18)
         }
-        .frame(minWidth: 560, minHeight: 460)
+        .frame(minWidth: 600, minHeight: 460)          // the shortcut's seven choices in one row
         .background(RaisedShape(finish: face.chassis, radius: 0))
     }
 
@@ -584,6 +585,28 @@ struct LineRow<Control: View>: View {
     }
 }
 
+/// A row of General's grid: the label in a fixed column, the control right beside it, every row the same.
+struct GridLine<Control: View>: View {
+    let label: String
+    var first = false
+    @ViewBuilder let control: Control
+    @Environment(\.face) private var face
+    static var labelWidth: CGFloat { 104 }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !first { EngravedRule() }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(label).font(.system(size: 12.5)).foregroundStyle(face.text).frame(width: Self.labelWidth, alignment: .leading)
+                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
+                control.alignmentGuide(.firstTextBaseline) { _ in 14 }      // the middle of the first control's 28 pt
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 8)
+        }
+    }
+}
+
 /// Add an account…: a key that opens a small form with its own label, Sign in… and Cancel.
 struct AddAccountForm: View {
     @Binding var open: Bool
@@ -939,143 +962,149 @@ struct AddPage: View {
     }
 }
 
+/// What a picture of General draws in place of this Mac's own state.
+struct GeneralSample {
+    var own: Int64 = 625
+    var clash: String? = nil
+    var login = true
+    var registered: String? = nil
+}
+
+/// General: one card, one grid (four labels on the left, every control in the column beside them), then one quiet strip
+/// for cl_quick's own data.
 struct GeneralPage: View {
     @ObservedObject var state: SettingsState
     @ObservedObject var store: ProfileStore
+    var sample: GeneralSample? = nil
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     @State private var chats: [(Profile, Int, Int64)] = []
     @State private var own: Int64 = 0
     @Environment(\.face) private var face
 
     var body: some View {
-        VStack(spacing: 14) {
-            SCard(title: "Quick chat", info: "A floating chat over any app. Your own Claude Code answers, on the profile's account in use, and it counts against its limits. It sends nothing but your messages; no tools.") {
-                SRow(label: "Shortcut", info: "Opens the chat from any app. Registered the way macOS's own app shortcuts are, so there's no Accessibility permission to give.", first: true, stacked: true) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 10) {
-                            SSwitch(isOn: Binding(get: { state.settings.shortcutOn }, set: { state.settings.shortcutOn = $0; state.save() }),
-                                    on: "\(state.settings.shortcut.title) opens it", off: "off")
-                            if state.recording == nil {
-                                Picker("", selection: Binding(get: { state.settings.shortcut.id }, set: { pick($0) })) {
-                                    ForEach(choices) { Text($0.title).tag($0.id) }
-                                    Divider()
-                                    Text("Record another…").tag("record")
-                                }
-                                .smallMenu().disabled(!state.settings.shortcutOn)
-                            }
-                        }
-                        if let r = state.recording { recorderRow(r) } else { shortcutNote }
-                    }
-                }
-                SRow(label: "Model", info: "The model a new chat starts with; the chat's own picker changes it for one chat.") {
-                    Picker("", selection: Binding(get: { state.settings.model }, set: { state.settings.model = $0; state.save() })) {
-                        ForEach(QuickChatModelChoice.allCases) { Text($0.title).tag($0) }
-                    }.smallMenu()
-                }
-                SRow(label: "Thinking", info: "How long Claude thinks before it answers in a new chat. Off is fastest.") {
-                    Picker("", selection: Binding(get: { state.settings.thinking }, set: { state.settings.thinking = $0; state.save() })) {
-                        ForEach(QuickChatThinking.allCases) { Text($0.title).tag($0) }
-                    }.smallMenu()
-                }
-                SRow(label: "Open at login", info: "cl_quick starts with the Mac, in the menu bar, ready for the shortcut. No Dock icon.") {
-                    SSwitch(isOn: Binding(get: { loginOn }, set: { setLogin($0) }), on: "in the menu bar", off: "off")
-                }
-            }
-            SCard(title: "Files", info: "Everything cl_quick keeps, and one button to remove it all.") {
-                SRow(label: "Chats", info: "cl_quick runs Claude Code without keeping a session, so no transcript is written anywhere. A chat lives only in the running Claude Code, which ends after 15 minutes idle, on New chat (⌘N), on another profile or account, or when cl_quick quits.", first: true, stacked: true) {
-                    Text("Quick chats are incognito: no message is saved on this Mac. Your messages still go to Anthropic under the profile's account.")
-                        .font(.system(size: 12)).foregroundStyle(face.soft).fixedSize(horizontal: false, vertical: true)
-                }
-                // chats saved by earlier versions, which Remove cl_quick data… still takes
-                if !chats.isEmpty {
-                    SRow(label: "Old chats", info: "Quick chats saved by earlier versions: Claude Code sessions in each profile's folder under projects/, deleted by Claude Code after 30 days by default.", stacked: true) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(chats, id: \.0.id) { p, n, b in
-                                Text("\(p.name): \(n == 1 ? "1 chat" : "\(n) chats"), \(Files.size(b))").font(.system(size: 12)).foregroundStyle(face.soft)
-                            }
+        VStack(alignment: .leading, spacing: 14) {
+            Text("General").font(.system(size: 16, weight: .semibold)).foregroundStyle(face.text).padding(.horizontal, 2)
+            SCard(title: "") {
+                GridLine(label: "Shortcut", first: true) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        if let r = state.recording { recorderRow(r) }
+                        else {
+                            KeySegments(choices: shortcutChoices, selected: shortcutSelected, pick: pick)
+                            shortcutNote
                         }
                     }
                 }
-                SRow(label: "cl_quick's own", stacked: true) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(tilde(Files.folder.path)).font(.system(size: 11, design: .monospaced)).foregroundStyle(face.soft)
-                        Text("Its profiles, settings and work folders, \(Files.size(own)). Outside it: the login item, and any folder Sign in another account… made (a Claude Code folder, which Remove leaves).")
-                            .font(.system(size: 10.5)).foregroundStyle(face.muted).fixedSize(horizontal: false, vertical: true)
+                GridLine(label: "Model") {
+                    KeySegments(choices: QuickChatModelChoice.allCases.map { .init(id: $0.rawValue, title: $0.title) },
+                                selected: state.settings.model.rawValue) { id in
+                        if let m = QuickChatModelChoice(rawValue: id) { state.settings.model = m; state.save() }
                     }
                 }
-                HStack(spacing: 8) {
-                    Button("Show in Finder") { Files.reveal(Files.folder) }
-                    Button("Remove cl_quick data…") { confirmRemove() }
+                GridLine(label: "Thinking") {
+                    KeySegments(choices: QuickChatThinking.allCases.map { .init(id: $0.rawValue, title: $0.title) },
+                                selected: state.settings.thinking.rawValue) { id in
+                        if let t = QuickChatThinking(rawValue: id) { state.settings.thinking = t; state.save() }
+                    }
                 }
-                .buttonStyle(PillButtonStyle(compact: true)).padding(.top, 8)
+                GridLine(label: "Open at login") {
+                    SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
+                }
             }
+            HStack(spacing: 10) {
+                Text(dataWords).font(.system(size: 11)).foregroundStyle(face.muted).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Show in Finder") { Files.reveal(Files.folder) }
+                Button("Remove…") { confirmRemove() }
+            }
+            .buttonStyle(.sentenceKey())
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.black.opacity(0.14)))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.05), lineWidth: 1))
         }
         .onAppear(perform: count)
         .onDisappear { state.stopRecording() }
     }
 
-    // MARK: Record another… (the listening itself is SettingsState's, so closing the window ends it)
+    /// Incognito in one sentence, the size of cl_quick's own files, and old chats from earlier versions while any are left.
+    private var dataWords: String {
+        let n = chats.reduce(0) { $0 + $1.1 }, b = chats.reduce(Int64(0)) { $0 + $1.2 }
+        return "Quick chats are incognito: nothing is saved on this Mac. cl_quick's own settings, \(Files.size(sample?.own ?? own))."
+            + (n == 0 ? "" : " Old quick chats from earlier versions: \(n), \(Files.size(b)).")
+    }
 
-    /// The five Space shortcuts, and the recorded one when it's none of them.
-    private var choices: [QuickChatShortcut] {
-        QuickChatShortcut.presets + (state.settings.shortcut.isPreset ? [] : [state.settings.shortcut])
+    // MARK: The shortcut (Record another…'s listening is SettingsState's, so closing the window ends it)
+
+    /// The five Space shortcuts, Other… (the recorded one, when it's none of them) and Off.
+    private var shortcutChoices: [KeySegments.Choice] {
+        let s = state.settings.shortcut
+        return QuickChatShortcut.presets.map { .init(id: $0.id, title: $0.title) }
+            + [.init(id: "record", title: s.isPreset ? "Other…" : s.title), .init(id: "off", title: "Off")]
+    }
+
+    private var shortcutSelected: String {
+        !state.settings.shortcutOn ? "off" : state.settings.shortcut.isPreset ? state.settings.shortcut.id : "record"
     }
 
     private func pick(_ id: String) {
+        if id == "off" { state.settings.shortcutOn = false; state.save(); return }
         if id == "record" { state.startRecording(); return }
-        guard let s = choices.first(where: { $0.id == id }) else { return }
-        state.settings.shortcut = s; state.save()
+        guard let s = QuickChatShortcut.presets.first(where: { $0.id == id }) else { return }
+        state.settings.shortcut = s; state.settings.shortcutOn = true; state.save()
     }
 
     @ViewBuilder private func recorderRow(_ r: QuickChatShortcut?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                DisplayWindow(text: r?.title ?? "Press the shortcut…", tone: r == nil ? .amber : .normal, height: 22, size: 10)
-                if let r, r.refused == nil {
-                    Button(r.clash() == nil ? "Keep" : "Keep anyway") { state.stopRecording(keep: r) }
-                }
-                if r != nil { Button("Record again") { state.recording = .some(nil) } }
-                Button("Cancel") { state.stopRecording() }
+        HStack(spacing: 6) {
+            DisplayWindow(text: r?.title ?? "Press the shortcut…", tone: r == nil ? .amber : .normal, height: 22, size: 10)
+            if let r, r.refused == nil {
+                Button(r.clash() == nil ? "Keep" : "Keep anyway") { state.settings.shortcutOn = true; state.stopRecording(keep: r) }
+                    .buttonStyle(.sentenceKey(next: true))
             }
-            .buttonStyle(PillButtonStyle(compact: true))
-            if let r {
-                if let why = r.refused { note(why, face.danger) }
-                else if let c = r.clash() { note(c + " Keep it anyway, or record another.", face.caution) }
-                else { note(noClashWords(r), face.ok) }
-            } else {
-                note("Hold ⌘, ⌃ or ⌥ and press a key. Esc cancels. \(state.settings.shortcut.title) is off while you record, and back when you keep a new one or cancel.", face.muted)
-            }
+            if r != nil { Button("Record again") { state.recording = .some(nil) } }
+            Button("Cancel") { state.stopRecording() }
+        }
+        .buttonStyle(.sentenceKey())
+        if let r {
+            if let why = r.refused { note(why, face.danger, lamp: true) }
+            else if let c = r.clash() { note(c + " Keep it anyway, or record another.", face.caution, lamp: true) }
+        } else {
+            note("Hold ⌘, ⌃ or ⌥ and press a key. Esc cancels.", face.muted)
         }
     }
 
+    /// Only what needs saying: a shortcut macOS wouldn't take, or one that clashes, with a one-click way out.
     @ViewBuilder private var shortcutNote: some View {
         let s = state.settings.shortcut
-        if !state.settings.shortcutOn {
-            note("Off: Quick chat in cl_quick's menu opens it.", face.muted)
-        } else if let st = QuickChat.shared.shortcutState, st != "on" {
-            note(st + " Pick another.", face.danger)
-        } else if let c = s.clash() {
-            note(c + " Pick another, or change it where it's set.", face.caution)
-        } else {
-            note(noClashWords(s), face.ok)
+        if state.settings.shortcutOn {
+            if let st = sample?.registered ?? QuickChat.shared.shortcutState, st != "on" {
+                note(st + " Pick another.", face.danger, lamp: true)
+            } else if let c = sample != nil ? sample?.clash : s.clash() {
+                VStack(alignment: .leading, spacing: 3) {
+                    note(c, face.caution, lamp: true)
+                    if let free = QuickChatShortcut.presets.first(where: { $0 != s && (sample != nil || $0.clash() == nil) }) {
+                        Button("Pick \(free.title) instead") { pick(free.id) }
+                            .buttonStyle(.plain).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.hex(0x9cc7ff))
+                            .padding(.leading, 12)
+                    }
+                }
+            }
         }
     }
 
-    /// Only macOS's Space shortcuts and Quick Entry are known; another key is said to be unchecked, not free.
-    private func noClashWords(_ s: QuickChatShortcut) -> String {
-        s.keyCode == UInt32(kVK_Space) ? "No clash found." : "Only Space shortcuts are checked for clashes."
-    }
-
-    private func note(_ t: String, _ c: Color) -> some View {
-        Text(t).font(.system(size: 10.5)).foregroundStyle(c).fixedSize(horizontal: false, vertical: true)
+    private func note(_ t: String, _ c: Color, lamp: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if lamp { LED(color: c, size: 6).alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 1 } }
+            Text(t).font(.system(size: 11)).foregroundStyle(c == face.muted ? c : c.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func setLogin(_ on: Bool) {
+        guard sample == nil else { return }
         do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
         loginOn = SMAppService.mainApp.status == .enabled
     }
 
     private func count() {
+        guard sample == nil else { return }
         let list = store.profiles
         DispatchQueue.global(qos: .utility).async {
             let c = list.map { p -> (Profile, Int, Int64) in let x = Files.chats(p); return (p, x.count, x.bytes) }
@@ -1204,8 +1233,17 @@ enum SettingsRender {
                 SField(placeholder: "Name, e.g. Personal", text: .constant("Personal"), width: 150)
             })
         default:
+            // General with sample settings: ⌃Space with nothing to say, ⌥Space clashing with Quick Entry, the shortcut
+            // off, Other… listening for keys, and a shortcut another app holds
             at = .general
-            view = AnyView(GeneralPage(state: st, store: ProfileStore.shared))
+            st.settings.shortcut = page == "general-clash" || page == "general-taken" ? .optionSpace : .controlSpace
+            st.settings.shortcutOn = page != "general-off"
+            st.settings.model = .haiku
+            st.settings.thinking = .off
+            if page == "general-recording" { st.recording = .some(nil) }
+            let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.optionSpace.title + " also opens the Claude app's Quick Entry, if that's turned on." : nil,
+                                       registered: page == "general-taken" ? "Another app already uses ⌥Space." : nil)
+            view = AnyView(GeneralPage(state: st, store: ProfileStore.shared, sample: sample))
         }
         let whole = VStack(alignment: .leading, spacing: 14) {
             SettingsTiles(profiles: tiles, page: at)
