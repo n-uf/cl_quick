@@ -937,25 +937,28 @@ final class QuickChat {
     private func fit() {
         guard let p = panel, let host else { return }
         let vis = (p.screen ?? NSScreen.main)?.visibleFrame
+        let chat = model.isWindow
+        if chat, sizedForChat { return }
+        if !chat { sizedForChat = false }
+        host.layoutSubtreeIfNeeded()         // the content and its limits for the mode we are in now, before anything is read or set
         var h: CGFloat
-        if model.isWindow {
-            if sizedForChat { return }
-            sizedForChat = true
+        if chat {
             h = chatHeight ?? QuickChatRoot.windowHeight
         } else {
-            sizedForChat = false
             h = host.intrinsicContentSize.height
             guard h > 0 else { return }      // not measured yet (NSView.noIntrinsicMetric is -1)
         }
         if let vis { h = min(h, vis.height) }
-        host.layoutSubtreeIfNeeded()         // the limits of the mode we are in now, before the frame is set
         var f = p.frame
-        guard abs(f.height - h) > 0.5 else { p.invalidateShadow(); return }
-        let top = f.maxY
-        f.size.height = h
-        f.origin.y = top - h
-        if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
-        p.setFrame(f, display: true)
+        if abs(f.height - h) > 0.5 {
+            let top = f.maxY
+            f.size.height = h
+            f.origin.y = top - h
+            if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
+            p.setFrame(f, display: true)
+        }
+        // the chat is the user's from here on, once it really has its height (else the next change tries again)
+        if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
         p.invalidateShadow()
     }
 
