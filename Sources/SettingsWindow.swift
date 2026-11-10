@@ -267,7 +267,7 @@ struct ProfilePage: View {
                     .onChange(of: profile.id) { _ in name = profile.name }
             }
             SRow(label: "Account", info: "Read from the folder's own Claude Code file, never the Keychain. The week is what Claude Code reported after the last answer on this profile; cl_quick reads no usage of its own.", stacked: true) {
-                AccountBox(folder: profile.path, level: store.levels[profile.id], signingIn: state.signingIn.contains(profile.path))
+                AccountBox(folder: profile.path, level: store.level(of: profile), signingIn: state.signingIn.contains(profile.path))
             }
             SRow(label: "Default", info: "The profile the shortcut chats on. The chat's picker changes it for one chat.") {
                 SSwitch(isOn: Binding(get: { (state.settings.defaultProfile ?? store.profiles.first?.id) == profile.id },

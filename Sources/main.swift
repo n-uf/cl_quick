@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let store = ProfileStore.shared
         store.noteAccounts()
         for p in store.profiles {
-            let l = store.levels[p.id]
+            let l = store.level(of: p)
             let words = l?.full() != nil ? "full" : l?.weekNow().map { "week \(Int($0.rounded()))%" } ?? "no numbers yet"
             let i = NSMenuItem(title: "\(p.name)   \(words)", action: #selector(openProfile(_:)), keyEquivalent: "")
             i.target = self; i.representedObject = p.id

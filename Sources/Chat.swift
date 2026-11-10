@@ -106,12 +106,15 @@ struct QuickChatTarget: Equatable {
     var name: String
     var configDir: String
     var isDefaultDir: Bool
+    /// The account signed in to the folder now, as its file says (never a token).
     var email: String?
+    var accountUUID: String?
     var workFolder: String
 
     init(_ p: Profile) {
         profileID = p.id; name = p.name; configDir = p.path; isDefaultDir = p.isDefaultFolder
-        email = ClaudeFolder.email(p.path); workFolder = p.workFolder
+        let a = ClaudeFolder.account(p.path)
+        email = a?.email; accountUUID = a?.uuid; workFolder = p.workFolder
     }
 }
 
@@ -191,8 +194,8 @@ final class QuickChatModel: ObservableObject {
     var pickable: () -> [(Profile, QuickChatLevel?)] = { [] }
     /// Another profile was picked: the controller moves the chat there.
     var pickProfile: (String) -> Void = { _ in }
-    /// Claude Code reported the profile's limits after an answer.
-    var levelReported: (String, QuickChatLevel) -> Void = { _, _ in }
+    /// Claude Code reported the account's limits after an answer: the profile, its account's uuid, the level.
+    var levelReported: (String, String, QuickChatLevel) -> Void = { _, _, _ in }
 
     private var process: QuickChatProcess?
     private var processKey = ""
@@ -345,7 +348,7 @@ final class QuickChatModel: ObservableObject {
             var l = level ?? QuickChatLevel()
             l.apply(type: type, used: used, status: status, resets: resets)
             level = l
-            if let id = target?.profileID { levelReported(id, l) }
+            if let t = target, let u = t.accountUUID { levelReported(t.profileID, u, l) }
         case .done(let isError, let text, let ms, let s):
             flush()
             if !s.isEmpty { session = s }
@@ -360,7 +363,7 @@ final class QuickChatModel: ObservableObject {
                     var l = level ?? QuickChatLevel()
                     l.refusedUntil = l.refusedUntil ?? Date().addingTimeInterval(3600)
                     level = l
-                    if let id = target?.profileID { levelReported(id, l) }
+                    if let t = target, let u = t.accountUUID { levelReported(t.profileID, u, l) }
                 }
             } else {
                 if turns[i].answer.isEmpty { turns[i].answer = text }
@@ -476,10 +479,10 @@ final class QuickChat {
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
             guard let self else { return [] }
-            return self.store.profiles.filter(\.inPicker).map { ($0, self.store.levels[$0.id]) }
+            return self.store.profiles.filter(\.inPicker).map { ($0, self.store.level(of: $0)) }
         }
         model.pickProfile = { [weak self] id in self?.move(to: id) }
-        model.levelReported = { [weak self] id, l in self?.store.record(id, l); self?.refresh() }
+        model.levelReported = { [weak self] id, account, l in self?.store.record(id, account: account, l); self?.refresh() }
         hotKey.onPress = { [weak self] in self?.toggle() }
         applyShortcut()
     }
@@ -499,12 +502,12 @@ final class QuickChat {
         // the most room first; one that hasn't answered anything yet comes after, as it may have room too
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in
-                guard let l = store.levels[o.id] else { return QuickChatOffer(profileID: o.id, name: o.name, week: nil) }
+                guard let l = store.level(of: o) else { return QuickChatOffer(profileID: o.id, name: o.name, week: nil) }
                 guard l.full() == nil else { return nil }
                 return QuickChatOffer(profileID: o.id, name: o.name, week: l.weekNow())
             }
             .sorted { ($0.week ?? 101) < ($1.week ?? 101) }
-        model.update(target: QuickChatTarget(p), level: store.levels[id], offer: others.first)
+        model.update(target: QuickChatTarget(p), level: store.level(of: p), offer: others.first)
     }
 
     func toggle() { isOpen ? hide() : open() }

@@ -150,11 +150,37 @@ final class ProfileStore: ObservableObject {
     static let shared = ProfileStore()
 
     @Published private(set) var profiles: [Profile] = []
+    /// Each account's week as last reported, kept per profile and account: "<profile id>|<account uuid>". A switch shows
+    /// the account's own last week, not the one it replaced.
     @Published private(set) var levels: [String: QuickChatLevel] = [:]
 
     private init() {
         profiles = Files.read([Profile].self, Files.profiles) ?? []
-        levels = Files.read([String: QuickChatLevel].self, Files.levels) ?? [:]
+        let read = Files.read([String: QuickChatLevel].self, Files.levels) ?? [:]
+        levels = Self.migrated(read, profiles: profiles)
+        if levels != read { Files.write(levels, Files.levels) }
+    }
+
+    static func levelKey(_ profile: String, _ account: String) -> String { profile + "|" + account }
+
+    /// A levels.json from before accounts was keyed by profile id alone: each such week goes to the account signed in to
+    /// that profile's folder now (the one it was reported on, unless it was switched meanwhile); one whose profile or
+    /// account can't be told is dropped. Keys already per account stay.
+    static func migrated(_ old: [String: QuickChatLevel], profiles: [Profile],
+                         account: (Profile) -> String? = { ClaudeFolder.account($0.path)?.uuid }) -> [String: QuickChatLevel] {
+        var out = old.filter { $0.key.contains("|") }
+        for (id, l) in old where !id.contains("|") {
+            guard let p = profiles.first(where: { $0.id == id }), let uuid = account(p) else { continue }
+            let key = levelKey(id, uuid)
+            if out[key] == nil { out[key] = l }
+        }
+        return out
+    }
+
+    /// The profile's week for one account: the one in use by default; nil: nothing reported on it yet.
+    func level(of p: Profile, account uuid: String? = nil) -> QuickChatLevel? {
+        guard let uuid = uuid ?? ClaudeFolder.account(p.path)?.uuid else { return nil }
+        return levels[Self.levelKey(p.id, uuid)]
     }
 
     var hasProfiles: Bool { !profiles.isEmpty }
@@ -206,6 +232,12 @@ final class ProfileStore: ObservableObject {
         if let k = q.accounts.firstIndex(where: { $0.uuid == a.uuid })
             ?? q.accounts.firstIndex(where: { $0.email.lowercased() == a.email.lowercased() }) {
             guard q.accounts[k].uuid != a.uuid || q.accounts[k].email != a.email || now.timeIntervalSince(q.accounts[k].lastSeen) > 3600 else { return }
+            // a file that first had no accountUuid and now has one: its week moves to the new key
+            let old = Self.levelKey(id, q.accounts[k].uuid), new = Self.levelKey(id, a.uuid)
+            if old != new, let l = levels[old], levels[new] == nil {
+                levels[new] = l; levels[old] = nil
+                Files.write(levels, Files.levels)
+            }
             q.accounts[k].uuid = a.uuid; q.accounts[k].email = a.email; q.accounts[k].lastSeen = now
         } else {
             q.accounts.append(KnownAccount(uuid: a.uuid, email: a.email, lastSeen: now))
@@ -221,16 +253,17 @@ final class ProfileStore: ObservableObject {
     /// cl_quick forgets the profile; its folder and sessions stay.
     func remove(_ id: String) {
         save(profiles.filter { $0.id != id })
-        levels[id] = nil
+        levels = levels.filter { !$0.key.hasPrefix(id + "|") }
         Files.write(levels, Files.levels)
     }
     /// A folder already used by a profile.
     func uses(_ folder: String) -> Bool { profiles.contains { $0.path == expand(folder) } }
 
-    /// What Claude Code said after an answer on this profile.
-    func record(_ id: String, _ level: QuickChatLevel) {
-        guard profile(id) != nil, levels[id] != level else { return }      // a profile removed meanwhile stays gone
-        levels[id] = level
+    /// What Claude Code said after an answer on this profile, on the account that answered.
+    func record(_ id: String, account uuid: String, _ level: QuickChatLevel) {
+        let key = Self.levelKey(id, uuid)
+        guard profile(id) != nil, levels[key] != level else { return }      // a profile removed meanwhile stays gone
+        levels[key] = level
         Files.write(levels, Files.levels)
     }
 }
