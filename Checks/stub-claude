@@ -9,7 +9,8 @@
 #   mode=abort         half an answer, then it waits for an interrupt control request, ends that answer with an
 #                      aborted result, and answers the next message normally (its count of messages goes on)
 #   control requests   each one is answered with a control_response and written to args.ctl (subtype and what it sets);
-#                      `initialize` gets a list of models shaped like Claude Code 2.1.318's (sample names)
+#                      `initialize` gets a list of models shaped like Claude Code 2.1.318's (sample names);
+#                      `get_usage` gets limits shaped like 2.1.318's (sample numbers: 5 hours 44%, week 12%)
 #   args=FILE          writes its arguments, a few environment values, its folder and its pid there
 conf="$(cd "$PWD/.." && pwd)/stub.conf"
 mode="$(sed -n 's/^mode=//p' "$conf" 2>/dev/null)"; mode="${mode:-ok}"
@@ -39,6 +40,9 @@ while IFS= read -r line; do
       ctl "CTRL $sub ${mdl:+model=$mdl} $(printf '%s' "$line" | sed -n 's/.*"settings":\({[^}]*}\).*/settings=\1/p')"
       if [ "$mdl" = refuse ]; then
         echo '{"type":"control_response","response":{"subtype":"error","request_id":"'$rid'","error":"no such model"}}'
+      elif [ "$sub" = get_usage ]; then
+        # the two windows, plus keys cl_quick leaves alone (spend, the per-model weeks, unknown ones)
+        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"subscription_type":"max","rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":44,"resets_at":"2026-11-10T18:00:00.123456+00:00","locked_reason":null,"used_dollars":1.5},"seven_day":{"utilization":12,"resets_at":"2026-11-14T09:00:00Z","locked_reason":null},"seven_day_opus":null,"spend":{"total":3},"cedar_ember":{"x":1}},"session":{"cost":0}}}}'
       elif [ "$sub" = initialize ]; then
         # "default", an alias that isn't the newest (fable is 5.1, 5.2 exists), an older version, a model with no efforts
         echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"commands":[],"models":[{"value":"default","displayName":"Opus 5.5","description":"Default","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"opus","displayName":"Opus 5.5","description":"For the hardest work","supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsEffort":true},{"value":"claude-fable-5-2","displayName":"Fable 5.2","description":"Newest Fable","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","displayName":"Sonnet 5.5","description":"Everyday","supportedEffortLevels":["low","medium","high","xhigh"]},{"value":"haiku","displayName":"Haiku 5.5","description":"Fastest","supportsEffort":false},{"value":"fable","displayName":"Fable 5.1","supportedEffortLevels":["low","medium","high"]},{"value":"claude-opus-4-8","displayName":"Opus 4.8","supportedEffortLevels":["low","medium","high"]}]}}}'

@@ -64,6 +64,19 @@ struct QuickChatLevel: Codable, Equatable {
         at = now
     }
 
+    /// What `get_usage` said: both windows as they are now (0…100), and whether either holds the account back. When
+    /// Claude Code says the limits aren't available, nothing changes: the last numbers stay.
+    mutating func apply(usage u: QuickChatUsage, now: Date = Date()) {
+        guard u.available, u.fiveHour != nil || u.week != nil else { return }
+        if let w = u.fiveHour { if let p = w.used { fiveHour = p }; if let r = w.resets { fiveHourResets = r } }
+        if let w = u.week { if let p = w.used { week = p }; if let r = w.resets { weekResets = r } }
+        let locked = [u.fiveHour, u.week].compactMap { $0 }.filter(\.locked)
+        // a lock lasts until the window that holds it resets (the later one when both do); none: nothing holds it now
+        if !locked.isEmpty { refusedUntil = locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600) }
+        else { refusedUntil = nil }
+        at = now
+    }
+
     private static func holding(_ p: Double?, _ resets: Date?, _ now: Date) -> Bool {
         (p.map { $0.rounded() >= 100 } ?? false) && (resets.map { $0 > now } ?? true)
     }

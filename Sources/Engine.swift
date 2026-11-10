@@ -33,7 +33,25 @@ enum QuickChatEvent: Equatable {
     /// The models this account can use, from Claude Code's answer to `initialize` (sent when `claude` starts; nothing
     /// goes to a model for it).
     case models([QuickChatModelEntry])
+    /// The account's limits now, from Claude Code's answer to `get_usage` (sent when `claude` starts, after each answer
+    /// and when the panel opens again; nothing goes to a model).
+    case usage(QuickChatUsage)
     case ignored
+}
+
+/// What `get_usage` says about the account's limits: the 5-hour and weekly windows. Experimental in Claude Code, so
+/// `rate_limit_event` after each answer stays as well; when it says the limits aren't available, nothing changes.
+struct QuickChatUsage: Equatable {
+    struct Window: Equatable {
+        /// The share used, 0…100.
+        var used: Double?
+        var resets: Date?
+        /// Claude Code says the account is held back on this window (`locked_reason` set).
+        var locked = false
+    }
+    var available: Bool
+    var fiveHour: Window?
+    var week: Window?
 }
 
 /// One model Claude Code offers: what `--model` and `set_model` take ("claude-fable-5-2", "opus"), its name ("Fable 5.2")
@@ -170,6 +188,10 @@ enum QuickChatParse {
             if error == nil, let list = (r["response"] as? [String: Any])?["models"] as? [[String: Any]] {
                 return .models(list.compactMap(modelEntry))
             }
+            // the answer to `get_usage`: the account's limits (an error is just a control answer: nothing changes)
+            if error == nil, let u = r["response"] as? [String: Any], u["rate_limits"] != nil || u["rate_limits_available"] != nil {
+                return .usage(usage(u))
+            }
             return .control(id: id, error: error, model: (r["response"] as? [String: Any])?["model"] as? String)
         case "result":
             return .done(isError: o["is_error"] as? Bool ?? false, text: o["result"] as? String ?? "",
@@ -185,6 +207,32 @@ enum QuickChatParse {
         guard let value = m["value"] as? String, let name = m["displayName"] as? String else { return nil }
         let efforts = (m["supportedEffortLevels"] as? [String]) ?? ((m["supportsEffort"] as? Bool) == false ? [] : nil)
         return QuickChatModelEntry(value: value, displayName: name, description: m["description"] as? String, efforts: efforts)
+    }
+
+    /// `get_usage`'s answer: `rate_limits.five_hour` and `.seven_day`, each `{utilization: 0…100, resets_at: ISO 8601,
+    /// locked_reason}`; every other key (spend, extra usage, the per-model weeks…) is left alone.
+    static func usage(_ u: [String: Any]) -> QuickChatUsage {
+        let limits = u["rate_limits"] as? [String: Any]
+        func window(_ key: String) -> QuickChatUsage.Window? {
+            guard let w = (limits?[key] ?? u[key]) as? [String: Any] else { return nil }
+            let used = (w["utilization"] as? NSNumber)?.doubleValue
+            let reason = w["locked_reason"]
+            return .init(used: used.map { min(100, max(0, $0)) }, resets: (w["resets_at"] as? String).flatMap(isoDate),
+                         locked: !(reason == nil || reason is NSNull || (reason as? String)?.isEmpty == true))
+        }
+        let available = (u["rate_limits_available"] as? Bool) ?? (limits != nil)
+        return QuickChatUsage(available: available, fiveHour: window("five_hour"), week: window("seven_day"))
+    }
+
+    /// "2026-11-12T18:00:00Z", with or without fractional seconds (any number of digits) or an offset.
+    static func isoDate(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        if let d = f.date(from: s) { return d }
+        // fractional seconds of any length: dropped (a second's precision is plenty for "resets at")
+        guard let dot = s.firstIndex(of: "."), s[s.index(after: dot)...].first?.isNumber == true else { return nil }
+        var end = s.index(after: dot)
+        while end < s.endIndex, s[end].isNumber { end = s.index(after: end) }
+        return f.date(from: String(s[..<dot]) + String(s[end...]))
     }
 
     /// One message for Claude Code's input (stream-json), ending in a newline.
@@ -253,7 +301,7 @@ struct StaleAnswers {
         guard count > 0 else { return .pass }
         switch e {
         case .done: count -= 1; return .endsOne
-        case .limit, .control, .models, .ignored: return .pass
+        case .limit, .control, .models, .usage, .ignored: return .pass
         default: return .drop
         }
     }
@@ -439,6 +487,11 @@ final class QuickChatProcess {
     /// Asks for the account's models (a `.models` event answers). Nothing goes to a model. False when it can't be asked.
     @discardableResult
     func initialize() -> Bool { control("initialize") != nil }
+
+    /// Asks for the account's limits now (a `.usage` event answers), with Claude Code's own sign-in. Nothing goes to a
+    /// model. False when it can't be asked.
+    @discardableResult
+    func getUsage() -> Bool { control("get_usage") != nil }
 
     /// The model for the next answers (a value from Claude Code's list, or an alias); "" leaves it to Claude Code. The
     /// request's id, or nil when it can't be asked.

@@ -256,6 +256,42 @@ run("ok") { p, events, exit in
     check("ok: the process still answers after it", p.send("fourth question") && { wait(5) { done(events()) == 4 }; return done(events()) == 4 }())
 }
 
+// the account's limits before any message: `get_usage` on a `claude` that was only started (the bar opened)
+run("ok") { p, events, _ in
+    check("usage: asked before any message", p.getUsage())
+    wait(3) { events().contains { if case .usage = $0 { return true }; return false } }
+    let u = events().compactMap { e -> QuickChatUsage? in if case .usage(let u) = e { return u }; return nil }.first
+    check("usage: both windows", u?.available == true && u?.fiveHour?.used == 44 && u?.week?.used == 12 && u?.fiveHour?.locked == false, u as Any)
+    check("usage: reset times, fractional seconds and offset", u?.fiveHour?.resets == Date(timeIntervalSince1970: 1_794_333_600)
+          && u?.week?.resets == QuickChatParse.isoDate("2026-11-14T09:00:00Z"), u as Any)
+    let ctl = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
+    check("usage: no message was sent for it", ctl.contains("CTRL get_usage") && !ctl.contains("USER"), ctl)
+    check("usage: the process still takes a message after it", p.send("a question") && { wait(5) { done(events()) == 1 }; return done(events()) == 1 }())
+}
+
+// MARK: the account's limits (Claude Code's `get_usage`)
+
+func usageEvent(_ body: String) -> QuickChatEvent {
+    QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-5","response":"# + body + "}}"))
+}
+let locked = usageEvent(#"{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":100,"resets_at":"2026-11-10T18:00:00Z","locked_reason":"five_hour_limit"},"seven_day":{"utilization":130.5,"resets_at":"2026-11-14T09:00:00Z"}}}"#)
+check("usage: a lock is read, a share is kept within 0…100", locked == .usage(QuickChatUsage(available: true,
+      fiveHour: .init(used: 100, resets: QuickChatParse.isoDate("2026-11-10T18:00:00Z"), locked: true),
+      week: .init(used: 100, resets: QuickChatParse.isoDate("2026-11-14T09:00:00Z"), locked: false))), locked)
+check("usage: not available says so", usageEvent(#"{"rate_limits_available":false,"rate_limits":{}}"#)
+      == .usage(QuickChatUsage(available: false, fiveHour: nil, week: nil)))
+check("usage: a window missing is nil, an empty lock reason isn't a lock", usageEvent(#"{"rate_limits":{"seven_day":{"utilization":5,"locked_reason":""}}}"#)
+      == .usage(QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 5, resets: nil, locked: false))))
+check("usage: an error is just a control answer", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"error","request_id":"qc-6","error":"Unknown subtype"}}"#))
+      == .control(id: "qc-6", error: "Unknown subtype", model: nil))
+check("usage: other control answers are untouched", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-7","response":{"still_queued":[]}}}"#))
+      == .control(id: "qc-7", error: nil, model: nil))
+check("iso dates: Z, offset, any fraction; garbage is nil", QuickChatParse.isoDate("2026-11-14T09:00:00Z") == Date(timeIntervalSince1970: 1_794_646_800)
+      && QuickChatParse.isoDate("2026-11-14T11:00:00.5+02:00") == Date(timeIntervalSince1970: 1_794_646_800)
+      && QuickChatParse.isoDate("2026-11-14T09:00:00.123456789Z") == Date(timeIntervalSince1970: 1_794_646_800)
+      && QuickChatParse.isoDate("soon") == nil)
+check("usage: a stale answer's filter lets it through", { var s = StaleAnswers(); s.abandon(); return s.fate(of: .usage(QuickChatUsage(available: true))) == .pass }())
+
 // MARK: the account's models (Claude Code's `initialize`)
 
 let initLine = #"{"type":"control_response","response":{"subtype":"success","request_id":"qc-9","response":{"models":[{"value":"default","displayName":"Opus 5.5","supportedEffortLevels":["low","high"]},{"value":"opus","displayName":"Opus 5.5","description":"For the hardest work","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-fable-5-2","displayName":"Fable 5.2","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"fable","displayName":"Fable 5.1"},{"value":"claude-sonnet-5-5","displayName":"Sonnet 5.5","supportedEffortLevels":["low","medium","high","xhigh"]},{"value":"sonnet-old","displayName":"Sonnet 5","supportedEffortLevels":["low"]},{"value":"haiku","displayName":"Haiku 5.5","supportsEffort":false},{"value":"other","displayName":"Something else"},{"displayName":"No value"}]}}}"#

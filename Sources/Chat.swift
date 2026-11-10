@@ -451,10 +451,7 @@ final class QuickChatModel: ObservableObject {
     private func start(_ q: String, path: String, target: QuickChatTarget) {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
                                    workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort)
-        // the same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
-        // aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
-        // accounts may share one, and must not share a running claude.
-        let key = [path, target.configDir, target.workFolder, target.accountUUID ?? target.email ?? ""].joined(separator: "|")
+        let key = keyFor(path, target)
         let goesOn = process?.isRunning == true && key == processKey && trail.canContinue(on: target.accountUUID)
         if goesOn {
             if cmd.model != appliedModel {
@@ -470,30 +467,59 @@ final class QuickChatModel: ObservableObject {
                 turns = [last]
                 accountNote = (accountNote.map { $0 + " " } ?? "") + "New chat; nothing from the last one was carried over."
             }
-            let p = QuickChatProcess(cmd)
-            p.onEvent = { [weak self, weak p] e in guard let self, let p, p === self.process else { return }; self.handle(e) }
-            p.onExit = { [weak self, weak p] status, tail in
-                guard let self, let p, p === self.process else { return }
-                self.exited(status, tail)
-            }
-            do { try p.start() } catch {
-                fail(.stopped(detail: "Claude Code couldn't start: \(error.localizedDescription)")); return
-            }
-            process = p
-            p.initialize()          // the account's models, for the pickers (nothing goes to a model)
-            processKey = key
-            appliedModel = cmd.model
-            confirmedModel = cmd.model
-            appliedEffort = cmd.effort
-            trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
+            if let why = launch(cmd, key: key, target: target) { fail(.stopped(detail: why)); return }
         }
         idleTimer?.invalidate()
         messageSent = process?.send(q) == true
         if !messageSent { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
+    /// The same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
+    /// aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
+    /// accounts may share one, and must not share a running claude.
+    private func keyFor(_ path: String, _ target: QuickChatTarget) -> String {
+        [path, target.configDir, target.workFolder, target.accountUUID ?? target.email ?? ""].joined(separator: "|")
+    }
+
+    /// A new `claude` for the target, asked at once for the account's models and limits (nothing goes to a model).
+    /// Why it couldn't start, or nil.
+    private func launch(_ cmd: QuickChatCommand, key: String, target: QuickChatTarget) -> String? {
+        let p = QuickChatProcess(cmd)
+        p.onEvent = { [weak self, weak p] e in guard let self, let p, p === self.process else { return }; self.handle(e) }
+        p.onExit = { [weak self, weak p] status, tail in
+            guard let self, let p, p === self.process else { return }
+            self.exited(status, tail)
+        }
+        do { try p.start() } catch { return "Claude Code couldn't start: \(error.localizedDescription)" }
+        process = p
+        p.initialize()          // the account's models, for the pickers
+        p.getUsage()            // its limits now, before anything is asked
+        processKey = key
+        appliedModel = cmd.model
+        confirmedModel = cmd.model
+        appliedEffort = cmd.effort
+        trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
+        return nil
+    }
+
     private func handle(_ e: QuickChatEvent) {
         lastEvent = Date(); spoken = true
+        // about the account, not an answer: taken with or without a chat on screen (a `claude` started as the bar opened)
+        switch e {
+        case .models(let list):
+            // the account this `claude` started on: its models (the next message asks for the newest of the family)
+            if let t = target { ModelCatalog.shared.set(list, profile: t.profileID, account: trail.reportAccount ?? t.accountUUID) }
+            objectWillChange.send()
+            return
+        case .usage(let u):
+            // its limits now: kept like a report after an answer, for this account (an old level of another one isn't the base)
+            var l = (trail.reportAccount == target?.accountUUID ? level : nil) ?? QuickChatLevel()
+            let before = l
+            l.apply(usage: u)
+            if l != before { reportLevel(l) }
+            return
+        default: break
+        }
         guard let i = turns.indices.last else { return }
         // what Claude Code still says about an answer Stop gave up on is dropped, up to its `done`
         switch stale.fate(of: e) {
@@ -553,6 +579,7 @@ final class QuickChatModel: ObservableObject {
                 turns[i].phase = .done
                 if let t = target, let u = trail.reportAccount { authResult(t.profileID, u, false) }      // it signed in fine
             }
+            process?.getUsage()         // the limits after this answer (rate_limit_event above stays as the fallback)
             // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
             guard turns.indices.contains(i) else { return }
             scrollTick += 1
@@ -564,11 +591,7 @@ final class QuickChatModel: ObservableObject {
                 if error == nil { confirmedModel = asked }
                 else if appliedModel == asked { appliedModel = confirmedModel }
             }
-        case .models(let list):
-            // the account this `claude` started on: its models (the next message asks for the newest of the family)
-            if let t = target { ModelCatalog.shared.set(list, profile: t.profileID, account: trail.reportAccount ?? t.accountUUID) }
-            objectWillChange.send()
-        case .ignored:
+        case .models, .usage, .ignored:
             break
         }
     }
