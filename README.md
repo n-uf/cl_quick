@@ -52,7 +52,8 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   a token and never touches the Keychain.
 - If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
   Sign in again. After 10 minutes with no change it stops looking and says "No sign-in in 10 minutes." (in the chat and on the profile's card), with Sign in again and Dismiss.
-- Each account keeps its own week: after a switch the chat shows that account's last-reported week, or "no numbers yet".
+- Each account keeps its own week: after a switch the chat's new `claude` is asked for the new account's limits at once
+  (until they come, its last-reported week, or "no numbers yet").
   Weeks are kept per account (its id in Claude Code's file), not per organization.
 - Addresses are masked everywhere in cl_quick (p•••@example.com).
 
@@ -63,8 +64,11 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   2.4 s"; under the last one also Ask again.
 - Under the field: the profile (its dot in the week's colour), the model (Haiku by default) and thinking (off by
   default). A pick holds for that chat; a new chat goes back to the defaults.
-- The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. cl_quick reads no usage of
-  its own: the numbers are what Claude Code reports after each answer.
+- The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from the
+  chat's own Claude Code: it starts as the bar opens (the same `claude` the chat then uses; with nothing asked it ends
+  after 15 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again
+  (Claude Code's `get_usage`, which sends nothing to a model and uses its own sign-in, never the Keychain). After each
+  answer Claude Code also reports them on its own, which stays as the fallback. Standby accounts show no usage.
 - When a profile's week (or 5-hour limit) is full, the chat says when it resets and offers the profile with the most
   room: **Ask on Work** sends your question there. If the profile has a standby account with room, it also offers
   **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a chat may not

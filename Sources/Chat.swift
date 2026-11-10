@@ -502,6 +502,22 @@ final class QuickChatModel: ObservableObject {
         return nil
     }
 
+    /// The bar opened: its `claude` starts now (the one the chat then uses, not an extra one), so the account's limits
+    /// arrive before anything is asked; with nothing asked it ends after the same 15 minutes as a chat. One already
+    /// running is asked for them again. Nothing goes to a model either way; a `claude` that can't start says so only
+    /// when a message is sent.
+    func warm() {
+        if let p = process, p.isRunning { p.getUsage(); return }
+        guard process == nil, !busy, target != nil else { return }
+        let gen = generation
+        resolveClaude { [weak self] path in
+            guard let self, let path, gen == self.generation, self.process == nil, !self.busy, let t = self.target else { return }
+            let cmd = QuickChatCommand(claude: path, configDir: t.configDir, isDefaultDir: t.isDefaultDir,
+                                       workFolder: t.workFolder, model: self.resolvedModel.value, effort: self.effectiveThinking.effort)
+            if self.launch(cmd, key: self.keyFor(path, t), target: t) == nil { self.armIdle() }
+        }
+    }
+
     private func handle(_ e: QuickChatEvent) {
         lastEvent = Date(); spoken = true
         // about the account, not an answer: taken with or without a chat on screen (a `claude` started as the bar opened)
@@ -837,13 +853,16 @@ final class QuickChat {
         // the profile uses another folder (or work folder) than the chat's: its `claude` is on the old one, so a new chat
         // starts. While an answer is on its way the next message meets the same rule in start().
         let now = QuickChatTarget(p)
+        var restarted = false
         if let old = model.target, old.profileID == id, old.configDir != now.configDir || old.workFolder != now.workFolder, !model.busy {
             model.folderChanged(to: now)
+            restarted = true
         }
         // the folder is on another account than the chat's (a switch from Settings, a sign-in as someone else, Sign in
         // again…, or one outside cl_quick): a chat belongs to its account, so a new chat starts and says so
         if let old = model.target, old.profileID == id, let was = old.accountUUID, let to = now.accountUUID, was != to, !model.busy {
             model.accountChanged(to: now)
+            restarted = true
         }
         // the most room first; one that hasn't answered anything yet comes after, as it may have room too
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
@@ -870,6 +889,8 @@ final class QuickChat {
             }
         model.update(target: now, level: store.level(of: p), offer: others.first,
                      switchOffer: standby.first?.1, notice: notice)
+        // a new account or folder while the bar is open: its `claude` starts, so its limits show at once
+        if restarted, isOpen { model.warm() }
     }
 
     func toggle() { isOpen ? hide() : open() }
@@ -914,6 +935,7 @@ final class QuickChat {
         }
         store.reload(pick.map { [$0.id] })      // the account may have changed since: read off the main thread, drawn again
         if claudePath == nil { resolveClaude { _ in } }   // look early, off the main thread
+        model.warm()            // its `claude` starts now (or is asked again): the account's limits come before any message
     }
 
     /// The profile picker: a new chat on that profile; what you typed stays.
@@ -923,6 +945,7 @@ final class QuickChat {
         model.forgetAccount()
         model.target = QuickChatTarget(p)
         refresh()
+        if isOpen { model.warm() }          // that profile's `claude`, and its limits
     }
 
     func hide() { panel?.orderOut(nil) }
