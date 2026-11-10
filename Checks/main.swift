@@ -34,6 +34,15 @@ check("result, an error", QuickChatParse.event(line(#"{"type":"result","is_error
 check("garbage is ignored", QuickChatParse.event(line("not json")) == .ignored)
 check("an unknown type is ignored", QuickChatParse.event(line(#"{"type":"post_turn_summary"}"#)) == .ignored)
 
+// Claude Code's answers to control requests
+check("control response, ok with the model", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-2","response":{"model":"claude-sonnet-5-5"}}}"#))
+      == .control(id: "qc-2", error: nil, model: "claude-sonnet-5-5"))
+check("control response, interrupt", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-1","response":{"still_queued":[]}}}"#))
+      == .control(id: "qc-1", error: nil, model: nil))
+check("control response, an error", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"error","request_id":"qc-3","error":"nope"}}"#))
+      == .control(id: "qc-3", error: "nope", model: nil))
+check("control response without an id is ignored", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success"}}"#)) == .ignored)
+
 // the message Claude Code reads: one JSON line, whatever the text holds
 let tricky = "Quote \" backslash \\ newline\nand emoji 🙂 and <tags>"
 let ul = QuickChatParse.userLine(tricky)
@@ -96,6 +105,7 @@ do {
           s.fate(of: .text("late")) == .drop && s.fate(of: .thinking("t")) == .drop && s.fate(of: .started(session: "s", model: "m")) == .drop
           && s.fate(of: .message(text: "a", model: "m", error: nil)) == .drop)
     check("stale: a limit report is about the account and passes", s.fate(of: .limit(type: "seven_day", used: 0.5, status: "allowed", resets: nil)) == .pass)
+    check("stale: a control response passes", s.fate(of: .control(id: "qc-1", error: nil, model: nil)) == .pass)
     check("stale: its done ends the wait", s.fate(of: dn) == .endsOne && !s.waiting)
     check("stale: then the next answer passes", s.fate(of: .text("Answer")) == .pass && s.fate(of: dn) == .pass)
     s.abandon(); s.abandon()
@@ -121,7 +131,8 @@ check("no headers, model or node options from outside", env["ANTHROPIC_CUSTOM_HE
 check("language and proxy kept", env["LANG"] == "en_GB.UTF-8" && env["LC_CTYPE"] == "UTF-8" && env["HTTPS_PROXY"] == "http://proxy.example:8080")
 check("nothing but the allowed, the folder, the PATH and the off switches",
       Set(env.keys).subtracting(QuickChatCommand.passed).subtracting(["CLAUDE_CONFIG_DIR", "PATH", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-                                                                      "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"]).allSatisfy { $0.hasPrefix("LC_") },
+                                                                      "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING",
+                                                                      "CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).allSatisfy { $0.hasPrefix("LC_") },
       env.keys.sorted())
 check("the profile's folder", env["CLAUDE_CONFIG_DIR"] == "/Users/sample/.claude-work")
 check("claude's folder first on the PATH", env["PATH"]?.hasPrefix("/opt/sample/bin:") == true, env["PATH"] ?? "")
@@ -211,9 +222,17 @@ run("ok") { p, events, exit in
     check("ok: no exit yet", exit() == nil)
     check("ok: incognito, one process for both questions", recorded.contains("ARG [--no-session-persistence]") && !recorded.contains("ARG [--resume]"), recorded)
     // the model and thinking change in the running process, between messages, without a new one
-    check("ok: set_model sent", p.setModel("sonnet"))
+    let modelRequest = p.setModel("sonnet")
+    check("ok: set_model sent", modelRequest != nil)
     check("ok: thinking sent", p.setThinking("high"))
-    check("ok: the profile's default model sent", p.setModel(""))
+    check("ok: the profile's default model sent", p.setModel("") != nil)
+    check("ok: its answer names the request and the model in effect",
+          { wait(3) { events().contains(.control(id: modelRequest ?? "", error: nil, model: "claude-sonnet-5-5")) }
+            return events().contains(.control(id: modelRequest ?? "", error: nil, model: "claude-sonnet-5-5")) }(), events())
+    let refused = p.setModel("refuse")
+    wait(3) { events().contains { if case .control(refused ?? "", let e?, _) = $0 { return e == "no such model" }; return false } }
+    check("ok: a refused set_model comes back as an error",
+          events().contains { if case .control(let id, let e?, _) = $0 { return id == refused && e == "no such model" }; return false }, events())
     check("ok: a third question", p.send("third question"))
     wait(5) { done(events()) == 3 }
     check("ok: the same process answered the third", p.pid == pid && events().contains(.done(isError: false, text: "Answer 3", ms: 1200, session: "00000000-0000-4000-8000-000000000001")))
@@ -222,7 +241,7 @@ run("ok") { p, events, exit in
           ctlLog.contains("CTRL set_model model=sonnet") && ctlLog.contains("CTRL apply_flag_settings") && ctlLog.contains("\"effortLevel\":\"high\"")
           && ctlLog.range(of: "CTRL set_model model=sonnet")!.lowerBound < ctlLog.range(of: "USER 3")!.lowerBound
           && ctlLog.range(of: "CTRL apply_flag_settings")!.lowerBound < ctlLog.range(of: "USER 3")!.lowerBound, ctlLog)
-    check("ok: no model means the default", ctlLog.components(separatedBy: "CTRL set_model").count == 3 && ctlLog.contains("CTRL set_model  "), ctlLog)
+    check("ok: no model means the default", ctlLog.components(separatedBy: "CTRL set_model").count == 4 && ctlLog.contains("CTRL set_model  "), ctlLog)
 }
 
 setenv("ANTHROPIC_API_KEY", "sk-sample-should-not-pass", 1)
@@ -281,7 +300,7 @@ run("abort") { p, events, exit in
 let missing = QuickChatProcess(QuickChatCommand(claude: "/nonexistent/claude", configDir: "/x", isDefaultDir: false, workFolder: work, model: ""))
 check("a missing claude throws", (try? missing.start()) == nil)
 check("a missing claude can't be sent to", missing.send("hi") == false)
-check("a missing claude can't be interrupted or told a model", missing.interrupt() == false && missing.setModel("haiku") == false && missing.setThinking(nil) == false)
+check("a missing claude can't be interrupted or told a model", missing.interrupt() == false && missing.setModel("haiku") == nil && missing.setThinking(nil) == false)
 
 // MARK: a profile's accounts (Accounts.swift), sample addresses only
 

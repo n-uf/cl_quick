@@ -27,6 +27,9 @@ enum QuickChatEvent: Equatable {
     case limit(type: String?, used: Double?, status: String?, resets: Date?)
     /// The answer is done (or failed): Claude Code's last words, how long it took, the session.
     case done(isError: Bool, text: String, ms: Int, session: String)
+    /// Claude Code's answer to a control request we sent (its request id): an error is its own words. The control
+    /// response to a `set_model` names the model now in effect ("claude-sonnet-5-5").
+    case control(id: String, error: String?, model: String?)
     case ignored
 }
 
@@ -60,6 +63,10 @@ enum QuickChatParse {
             let used = (window?["utilization"] as? NSNumber)?.doubleValue ?? (info["utilization"] as? NSNumber)?.doubleValue
             let resets = ((window?["resetsAt"] ?? info["resetsAt"]) as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
             return .limit(type: kind, used: used, status: (window?["status"] ?? info["status"]) as? String, resets: resets)
+        case "control_response":
+            guard let r = o["response"] as? [String: Any], let id = r["request_id"] as? String else { return .ignored }
+            let error = r["subtype"] as? String == "error" ? ((r["error"] as? String) ?? "refused") : nil
+            return .control(id: id, error: error, model: (r["response"] as? [String: Any])?["model"] as? String)
         case "result":
             return .done(isError: o["is_error"] as? Bool ?? false, text: o["result"] as? String ?? "",
                          ms: (o["duration_ms"] as? NSNumber)?.intValue ?? 0, session: o["session_id"] as? String ?? "")
@@ -134,7 +141,7 @@ struct StaleAnswers {
         guard count > 0 else { return .pass }
         switch e {
         case .done: count -= 1; return .endsOne
-        case .limit, .ignored: return .pass
+        case .limit, .control, .ignored: return .pass
         default: return .drop
         }
     }
@@ -192,6 +199,11 @@ struct QuickChatCommand: Equatable {
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["DISABLE_TELEMETRY"] = "1"
         env["DISABLE_ERROR_REPORTING"] = "1"
+        // Incognito, to the file: Claude Code's built-in AGENTS.md plugin otherwise notes the session's id in
+        // plugins/store/ (a once-per-session marker); this has it send per process and note nothing (checked against
+        // 2.1.318). And no auto-memory folder in the profile's projects/ (an empty one appears without a system prompt).
+        env["CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS"] = "1"
+        env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
         return env
     }
 
@@ -298,25 +310,29 @@ final class QuickChatProcess {
 
     private var requests = 0
 
-    private func control(_ subtype: String, _ fields: [String: Any] = [:]) -> Bool {
+    /// Sends a control request; its id (Claude Code's answer, a `.control` event, carries it), or nil when the pipe is closed.
+    private func control(_ subtype: String, _ fields: [String: Any] = [:]) -> String? {
         lock.lock(); let closed = stopping; requests += 1; let id = "qc-\(requests)"; lock.unlock()
-        guard !closed, process.isRunning else { return false }
-        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.controlLine(id: id, subtype: subtype, fields)); return true }
-        catch { return false }
+        guard !closed, process.isRunning else { return nil }
+        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.controlLine(id: id, subtype: subtype, fields)); return id }
+        catch { return nil }
     }
 
     /// Stops the answer under way; the conversation stays in the process. Claude Code then ends that turn with a result
     /// of its own (an error, "aborted"), so every message sent gets exactly one `done`. False when it can't be asked.
     @discardableResult
-    func interrupt() -> Bool { control("interrupt") }
+    func interrupt() -> Bool { control("interrupt") != nil }
 
-    /// The model for the next answers; "" is the profile's default.
+    /// The model for the next answers; "" is the profile's default. The request's id, or nil when it can't be asked.
     @discardableResult
-    func setModel(_ model: String) -> Bool { control("set_model", model.isEmpty ? [:] : ["model": model]) }
+    func setModel(_ model: String) -> String? { control("set_model", model.isEmpty ? [:] : ["model": model]) }
 
-    /// Thinking for the next answers: off (nil), or on at that effort.
+    /// Thinking for the next answers: off (nil), or on at that effort (checked against Claude Code 2.1.318: the effort
+    /// in effect follows this, also for a `claude` started with `--effort`). False when it can't be asked.
     @discardableResult
-    func setThinking(_ effort: String?) -> Bool { control("apply_flag_settings", ["settings": QuickChatParse.thinkingSettings(effort)]) }
+    func setThinking(_ effort: String?) -> Bool {
+        control("apply_flag_settings", ["settings": QuickChatParse.thinkingSettings(effort)]) != nil
+    }
 
     /// Ends it: closes its input, then asks it to stop, then stops it.
     func stop() {

@@ -24,7 +24,13 @@ marker="$out/real-marker"
 touch "$marker"; sleep 1
 status=0
 multi=0; [ -n "${QC_CONFIG:-}" ] && multi=1
-QC_MULTI="$multi" QC_CLAUDE="$claude" QC_CONFIG="$config" QC_WORK="$work" "$out/real" || status=$?
+log="$out/real-output.txt"
+set +e
+QC_MULTI="$multi" QC_CLAUDE="$claude" QC_CONFIG="$config" QC_WORK="$work" "$out/real" 2>&1 | tee "$log"
+rc=${PIPESTATUS[0]}
+set -e
+[ "$rc" = 0 ] || status=1
+sid="$(sed -n 's/.*SESSION \([0-9a-f-]\{36\}\).*/\1/p' "$log" | head -1)"
 # incognito: Claude Code must not have kept a session for this work folder
 key="$(printf '%s' "$work" | sed 's/[^A-Za-z0-9]/-/g')"
 sleep 1
@@ -36,6 +42,12 @@ if [ -n "${QC_CONFIG:-}" ]; then
     rm -rf "$config/projects/$key"
   else
     echo "PASS no session kept for this run (no projects/$key)"
+  fi
+  # nothing in the folder names this chat: not its session id, not its work folder (other sessions' files don't)
+  if [ -n "$sid" ]; then
+    hits="$(grep -rl -e "$sid" -e "$work" "$config/plugins" "$config/backups" "$config.json" "$config/.claude.json" 2>/dev/null || true)"
+    if [ -n "$hits" ]; then echo "FAIL this chat's session id or work folder is written in: $hits"; status=1
+    else echo "PASS no file in plugins/, backups/ or .claude.json names this chat's session id or work folder"; fi
   fi
 fi
 if [ -z "${QC_CONFIG:-}" ]; then rm -rf "$config"; fi

@@ -278,8 +278,16 @@ final class QuickChatModel: ObservableObject {
     private var generation = 0
     /// A chat ends this long after its last answer (window open or hidden); nothing is kept.
     static let idleSeconds: TimeInterval = 15 * 60
-    /// Stop waits this long for Claude Code to end the answer; then the chat ends instead of hanging.
+    /// Stop waits this long without a word from Claude Code for it to end the answer (longer while it has said nothing
+    /// yet, a cold start); then the chat ends instead of hanging.
     static let stopSeconds: TimeInterval = 5
+    static let coldStopSeconds: TimeInterval = 20
+    /// The last line `claude` printed, and whether this `claude` has printed any.
+    private var lastEvent = Date.distantPast
+    private var spoken = false
+    /// The `set_model` request in flight, and the model the process had before it.
+    private var modelRequest: String?
+    private var modelBefore = ""
 
     // MARK: keys
 
@@ -389,6 +397,25 @@ final class QuickChatModel: ObservableObject {
         accountNote = "\(t.name) is on \(maskEmail(t.email ?? "another account")) now."
     }
 
+    /// The chat's profile points at another folder now (Choose a folder…): its `claude` was started on the old one, and the
+    /// conversation lives only in it, so the chat ends and a new one starts on the same profile. What was typed stays.
+    func folderChanged(to t: QuickChatTarget) {
+        let q = pendingQuestion()
+        newChat(keepField: true, dropsSwitch: false)
+        field = q
+        forgetAccount()
+        target = t
+        accountNote = "\(t.name) uses another folder now. New chat."
+    }
+
+    /// The chat's profile was removed: the chat ends with its `claude` (nothing is left running for a profile that's gone).
+    func profileRemoved() {
+        guard target != nil else { return }
+        newChat(keepField: true)
+        forgetAccount()
+        target = nil
+    }
+
     /// Another profile: its own account line, nothing carried over from the last one.
     func forgetAccount() { level = nil; offer = nil; switchOffer = nil; switchNotice = nil; drawnBlocked = false }
 
@@ -439,10 +466,14 @@ final class QuickChatModel: ObservableObject {
         // the same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
         // aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
         // accounts may share one, and must not share a running claude.
-        let key = [path, target.configDir, target.accountUUID ?? target.email ?? ""].joined(separator: "|")
+        let key = [path, target.configDir, target.workFolder, target.accountUUID ?? target.email ?? ""].joined(separator: "|")
         let goesOn = process?.isRunning == true && key == processKey && trail.canContinue(on: target.accountUUID)
         if goesOn {
-            if cmd.model != appliedModel { process?.setModel(cmd.model); appliedModel = cmd.model }
+            if cmd.model != appliedModel {
+                modelBefore = appliedModel
+                modelRequest = process?.setModel(cmd.model)
+                appliedModel = cmd.model
+            }
             if cmd.effort != appliedEffort { process?.setThinking(cmd.effort); appliedEffort = cmd.effort }
         } else {
             // another account, folder or `claude`, or none running: a new chat begins, so nothing said before is on
@@ -473,6 +504,7 @@ final class QuickChatModel: ObservableObject {
     }
 
     private func handle(_ e: QuickChatEvent) {
+        lastEvent = Date(); spoken = true
         guard let i = turns.indices.last else { return }
         // what Claude Code still says about an answer Stop gave up on is dropped, up to its `done`
         switch stale.fate(of: e) {
@@ -533,6 +565,12 @@ final class QuickChatModel: ObservableObject {
             scrollTick += 1
             // a `claude` that says it isn't signed in is let go: Retry (after signing in) asks in a new chat
             if case .notSignedIn? = turns[i].problem { endChat(.failed) } else { armIdle() }
+        case .control(let id, let error, _):
+            // a refused `set_model`: the old model is still answering, so the next message asks again
+            if id == modelRequest {
+                modelRequest = nil
+                if error != nil { appliedModel = modelBefore }
+            }
         case .ignored:
             break
         }
@@ -547,16 +585,18 @@ final class QuickChatModel: ObservableObject {
         levelReported(t.profileID, u, l)
     }
 
+    /// The model an answer came from, as Claude Code says it. It names the picker's choice only when it is that family: a
+    /// `set_model` Claude Code refused leaves the old model answering, and that name isn't the new choice's.
     private func setModel(_ id: String, turn i: Int) {
         let name = QuickChatParse.modelName(id)
         turns[i].model = name
-        knownModels[choice] = name
+        if choice.flag.isEmpty || name.lowercased().hasPrefix(choice.flag) { knownModels[choice] = name }
     }
 
     private func exited(_ status: Int32, _ tail: String) {
-        // the conversation lived only in this process: it is gone with it
-        closeProcess()
+        // the conversation lived only in this process: it is gone with it. What it printed last is drawn first.
         flush()
+        closeProcess()
         guard !turns.isEmpty else { return }
         guard let i = turns.indices.last, turns[i].busy else { ended = ended ?? .closed; return }
         var detail = "claude exited with code \(status)"
@@ -584,11 +624,17 @@ final class QuickChatModel: ObservableObject {
         idleTimer = t
     }
 
-    /// Stop was asked and Claude Code hasn't ended the answer: the chat ends instead of hanging on it.
+    /// Stop was asked and Claude Code hasn't ended the answer: the chat ends instead of hanging on it. It is silence that
+    /// counts: 5 seconds with nothing from `claude`, or 20 while it has not said anything yet (a cold start); every line
+    /// it prints, the aborted answer's included, starts the wait over.
     private func armStale() {
         staleTimer?.invalidate()
-        let t = Timer(timeInterval: Self.stopSeconds, repeats: false) { [weak self] _ in
-            guard let self, self.stale.waiting else { return }
+        let from = Date()
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self, self.stale.waiting else { timer.invalidate(); return }
+            let limit = self.spoken ? Self.stopSeconds : Self.coldStopSeconds
+            guard Date().timeIntervalSince(max(self.lastEvent, from)) >= limit else { return }
+            timer.invalidate()
             if self.busy { self.fail(.stopped(detail: "Claude Code didn't stop the answer in time.")) } else { self.endChat(.stopped) }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -623,6 +669,8 @@ final class QuickChatModel: ObservableObject {
         staleTimer?.invalidate(); staleTimer = nil
         stale.reset()
         messageSent = false
+        spoken = false; lastEvent = .distantPast
+        modelRequest = nil
         process?.onEvent = { _ in }
         process?.onExit = { _, _ in }
         process?.stop()
@@ -742,12 +790,21 @@ final class QuickChat {
 
     /// The chat's profile, its account and its level now, and while its limit is full the profile with the most room.
     func refresh() {
-        guard let id = model.target?.profileID, store.profile(id) != nil else { model.update(target: nil, level: nil, offer: nil); return }
+        guard let id = model.target?.profileID, store.profile(id) != nil else {
+            model.profileRemoved()
+            model.update(target: nil, level: nil, offer: nil)
+            return
+        }
         store.noteAccount(of: id)
         guard let p = store.profile(id) else { return }
+        // the profile uses another folder (or work folder) than the chat's: its `claude` is on the old one, so a new chat
+        // starts. While an answer is on its way the next message meets the same rule in start().
+        let now = QuickChatTarget(p)
+        if let old = model.target, old.profileID == id, old.configDir != now.configDir || old.workFolder != now.workFolder, !model.busy {
+            model.folderChanged(to: now)
+        }
         // the folder is on another account than the chat's (a switch from Settings, a sign-in as someone else, Sign in
         // again…, or one outside cl_quick): a chat belongs to its account, so a new chat starts and says so
-        let now = QuickChatTarget(p)
         if let old = model.target, old.profileID == id, let was = old.accountUUID, let to = now.accountUUID, was != to, !model.busy {
             model.accountChanged(to: now)
         }

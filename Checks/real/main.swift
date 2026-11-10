@@ -64,12 +64,23 @@ if env["QC_MULTI"] != "1" {
     check("after the interrupt it still remembers", texts(from: mark).lowercased().contains("kumquat"), texts(from: mark))
     // 5: the model changes in the running process, the conversation stays
     mark = events.count
-    check("set_model accepted", p.setModel("sonnet"))
+    let modelRequest = p.setModel("sonnet")
+    check("set_model accepted", modelRequest != nil)
     p.send("What was the secret word? Reply with just the word.")
     spin(90) { doneCount() >= 5 }
     let models = events[mark...].compactMap { e -> String? in if case .started(_, let m) = e { return m }; return nil }
     check("the next answer comes from the new model", models.contains { $0.contains("sonnet") }, models.joined(separator: ","))
     check("and still remembers", texts(from: mark).lowercased().contains("kumquat"), texts(from: mark))
+    check("Claude Code confirmed the model in effect", events[mark...].contains { if case .control(let id, nil, let m?) = $0 { return id == modelRequest && m.contains("sonnet") }; return false })
+    // 6: thinking turned on in the running chat (it was launched with thinking off): the next answer thinks
+    func thinkingEvents(from i: Int) -> Int { events[i...].filter { if case .thinking = $0 { return true }; return false }.count }
+    let thinkingBefore = thinkingEvents(from: mark)        // the answer just before, with thinking off
+    mark = events.count
+    check("thinking accepted", p.setThinking("high"))
+    p.send("What is 17*23? Think it through, then answer with just the number.")
+    spin(90) { doneCount() >= 6 }
+    check("the next answer comes with thinking, the one before had none", thinkingBefore == 0 && thinkingEvents(from: mark) > 0,
+          "before \(thinkingBefore), after \(thinkingEvents(from: mark))")
     check("one process for all of it", p.isRunning && p.pid == pid)
     print("rss of the idle claude: \(rssKB(p.pid)) KB")
 }
@@ -87,12 +98,13 @@ let stopEnd = Date().addingTimeInterval(5)
 while exitInfo == nil, Date() < stopEnd { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
 for e in events {
     switch e {
-    case .started(_, let m): print("started: model \(m) (\(QuickChatParse.modelName(m)))")
+    case .started(let s, let m): print("started: model \(m) (\(QuickChatParse.modelName(m))) SESSION \(s)")
     case .text(let t): if env["QC_MULTI"] != "1" { print("text: \(t.debugDescription)") }
     case .thinking(let t): print("thinking: \(t.count) characters")
     case .message(let t, let m, let err): print("message: \(t.prefix(80).debugDescription) model \(m) error \(err ?? "none")")
     case .limit(let type, let used, let status, _): print("limit: \(type ?? "?") used \(used.map { String($0) } ?? "?") \(status ?? "?")")
     case .done(let isError, let t, let ms, _): print("done: error \(isError), \(ms) ms, \(t.prefix(80).debugDescription)")
+    case .control(let id, let err, let m): print("control \(id): \(err.map { "error \($0)" } ?? "ok")\(m.map { ", model \($0)" } ?? "")")
     case .ignored: break
     }
 }

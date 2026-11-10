@@ -34,8 +34,15 @@ while IFS= read -r line; do
     *'"type":"control_request"'*)
       rid="$(printf '%s' "$line" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')"
       sub="$(printf '%s' "$line" | sed -n 's/.*"subtype":"\([^"]*\)".*/\1/p')"
-      ctl "CTRL $sub $(printf '%s' "$line" | sed -n 's/.*"model":"\([^"]*\)".*/model=\1/p') $(printf '%s' "$line" | sed -n 's/.*"settings":\({[^}]*}\).*/settings=\1/p')"
-      echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'"}}'
+      mdl="$(printf '%s' "$line" | sed -n 's/.*"model":"\([^"]*\)".*/\1/p')"
+      ctl "CTRL $sub ${mdl:+model=$mdl} $(printf '%s' "$line" | sed -n 's/.*"settings":\({[^}]*}\).*/settings=\1/p')"
+      if [ "$mdl" = refuse ]; then
+        echo '{"type":"control_response","response":{"subtype":"error","request_id":"'$rid'","error":"no such model"}}'
+      elif [ "$sub" = set_model ]; then
+        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"model":"claude-'${mdl:-opus}'-5-5"}}}'
+      else
+        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'"}}'
+      fi
       continue ;;
   esac
   n=$((n + 1))
