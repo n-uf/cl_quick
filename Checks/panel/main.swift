@@ -55,6 +55,47 @@ check("the card is never a handle: its middle, its padding, 1 pt inside its edge
       handle(at: W / 2, H / 2) == nil && handle(at: 20, 20) == nil && handle(at: W - 20, H - 20) == nil
       && handle(at: rim + 1, H / 2) == nil && handle(at: W / 2, rim + 1) == nil && handle(at: W / 2, H - rim - 1) == nil
       && handle(at: 24, 24) == nil)
+// DRAG must not dominate RESIZE: nothing in the rim moves the window, and no drag surface reaches the rim
+func noDragInTheRim(_ label: String) {
+    let wf = p.frame, r = QuickChatRoot.margin
+    let card = NSRect(x: r, y: r, width: wf.width - 2 * r, height: wf.height - 2 * r).insetBy(dx: -0.5, dy: -0.5)
+    var surfaces = 0, outside = 0, movers = 0
+    var names: [String] = []
+    func walk(_ v: NSView) {
+        if v is QCDragView {
+            surfaces += 1
+            if !card.contains(v.convert(v.bounds, to: nil)) { outside += 1 }
+        }
+        // (the SwiftUI views inside the card may say yes; the panel isn't movable by its background, so it is never asked.
+        // Anything that covers the rim must say no.)
+        // (a view wholly outside the window, such as SwiftUI's key-view helper placed below it, is never hit)
+        let r = v.convert(v.bounds, to: nil)
+        if v.mouseDownCanMoveWindow && r.intersects(NSRect(origin: .zero, size: wf.size)) && !card.contains(r) { movers += 1; names.append("\(type(of: v)) \(r)") }
+        v.subviews.forEach(walk)
+    }
+    walk(cv)
+    check("\(label): drag surfaces exist (\(surfaces)) and all lie inside the card", surfaces > 0 && outside == 0, "\(outside) outside")
+    check("\(label): no view says the window server may start a move from it", movers == 0, "\(names)")
+    // every point of the rim: what is hit is a handle, which cannot move the window
+    var bad = 0
+    var x = 0.5
+    while x < wf.width {
+        for y in [0.5, 3.5, 7.5, wf.height - 0.5, wf.height - 3.5, wf.height - 7.5] {
+            let v = cv.hitTest(NSPoint(x: x, y: y)); if !(v is QCResizeHandle) || v!.mouseDownCanMoveWindow { bad += 1 }
+        }
+        x += 6
+    }
+    var y = 0.5
+    while y < wf.height {
+        for x in [0.5, 3.5, 7.5, wf.width - 0.5, wf.width - 3.5, wf.width - 7.5] {
+            let v = cv.hitTest(NSPoint(x: x, y: y)); if !(v is QCResizeHandle) || v!.mouseDownCanMoveWindow { bad += 1 }
+        }
+        y += 6
+    }
+    check("\(label): every rim point resolves to a resize handle that cannot move the window", bad == 0, "\(bad) points")
+}
+check("the panel is not movable by its background (the window server starts no move of its own)", !p.isMovableByWindowBackground)
+noDragInTheRim("bar")
 check("the content's least width is the card's 320 plus the rim twice", abs(p.contentMinSize.width - (QuickChatRoot.minWidth + 2 * rim)) < 0.5, "\(p.contentMinSize)")
 
 // a drag of a handle, through the handle's own tracking loop: the events are queued, then the press is handed to the handle
@@ -65,6 +106,12 @@ func dragHandle(_ edges: QCEdges, from local: NSPoint, by d: NSPoint) -> (before
         return NSEvent.mouseEvent(with: t, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                   windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
     }
+    // the pointer's place, as the handle asks for it: scripted in screen points, one per event (the real one is
+    // NSEvent.mouseLocation; a queued event's locationInWindow is not a safe stand-in, it is taken against whatever the
+    // window was when the event was made and the window moves under a bottom or left edge drag)
+    var script = [NSPoint(x: before.minX + local.x, y: before.minY + local.y)]
+    for i in 1...6 { script.append(NSPoint(x: before.minX + local.x + d.x * CGFloat(i) / 6, y: before.minY + local.y + d.y * CGFloat(i) / 6)) }
+    QCResizeHandle.pointer = { _ in script.isEmpty ? NSPoint.zero : script.removeFirst() }
     for i in 1...6 { NSApp.postEvent(ev(.leftMouseDragged, NSPoint(x: local.x + d.x * CGFloat(i) / 6, y: local.y + d.y * CGFloat(i) / 6)), atStart: false) }
     NSApp.postEvent(ev(.leftMouseUp, NSPoint(x: local.x + d.x, y: local.y + d.y)), atStart: false)
     cv.handles.first { $0.edges == edges }!.mouseDown(with: ev(.leftMouseDown, local))
@@ -73,6 +120,13 @@ func dragHandle(_ edges: QCEdges, from local: NSPoint, by d: NSPoint) -> (before
 let h0 = dragHandle(.right, from: NSPoint(x: W - 4, y: H / 2), by: NSPoint(x: 60, y: 0))
 check("a right-edge drag widens by what the pointer moved, nothing else", abs(h0.after.width - (h0.before.width + 60)) < 0.5 && h0.after.height == h0.before.height && h0.after.minX == h0.before.minX && h0.after.maxY == h0.before.maxY, "\(h0)")
 check("the drag ended: idle again", p.isIdle)
+// a left-edge drag in steps that are queued before the window moves: it follows the pointer exactly (no overshoot)
+let hl = dragHandle(.left, from: NSPoint(x: 4, y: p.frame.height / 2), by: NSPoint(x: 40, y: 0))
+check("a left-edge drag by 40 narrows by exactly 40, the right edge staying", abs(hl.after.width - (hl.before.width - 40)) < 0.5 && abs(hl.after.maxX - hl.before.maxX) < 0.5, "\(hl)")
+let hb = dragHandle(.bottom, from: NSPoint(x: p.frame.width / 2, y: 4), by: NSPoint(x: 0, y: -25))
+check("a bottom-edge drag by 25 grows by exactly 25, the top staying", abs(hb.after.height - (hb.before.height + 25)) < 0.5 && abs(hb.after.maxY - hb.before.maxY) < 0.5, "\(hb)")
+let hc = dragHandle([.left, .bottom], from: NSPoint(x: 4, y: 4), by: NSPoint(x: -30, y: 15))
+check("a bottom-left corner drag follows both ways exactly", abs(hc.after.width - (hc.before.width + 30)) < 0.5 && abs(hc.after.height - (hc.before.height - 15)) < 0.5 && abs(hc.after.maxX - hc.before.maxX) < 0.5 && abs(hc.after.maxY - hc.before.maxY) < 0.5, "\(hc)")
 let h1 = dragHandle(.left, from: NSPoint(x: 4, y: p.frame.height / 2), by: NSPoint(x: 5000, y: 0))
 check("a left-edge drag stops at the least width, the right edge staying", abs(h1.after.width - p.contentMinSize.width) < 0.5 && abs(h1.after.maxX - h1.before.maxX) < 0.5, "\(h1)")
 let h2 = dragHandle(.bottom, from: NSPoint(x: p.frame.width / 2, y: 4), by: NSPoint(x: 0, y: -40))
@@ -175,6 +229,7 @@ check("the bar after a new chat keeps the width", p.frame.width == userChat.widt
 chat.model.turns = [oneTurn()]
 spin(0.8)
 check("the chat comes back at the height the user gave it", abs(p.frame.height - userChat.height) < 0.5 && p.frame.width == userChat.width, "\(p.frame.size) vs \(userChat)")
+noDragInTheRim("chat")
 
 // ── the least sizes are the system's, from the content's own frames ───────────────────────────────
 check("the least width is 320 of card plus the margin", abs(p.contentMinSize.width - (QuickChatRoot.minWidth + 2 * QuickChatRoot.margin)) < 0.5, "\(p.contentMinSize)")
