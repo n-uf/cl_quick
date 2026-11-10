@@ -23,6 +23,63 @@ struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
     var isPlaceholder: Bool { uuid.hasPrefix("email:") }
 }
 
+/// What was read from a folder's .claude.json.
+struct FolderRead {
+    var mtime: Date?
+    var email: String?
+    var uuid: String?
+    var plan: String?
+}
+
+/// The .claude.json files, read for the account in them. A file can be several MB and changes often (every Claude Code
+/// session writes it), so the value read is kept per file; everything on the main thread reads the kept value, and the
+/// file is read again on one serial utility queue. Every reload is queued behind the reads before it, so its `done`
+/// always sees the file as it was when the reload was asked for, even if another read of it was under way.
+enum FolderFiles {
+    private static var cache: [String: FolderRead] = [:]
+    private static let lock = NSLock()
+    private static let queue = DispatchQueue(label: "cl_quick.folder-reads", qos: .utility)
+
+    /// The value kept for the file; read from it only when it was never looked at.
+    static func kept(_ file: String) -> FolderRead {
+        lock.lock(); let hit = cache[file]; lock.unlock()
+        return hit ?? fresh(file)
+    }
+
+    /// Reads the files again, off the main thread (parsing only those whose modification time moved); `done` comes on
+    /// the main thread with whether an account changed since the value kept before these reads.
+    static func reload(_ files: [String], done: @escaping (Bool) -> Void) {
+        queue.async {
+            var changed = false
+            for f in files {
+                lock.lock(); let before = cache[f]; lock.unlock()
+                let r = fresh(f)
+                if r.email != before?.email || r.uuid != before?.uuid { changed = true }
+            }
+            DispatchQueue.main.async { done(changed) }
+        }
+    }
+
+    /// The file as it is now: parsed again only if its modification time moved.
+    static func fresh(_ file: String) -> FolderRead {
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date
+        lock.lock(); let hit = cache[file]; lock.unlock()
+        if let hit, hit.mtime == mtime { return hit }
+        var r = FolderRead(mtime: mtime)
+        if let d = FileManager.default.contents(atPath: file),
+           let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+           let a = j["oauthAccount"] as? [String: Any] {
+            r.email = a["emailAddress"] as? String
+            r.uuid = (a["accountUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
+                r.plan = p == p.lowercased() ? p.capitalized : p
+            }
+        }
+        lock.lock(); cache[file] = r; lock.unlock()
+        return r
+    }
+}
+
 /// The accounts a chat's `claude` and its session started on. What the process reports (a week, a full limit) belongs
 /// to that account, whatever the chat's target says by then: the folder may have changed account while an answer was on
 /// its way. A session belongs to its account too: it is gone on only on the account it began on.

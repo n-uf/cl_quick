@@ -239,6 +239,27 @@ do {
         AccountBook.note(&l, uuid: "email:ultra-5@example.com", email: "ultra-5@example.com"); return l.count == 2 }())
     check("accounts: week key", AccountBook.levelKey("main", "u1") == "main|u1")
 
+    // the folder's file: a reload asked for while another read of it is under way still sees the file as it is now
+    let dir = NSTemporaryDirectory() + "cl_quick-checks-\(getpid())"
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let file = dir + "/.claude.json"
+    func writeAccount(_ uuid: String, _ email: String, mtime: Date) {
+        let j = #"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)","planDisplayName":"max"}}"#
+        try? j.write(toFile: file, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: file)
+    }
+    writeAccount("u1", "ultra-1@example.com", mtime: t0)
+    check("folder: the first look reads the file", FolderFiles.kept(file).uuid == "u1" && FolderFiles.kept(file).plan == "Max")
+    writeAccount("u2", "ultra-2@example.com", mtime: t0.addingTimeInterval(5))      // the sign-in landed
+    check("folder: the kept value doesn't move by itself", FolderFiles.kept(file).uuid == "u1")
+    var first: Bool?, second: Bool?, seen: String?
+    FolderFiles.reload([file]) { first = $0 }                    // a read under way ...
+    FolderFiles.reload([file]) { second = $0; seen = FolderFiles.kept(file).uuid }       // ... then what ask() does
+    wait(5) { second != nil }
+    check("folder: a reload behind another read sees the new account", seen == "u2", seen as Any)
+    check("folder: the first read said an account changed, the next had nothing new", first == true && second == false, (first as Any, second as Any))
+    try? FileManager.default.removeItem(atPath: dir)
+
     // what a `claude` reports belongs to the account it started on, whatever the chat's target says later
     var trail = AccountTrail()
     check("trail: nothing running, nothing to report on", trail.reportAccount == nil)

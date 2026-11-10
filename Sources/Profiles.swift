@@ -62,60 +62,14 @@ enum ClaudeFolder {
         isDefault(path) ? expand("~/.claude.json") : (expand(path) as NSString).appendingPathComponent(".claude.json")
     }
 
-    /// What was read from a .claude.json: it can be several MB and changes often (every Claude Code session writes it).
-    /// Views, the chat and the 2 s sign-in watch read only this value, kept per folder (account, email, plan below);
-    /// the file itself is read again off the main thread by `reload`, and once, on the spot, the first time a folder is
-    /// looked at.
-    private struct Read { var mtime: Date?; var email: String?; var uuid: String?; var plan: String? }
-    private static var cache: [String: Read] = [:]
-    private static var inflight = Set<String>()
-    private static let lock = NSLock()
-    private static let queue = DispatchQueue(label: "cl_quick.folder-reads", qos: .utility)
+    /// Views, the chat and the 2 s sign-in watch read only the value kept per folder (FolderFiles); the file itself is
+    /// read again off the main thread by `reload`, and once, on the spot, the first time a folder is looked at.
+    private static func read(_ path: String) -> FolderRead { FolderFiles.kept(json(path)) }
 
-    /// The value kept for the folder; read from the file only when the folder was never looked at.
-    private static func read(_ path: String) -> Read {
-        let file = json(path)
-        lock.lock(); let hit = cache[file]; lock.unlock()
-        return hit ?? fresh(file)
-    }
-
-    /// Reads the files again, off the main thread, when they changed since the last look; `done` comes on the main
-    /// thread with whether an account changed. A folder already being read is left to that read.
+    /// Reads the folders' files again, off the main thread; `done` comes on the main thread, after those reads, with
+    /// whether an account changed.
     static func reload(_ paths: [String], done: @escaping (Bool) -> Void) {
-        let files = Array(Set(paths.map(json)))
-        lock.lock()
-        let todo = files.filter { inflight.insert($0).inserted }
-        let before = todo.map { cache[$0] }
-        lock.unlock()
-        guard !todo.isEmpty else { DispatchQueue.main.async { done(false) }; return }
-        queue.async {
-            var changed = false
-            for (i, f) in todo.enumerated() {
-                let r = fresh(f)
-                if r.email != before[i]?.email || r.uuid != before[i]?.uuid { changed = true }
-                lock.lock(); inflight.remove(f); lock.unlock()
-            }
-            DispatchQueue.main.async { done(changed) }
-        }
-    }
-
-    /// The file as it is now: parsed again only if its modification time moved.
-    private static func fresh(_ file: String) -> Read {
-        let mtime = (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date
-        lock.lock(); let hit = cache[file]; lock.unlock()
-        if let hit, hit.mtime == mtime { return hit }
-        var r = Read(mtime: mtime)
-        if let d = FileManager.default.contents(atPath: file),
-           let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
-           let a = j["oauthAccount"] as? [String: Any] {
-            r.email = a["emailAddress"] as? String
-            r.uuid = (a["accountUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
-                r.plan = p == p.lowercased() ? p.capitalized : p
-            }
-        }
-        lock.lock(); cache[file] = r; lock.unlock()
-        return r
+        FolderFiles.reload(Array(Set(paths.map(json))), done: done)
     }
 
     /// The address Claude Code signed the folder in with; nil when it hasn't.
@@ -135,7 +89,8 @@ enum ClaudeFolder {
     /// A folder cl_quick can chat on: signed in to Claude Code, and not the home folder itself.
     static func usable(_ path: String) -> Bool {
         let p = (expand(path) as NSString).standardizingPath
-        return p != (NSHomeDirectory() as NSString).standardizingPath && fresh(json(p)).email != nil
+        // the kept value: a folder looked at before isn't parsed again on the main thread (the file is MBs)
+        return p != (NSHomeDirectory() as NSString).standardizingPath && email(p) != nil
     }
 
     /// ~/.claude and every ~/.claude-* folder, the plain one first. `home` is for the checks.
