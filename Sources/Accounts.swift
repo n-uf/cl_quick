@@ -23,15 +23,23 @@ struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
     var isPlaceholder: Bool { uuid.hasPrefix("email:") }
 }
 
-/// The account a running `claude` started on. What it reports (a week, a full limit) belongs to that account, whatever
-/// the chat's target says by then: the folder may have changed account while an answer was on its way.
+/// The accounts a chat's `claude` and its session started on. What the process reports (a week, a full limit) belongs
+/// to that account, whatever the chat's target says by then: the folder may have changed account while an answer was on
+/// its way. A session belongs to its account too: it is gone on only on the account it began on.
 struct AccountTrail {
     private(set) var process: String?
+    private(set) var session: String?
 
     mutating func processStarted(on uuid: String?) { process = uuid }
     mutating func processEnded() { process = nil }
+    /// The running `claude` began its session: on the account it started on.
+    mutating func sessionStarted() { session = process }
+    mutating func sessionCleared() { session = nil }
+
     /// The account a report from the running `claude` is recorded on.
     var reportAccount: String? { process }
+    /// A session goes on only on the account it began on (no session yet: nothing to carry across).
+    func canResume(on uuid: String?) -> Bool { session == nil || session == uuid }
 }
 
 enum AccountBook {

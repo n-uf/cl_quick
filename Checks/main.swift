@@ -245,7 +245,15 @@ do {
     trail.processStarted(on: "u1")
     let targetNow = "u2"        // the folder moved to another account while the answer was on its way
     check("trail: a report goes to the account the process started on", trail.reportAccount == "u1" && trail.reportAccount != targetNow)
+    // a session belongs to its account
+    check("trail: no session yet can go on anywhere", trail.canResume(on: "u1") && trail.canResume(on: "u2") && trail.canResume(on: nil))
+    trail.sessionStarted()
+    check("trail: a session goes on on the account it began on", trail.canResume(on: "u1"))
+    check("trail: a session isn't gone on with on another account", !trail.canResume(on: "u2") && !trail.canResume(on: nil))
     trail.processEnded()
+    check("trail: the session outlives its process", !trail.canResume(on: "u2") && trail.canResume(on: "u1"))
+    trail.sessionCleared()
+    check("trail: a new chat can begin on any account", trail.canResume(on: "u2"))
     check("trail: a process that ended reports nowhere", trail.reportAccount == nil)
 
     // an older levels.json, keyed by profile id (the values stand for weeks)

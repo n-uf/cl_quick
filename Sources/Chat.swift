@@ -227,6 +227,8 @@ final class QuickChatModel: ObservableObject {
     var dropSwitch: () -> Void = {}
     /// Sign in to the profile's folder (its Claude Code isn't signed in).
     var signIn: (String) -> Void = { _ in }
+    /// The profile's target with its folder's file read again (off the main thread), before a message is sent.
+    var freshTarget: (String, @escaping (QuickChatTarget?) -> Void) -> Void = { _, done in done(nil) }
 
     private var process: QuickChatProcess?
     private var processKey = ""
@@ -279,16 +281,18 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// A new chat: the process goes, the session stays in Claude Code's folder, the pickers go back to the defaults.
-    /// `keepField`: what you typed stays (another profile was picked).
-    func newChat(keepField: Bool = false) {
+    /// `keepField`: what you typed stays (another profile was picked). `dropsSwitch`: a switch of account under way or
+    /// gone wrong is forgotten too (not when the chat starts anew because the account changed, which is what it says).
+    func newChat(keepField: Bool = false, dropsSwitch: Bool = true) {
         generation += 1
         closeProcess()
         session = nil
+        trail.sessionCleared()
         turns = []
         if !keepField { field = "" }
         barProblem = nil
         accountNote = nil
-        dropSwitch()
+        if dropsSwitch { dropSwitch() }
         let d = defaults()
         choice = d.model; thinking = d.thinking
         focusTick += 1
@@ -323,6 +327,18 @@ final class QuickChatModel: ObservableObject {
         send()
     }
 
+    /// The profile's folder is on another account than this chat's. A session belongs to its account, so a new chat
+    /// starts on the same profile; what was typed (or the question a full limit stopped) stays in the field, and one
+    /// line says where it is. Not while an answer is on its way: the next message meets the same rule in ask().
+    func accountChanged(to t: QuickChatTarget) {
+        let q = pendingQuestion()
+        newChat(keepField: true, dropsSwitch: false)
+        field = q
+        forgetAccount()
+        target = t
+        accountNote = "\(t.name) is on \(maskEmail(t.email ?? "another account")) now."
+    }
+
     /// Another profile: its own account line, nothing carried over from the last one.
     func forgetAccount() { level = nil; offer = nil; switchOffer = nil; switchNotice = nil; drawnBlocked = false }
 
@@ -343,35 +359,51 @@ final class QuickChatModel: ObservableObject {
     // MARK: talking to Claude Code
 
     private func ask(_ q: String) {
-        guard let target else { fail(.noProfile); return }
+        guard let first = target else { fail(.noProfile); return }
         let gen = generation
         resolveClaude { [weak self] path in
             guard let self, gen == self.generation else { return }
             guard let path else { self.fail(.notInstalled); return }
-            let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
-                                       workFolder: target.workFolder, model: self.choice.flag, effort: self.thinking.effort,
-                                       resume: self.session)
-            // the same `claude` while nothing it runs with changed; a new one goes on with the session
-            let key = [path, target.configDir, target.email ?? "", cmd.model, cmd.effort ?? ""].joined(separator: "|")
-            if self.process?.isRunning != true || key != self.processKey {
-                self.closeProcess()
-                let p = QuickChatProcess(cmd)
-                p.onEvent = { [weak self, weak p] e in guard let self, let p, p === self.process else { return }; self.handle(e) }
-                p.onExit = { [weak self, weak p] status, tail in
-                    guard let self, let p, p === self.process else { return }
-                    self.exited(status, tail)
+            // the folder may have changed account since the chat last looked: its file is read again (off the main thread)
+            self.freshTarget(first.profileID) { fresh in
+                guard gen == self.generation, let i = self.turns.indices.last, self.turns[i].busy else { return }     // stopped meanwhile
+                if let fresh, fresh != self.target { self.target = fresh }
+                guard let target = self.target else { self.fail(.noProfile); return }
+                // a session belongs to its account: on another one it isn't gone on with, and a new `claude` begins
+                if !self.trail.canResume(on: target.accountUUID) {
+                    self.session = nil
+                    self.trail.sessionCleared()
+                    self.closeProcess()
                 }
-                do { try p.start() } catch {
-                    self.fail(.stopped(detail: "Claude Code couldn't start: \(error.localizedDescription)")); return
-                }
-                self.process = p
-                self.processKey = key
-                self.processStarted = false
-                self.trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
+                self.start(q, path: path, target: target)
             }
-            self.idleTimer?.invalidate()
-            if self.process?.send(q) != true { self.fail(.stopped(detail: "Claude Code didn't take the message.")) }
         }
+    }
+
+    private func start(_ q: String, path: String, target: QuickChatTarget) {
+        let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
+                                   workFolder: target.workFolder, model: choice.flag, effort: thinking.effort,
+                                   resume: session)
+        // the same `claude` while nothing it runs with changed; a new one goes on with the session
+        let key = [path, target.configDir, target.email ?? "", cmd.model, cmd.effort ?? ""].joined(separator: "|")
+        if process?.isRunning != true || key != processKey {
+            closeProcess()
+            let p = QuickChatProcess(cmd)
+            p.onEvent = { [weak self, weak p] e in guard let self, let p, p === self.process else { return }; self.handle(e) }
+            p.onExit = { [weak self, weak p] status, tail in
+                guard let self, let p, p === self.process else { return }
+                self.exited(status, tail)
+            }
+            do { try p.start() } catch {
+                fail(.stopped(detail: "Claude Code couldn't start: \(error.localizedDescription)")); return
+            }
+            process = p
+            processKey = key
+            processStarted = false
+            trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
+        }
+        idleTimer?.invalidate()
+        if process?.send(q) != true { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
     private func handle(_ e: QuickChatEvent) {
@@ -379,6 +411,7 @@ final class QuickChatModel: ObservableObject {
         switch e {
         case .started(let s, let model):
             session = s
+            trail.sessionStarted()
             processStarted = true
             if !model.isEmpty { setModel(model, turn: i) }
         case .text(let t):
@@ -455,7 +488,7 @@ final class QuickChatModel: ObservableObject {
         trail.processEnded()
         flush()
         // it ended before its session began (a session to go on with that is gone, say): Retry starts a new one
-        if !processStarted { session = nil }
+        if !processStarted { session = nil; trail.sessionCleared() }
         guard let i = turns.indices.last, turns[i].busy else { return }
         var detail = "claude exited with code \(status)"
         if !tail.isEmpty { detail += ": \(tail)" }
@@ -566,6 +599,13 @@ final class QuickChat {
             guard let p = self?.store.profile(id) else { return }
             SignIn.open(folder: p.path) { why in if let why { SignIn.tell(why) } }
         }
+        model.freshTarget = { [weak self] id, done in
+            guard let self, let p = self.store.profile(id) else { done(nil); return }
+            ClaudeFolder.reload([p.path]) { _ in
+                self.store.noteAccount(of: id)
+                done(self.store.profile(id).map(QuickChatTarget.init))
+            }
+        }
         switcher.onOutcome = { [weak self] goal, outcome in self?.switched(goal, outcome) }
         NotificationCenter.default.addObserver(forName: AccountSwitcher.changed, object: nil, queue: .main) { [weak self] _ in self?.refresh() }
         hotKey.onPress = { [weak self] in self?.toggle() }
@@ -596,6 +636,12 @@ final class QuickChat {
         guard let id = model.target?.profileID, store.profile(id) != nil else { model.update(target: nil, level: nil, offer: nil); return }
         store.noteAccount(of: id)
         guard let p = store.profile(id) else { return }
+        // the folder is on another account than the chat's (a switch from Settings, a sign-in as someone else, Sign in
+        // again…, or one outside cl_quick): a session belongs to its account, so a new chat starts and says so
+        let now = QuickChatTarget(p)
+        if let old = model.target, old.profileID == id, let was = old.accountUUID, let to = now.accountUUID, was != to, !model.busy {
+            model.accountChanged(to: now)
+        }
         // the most room first; one that hasn't answered anything yet comes after, as it may have room too
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in
@@ -617,7 +663,7 @@ final class QuickChat {
             }
         let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }
             ?? switcher.mismatch[id].map { .wrong(signedIn: $0.signedIn, wanted: $0.goal.wantedEmail) }
-        model.update(target: QuickChatTarget(p), level: store.level(of: p), offer: others.first,
+        model.update(target: now, level: store.level(of: p), offer: others.first,
                      switchOffer: standby.first?.1, notice: notice)
     }
 
@@ -640,7 +686,8 @@ final class QuickChat {
         let wanted = profile ?? (model.isWindow ? model.target?.profileID : nil) ?? settings.defaultProfile
         let pick = list.first { $0.id == wanted } ?? list.first
         if let t = model.target, let p = pick, t.profileID != p.id { model.newChat(); model.forgetAccount() }
-        model.target = pick.map(QuickChatTarget.init)
+        // the same profile keeps its target: refresh() sees whether its folder moved to another account since
+        if model.target?.profileID != pick?.id { model.target = pick.map(QuickChatTarget.init) }
         refresh()
         if pick != nil, model.barProblem == .noProfile { model.barProblem = nil }
         let p = panel ?? makePanel()
