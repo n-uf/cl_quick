@@ -52,6 +52,15 @@ enum QuickChatModelChoice: String, CaseIterable, Codable, Identifiable {
     case haiku, sonnet, opus, fable
     var id: String { rawValue }
     var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    /// A few words in the model menu, when Claude Code's list gives none.
+    var blurb: String {
+        switch self {
+        case .haiku: return "fast, light on the week"
+        case .sonnet: return "for harder questions"
+        case .opus: return "for the hardest questions; uses the week fast"
+        case .fable: return "Claude's Fable family; uses the week fast"
+        }
+    }
 }
 
 /// Choosing from Claude Code's own list: plain functions, for the checks.

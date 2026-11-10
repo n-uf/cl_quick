@@ -29,6 +29,17 @@ enum QuickChatThinking: String, CaseIterable, Codable, Identifiable {
         case .max: return "Max"
         }
     }
+    /// A few words in the thinking menu.
+    var blurb: String {
+        switch self {
+        case .off: return "answers at once"
+        case .low: return "thinks briefly first"
+        case .medium: return "thinks a while first"
+        case .high: return "for harder questions"
+        case .xhigh: return "thinks long; uses the week fast"
+        case .max: return "thinks longest; uses the week fastest"
+        }
+    }
 }
 
 struct QuickChatSettings: Codable, Equatable {

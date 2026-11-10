@@ -30,12 +30,12 @@ final class ModelCatalog {
         NotificationCenter.default.post(name: Self.changed, object: nil)
     }
 
-    /// The four families as a picker offers them for a list: the ones the account has, each by its newest name; with no
-    /// list known, all four by family.
-    static func choices(_ list: [QuickChatModelEntry]?) -> [(choice: QuickChatModelChoice, title: String)] {
-        guard let list else { return QuickChatModelChoice.allCases.map { ($0, $0.title) } }
+    /// The four families as a picker offers them for a list: the ones the account has, each by its newest name and
+    /// Claude Code's words for it; with no list known, all four by family.
+    static func choices(_ list: [QuickChatModelEntry]?) -> [(choice: QuickChatModelChoice, title: String, detail: String)] {
+        guard let list else { return QuickChatModelChoice.allCases.map { ($0, $0.title, $0.blurb) } }
         let have = QuickChatModels.newest(list)
-        return QuickChatModelChoice.allCases.compactMap { c in have[c].map { (c, $0.displayName) } }
+        return QuickChatModelChoice.allCases.compactMap { c in have[c].map { (c, $0.displayName, $0.description ?? c.blurb) } }
     }
 
     /// The thinking steps for a family on a list (Off, then what its model takes), and the step a saved one becomes.
@@ -56,8 +56,8 @@ extension QuickChatModel {
     var resolvedModel: (family: QuickChatModelChoice, value: String, entry: QuickChatModelEntry?) {
         QuickChatModels.resolve(choice, in: modelList)
     }
-    /// The families the chat's model control steps through.
-    var modelChoices: [(choice: QuickChatModelChoice, title: String)] { ModelCatalog.choices(modelList) }
+    /// The families the chat's model menu offers.
+    var modelChoices: [(choice: QuickChatModelChoice, title: String, detail: String)] { ModelCatalog.choices(modelList) }
     /// The thinking steps that model takes, and the chosen step clamped to them.
     var thinkingSteps: [QuickChatThinking] { ModelCatalog.thinking(thinking, family: resolvedModel.family, list: modelList).steps }
     var effectiveThinking: QuickChatThinking { ModelCatalog.thinking(thinking, family: resolvedModel.family, list: modelList).now }
