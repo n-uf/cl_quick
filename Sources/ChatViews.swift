@@ -176,7 +176,6 @@ struct QCHeader: View {
     @State private var addressHover = false
     @State private var line = QCLineState()
     @Environment(\.qcHover) private var pictureHover
-    @Environment(\.qcAddressHover) private var pictureAddressHover
 
     var body: some View {
         let on = meterHover || pictureHover
@@ -197,23 +196,19 @@ struct QCHeader: View {
         .qcDraggable()
         .overlay(alignment: .topTrailing) {
             // a card under the meters, right-aligned to the 10 pt line, only for what the line had to leave out: while
-            // the pointer is on the meters, their dropped parts; while it is on the address capsule and the capsule cut
-            // the address, the whole address (the address as it is now: the profile or account may have changed since
-            // the line's step was picked). An address that left the line has no capsule to point at and stays out.
-            let email = (addressHover || pictureAddressHover) && line.addressShown
-                ? model.target?.email.flatMap { QCBlurred.fits($0) ? nil : $0 } : nil
+            // the pointer is on the meters, their dropped parts. (The address has no card: the capsule itself grows.)
             let rows = on ? QCHeaderCard.rows(model.level, shown: line.detail) : []
-            if email != nil || !rows.isEmpty {
-                QCHeaderCard(email: email, rows: rows)
+            if !rows.isEmpty {
+                QCHeaderCard(rows: rows)
                     .padding(.trailing, QCSpace.gap).offset(y: QCSpace.header - 2).allowsHitTesting(false)
             }
         }
     }
 }
 
-/// What the header line left out, under the header: the whole address, and for each window only the parts of its meter
-/// the line dropped (its share, when it resets, its label when none is left). The bar and anything the line shows are
-/// not repeated; the window's name is the row's key. A label only cut to "5h" or "wk" is not a loss.
+/// What the header line left out, under the header: for each window only the parts of its meter the line dropped (its
+/// share, when it resets, its label when none is left). The bar and anything the line shows are not repeated; the
+/// window's name is the row's key. A label only cut to "5h" or "wk" is not a loss.
 struct QCHeaderCard: View {
     struct Row: Identifiable {
         let id: String
@@ -222,7 +217,6 @@ struct QCHeaderCard: View {
         var resets: String?
     }
 
-    let email: String?
     let rows: [Row]
 
     /// The rows for the dropped parts of the meters the line shows (`shown`); none when the line has them all.
@@ -244,23 +238,15 @@ struct QCHeaderCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let email {
-                Text(email).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1)
-                if !rows.isEmpty { Rectangle().fill(QCColor.line).frame(height: 1).padding(.bottom, 1) }
-            }
-            // a grid, so the labels and numbers of the rows line up
-            if !rows.isEmpty {
-                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
-                    ForEach(rows) { r in
-                        GridRow {
-                            Text(r.label).foregroundColor(QCColor.muted)
-                            if let share = r.share { Text(share.text).fontWeight(.semibold).foregroundColor(share.color) }
-                            if let when = r.resets { Text(when).foregroundColor(QCColor.muted) }
-                        }
-                        .font(.system(size: 12).monospacedDigit()).lineLimit(1)
-                    }
+        // a grid, so the labels and numbers of the rows line up
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+            ForEach(rows) { r in
+                GridRow {
+                    Text(r.label).foregroundColor(QCColor.muted)
+                    if let share = r.share { Text(share.text).fontWeight(.semibold).foregroundColor(share.color) }
+                    if let when = r.resets { Text(when).foregroundColor(QCColor.muted) }
                 }
+                .font(.system(size: 12).monospacedDigit()).lineLimit(1)
             }
         }
         .fixedSize()
@@ -297,7 +283,7 @@ extension EnvironmentValues {
 /// The address sits in a capsule at most 132 pt wide, blurred at rest; it turns readable in place, the capsule keeping its
 /// width, only while the pointer is on the capsule. While the pointer is on the meters, a card under them shows only
 /// what the line dropped (a window's share, reset or label), nothing it already shows, and no card at all when it
-/// dropped nothing; on the capsule it adds the whole address when the capsule cut it.
+/// dropped nothing. On the address capsule there is no card: the capsule grows to show the whole address.
 struct QCHeaderDetail: Equatable {
     enum Resets { case words, none }
     enum Labels { case full, short, none }
@@ -322,7 +308,6 @@ struct QCHeaderDetail: Equatable {
 /// What the line on screen shows (told by the step that is shown): the hover card adds the rest.
 struct QCLineState: Equatable {
     var detail = QCHeaderDetail.steps[0]
-    var addressShown: Bool { detail.address }
 }
 
 /// The profile, its address (smudged) and the session and week meters.
