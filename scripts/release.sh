@@ -121,6 +121,15 @@ if [ $push = 1 ]; then
     *) echo "origin is $origin_url, not $repo; refusing to push or publish. Nothing was changed." >&2; exit 1 ;;
   esac
   command -v gh >/dev/null || { echo "--push needs the gh command (GitHub CLI), signed in" >&2; exit 1; }
+  gh auth status >/dev/null 2>&1 || { echo "gh is not signed in (gh auth status fails); run gh auth login. Nothing was changed." >&2; exit 1; }
+  gh repo view "$repo" >/dev/null 2>&1 || { echo "gh can't see the GitHub repo $repo (not created yet, or no access). Nothing was changed." >&2; exit 1; }
+  # 0: the tag is already on origin; 2: it isn't; anything else: origin couldn't be asked.
+  rc=0; git ls-remote --exit-code --tags origin "refs/tags/v$next" >/dev/null 2>&1 || rc=$?
+  case $rc in
+    0) echo "v$next already exists on origin; refusing to release it again. Nothing was changed." >&2; exit 1 ;;
+    2) ;;
+    *) echo "couldn't ask origin about the tag v$next (git ls-remote failed). Nothing was changed." >&2; exit 1 ;;
+  esac
 fi
 
 # Release only a clean main with notes waiting.
@@ -156,8 +165,8 @@ if [ $push = 1 ]; then
   zip_sha="$(shasum -a 256 "dist/$name.zip" | awk '{print $1}')"
   dmg_sha="$(shasum -a 256 "dist/$name.dmg" | awk '{print $1}')"
 
-  git push -q origin main
-  git push -q origin "v$next"
+  # One atomic push: main and the tag both arrive or neither does.
+  git push --atomic -q origin main "v$next"
   echo "pushed main and v$next"
 
   section="$(awk -v h="## $next " 'index($0, h) == 1 {f=1; next} /^## /{f=0} f' CHANGELOG.md)"
@@ -165,7 +174,9 @@ if [ $push = 1 ]; then
   cc="$(claude --version 2>/dev/null | awk '{print $1}')"
   checked="Checked with Claude Code ${cc:-?}. A newer Claude Code can change how it answers or reports the week; if something stops working, update cl_quick."
   echo "$checked"
-  gh release create "v$next" "dist/$name.zip" "dist/$name.dmg" --repo "$repo" --title "$name $next" --notes "$section
+  # The notes go to a file so a failed publish can be retried with the very same text.
+  notes_file="dist/release-notes-v$next.md"
+  printf '%s\n' "$section
 
 ---
 
@@ -173,6 +184,12 @@ $checked
 
 **Download:** \`$name.dmg\` below (Apple silicon, macOS 13 or later). Open it and drag $name onto Applications. Or \`$name.zip\`: unzip it and move **$name** to Applications. Either way, $name isn't signed with an Apple Developer ID yet, so the first time macOS says it can't verify the app: open System Settings ▸ Privacy & Security and click **Open Anyway** (once). Or build it from source, see the README.
 
-SHA-256: \`$name.zip\` $zip_sha · \`$name.dmg\` $dmg_sha"
+SHA-256: \`$name.zip\` $zip_sha · \`$name.dmg\` $dmg_sha" > "$notes_file"
+  if ! gh release create "v$next" "dist/$name.zip" "dist/$name.dmg" --repo "$repo" --title "$name $next" --notes-file "$notes_file"; then
+    # main and the tag are already on GitHub: keep them, and retry only the release.
+    echo "publishing the GitHub Release failed; main and v$next stay pushed. Retry with:" >&2
+    echo "  gh release create v$next dist/$name.zip dist/$name.dmg --repo $repo --title \"$name $next\" --notes-file $notes_file" >&2
+    exit 1
+  fi
   echo "published the GitHub Release v$next with $name.zip and $name.dmg"
 fi
