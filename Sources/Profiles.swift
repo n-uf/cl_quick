@@ -178,18 +178,11 @@ final class ProfileStore: ObservableObject {
 
     static func levelKey(_ profile: String, _ account: String) -> String { AccountBook.levelKey(profile, account) }
 
-    /// A levels.json from before accounts was keyed by profile id alone: each such week goes to the account signed in to
-    /// that profile's folder now (the one it was reported on, unless it was switched meanwhile); one whose profile or
-    /// account can't be told is dropped. Keys already per account stay.
+    /// A levels.json from before accounts (AccountBook.migrated): each week goes to the account signed in to that
+    /// profile's folder now; one that can't be placed stays under its old key.
     static func migrated(_ old: [String: QuickChatLevel], profiles: [Profile],
                          account: (Profile) -> String? = { ClaudeFolder.account($0.path)?.uuid }) -> [String: QuickChatLevel] {
-        var out = old.filter { $0.key.contains("|") }
-        for (id, l) in old where !id.contains("|") {
-            guard let p = profiles.first(where: { $0.id == id }), let uuid = account(p) else { continue }
-            let key = levelKey(id, uuid)
-            if out[key] == nil { out[key] = l }
-        }
-        return out
+        AccountBook.migrated(old) { id in profiles.first { $0.id == id }.flatMap(account) }
     }
 
     /// The profile's week for one account: the one in use by default; nil: nothing reported on it yet.
@@ -280,7 +273,7 @@ final class ProfileStore: ObservableObject {
     /// cl_quick forgets the profile; its folder and sessions stay.
     func remove(_ id: String) {
         save(profiles.filter { $0.id != id })
-        levels = levels.filter { !$0.key.hasPrefix(id + "|") }
+        levels = AccountBook.removing(profile: id, from: levels)
         Files.write(levels, Files.levels)
     }
     /// A folder already used by a profile.

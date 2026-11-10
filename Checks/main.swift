@@ -238,6 +238,19 @@ do {
     check("accounts: a real uuid is never found by its address", { var l = [KnownAccount(uuid: "u5", email: "ultra-5@example.com")]
         AccountBook.note(&l, uuid: "email:ultra-5@example.com", email: "ultra-5@example.com"); return l.count == 2 }())
     check("accounts: week key", AccountBook.levelKey("main", "u1") == "main|u1")
+
+    // an older levels.json, keyed by profile id (the values stand for weeks)
+    let legacy: [String: Int] = ["main": 50, "work": 20, "gone": 7, "main|u9": 33]
+    let moved = AccountBook.migrated(legacy) { id in id == "main" ? "u1" : id == "work" ? nil : nil }
+    check("migration: a week goes to the account signed in now", moved["main|u1"] == 50 && moved["main"] == nil, moved)
+    check("migration: a week that can't be placed stays under its key", moved["work"] == 20 && moved["gone"] == 7, moved)
+    check("migration: a per-account week stays", moved["main|u9"] == 33 && moved.count == 4, moved)
+    check("migration: a per-account week wins over the legacy one", AccountBook.migrated(["main": 1, "main|u1": 2]) { _ in "u1" } == ["main|u1": 2])
+    check("migration: a second run changes nothing", AccountBook.migrated(moved) { id in id == "main" ? "u1" : nil } == moved)
+    // removing a profile takes its weeks, per account and the bare one
+    let left = AccountBook.removing(profile: "main", from: moved)
+    check("remove: every week of the profile goes, others stay", left == ["work": 20, "gone": 7], left)
+    check("remove: a profile whose id starts the same stays", AccountBook.removing(profile: "main", from: ["main-2|u1": 1, "main": 2]) == ["main-2|u1": 1])
 }
 
 try? FileManager.default.removeItem(atPath: argsFile)
