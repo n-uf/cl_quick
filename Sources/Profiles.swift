@@ -191,12 +191,17 @@ final class ProfileStore: ObservableObject {
         Files.write(list, Files.profiles)
     }
 
-    /// The first run: every folder found that is signed in, named after the folder.
+    /// The first run: every folder found that is signed in, named after the folder. Two folders signed in to the same
+    /// account never make two profiles: ~/.claude comes first, and a later folder on the same account is left out.
     func adoptFound() {
         guard profiles.isEmpty else { return }
         var list: [Profile] = []
+        var seen = Set<String>()        // account uuids and addresses already taken by an earlier folder
         for f in ClaudeFolder.found() where ClaudeFolder.usable(f) {
-            list.append(Profile(id: Self.newID(f, taken: list.map(\.id)), name: ClaudeFolder.suggestedName(f), folder: f))
+            guard let a = ClaudeFolder.account(f), !seen.contains(a.uuid), !seen.contains(a.email.lowercased()) else { continue }
+            seen.insert(a.uuid); seen.insert(a.email.lowercased())
+            list.append(Profile(id: Self.newID(f, taken: list.map(\.id)), name: ClaudeFolder.suggestedName(f), folder: f,
+                                accounts: [KnownAccount(uuid: a.uuid, email: a.email)]))
         }
         save(list)
     }
