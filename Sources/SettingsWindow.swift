@@ -977,6 +977,8 @@ struct GeneralSample {
     var clash: String? = nil
     var login = true
     var registered: String? = nil
+    /// Claude Code's list of models for the default profile's account; nil: none known yet.
+    var models: [QuickChatModelEntry]? = nil
 }
 
 /// General: one card, one grid (four labels on the left, every control in the column beside them), then one quiet strip
@@ -988,6 +990,8 @@ struct GeneralPage: View {
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     @State private var chats: [(Profile, Int, Int64)] = []
     @State private var own: Int64 = 0
+    /// Claude Code gave a new list of models: drawn again.
+    @State private var modelsTick = 0
     @Environment(\.face) private var face
 
     var body: some View {
@@ -1003,15 +1007,18 @@ struct GeneralPage: View {
                         }
                     }
                 }
+                // the newest of each family the default profile's account has, by name; its model's thinking steps
+                let list = models, family = QuickChatModels.resolve(state.settings.model, in: list).family
+                let think = ModelCatalog.thinking(state.settings.thinking, family: family, list: list)
                 GridLine(label: "Model") {
-                    KeySegments(choices: QuickChatModelChoice.allCases.map { .init(id: $0.rawValue, title: $0.title) },
-                                selected: state.settings.model.rawValue) { id in
+                    KeySegments(choices: ModelCatalog.choices(list).map { .init(id: $0.choice.rawValue, title: $0.title) },
+                                selected: family.rawValue) { id in
                         if let m = QuickChatModelChoice(rawValue: id) { state.settings.model = m; state.save() }
                     }
                 }
                 GridLine(label: "Thinking") {
-                    KeySegments(choices: QuickChatThinking.allCases.map { .init(id: $0.rawValue, title: $0.title) },
-                                selected: state.settings.thinking.rawValue) { id in
+                    KeySegments(choices: think.steps.map { .init(id: $0.rawValue, title: $0.title) },
+                                selected: think.now.rawValue) { id in
                         if let t = QuickChatThinking(rawValue: id) { state.settings.thinking = t; state.save() }
                     }
                 }
@@ -1031,10 +1038,20 @@ struct GeneralPage: View {
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.05), lineWidth: 1))
         }
         .onAppear(perform: count)
+        .onReceive(NotificationCenter.default.publisher(for: ModelCatalog.changed)) { _ in modelsTick += 1 }
         .onDisappear { state.stopRecording() }
     }
 
     /// Incognito in one sentence, the size of cl_quick's own files, and old chats from earlier versions while any are left.
+    /// Claude Code's list for the default profile's account in use (new chats start there), as last given; nil before
+    /// a chat on it has started once.
+    private var models: [QuickChatModelEntry]? {
+        _ = modelsTick
+        if let sample { return sample.models }
+        guard let p = store.profile(state.settings.defaultProfile) ?? store.profiles.first else { return nil }
+        return ModelCatalog.shared.list(profile: p.id, account: store.inUse(p)?.uuid)
+    }
+
     private var dataWords: String {
         let n = chats.reduce(0) { $0 + $1.1 }, b = chats.reduce(Int64(0)) { $0 + $1.2 }
         return "Quick chats are incognito: nothing is saved on this Mac. cl_quick's own settings, \(Files.size(sample?.own ?? own))."
@@ -1264,8 +1281,22 @@ enum SettingsRender {
             st.settings.thinking = .off
             if page == "general-recording" { st.recording = .some(nil) }
             // the words as clash() and registering put them
+            // Claude Code's list as an account might give it: "default", an alias that isn't the newest (fable is 5.1,
+            // 5.2 exists), older versions; general-nolist is a first run, before any list; general-fable picks Fable at
+            // Max, general-haiku Haiku, whose model takes fewer steps (Max is clamped to High)
+            let models: [QuickChatModelEntry] = [
+                .init(value: "default", displayName: "Opus 5.5", efforts: ["low", "medium", "high", "xhigh", "max"]),
+                .init(value: "opus", displayName: "Opus 5.5", description: "For the hardest work", efforts: ["low", "medium", "high", "xhigh", "max"]),
+                .init(value: "claude-fable-5-2", displayName: "Fable 5.2", description: "Newest Fable", efforts: ["low", "medium", "high", "xhigh", "max"]),
+                .init(value: "sonnet", displayName: "Sonnet 5.5", description: "For everyday work", efforts: ["low", "medium", "high", "xhigh"]),
+                .init(value: "haiku", displayName: "Haiku 5.5", description: "Fastest", efforts: ["low", "medium", "high"]),
+                .init(value: "fable", displayName: "Fable 5.1", efforts: ["low", "medium", "high", "xhigh", "max"]),
+                .init(value: "claude-opus-4-8", displayName: "Opus 4.8", efforts: ["low", "medium", "high"])]
+            if page == "general-fable" { st.settings.model = .fable; st.settings.thinking = .max }
+            if page == "general-haiku" { st.settings.thinking = .max }
             let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.commandSpace.title + " opens Spotlight in macOS." : nil,
-                                       registered: page == "general-taken" ? QuickChatShortcut.optionSpace.title + " is taken by another app." : nil)
+                                       registered: page == "general-taken" ? QuickChatShortcut.optionSpace.title + " is taken by another app." : nil,
+                                       models: page == "general-nolist" ? nil : models)
             view = AnyView(GeneralPage(state: st, store: ProfileStore.shared, sample: sample))
         }
         let whole = VStack(alignment: .leading, spacing: 14) {

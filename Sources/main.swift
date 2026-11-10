@@ -14,7 +14,8 @@
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
 //                                       accounts-other, accounts-forget), Add a profile (add, first, add-refused,
 //                                       add-empty) and General (general, general-clash, general-off,
-//                                       general-recording, general-taken)
+//                                       general-recording, general-taken, general-fable, general-haiku,
+//                                       general-nolist)
 //   --version
 
 import AppKit

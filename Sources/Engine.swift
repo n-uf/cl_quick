@@ -30,7 +30,106 @@ enum QuickChatEvent: Equatable {
     /// Claude Code's answer to a control request we sent (its request id): an error is its own words. The control
     /// response to a `set_model` names the model now in effect ("claude-sonnet-5-5").
     case control(id: String, error: String?, model: String?)
+    /// The models this account can use, from Claude Code's answer to `initialize` (sent when `claude` starts; nothing
+    /// goes to a model for it).
+    case models([QuickChatModelEntry])
     case ignored
+}
+
+/// One model Claude Code offers: what `--model` and `set_model` take ("claude-fable-5-2", "opus"), its name ("Fable 5.2")
+/// and the thinking efforts it takes ("low" … "max"; nil when Claude Code doesn't say).
+struct QuickChatModelEntry: Codable, Equatable {
+    var value: String
+    var displayName: String
+    var description: String? = nil
+    var efforts: [String]? = nil
+}
+
+/// The model a chat answers with: one of four families, from the lightest on; each is the newest of its family the
+/// account has (QuickChatModels). Saved settings keep the family, never a version; an older settings file's
+/// "profile" (the profile's own default, gone) reads as Haiku, the default.
+enum QuickChatModelChoice: String, CaseIterable, Codable, Identifiable {
+    case haiku, sonnet, opus, fable
+    var id: String { rawValue }
+    var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    /// A few words in a picker, when Claude Code's list gives none.
+    var blurb: String {
+        switch self {
+        case .haiku: return "fast, light on the week"
+        case .sonnet: return "for harder questions"
+        case .opus: return "for the hardest questions; uses the week fast"
+        case .fable: return "Claude's Fable family; uses the week fast"
+        }
+    }
+}
+
+/// Choosing from Claude Code's own list: plain functions, for the checks.
+enum QuickChatModels {
+    /// Claude Code's thinking efforts, in order; "off" is thinking disabled.
+    static let effortOrder = ["off", "low", "medium", "high", "xhigh", "max"]
+    /// Before any list is known (a first run): the aliases, and Low to High.
+    static let fallbackEfforts = ["low", "medium", "high"]
+
+    /// "Fable 5.2" → (fable, [5, 2]); a name that isn't one of the four families, or has no version, is nil.
+    static func family(_ e: QuickChatModelEntry) -> (QuickChatModelChoice, [Int])? {
+        let words = e.displayName.split(separator: " ")
+        guard words.count >= 2, let f = QuickChatModelChoice(rawValue: words[0].lowercased()) else { return nil }
+        let v = words[1].split(separator: ".").compactMap { Int($0) }
+        return v.isEmpty ? nil : (f, v)
+    }
+
+    /// The newest of each family in the list ("default" and older versions are left out). A family the account
+    /// doesn't have is missing.
+    static func newest(_ list: [QuickChatModelEntry]) -> [QuickChatModelChoice: QuickChatModelEntry] {
+        var best: [QuickChatModelChoice: (QuickChatModelEntry, [Int])] = [:]
+        for e in list where e.value != "default" {
+            guard let (f, v) = family(e) else { continue }
+            if let b = best[f], !newer(v, than: b.1) { continue }
+            best[f] = (e, v)
+        }
+        return best.mapValues(\.0)
+    }
+
+    /// [5, 2] is newer than [5, 1] and [5]; [5, 1, 1] newer than [5, 1].
+    static func newer(_ a: [Int], than b: [Int]) -> Bool {
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    /// The family a chat answers with: the one asked for when the account has it, else the nearest it has (the lighter
+    /// one first); with no list known, the one asked for, by its alias.
+    static func resolve(_ f: QuickChatModelChoice, in list: [QuickChatModelEntry]?) -> (family: QuickChatModelChoice, value: String, entry: QuickChatModelEntry?) {
+        guard let list else { return (f, f.rawValue, nil) }
+        let have = newest(list)
+        if let e = have[f] { return (f, e.value, e) }
+        let all = QuickChatModelChoice.allCases, i = all.firstIndex(of: f)!
+        for d in 1..<all.count {
+            for j in [i - d, i + d] where all.indices.contains(j) {
+                if let e = have[all[j]] { return (all[j], e.value, e) }
+            }
+        }
+        return (f, f.rawValue, nil)       // a list with none of the four: the alias, and Claude Code decides
+    }
+
+    /// The thinking steps a model takes: Off, then its efforts in order. With no list known, Low to High; a model that
+    /// names none takes Off only.
+    static func steps(_ entry: QuickChatModelEntry?, listKnown: Bool) -> [String] {
+        let efforts = listKnown ? (entry?.efforts ?? []) : fallbackEfforts
+        return ["off"] + effortOrder.dropFirst().filter { efforts.contains($0) }
+    }
+
+    /// The step asked for when the model takes it, else the nearest it takes (the lighter one first).
+    static func clamp(_ effort: String, to steps: [String]) -> String {
+        if steps.contains(effort) { return effort }
+        guard let i = effortOrder.firstIndex(of: effort) else { return "off" }
+        for d in 1..<effortOrder.count {
+            for j in [i - d, i + d] where effortOrder.indices.contains(j) && steps.contains(effortOrder[j]) { return effortOrder[j] }
+        }
+        return "off"
+    }
 }
 
 enum QuickChatParse {
@@ -66,6 +165,10 @@ enum QuickChatParse {
         case "control_response":
             guard let r = o["response"] as? [String: Any], let id = r["request_id"] as? String else { return .ignored }
             let error = r["subtype"] as? String == "error" ? ((r["error"] as? String) ?? "refused") : nil
+            // the answer to `initialize`: the account's models
+            if error == nil, let list = (r["response"] as? [String: Any])?["models"] as? [[String: Any]] {
+                return .models(list.compactMap(modelEntry))
+            }
             return .control(id: id, error: error, model: (r["response"] as? [String: Any])?["model"] as? String)
         case "result":
             return .done(isError: o["is_error"] as? Bool ?? false, text: o["result"] as? String ?? "",
@@ -73,6 +176,14 @@ enum QuickChatParse {
         default:
             return .ignored
         }
+    }
+
+    /// One entry of `initialize`'s models: its value and name, and the efforts it takes (none, when Claude Code says it
+    /// takes no effort; nil when it doesn't say).
+    static func modelEntry(_ m: [String: Any]) -> QuickChatModelEntry? {
+        guard let value = m["value"] as? String, let name = m["displayName"] as? String else { return nil }
+        let efforts = (m["supportedEffortLevels"] as? [String]) ?? ((m["supportsEffort"] as? Bool) == false ? [] : nil)
+        return QuickChatModelEntry(value: value, displayName: name, description: m["description"] as? String, efforts: efforts)
     }
 
     /// One message for Claude Code's input (stream-json), ending in a newline.
@@ -141,7 +252,7 @@ struct StaleAnswers {
         guard count > 0 else { return .pass }
         switch e {
         case .done: count -= 1; return .endsOne
-        case .limit, .control, .ignored: return .pass
+        case .limit, .control, .models, .ignored: return .pass
         default: return .drop
         }
     }
@@ -157,9 +268,10 @@ struct QuickChatCommand: Equatable {
     var isDefaultDir: Bool
     /// Quick chat's own folder for this profile: Claude Code runs here, so its sessions are listed apart.
     var workFolder: String
-    /// "haiku", "sonnet", "opus", or "" for the profile's own default.
+    /// What `--model` takes: the newest of the chosen family from Claude Code's list ("claude-fable-5-2"), or its alias
+    /// ("haiku") before any list is known; "" leaves it to Claude Code.
     var model: String
-    /// nil: thinking off; otherwise Claude Code's effort ("low", "medium", "high", "xhigh").
+    /// nil: thinking off; otherwise Claude Code's effort ("low", "medium", "high", "xhigh", "max").
     var effort: String? = nil
 
     static let systemPrompt = """
@@ -322,6 +434,10 @@ final class QuickChatProcess {
     /// of its own (an error, "aborted"), so every message sent gets exactly one `done`. False when it can't be asked.
     @discardableResult
     func interrupt() -> Bool { control("interrupt") != nil }
+
+    /// Asks for the account's models (a `.models` event answers). Nothing goes to a model. False when it can't be asked.
+    @discardableResult
+    func initialize() -> Bool { control("initialize") != nil }
 
     /// The model for the next answers; "" is the profile's default. The request's id, or nil when it can't be asked.
     @discardableResult

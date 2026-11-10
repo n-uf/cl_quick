@@ -82,9 +82,13 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   against macOS's own shortcuts that use Space (Spotlight, Finder's search, the input sources, as this Mac has them).
   Other apps' shortcuts can't be read and macOS lets two apps register the same key, so a clash with another app isn't
   caught and none is guessed at: if the key opens something else too, pick another. If macOS does refuse the key, or
-  one of its own shortcuts uses it, Settings says so and offers a preset none of macOS's own shortcuts uses. It's registered the way macOS's own app shortcuts are, so there's no
-  Accessibility permission to give.
-- **Model** and **Thinking** for a new chat.
+  one of its own shortcuts uses it, Settings says so and offers a preset none of macOS's own shortcuts uses. It's
+  registered the way macOS's own app shortcuts are, so there's no Accessibility permission to give.
+- **Model** and **Thinking** for a new chat. The model is one of four families, Haiku, Sonnet, Opus and Fable, each the
+  newest the account has, by Claude Code's own list (asked when a chat's `claude` starts, with `initialize`, which sends
+  nothing to a model; kept per profile and account in models.json). A family the account lacks isn't offered. Thinking
+  is Off or the efforts the chosen model takes (Low, Medium, High, Extra, Max); a step it doesn't take moves to the
+  nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
 - **Open at login**: in the menu bar, ready for the shortcut.
 - **Files**: the incognito note, cl_quick's own folder, any old chats saved by earlier versions, and
   **Remove cl_quick data…**.

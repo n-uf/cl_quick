@@ -777,8 +777,8 @@ struct QCControls: View {
                 QCChip(title: t.name, dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()), help: "Profile") { pickProfile() }
             }
             QCChip(title: model.modelTitle, help: "Model") { pickModel() }
-            QCChip(title: model.thinking == .off ? "Thinking off" : model.thinking.title, symbol: "lightbulb",
-                   lit: model.thinking != .off, help: "Thinking") { pickThinking() }
+            QCChip(title: model.effectiveThinking == .off ? "Thinking off" : model.effectiveThinking.title, symbol: "lightbulb",
+                   lit: model.effectiveThinking != .off, help: "Thinking") { pickThinking() }
             Spacer(minLength: 4)
             if inBar, let l = model.level, l.weekNow() != nil || l.full() != nil {
                 QCLevelView(level: l).padding(.horizontal, 6)
@@ -813,16 +813,14 @@ struct QCControls: View {
     }
 
     private func pickModel() {
-        let name = model.target?.name ?? "the profile"
-        QCMenu.pop(header: "Model", items: QuickChatModelChoice.allCases.map { c in
-            QCMenu.Item(title: c == .profile ? c.title : (model.knownModels[c] ?? c.title), detail: c.blurb(profile: name),
-                        on: c == model.choice) { model.choose(c) }
+        QCMenu.pop(header: "Model", items: model.modelChoices.map { m in
+            QCMenu.Item(title: m.title, detail: m.detail, on: m.choice == model.resolvedModel.family) { model.choose(m.choice) }
         }, footer: "For this chat. New chat goes back to the default in Settings.")
     }
 
     private func pickThinking() {
-        QCMenu.pop(header: "Thinking", items: QuickChatThinking.allCases.map { t in
-            QCMenu.Item(title: t.title, detail: t.blurb, on: t == model.thinking) { model.choose(t) }
+        QCMenu.pop(header: "Thinking", items: model.thinkingSteps.map { t in
+            QCMenu.Item(title: t.title, detail: t.blurb, on: t == model.effectiveThinking) { model.choose(t) }
         }, footer: "For this chat. New chat goes back to the default in Settings.")
     }
 }

@@ -245,7 +245,46 @@ run("ok") { p, events, exit in
           && ctlLog.range(of: "CTRL set_model model=sonnet")!.lowerBound < ctlLog.range(of: "USER 3")!.lowerBound
           && ctlLog.range(of: "CTRL apply_flag_settings")!.lowerBound < ctlLog.range(of: "USER 3")!.lowerBound, ctlLog)
     check("ok: no model means the default", ctlLog.components(separatedBy: "CTRL set_model").count == 4 && ctlLog.contains("CTRL set_model  "), ctlLog)
+    // the account's models: asked with `initialize`, answered as a list (nothing goes to a model)
+    check("ok: initialize sent", p.initialize())
+    wait(3) { events().contains { if case .models = $0 { return true }; return false } }
+    let listed: [QuickChatModelEntry] = events().compactMap { e -> [QuickChatModelEntry]? in
+        if case .models(let l) = e { return l }; return nil
+    }.first ?? []
+    check("ok: the models listed", listed.count == 7 && listed.map(\.value).contains("claude-fable-5-2"), listed)
+    check("ok: newest Fable picked from the list", QuickChatModels.resolve(.fable, in: listed).value == "claude-fable-5-2")
+    check("ok: the process still answers after it", p.send("fourth question") && { wait(5) { done(events()) == 4 }; return done(events()) == 4 }())
 }
+
+// MARK: the account's models (Claude Code's `initialize`)
+
+let initLine = #"{"type":"control_response","response":{"subtype":"success","request_id":"qc-9","response":{"models":[{"value":"default","displayName":"Opus 5.5","supportedEffortLevels":["low","high"]},{"value":"opus","displayName":"Opus 5.5","description":"For the hardest work","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-fable-5-2","displayName":"Fable 5.2","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"fable","displayName":"Fable 5.1"},{"value":"claude-sonnet-5-5","displayName":"Sonnet 5.5","supportedEffortLevels":["low","medium","high","xhigh"]},{"value":"sonnet-old","displayName":"Sonnet 5","supportedEffortLevels":["low"]},{"value":"haiku","displayName":"Haiku 5.5","supportsEffort":false},{"value":"other","displayName":"Something else"},{"displayName":"No value"}]}}}"#
+let ml: [QuickChatModelEntry] = { if case .models(let l) = QuickChatParse.event(line(initLine)) { return l }; return [] }()
+check("models: parsed, entries without a value left out", ml.count == 8, ml)
+check("models: efforts read", ml.first { $0.value == "opus" }?.efforts == ["low", "medium", "high", "xhigh", "max"] && ml.first { $0.value == "opus" }?.description == "For the hardest work")
+check("models: no effort said is nil, supportsEffort false is none", ml.first { $0.value == "fable" }?.efforts == nil && ml.first { $0.value == "haiku" }?.efforts == [])
+check("models: another control answer is still a control", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-2","response":{"model":"claude-sonnet-5-5"}}}"#))
+      == .control(id: "qc-2", error: nil, model: "claude-sonnet-5-5"))
+let nw = QuickChatModels.newest(ml)
+check("models: the newest of each family, not the alias", nw[.fable]?.value == "claude-fable-5-2" && nw[.sonnet]?.value == "claude-sonnet-5-5"
+      && nw[.opus]?.value == "opus" && nw[.haiku]?.value == "haiku", nw)
+check("models: default and unknown names left out", !nw.values.contains { $0.value == "default" || $0.value == "other" })
+check("models: versions compare by number", QuickChatModels.newer([5, 10], than: [5, 2]) && QuickChatModels.newer([5, 1, 1], than: [5, 1]) && !QuickChatModels.newer([5], than: [5, 0]))
+let noFable = ml.filter { !$0.displayName.hasPrefix("Fable") }
+check("models: a family missing goes to the nearest, lighter first", QuickChatModels.resolve(.fable, in: noFable).family == .opus
+      && QuickChatModels.resolve(.sonnet, in: ml.filter { !$0.displayName.hasPrefix("Sonnet") }).family == .haiku)
+let before = QuickChatModels.resolve(.fable, in: nil)
+check("models: before any list, the alias", before.family == .fable && before.value == "fable" && before.entry == nil)
+check("thinking: the model's steps, Off first", QuickChatModels.steps(nw[.sonnet], listKnown: true) == ["off", "low", "medium", "high", "xhigh"])
+check("thinking: no list, Low to High", QuickChatModels.steps(nil, listKnown: false) == ["off", "low", "medium", "high"])
+check("thinking: a model with no efforts, Off only", QuickChatModels.steps(nw[.haiku], listKnown: true) == ["off"])
+check("thinking: clamped to the nearest, lighter first", QuickChatModels.clamp("max", to: ["off", "low", "medium", "high"]) == "high"
+      && QuickChatModels.clamp("medium", to: ["off", "low", "high"]) == "low" && QuickChatModels.clamp("high", to: ["off"]) == "off"
+      && QuickChatModels.clamp("xhigh", to: ["off", "low", "medium", "high", "xhigh"]) == "xhigh")
+// settings.json's model: an old "profile" doesn't decode (the settings read it as Haiku, the default), "fable" does
+struct SavedModel: Decodable { var model: QuickChatModelChoice }
+check("settings: an old saved \"profile\" isn't a model", (try? JSONDecoder().decode(SavedModel.self, from: Data(#"{"model":"profile"}"#.utf8))) == nil)
+check("settings: fable is", (try? JSONDecoder().decode(SavedModel.self, from: Data(#"{"model":"fable"}"#.utf8)))?.model == .fable)
 
 setenv("ANTHROPIC_API_KEY", "sk-sample-should-not-pass", 1)
 setenv("CLAUDE_CODE_OAUTH_TOKEN", "sample-should-not-pass", 1)

@@ -12,34 +12,11 @@ import SwiftUI
 
 // MARK: - Settings
 
-/// The model a chat answers with: a family, or whatever the profile itself uses in Claude Code.
-enum QuickChatModelChoice: String, CaseIterable, Codable, Identifiable {
-    case haiku, sonnet, opus, profile
-    var id: String { rawValue }
-    /// For `--model`; "" leaves it to the profile.
-    var flag: String { self == .profile ? "" : rawValue }
-    var title: String {
-        switch self {
-        case .haiku: return "Haiku"
-        case .sonnet: return "Sonnet"
-        case .opus: return "Opus"
-        case .profile: return "Profile's default"
-        }
-    }
-    /// A few words in its picker.
-    func blurb(profile: String) -> String {
-        switch self {
-        case .haiku: return "fast, light on the week"
-        case .sonnet: return "for harder questions"
-        case .opus: return "the most capable; uses the week fastest"
-        case .profile: return "what \(profile) uses in Claude Code"
-        }
-    }
-}
+// The model a chat answers with (QuickChatModelChoice) is in Engine.swift, with Claude Code's list (Models.swift).
 
-/// How long Claude thinks before it answers: off, or Claude Code's effort.
+/// How long Claude thinks before it answers: off, or Claude Code's effort (the steps the model takes, Models.swift).
 enum QuickChatThinking: String, CaseIterable, Codable, Identifiable {
-    case off, low, medium, high, xhigh
+    case off, low, medium, high, xhigh, max
     var id: String { rawValue }
     var effort: String? { self == .off ? nil : rawValue }
     var title: String {
@@ -49,6 +26,7 @@ enum QuickChatThinking: String, CaseIterable, Codable, Identifiable {
         case .medium: return "Medium"
         case .high: return "High"
         case .xhigh: return "Extra"
+        case .max: return "Max"
         }
     }
     var blurb: String {
@@ -57,7 +35,8 @@ enum QuickChatThinking: String, CaseIterable, Codable, Identifiable {
         case .low: return "thinks briefly first"
         case .medium: return "thinks a while first"
         case .high: return "for harder questions"
-        case .xhigh: return "thinks longest; uses the week fastest"
+        case .xhigh: return "thinks long; uses the week fast"
+        case .max: return "thinks longest; uses the week fastest"
         }
     }
 }
@@ -233,7 +212,7 @@ final class QuickChatModel: ObservableObject {
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
-    var modelTitle: String { knownModels[choice] ?? choice.title }
+    var modelTitle: String { resolvedModel.entry?.displayName ?? knownModels[choice] ?? choice.title }
     /// A limit holds the account back: nothing is sent until it resets or another profile is picked.
     var blocked: Bool { level?.full() != nil }
 
@@ -302,7 +281,7 @@ final class QuickChatModel: ObservableObject {
         barProblem = nil
         // the chat on screen ended: this message starts a new one, with nothing from the old one
         if ended != nil { turns = []; ended = nil; accountNote = nil }
-        turns.append(QuickChatTurn(question: q, thinkingTitle: thinking.effort == nil ? nil : thinking.title))
+        turns.append(QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
         scrollTick += 1
         ask(q)
     }
@@ -329,7 +308,7 @@ final class QuickChatModel: ObservableObject {
         guard !busy, let i = turns.indices.last else { return }
         if ended != nil {
             let q = turns[i].question
-            turns = [QuickChatTurn(question: q, thinkingTitle: thinking.effort == nil ? nil : thinking.title)]
+            turns = [QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
             ended = nil; accountNote = nil
             scrollTick += 1
             ask(q)
@@ -337,7 +316,7 @@ final class QuickChatModel: ObservableObject {
         }
         turns[i].answer = ""; turns[i].thinking = ""; turns[i].problem = nil; turns[i].phase = .waiting
         turns[i].started = Date(); turns[i].seconds = nil
-        turns[i].thinkingTitle = thinking.effort == nil ? nil : thinking.title
+        turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
         ask(turns[i].question)
     }
@@ -468,7 +447,7 @@ final class QuickChatModel: ObservableObject {
 
     private func start(_ q: String, path: String, target: QuickChatTarget) {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
-                                   workFolder: target.workFolder, model: choice.flag, effort: thinking.effort)
+                                   workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort)
         // the same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
         // aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
         // accounts may share one, and must not share a running claude.
@@ -498,6 +477,7 @@ final class QuickChatModel: ObservableObject {
                 fail(.stopped(detail: "Claude Code couldn't start: \(error.localizedDescription)")); return
             }
             process = p
+            p.initialize()          // the account's models, for the pickers (nothing goes to a model)
             processKey = key
             appliedModel = cmd.model
             confirmedModel = cmd.model
@@ -581,6 +561,10 @@ final class QuickChatModel: ObservableObject {
                 if error == nil { confirmedModel = asked }
                 else if appliedModel == asked { appliedModel = confirmedModel }
             }
+        case .models(let list):
+            // the account this `claude` started on: its models (the next message asks for the newest of the family)
+            if let t = target { ModelCatalog.shared.set(list, profile: t.profileID, account: trail.reportAccount ?? t.accountUUID) }
+            objectWillChange.send()
         case .ignored:
             break
         }
@@ -600,7 +584,7 @@ final class QuickChatModel: ObservableObject {
     private func setModel(_ id: String, turn i: Int) {
         let name = QuickChatParse.modelName(id)
         turns[i].model = name
-        if choice.flag.isEmpty || name.lowercased().hasPrefix(choice.flag) { knownModels[choice] = name }
+        if name.lowercased().hasPrefix(choice.rawValue) { knownModels[choice] = name }
     }
 
     private func exited(_ status: Int32, _ tail: String) {
