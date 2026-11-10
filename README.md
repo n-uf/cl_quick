@@ -81,8 +81,8 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
 - **Shortcut**: ⌥Space by default, four other Space shortcuts, Other… for any key with ⌘, ⌃ or ⌥, or Off. It's checked
   against macOS's own shortcuts that use Space (Spotlight, Finder's search, the input sources, as this Mac has them).
   Other apps' shortcuts can't be read and macOS lets two apps register the same key, so a clash with another app isn't
-  caught and none is guessed at: if the key opens something else too, pick another. If macOS does refuse the key,
-  Settings says so and offers a free one. It's registered the way macOS's own app shortcuts are, so there's no
+  caught and none is guessed at: if the key opens something else too, pick another. If macOS does refuse the key, or
+  one of its own shortcuts uses it, Settings says so and offers a preset none of macOS's own shortcuts uses. It's registered the way macOS's own app shortcuts are, so there's no
   Accessibility permission to give.
 - **Model** and **Thinking** for a new chat.
 - **Open at login**: in the menu bar, ready for the shortcut.

@@ -1097,7 +1097,8 @@ struct GeneralPage: View {
         }
     }
 
-    /// A line under the shortcut and, under it, the first preset that's free as far as this Mac says.
+    /// A line under the shortcut and, under it, the first preset none of macOS's own shortcuts uses (another app may
+    /// still use it: those can't be read).
     private func wayOut(_ words: String, _ color: Color, from s: QuickChatShortcut) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             note(words, color, lamp: true)
