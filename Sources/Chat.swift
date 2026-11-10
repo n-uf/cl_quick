@@ -493,7 +493,9 @@ final class QuickChat {
 
     /// The chat's profile, its account and its level now, and while its limit is full the profile with the most room.
     func refresh() {
-        guard let id = model.target?.profileID, let p = store.profile(id) else { model.update(target: nil, level: nil, offer: nil); return }
+        guard let id = model.target?.profileID, store.profile(id) != nil else { model.update(target: nil, level: nil, offer: nil); return }
+        store.noteAccount(of: id)
+        guard let p = store.profile(id) else { return }
         // the most room first; one that hasn't answered anything yet comes after, as it may have room too
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in

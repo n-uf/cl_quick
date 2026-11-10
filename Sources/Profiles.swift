@@ -22,7 +22,25 @@ func maskEmail(_ email: String) -> String {
     return String(local.prefix(1)) + String(repeating: "•", count: max(3, min(local.count - 1, 7))) + email[at...]
 }
 
-/// One Claude Code folder cl_quick chats on.
+/// An account that was signed in to a profile's folder: its address and when cl_quick last saw it there. Never a token.
+struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
+    /// Claude Code's accountUuid (the address in lower case, behind "email:", when its file has none).
+    var uuid: String
+    var email: String
+    var lastSeen: Date
+    var id: String { uuid }
+
+    init(uuid: String, email: String, lastSeen: Date = Date()) { self.uuid = uuid; self.email = email; self.lastSeen = lastSeen }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uuid = try c.decode(String.self, forKey: .uuid)
+        email = try c.decode(String.self, forKey: .email)
+        lastSeen = (try? c.decodeIfPresent(Date.self, forKey: .lastSeen)) ?? Date()
+    }
+}
+
+/// One Claude Code folder cl_quick chats on, with the accounts that have been signed in to it. One of them is in use
+/// (the one its .claude.json says); the others are standby: signing in again in the same folder switches to one.
 struct Profile: Codable, Identifiable, Equatable, Hashable {
     var id: String
     var name: String
@@ -30,9 +48,11 @@ struct Profile: Codable, Identifiable, Equatable, Hashable {
     var folder: String
     /// Offered in the chat's profile picker.
     var inPicker = true
+    /// Every account cl_quick has seen signed in to the folder, the one in use among them.
+    var accounts: [KnownAccount] = []
 
-    init(id: String, name: String, folder: String, inPicker: Bool = true) {
-        self.id = id; self.name = name; self.folder = folder; self.inPicker = inPicker
+    init(id: String, name: String, folder: String, inPicker: Bool = true, accounts: [KnownAccount] = []) {
+        self.id = id; self.name = name; self.folder = folder; self.inPicker = inPicker; self.accounts = accounts
     }
     /// Tolerant: a field added later never makes older profiles.json files unreadable.
     init(from decoder: Decoder) throws {
@@ -41,6 +61,7 @@ struct Profile: Codable, Identifiable, Equatable, Hashable {
         folder = try c.decode(String.self, forKey: .folder)
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ClaudeFolder.suggestedName(folder)
         inPicker = (try? c.decodeIfPresent(Bool.self, forKey: .inPicker)) ?? true
+        accounts = (try? c.decodeIfPresent([KnownAccount].self, forKey: .accounts)) ?? []
     }
 
     var path: String { expand(folder) }
@@ -59,7 +80,7 @@ enum ClaudeFolder {
     }
 
     /// What was read from a .claude.json, kept until the file changes: it can be several MB.
-    private struct Read { var mtime: Date?; var email: String?; var plan: String? }
+    private struct Read { var mtime: Date?; var email: String?; var uuid: String?; var plan: String? }
     private static var cache: [String: Read] = [:]
     private static let lock = NSLock()
 
@@ -73,6 +94,7 @@ enum ClaudeFolder {
            let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
            let a = j["oauthAccount"] as? [String: Any] {
             r.email = a["emailAddress"] as? String
+            r.uuid = (a["accountUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
                 r.plan = p == p.lowercased() ? p.capitalized : p
             }
@@ -83,6 +105,14 @@ enum ClaudeFolder {
 
     /// The address Claude Code signed the folder in with; nil when it hasn't.
     static func email(_ path: String) -> String? { read(path).email }
+
+    /// The account signed in to the folder: Claude Code's accountUuid (or, in a file without one, "email:" and the
+    /// address in lower case) and the address. nil when it isn't signed in.
+    static func account(_ path: String) -> (uuid: String, email: String)? {
+        let r = read(path)
+        guard let email = r.email else { return nil }
+        return (r.uuid ?? "email:" + email.lowercased(), email)
+    }
 
     /// Claude's name for the plan ("Max"), when Claude Code recorded it.
     static func plan(_ path: String) -> String? { read(path).plan }
@@ -154,7 +184,39 @@ final class ProfileStore: ObservableObject {
         return id
     }
 
-    func add(_ p: Profile) { save(profiles + [p]) }
+    // MARK: accounts
+
+    /// The profile's account in use now (the folder's .claude.json), as a KnownAccount.
+    func inUse(_ p: Profile) -> KnownAccount? {
+        ClaudeFolder.account(p.path).map { a in p.accounts.first { $0.uuid == a.uuid } ?? KnownAccount(uuid: a.uuid, email: a.email) }
+    }
+
+    /// The accounts signed in before and not in use now, the most recently seen first.
+    func standby(_ p: Profile) -> [KnownAccount] {
+        let current = ClaudeFolder.account(p.path)
+        return p.accounts.filter { $0.uuid != current?.uuid }.sorted { $0.lastSeen > $1.lastSeen }
+    }
+
+    /// Whenever cl_quick looks at a profile's folder, the account signed in to it is added to the profile, or its address
+    /// and last-seen time updated (found by its uuid). Addresses only; the time is kept to the hour so a busy chat
+    /// doesn't write the file at every look. Main thread; not from a view's body.
+    func noteAccount(of id: String, now: Date = Date()) {
+        guard let p = profile(id), let a = ClaudeFolder.account(p.path) else { return }
+        var q = p
+        if let k = q.accounts.firstIndex(where: { $0.uuid == a.uuid })
+            ?? q.accounts.firstIndex(where: { $0.email.lowercased() == a.email.lowercased() }) {
+            guard q.accounts[k].uuid != a.uuid || q.accounts[k].email != a.email || now.timeIntervalSince(q.accounts[k].lastSeen) > 3600 else { return }
+            q.accounts[k].uuid = a.uuid; q.accounts[k].email = a.email; q.accounts[k].lastSeen = now
+        } else {
+            q.accounts.append(KnownAccount(uuid: a.uuid, email: a.email, lastSeen: now))
+        }
+        update(q)
+    }
+
+    /// Every profile's folder looked at once (Settings opens, the menu opens, cl_quick starts).
+    func noteAccounts() { profiles.map(\.id).forEach { noteAccount(of: $0) } }
+
+    func add(_ p: Profile) { save(profiles + [p]); noteAccount(of: p.id) }
     func update(_ p: Profile) { save(profiles.map { $0.id == p.id ? p : $0 }) }
     /// cl_quick forgets the profile; its folder and sessions stay.
     func remove(_ id: String) {
