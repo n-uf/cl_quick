@@ -3,7 +3,8 @@
 // One `claude` process per chat, kept open between messages: print mode with stream-json in and out, no tools, no MCP
 // servers, no settings files, no slash commands, and Claude Code's non-essential traffic off. It runs on the profile's
 // own folder (CLAUDE_CONFIG_DIR), so it answers on the account the profile has in use (and counts against its limits),
-// and in quick chat's own work folder, so its sessions stay apart from the profile's others. Nothing else is sent anywhere.
+// and in quick chat's own work folder. Incognito: it keeps no session (`--no-session-persistence`), so the conversation
+// lives only in that process and ends with it. Nothing else is sent anywhere.
 //
 // Everything here but `QuickChatProcess` is a plain function of its input, for the checks (Checks/quick-chat).
 
@@ -75,6 +76,24 @@ enum QuickChatParse {
         return d
     }
 
+    /// A control request for Claude Code's input (stream-json), ending in a newline: "interrupt" stops the answer under
+    /// way and keeps the conversation; "set_model" (no model: the profile's default) and "apply_flag_settings" change
+    /// the model and thinking for the next answers. Claude Code answers each with a control_response, which is ignored.
+    static func controlLine(id: String, subtype: String, _ fields: [String: Any] = [:]) -> Data {
+        var request: [String: Any] = ["subtype": subtype]
+        for (k, v) in fields { request[k] = v }
+        let o: [String: Any] = ["type": "control_request", "request_id": id, "request": request]
+        var d = (try? JSONSerialization.data(withJSONObject: o)) ?? Data()
+        d.append(0x0A)
+        return d
+    }
+
+    /// The settings that put thinking where the chat's picker is: off, or on at Claude Code's effort.
+    static func thinkingSettings(_ effort: String?) -> [String: Any] {
+        if let effort { return ["alwaysThinkingEnabled": true, "effortLevel": effort] }
+        return ["alwaysThinkingEnabled": false]
+    }
+
     /// Claude Code refused because a limit of the account is full: its error says so ("rate_limit"), or its words do
     /// ("Claude AI usage limit reached|1794776400", "You've hit your limit · resets 5pm", "5-hour limit reached").
     static func isLimit(error: String?, text: String) -> Bool {
@@ -110,22 +129,21 @@ struct QuickChatCommand: Equatable {
     var model: String
     /// nil: thinking off; otherwise Claude Code's effort ("low", "medium", "high", "xhigh").
     var effort: String? = nil
-    /// The session to go on with: after Stop, a crash, or a process closed while the chat sat idle.
-    var resume: String? = nil
 
     static let systemPrompt = """
         You are Claude, answering in a small floating chat window on the user's Mac. Answer directly and briefly unless \
         asked for more. Use Markdown; put code in fenced blocks with the language named. You have no tools here.
         """
 
+    /// Incognito: `--no-session-persistence` keeps Claude Code from writing the chat's transcript, so the conversation
+    /// lives only in this running process; there is nothing to `--resume`.
     var arguments: [String] {
         var a = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                 "--include-partial-messages", "--tools", "", "--strict-mcp-config", "--setting-sources", "",
-                 "--disable-slash-commands", "--system-prompt", Self.systemPrompt]
+                 "--include-partial-messages", "--no-session-persistence", "--tools", "", "--strict-mcp-config",
+                 "--setting-sources", "", "--disable-slash-commands", "--system-prompt", Self.systemPrompt]
         if !model.isEmpty { a += ["--model", model] }
         if let effort { a += ["--effort", effort, "--settings", #"{"alwaysThinkingEnabled":true}"#] }
         else { a += ["--settings", #"{"alwaysThinkingEnabled":false}"#] }
-        if let resume, !resume.isEmpty { a += ["--resume", resume] }
         return a
     }
 
@@ -152,8 +170,9 @@ struct QuickChatCommand: Equatable {
         return env
     }
 
-    /// The folder name Claude Code keeps this work folder's sessions under, in the profile's folder: every UTF-16 unit
-    /// that isn't an ASCII letter or digit becomes "-", as Claude Code counts them (~/.claude/projects/<this>/).
+    /// The folder name Claude Code kept this work folder's sessions under, in the profile's folder, before quick chats
+    /// were incognito: every UTF-16 unit that isn't an ASCII letter or digit becomes "-", as Claude Code counts them
+    /// (~/.claude/projects/<this>/). Only for finding and removing those old chats.
     static func projectKey(_ folder: String) -> String {
         String(folder.utf16.map { u -> Character in
             guard u < 128, let s = Unicode.Scalar(u), s.properties.isAlphabetic || ("0"..."9").contains(s) else { return "-" }
@@ -251,6 +270,28 @@ final class QuickChatProcess {
         do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.userLine(text)); return true }
         catch { return false }
     }
+
+    private var requests = 0
+
+    private func control(_ subtype: String, _ fields: [String: Any] = [:]) -> Bool {
+        lock.lock(); let closed = stopping; requests += 1; let id = "qc-\(requests)"; lock.unlock()
+        guard !closed, process.isRunning else { return false }
+        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.controlLine(id: id, subtype: subtype, fields)); return true }
+        catch { return false }
+    }
+
+    /// Stops the answer under way; the conversation stays in the process. Claude Code then ends that turn with a result
+    /// of its own (an error, "aborted"), so every message sent gets exactly one `done`. False when it can't be asked.
+    @discardableResult
+    func interrupt() -> Bool { control("interrupt") }
+
+    /// The model for the next answers; "" is the profile's default.
+    @discardableResult
+    func setModel(_ model: String) -> Bool { control("set_model", model.isEmpty ? [:] : ["model": model]) }
+
+    /// Thinking for the next answers: off (nil), or on at that effort.
+    @discardableResult
+    func setThinking(_ effort: String?) -> Bool { control("apply_flag_settings", ["settings": QuickChatParse.thinkingSettings(effort)]) }
 
     /// Ends it: closes its input, then asks it to stop, then stops it.
     func stop() {
