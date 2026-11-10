@@ -371,7 +371,15 @@ final class QuickChatModel: ObservableObject {
             // the folder may have changed account since the chat last looked: its file is read again (off the main thread)
             self.freshTarget(first.profileID) { fresh in
                 guard gen == self.generation, let i = self.turns.indices.last, self.turns[i].busy else { return }     // stopped meanwhile
-                if let fresh, fresh != self.target { self.target = fresh }
+                if let fresh, fresh != self.target {
+                    let was = self.target?.accountUUID
+                    self.target = fresh
+                    // the folder moved to another account: the account line starts over and says where it is
+                    if let was, let now = fresh.accountUUID, was != now {
+                        self.forgetAccount()
+                        self.accountNote = "\(fresh.name) is on \(maskEmail(fresh.email ?? "another account")) now."
+                    }
+                }
                 guard let target = self.target else { self.fail(.noProfile); return }
                 // a session belongs to its account: on another one it isn't gone on with, and a new `claude` begins
                 if !self.trail.canResume(on: target.accountUUID) {
@@ -608,6 +616,7 @@ final class QuickChat {
             ClaudeFolder.reload([p.path]) { _ in
                 self.store.noteAccount(of: id)
                 done(self.store.profile(id).map(QuickChatTarget.init))
+                self.refresh()          // the account line, offers and notices of the account now in use
             }
         }
         switcher.onOutcome = { [weak self] goal, outcome in self?.switched(goal, outcome) }
