@@ -1,7 +1,8 @@
 // QuickChatViews: the quick chat's bar and chat window (QuickChat.swift), in Claude's own dark colours rather than
-// cl_audit's front panel: it should feel like Claude. The bar is a field over one row of keys; the first message turns it
-// into a chat window: the account line on top, the chat, and the field at the bottom. Answers are Markdown in a serif,
-// code blocks have Copy, and each answer says which model gave it.
+// cl_audit's front panel: it should feel like Claude. The bar is a field over one row of controls; the first message
+// turns it into a chat window: the account line on top, the chat, and the field box at the bottom, all on one 10 pt
+// outer gap (QCSpace). Answers are Markdown in the system font, code blocks have Copy, and the last answer says which
+// model gave it. Model and thinking are step controls (QCStepControl); the profile is a menu.
 
 import AppKit
 import SwiftUI
@@ -153,7 +154,7 @@ struct QCWindow: View {
     @ViewBuilder private var turns: some View {
         if let note = model.accountNote { QCNote(text: note).padding(.top, 14) }
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
-            QCTurnView(turn: t, last: i == model.turns.count - 1, model: model)
+            QCTurnView(turn: t, first: i == 0 && model.accountNote == nil, last: i == model.turns.count - 1, model: model)
         }
         // the chat ended (idle, a crash, Stop that didn't stop): said once, under the turns that are left to read
         if let e = model.ended { QCEndNote(text: e.line).padding(.top, 12) }
@@ -485,53 +486,65 @@ struct QCLevelGroup: View {
 
 // MARK: - One question and its answer
 
+/// A question in its bubble, then the answer. Under the last answer its actions (Copy, Ask again) and who answered;
+/// under earlier ones the same row only while the pointer is on that turn (its room is kept, so nothing moves).
 struct QCTurnView: View {
     let turn: QuickChatTurn
+    let first: Bool
     let last: Bool
     @ObservedObject var model: QuickChatModel
+    @State private var hover = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Spacer(minLength: 70)
+                Spacer(minLength: 56)        // a bubble is at most about 82% of the chat's width
                 Text(turn.question)
-                    .font(.system(size: 14.5))
+                    .font(.system(size: 14))
+                    .lineSpacing(3)
                     .foregroundColor(QCColor.text)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(QCColor.bubble))
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(QCColor.bubble))
             }
-            .padding(.top, 14)
-            if turn.thinkingTitle != nil { QCThought(turn: turn) }
+            // after the previous turn's actions row: about 32 pt between an answer and the next question
+            .padding(.top, first ? 0 : 4)
+            if turn.thinkingTitle != nil { QCThought(turn: turn).padding(.top, 12) }
             if !turn.answer.isEmpty {
-                QCAnswer(text: turn.answer).equatable()
+                QCAnswer(text: turn.answer).equatable().padding(.top, turn.thinkingTitle != nil ? 4 : 10)
             }
-            if turn.phase == .waiting || turn.phase == .streaming { QCPulse() }
-            if turn.phase == .done || turn.phase == .stopped { footer }
+            if turn.phase == .waiting || turn.phase == .streaming { QCPulse().padding(.top, 10) }
+            if turn.phase == .done || turn.phase == .stopped {
+                let shown = last || hover
+                footer.padding(.top, 4).opacity(shown ? 1 : 0).allowsHitTesting(shown)
+            }
             if let p = turn.problem, turn.phase == .failed {
                 QCProblemView(problem: p, model: model, answered: !turn.answer.isEmpty, last: last)
+                    .padding(.top, 12).padding(.bottom, 8)
             }
         }
-        .padding(.bottom, 4)
+        .onHover { hover = $0 }
     }
 
+    /// 24 pt: Copy and Ask again (their glyphs on the chat's edge), then "Opus 5.5 · high · 7.8 s".
     private var footer: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             QCCopyIcon(text: turn.answer)
             if last { QCIconButton(symbol: "arrow.clockwise", help: "Ask again", small: true) { model.again() } }
-            Text(words).font(.system(size: 12)).foregroundColor(QCColor.muted).padding(.leading, 6)
+            Text(words).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).padding(.leading, 4)
         }
-        .padding(.leading, -7)
+        .frame(height: QCSpace.small)
+        .padding(.leading, -5)
     }
 
     private var words: String {
         let who = turn.model.isEmpty ? "Claude" : turn.model
-        if turn.phase == .stopped { return "\(who) · stopped by you" }
-        var s = "answered by \(who)"
-        if let th = turn.thinkingTitle { s += ", thinking \(th.lowercased())" }
-        if let sec = turn.seconds { s += " · " + QCFormat.seconds(sec) }
-        return s
+        if turn.phase == .stopped { return "\(who) · stopped" }
+        var parts = [who]
+        if let th = turn.thinkingTitle { parts.append(th.lowercased()) }
+        if let sec = turn.seconds { parts.append(QCFormat.seconds(sec)) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -548,12 +561,12 @@ struct QCThought: View {
                     Text(thinking ? "Thinking…" : turn.thinkingSeconds.map { "Thought for " + QCFormat.seconds($0) } ?? "Thought")
                     Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(open ? 90 : 0))
                 }
-                .font(.system(size: 13)).foregroundColor(QCColor.muted)
+                .font(.system(size: 12.5)).foregroundColor(QCColor.muted).frame(height: 20)
             }
             .buttonStyle(.plain)
             .disabled(turn.thinking.isEmpty)
             if open, !turn.thinking.isEmpty {
-                Text(turn.thinking).font(.system(size: 13)).foregroundColor(QCColor.muted).lineSpacing(2)
+                Text(turn.thinking).font(.system(size: 12.5)).foregroundColor(QCColor.muted).lineSpacing(3)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 12)
                     .overlay(Rectangle().fill(QCColor.line).frame(width: 2), alignment: .leading)
@@ -589,7 +602,7 @@ struct QCAnswer: View, Equatable {
         case .paragraph(let s):
             prose(s)
         case .heading(let level, let s):
-            Text(Self.inline(s)).font(.system(size: level <= 2 ? 17 : 15.5, weight: .semibold, design: .serif))
+            Text(Self.inline(s)).font(.system(size: level <= 2 ? 17 : 15, weight: .semibold))
                 .foregroundColor(QCColor.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
         case .bullets(let items):
             VStack(alignment: .leading, spacing: 4) {
@@ -601,7 +614,7 @@ struct QCAnswer: View, Equatable {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { i, it in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("\(start + i).").font(.system(size: 15, design: .serif)).foregroundColor(QCColor.muted)
+                        Text("\(start + i).").font(.system(size: 14).monospacedDigit()).foregroundColor(QCColor.muted)
                         prose(it)
                     }
                 }
@@ -616,11 +629,12 @@ struct QCAnswer: View, Equatable {
         }
     }
 
+    /// The system font at 14 on 21 pt lines: one family across the window.
     private func prose(_ s: String) -> some View {
         Text(Self.inline(s))
-            .font(.system(size: 15.5, design: .serif))
+            .font(.system(size: 14))
             .foregroundColor(QCColor.text)
-            .lineSpacing(3)
+            .lineSpacing(4)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
     }
@@ -629,7 +643,7 @@ struct QCAnswer: View, Equatable {
     static func inline(_ s: String) -> AttributedString {
         var a = QuickChatMarkdown.inline(s)
         for run in a.runs where run.inlinePresentationIntent?.contains(.code) == true {
-            a[run.range].font = .system(size: 13.5, design: .monospaced)
+            a[run.range].font = .system(size: 12.5, design: .monospaced)
             a[run.range].foregroundColor = QCColor.inlineCode
         }
         return a
@@ -643,12 +657,14 @@ struct QCCodeBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language.isEmpty ? "code" : language).font(.system(size: 12)).foregroundColor(QCColor.muted)
+            // a 28 pt top row: the language, and Copy as an icon
+            HStack(spacing: 0) {
+                Text(language.isEmpty ? "code" : language).font(.system(size: 11.5)).foregroundColor(QCColor.muted)
                 Spacer()
-                QCCopyLabel(text: code)
+                QCCopyIcon(text: code)
             }
-            .padding(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 4))
+            .padding(.leading, 12).padding(.trailing, 2)
+            .frame(height: QCSpace.row)
             Rectangle().fill(QCColor.line).frame(height: 1)
             if rendering {        // a picture can't draw a scroll view
                 codeText.frame(maxWidth: .infinity, alignment: .leading).clipped()
@@ -656,17 +672,18 @@ struct QCCodeBlock: View {
                 ScrollView(.horizontal, showsIndicators: false) { codeText }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(QCColor.code))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(QCColor.line))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(QCColor.code))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(QCColor.line))
     }
 
     private var codeText: some View {
         Text(code)
             .font(.system(size: 12.5, design: .monospaced))
+            .lineSpacing(3)
             .foregroundColor(QCColor.codeText)
             .textSelection(.enabled)
             .fixedSize()
-            .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+            .padding(EdgeInsets(top: 8, leading: 12, bottom: 10, trailing: 12))
     }
 }
 
@@ -1159,7 +1176,7 @@ struct QCIconButton: View {
     }
 }
 
-/// Copy under an answer: its icon turns into a tick for a moment.
+/// Copy under an answer and in a code block's top row: its icon turns into a tick for a moment.
 struct QCCopyIcon: View {
     let text: String
     @State private var done = false
@@ -1168,25 +1185,6 @@ struct QCCopyIcon: View {
             QCCopy.put(text); done = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { done = false }
         }
-    }
-}
-
-/// Copy in a code block's header: "Copy", then "Copied" for a moment.
-struct QCCopyLabel: View {
-    let text: String
-    @State private var done = false
-    var body: some View {
-        Button {
-            QCCopy.put(text); done = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { done = false }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: done ? "checkmark" : "doc.on.doc").font(.system(size: 11))
-                Text(done ? "Copied" : "Copy").font(.system(size: 12))
-            }
-            .foregroundColor(QCColor.muted).padding(.horizontal, 8).frame(height: 26)
-        }
-        .buttonStyle(.plain)
     }
 }
 
