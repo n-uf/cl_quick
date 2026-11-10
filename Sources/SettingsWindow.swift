@@ -20,6 +20,15 @@ final class SettingsState: ObservableObject {
     @Published var tick = 0
     private var timer: Timer?
     private var since = Date()
+    private var switchWatch: NSObjectProtocol?
+
+    init() {
+        // a switch of account began, ended or was dropped (the chat's or this window's): the cards are drawn again
+        switchWatch = NotificationCenter.default.addObserver(forName: AccountSwitcher.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.tick += 1
+        }
+    }
+    deinit { if let switchWatch { NotificationCenter.default.removeObserver(switchWatch) } }
 
     // MARK: Record another…
 
@@ -189,28 +198,53 @@ struct WrapLayout: Layout {
 /// The account signed in to a folder, as cl_audit draws an account: a lamp, the address, the plan, a display window
 /// with its state, and the week in twelve segments when Claude Code has reported it.
 struct AccountBox: View {
-    let folder: String
+    /// The first line: the masked address, or the folder when nothing is signed in.
+    var title: String
+    /// The second line: the plan and the folder, or when a standby account was last seen.
+    var detail: String
+    /// The lamp: lit for the account in use or a folder signed in, dark for a standby account.
+    var lit: Bool
+    var status: String
+    var tone: DisplayWindow.Tone
+    /// The week as last reported on this account.
     var level: QuickChatLevel? = nil
-    var signingIn = false
+    /// Said in place of the week when there are no numbers yet (a standby account says it; a folder just shows none).
+    var noWeek: String? = nil
     var badge: AnyView? = nil
+    /// Keys under the week.
+    var actions: AnyView? = nil
     @Environment(\.face) private var face
 
-    var body: some View {
+    /// A folder as a whole: the account signed in to it, if any.
+    init(folder: String, level: QuickChatLevel? = nil, signingIn: Bool = false, badge: AnyView? = nil) {
         let email = ClaudeFolder.email(folder)
+        self.init(title: email.map(maskEmail) ?? tilde(folder),
+                  detail: ([ClaudeFolder.plan(folder)].compactMap { $0 } + [tilde(folder)]).joined(separator: " · "),
+                  lit: email != nil,
+                  status: signingIn ? "Signing in" : email == nil ? "Not signed in" : "Signed in",
+                  tone: signingIn ? .amber : email == nil ? .normal : .ok, level: level, badge: badge)
+    }
+
+    init(title: String, detail: String, lit: Bool, status: String, tone: DisplayWindow.Tone, level: QuickChatLevel? = nil,
+         noWeek: String? = nil, badge: AnyView? = nil, actions: AnyView? = nil) {
+        self.title = title; self.detail = detail; self.lit = lit; self.status = status; self.tone = tone
+        self.level = level; self.noWeek = noWeek; self.badge = badge; self.actions = actions
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 9) {
-                LED(color: face.ok, lit: email != nil, size: 7)
+                LED(color: face.ok, lit: lit, size: 7)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(email.map(maskEmail) ?? tilde(folder)).font(.system(size: 13, weight: .semibold)).foregroundStyle(face.text)
-                    Text(([ClaudeFolder.plan(folder)].compactMap { $0 } + [tilde(folder)]).joined(separator: " · "))
-                        .font(.system(size: 11)).foregroundStyle(face.muted)
+                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(face.text)
+                    Text(detail).font(.system(size: 11)).foregroundStyle(face.muted)
                 }
                 Spacer(minLength: 8)
-                if let badge { badge }
-                else if signingIn { DisplayWindow(text: "Signing in", tone: .amber, height: 18, size: 9) }
-                else { DisplayWindow(text: email == nil ? "Not signed in" : "Signed in", tone: email == nil ? .normal : .ok, height: 18, size: 9) }
+                if let badge { badge } else { DisplayWindow(text: status, tone: tone, height: 18, size: 9) }
             }
-            if let level { WeekSegments(level: level) }
+            if let level, level.weekNow() != nil || level.full() != nil { WeekSegments(level: level) }
+            else if let noWeek { Text("Week: \(noWeek)").font(.system(size: 11)).foregroundStyle(face.muted) }
+            if let actions { actions }
         }
         .padding(.horizontal, 10).padding(.vertical, 9)
         .background(WellShape(well: face.win, radius: 7))
@@ -252,22 +286,94 @@ struct WeekSegments: View {
 
 // MARK: - Pages
 
+/// What one account's box on a profile's card shows.
+struct AccountEntry: Identifiable, Equatable {
+    var id: String
+    var email: String
+    var detail: String
+    /// The one signed in to the folder now; the others are standby.
+    var inUse: Bool
+    var level: QuickChatLevel?
+    /// A sign-in for it is being waited for.
+    var signing = false
+}
+
+/// A profile's accounts: the one in use ("In use", its week, Sign in again…), then the standby ones ("Standby", their
+/// last week or "no numbers yet", Switch to this account…).
+struct AccountList: View {
+    let entries: [AccountEntry]
+    /// A sign-in is being waited for: switching waits.
+    var busy = false
+    var switchTo: (AccountEntry) -> Void = { _ in }
+    var signInAgain: (AccountEntry) -> Void = { _ in }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(entries) { e in
+                AccountBox(title: maskEmail(e.email), detail: e.detail, lit: e.inUse,
+                           status: e.signing ? "Signing in" : e.inUse ? "In use" : "Standby",
+                           tone: e.signing ? .amber : e.inUse ? .ok : .normal,
+                           level: e.level, noWeek: "no numbers yet",
+                           actions: AnyView(HStack(spacing: 8) {
+                               if e.inUse { Button("Sign in again…") { signInAgain(e) } }
+                               else { Button("Switch to this account…") { switchTo(e) }.disabled(busy) }
+                           }.buttonStyle(PillButtonStyle(compact: true))))
+            }
+        }
+    }
+}
+
 struct ProfilePage: View {
     @ObservedObject var state: SettingsState
     @ObservedObject var store: ProfileStore
     let profile: Profile
     @State private var name = ""
+    @State private var address = ""
+    @State private var problem: String?
     @Environment(\.face) private var face
 
+    private var switcher: AccountSwitcher { .shared }
+
     var body: some View {
-        SCard(title: "Profile", info: "A Claude Code folder cl_quick chats on, with the account signed in to it. The chat answers on that account and counts against its limits.") {
+        let waiting = switcher.waiting[profile.id], mismatch = switcher.mismatch[profile.id]
+        SCard(title: "Profile", info: "A Claude Code folder cl_quick chats on, with its accounts: the one signed in now, in use, and the others on standby. The chat answers on the account in use and counts against its limits.") {
             SRow(label: "Name", first: true) {
                 TextField("", text: $name, onCommit: rename).textFieldStyle(.plain).font(.system(size: 13)).frame(maxWidth: 220)
-                    .onAppear { name = profile.name }
-                    .onChange(of: profile.id) { _ in name = profile.name }
+                    .onAppear { name = profile.name; store.noteAccount(of: profile.id) }
+                    .onChange(of: profile.id) { _ in name = profile.name; problem = nil; address = "" }
             }
-            SRow(label: "Account", info: "Read from the folder's own Claude Code file, never the Keychain. The week is what Claude Code reported after the last answer on this profile; cl_quick reads no usage of its own.", stacked: true) {
-                AccountBox(folder: profile.path, level: store.level(of: profile), signingIn: state.signingIn.contains(profile.path))
+            SRow(label: "Accounts", info: "A folder holds one signed-in account at a time. Switching signs in again in this same folder, as the other account, so every Claude Code session using it moves to that account. Read from the folder's own Claude Code file, never the Keychain. The week is what Claude Code reported after the last answer on that account; cl_quick reads no usage of its own.", stacked: true) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if store.inUse(profile) == nil {
+                        AccountBox(folder: profile.path, signingIn: state.signingIn.contains(profile.path))
+                    }
+                    AccountList(entries: entries(waiting), busy: waiting != nil,
+                                switchTo: { e in switcher.confirmAndSwitch(profile, uuid: e.id, email: e.email, origin: .settings) },
+                                signInAgain: { e in
+                                    SignIn.open(folder: profile.path, email: e.email) { why in if let why { SignIn.tell(why) } }
+                                })
+                    if let waiting {
+                        SRowLine(text: "Waiting for the sign-in… Finish it in Terminal and the browser as \(maskEmail(waiting.wantedEmail)). cl_quick looks at the folder every 2 s, for 10 minutes.", color: face.caution)
+                        HStack(spacing: 8) {
+                            Button("Show Terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) }
+                            Button("Stop waiting") { switcher.drop(profile.id) }
+                        }.buttonStyle(PillButtonStyle(compact: true))
+                    } else if let m = mismatch {
+                        SRowLine(text: "Signed in as \(maskEmail(m.signedIn)), not \(maskEmail(m.goal.wantedEmail)).", color: face.danger)
+                        Button("Sign in again…") { switcher.begin(profile, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: .settings) }
+                            .buttonStyle(PillButtonStyle(compact: true))
+                    }
+                }
+            }
+            SRow(label: "Another account", info: "Signs in again in this folder, as that address: Claude Code's sign-in opens in Terminal and the browser decides which account signs in. The account becomes the one in use, and the one now in use stays here on standby.", stacked: true) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        TextField("Address, e.g. you@example.com", text: $address).textFieldStyle(.plain).font(.system(size: 13)).frame(maxWidth: 230)
+                        Button("Add an account…") { addAccount() }.buttonStyle(PillButtonStyle(compact: true))
+                            .disabled(!Self.looksLikeAddress(address) || waiting != nil)
+                    }
+                    if let problem { SRowLine(text: problem, color: face.danger) }
+                }
             }
             SRow(label: "Default", info: "The profile the shortcut chats on. The chat's picker changes it for one chat.") {
                 SSwitch(isOn: Binding(get: { (state.settings.defaultProfile ?? store.profiles.first?.id) == profile.id },
@@ -287,6 +393,39 @@ struct ProfilePage: View {
         }
     }
 
+    /// The account in use first, then the standby ones.
+    private func entries(_ waiting: SwitchGoal?) -> [AccountEntry] {
+        var out: [AccountEntry] = []
+        if let u = store.inUse(profile) {
+            out.append(AccountEntry(id: u.uuid, email: u.email,
+                                    detail: ([ClaudeFolder.plan(profile.path)].compactMap { $0 } + [tilde(profile.path)]).joined(separator: " · "),
+                                    inUse: true, level: store.level(of: profile, account: u.uuid)))
+        }
+        for a in store.standby(profile) {
+            let signing = waiting.map { $0.wantedUUID == a.id || $0.wantedEmail.lowercased() == a.email.lowercased() } ?? false
+            out.append(AccountEntry(id: a.uuid, email: a.email, detail: "Last in use \(TimeWords.when(a.lastSeen))", inUse: false,
+                                    level: store.level(of: profile, account: a.uuid), signing: signing))
+        }
+        return out
+    }
+
+    /// Something@something.something, no spaces: Claude Code's own sign-in page checks the rest.
+    static func looksLikeAddress(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard !t.contains(" "), let at = t.firstIndex(of: "@"), at != t.startIndex else { return false }
+        let host = t[t.index(after: at)...]
+        return host.contains(".") && !host.hasPrefix(".") && !host.hasSuffix(".") && !host.contains("@")
+    }
+
+    private func addAccount() {
+        let a = address.trimmingCharacters(in: .whitespaces)
+        if store.inUse(profile)?.email.lowercased() == a.lowercased() { problem = "\(maskEmail(a)) is the account in use already."; return }
+        problem = nil
+        let known = profile.accounts.first { $0.email.lowercased() == a.lowercased() }
+        switcher.confirmAndSwitch(profile, uuid: known?.uuid, email: known?.email ?? a, origin: .settings)
+        address = ""
+    }
+
     private func rename() {
         let n = name.trimmingCharacters(in: .whitespaces)
         guard !n.isEmpty, n != profile.name else { name = profile.name; return }
@@ -299,6 +438,7 @@ struct ProfilePage: View {
         a.informativeText = "cl_quick forgets it. The folder \(tilde(profile.path)), its sign-in and its sessions stay as they are."
         a.addButton(withTitle: "Remove"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
+        switcher.drop(profile.id)
         store.remove(profile.id)
         state.signingIn.remove(profile.path)
         if state.settings.defaultProfile == profile.id { state.settings.defaultProfile = nil; state.save() }
