@@ -23,6 +23,17 @@ struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
     var isPlaceholder: Bool { uuid.hasPrefix("email:") }
 }
 
+/// The account a running `claude` started on. What it reports (a week, a full limit) belongs to that account, whatever
+/// the chat's target says by then: the folder may have changed account while an answer was on its way.
+struct AccountTrail {
+    private(set) var process: String?
+
+    mutating func processStarted(on uuid: String?) { process = uuid }
+    mutating func processEnded() { process = nil }
+    /// The account a report from the running `claude` is recorded on.
+    var reportAccount: String? { process }
+}
+
 enum AccountBook {
     /// The key a week is kept under: the profile and the account, "<profile id>|<account uuid>".
     static func levelKey(_ profile: String, _ account: String) -> String { profile + "|" + account }

@@ -239,6 +239,15 @@ do {
         AccountBook.note(&l, uuid: "email:ultra-5@example.com", email: "ultra-5@example.com"); return l.count == 2 }())
     check("accounts: week key", AccountBook.levelKey("main", "u1") == "main|u1")
 
+    // what a `claude` reports belongs to the account it started on, whatever the chat's target says later
+    var trail = AccountTrail()
+    check("trail: nothing running, nothing to report on", trail.reportAccount == nil)
+    trail.processStarted(on: "u1")
+    let targetNow = "u2"        // the folder moved to another account while the answer was on its way
+    check("trail: a report goes to the account the process started on", trail.reportAccount == "u1" && trail.reportAccount != targetNow)
+    trail.processEnded()
+    check("trail: a process that ended reports nowhere", trail.reportAccount == nil)
+
     // an older levels.json, keyed by profile id (the values stand for weeks)
     let legacy: [String: Int] = ["main": 50, "work": 20, "gone": 7, "main|u9": 33]
     let moved = AccountBook.migrated(legacy) { id in id == "main" ? "u1" : id == "work" ? nil : nil }

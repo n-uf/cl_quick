@@ -230,6 +230,8 @@ final class QuickChatModel: ObservableObject {
 
     private var process: QuickChatProcess?
     private var processKey = ""
+    /// The account the running `claude` started on, for what it reports.
+    private var trail = AccountTrail()
     private var session: String?
     /// The current `claude` started its session (its first line came): one that ends before can't go on with it.
     private var processStarted = false
@@ -365,6 +367,7 @@ final class QuickChatModel: ObservableObject {
                 self.process = p
                 self.processKey = key
                 self.processStarted = false
+                self.trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
             }
             self.idleTimer?.invalidate()
             if self.process?.send(q) != true { self.fail(.stopped(detail: "Claude Code didn't take the message.")) }
@@ -400,8 +403,7 @@ final class QuickChatModel: ObservableObject {
         case .limit(let type, let used, let status, let resets):
             var l = level ?? QuickChatLevel()
             l.apply(type: type, used: used, status: status, resets: resets)
-            level = l
-            if let t = target, let u = t.accountUUID { levelReported(t.profileID, u, l) }
+            reportLevel(l)
         case .done(let isError, let text, let ms, let s):
             flush()
             if !s.isEmpty { session = s }
@@ -415,8 +417,7 @@ final class QuickChatModel: ObservableObject {
                 if turns[i].problem == .limitFull, level?.full() == nil {
                     var l = level ?? QuickChatLevel()
                     l.refusedUntil = l.refusedUntil ?? Date().addingTimeInterval(3600)
-                    level = l
-                    if let t = target, let u = t.accountUUID { levelReported(t.profileID, u, l) }
+                    reportLevel(l)
                 }
             } else {
                 if turns[i].answer.isEmpty { turns[i].answer = text }
@@ -433,6 +434,15 @@ final class QuickChatModel: ObservableObject {
         }
     }
 
+    /// What Claude Code said about its limits is the account the `claude` started on, not whatever the target says now
+    /// (the folder may have changed account while the answer was on its way). The account line shows it only while the
+    /// target is still that account.
+    private func reportLevel(_ l: QuickChatLevel) {
+        guard let t = target, let u = trail.reportAccount else { return }
+        if u == t.accountUUID { level = l }
+        levelReported(t.profileID, u, l)
+    }
+
     private func setModel(_ id: String, turn i: Int) {
         let name = QuickChatParse.modelName(id)
         turns[i].model = name
@@ -442,6 +452,7 @@ final class QuickChatModel: ObservableObject {
     private func exited(_ status: Int32, _ tail: String) {
         process = nil
         processKey = ""
+        trail.processEnded()
         flush()
         // it ended before its session began (a session to go on with that is gone, say): Retry starts a new one
         if !processStarted { session = nil }
@@ -476,6 +487,7 @@ final class QuickChatModel: ObservableObject {
         process?.stop()
         process = nil
         processKey = ""
+        trail.processEnded()
         pending = ""; pendingThinking = ""
     }
 
