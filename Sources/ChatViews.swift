@@ -154,12 +154,17 @@ struct QCHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            QCHeaderInfo(target: model.target, level: model.level, hover: hover || pictureHover)
+            QCHeaderInfo(target: model.target, level: model.level, hover: hover || pictureHover) {
+                if let id = model.target?.profileID { model.openSettings(id) }      // the chat stays where it is
+            }
             Spacer(minLength: 8)
-            QCIconButton(symbol: "square.and.pencil", help: "New chat") { model.newChat() }
-            QCIconButton(symbol: "xmark", help: "Hide (Esc)") { model.hide() }
+            // a tight pair, each a 24 pt target
+            HStack(spacing: 0) {
+                QCIconButton(symbol: "square.and.pencil", help: "New chat", width: 24) { model.newChat() }
+                QCIconButton(symbol: "xmark", help: "Hide (Esc)", width: 24) { model.hide() }
+            }
         }
-        .padding(EdgeInsets(top: 10, leading: 18, bottom: 6, trailing: 10))
+        .padding(EdgeInsets(top: 10, leading: 12, bottom: 6, trailing: 13))
         .qcDraggable(hover: $hover)       // the pointer anywhere on the line: hover, without taking the mouse from the drag
     }
 }
@@ -179,7 +184,8 @@ extension EnvironmentValues {
 ///   2. the reset times go;
 ///   3. the percentages go (bars only; "full" stays);
 ///   4. the "session" label goes (the session bar is the first one, the week's carries its label);
-///   5. the address smudge is cut to a short one.
+///   5. the address smudge is cut to a short one;
+///   6. the address goes (and a profile name too long for the window on its own is cut: the only ellipsis).
 /// While the pointer is on the header the numbers come back first: the address is cut short before they go, and the line
 /// shows what it can of them; the tooltip has all of them, as words, always.
 struct QCHeaderDetail: Equatable {
@@ -188,6 +194,7 @@ struct QCHeaderDetail: Equatable {
     var pct: Bool
     var sessionLabel: Bool
     var shortAddress: Bool
+    var address = true
 
     static let steps: [QCHeaderDetail] = [
         .init(resets: .words, pct: true, sessionLabel: true, shortAddress: false),
@@ -196,12 +203,13 @@ struct QCHeaderDetail: Equatable {
         .init(resets: .none, pct: false, sessionLabel: true, shortAddress: false),
         .init(resets: .none, pct: false, sessionLabel: false, shortAddress: false),
         .init(resets: .none, pct: false, sessionLabel: false, shortAddress: true),
+        .init(resets: .none, pct: false, sessionLabel: false, shortAddress: true, address: false),     // 6. no address
     ]
     static let hoverSteps: [QCHeaderDetail] = [
         steps[0], steps[1], steps[2],
         .init(resets: .none, pct: true, sessionLabel: true, shortAddress: true),
         .init(resets: .none, pct: true, sessionLabel: false, shortAddress: true),
-        steps[3], steps[4], steps[5],
+        steps[3], steps[4], steps[5], steps[6],
     ]
 }
 
@@ -210,13 +218,18 @@ struct QCHeaderInfo: View {
     let target: QuickChatTarget?
     let level: QuickChatLevel?
     let hover: Bool
+    /// The profile's name was clicked.
+    let openProfile: () -> Void
 
     var body: some View {
         let steps = hover ? QCHeaderDetail.hoverSteps : QCHeaderDetail.steps
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
-                QCHeaderLine(target: target, level: level, detail: steps[i]).fixedSize()
+                QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile).fixedSize()
             }
+            // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
+            // pushes the buttons off the panel
+            QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, flexible: true)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QCHeaderLine.spoken(target: target, level: level))
@@ -227,14 +240,16 @@ struct QCHeaderLine: View {
     let target: QuickChatTarget?
     let level: QuickChatLevel?
     let detail: QCHeaderDetail
+    let openProfile: () -> Void
+    /// The name may give way (be cut) to what the window has room for.
+    var flexible = false
 
     var body: some View {
         HStack(spacing: 8) {
             if let t = target {
-                // plain labels: a drag that starts on them moves the panel
-                Text(t.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
-                    .allowsHitTesting(false)
-                if let e = t.email { QCBlurred(text: e, short: detail.shortAddress).allowsHitTesting(false) }
+                QCProfileName(name: t.name, action: openProfile).layoutPriority(flexible ? -1 : 0)
+                // a plain label: a drag that starts on it moves the panel
+                if detail.address, let e = t.email { QCBlurred(text: e, short: detail.shortAddress).allowsHitTesting(false) }
             }
             if let l = level {
                 let full = l.full()
@@ -269,6 +284,35 @@ struct QCHeaderLine: View {
         let words = tooltip(level)
         if !words.isEmpty { parts.append(words.replacingOccurrences(of: "\n", with: ". ")) }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The profile's name, a button to its page in Settings: a soft highlight and the pointing hand while the pointer is on it.
+struct QCProfileName: View {
+    let name: String
+    let action: () -> Void
+    @State private var hover = false
+    @Environment(\.qcNameHover) private var pictureHover
+
+    var body: some View {
+        Button(action: action) {
+            Text(name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover || pictureHover ? QCColor.hover : .clear))
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .qcPointingHand()
+        .help("\(name) in Settings")
+    }
+}
+
+/// Set while drawing a picture: the profile's name as if the pointer were on it.
+private struct QCNameHoverKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var qcNameHover: Bool {
+        get { self[QCNameHoverKey.self] }
+        set { self[QCNameHoverKey.self] = newValue }
     }
 }
 
@@ -825,12 +869,14 @@ struct QCIconButton: View {
     let symbol: String
     let help: String
     var small = false
+    /// A narrower target than the default 28 or 30 pt.
+    var width: CGFloat? = nil
     let action: () -> Void
     @State private var hover = false
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: small ? 12 : 13, weight: .medium))
-                .frame(width: small ? 28 : 30, height: small ? 28 : 30)
+                .frame(width: width ?? (small ? 28 : 30), height: small ? 28 : 30)
                 .foregroundColor(hover ? QCColor.text : QCColor.muted)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover ? QCColor.hover : .clear))
         }
@@ -1076,10 +1122,12 @@ enum QuickChatRender {
             if state.contains("full") { l.week = 100; l.weekResets = Date().addingTimeInterval(26 * 3600) }
             m.level = l
             if state.contains("long") {
-                target.name = "Personal-work"; target.email = "long.address.name@example.com"; m.target = target
+                target.name = state.contains("verylong") ? "Work – client project, EU team" : "Personal-work"
+                target.email = "long.address.name@example.com"; m.target = target
             }
             let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
-            let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover"))
+            let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover") && !state.contains("namehover"))
+                .environment(\.qcNameHover, state.contains("namehover"))
                 .frame(width: width).background(QCColor.window).environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))
             let r = ImageRenderer(content: header)
             r.scale = 2

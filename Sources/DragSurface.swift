@@ -71,3 +71,35 @@ extension View {
     /// The panel can be dragged from this view's empty areas. `hover`: also tells whether the pointer is over the view.
     func qcDraggable(hover: Binding<Bool>? = nil) -> some View { modifier(QCDraggable(hover: hover)) }
 }
+
+/// The pointing hand over a view that does something when clicked. A tracking area (cursor updates, active always), so
+/// it works while the panel isn't the key window, and it takes no clicks itself.
+struct QCCursorArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { QCCursorView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
+private struct QCPointingHand: ViewModifier {
+    @Environment(\.qcRendering) private var rendering
+    func body(content: Content) -> some View {
+        if rendering { content } else { content.background(QCCursorArea()) }     // a picture has no pointer
+    }
+}
+
+extension View {
+    /// The pointing hand over this view.
+    func qcPointingHand() -> some View { modifier(QCPointingHand()) }
+}
+
+final class QCCursorView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+    override func mouseEntered(with event: NSEvent) { NSCursor.pointingHand.set() }
+    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+}
