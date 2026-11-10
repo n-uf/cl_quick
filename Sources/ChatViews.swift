@@ -1164,8 +1164,9 @@ struct QCStepControl: View {
         .qcControl()      // the label too: a press anywhere on the control never moves the window
         .background(rendering ? nil : GeometryReader { g in
             Color.clear
-                .onAppear { QCStepTargets.shared.control(key, g.frame(in: .global), step: step) }
-                .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.control(key, $0, step: step) }
+                .onAppear { QCStepTargets.shared.control(key, g.frame(in: .global), bars: steps.count, step: step) }
+                .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.control(key, $0, bars: steps.count, step: step) }
+                .onChange(of: steps.count) { QCStepTargets.shared.control(key, g.frame(in: .global), bars: $0, step: step) }
         })
         // with no label, the hovered step's name hangs above the bars from a zero-size frame: it never counts in the row
         .overlay(alignment: hintEdge == .leading ? .topLeading : .topTrailing) {
@@ -1244,8 +1245,10 @@ final class QCStepTargets {
     private var monitor: Any?
     private var scrolled: (key: String, sum: CGFloat)?
 
-    func control(_ key: String, _ frame: CGRect, step: @escaping (Int) -> Bool) {
+    /// A control laid out: its frame, and how many bars it has now (a profile with fewer families leaves none behind).
+    func control(_ key: String, _ frame: CGRect, bars count: Int, step: @escaping (Int) -> Bool) {
         controls[key] = (frame, step)
+        for k in bars.keys where k.hasPrefix(key) && (Int(k.dropFirst(key.count)) ?? 0) >= count { bars[k] = nil }
         if monitor == nil { watchScrolls() }
     }
     func bar(_ key: String, _ frame: CGRect, pick: @escaping () -> Void) { bars[key] = (frame, pick) }
