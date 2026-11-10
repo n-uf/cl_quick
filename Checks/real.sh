@@ -45,9 +45,11 @@ if [ -n "${QC_CONFIG:-}" ]; then
   fi
   # nothing in the folder names this chat: not its session id, not its work folder (other sessions' files don't)
   if [ -n "$sid" ]; then
-    hits="$(grep -rl -e "$sid" -e "$work" "$config/plugins" "$config/backups" "$config.json" "$config/.claude.json" 2>/dev/null || true)"
+    # the whole folder but projects/ (other sessions' transcripts live there; this run's own key is checked above)
+    hits="$(grep -rl --exclude-dir=projects --exclude-dir=cache --exclude-dir=skills --exclude-dir=plugins/marketplaces \
+              -e "$sid" -e "$work" "$config" "$config.json" 2>/dev/null || true)"
     if [ -n "$hits" ]; then echo "FAIL this chat's session id or work folder is written in: $hits"; status=1
-    else echo "PASS no file in plugins/, backups/ or .claude.json names this chat's session id or work folder"; fi
+    else echo "PASS no file in the folder (but projects/, cache/, skills/) or its .claude.json names this chat's session id or work folder"; fi
   fi
 fi
 if [ -z "${QC_CONFIG:-}" ]; then rm -rf "$config"; fi

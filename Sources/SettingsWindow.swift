@@ -498,6 +498,7 @@ struct ProfilePage: View {
         guard a.runModal() == .alertFirstButtonReturn else { return }
         switcher.drop(profile.id)
         store.remove(profile.id)
+        QuickChat.shared.refresh()          // a chat on the removed profile ends with its claude
         state.signingIn.remove(profile.path)
         if state.settings.defaultProfile == profile.id { state.settings.defaultProfile = nil; state.save() }
         state.page = .general

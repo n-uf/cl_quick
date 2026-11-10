@@ -285,9 +285,9 @@ final class QuickChatModel: ObservableObject {
     /// The last line `claude` printed, and whether this `claude` has printed any.
     private var lastEvent = Date.distantPast
     private var spoken = false
-    /// The `set_model` request in flight, and the model the process had before it.
-    private var modelRequest: String?
-    private var modelBefore = ""
+    /// The `set_model` requests in flight (id → the model asked), and the model Claude Code last confirmed it runs.
+    private var modelRequests: [String: String] = [:]
+    private var confirmedModel = ""
 
     // MARK: keys
 
@@ -397,7 +397,8 @@ final class QuickChatModel: ObservableObject {
         accountNote = "\(t.name) is on \(maskEmail(t.email ?? "another account")) now."
     }
 
-    /// The chat's profile points at another folder now (Choose a folder…): its `claude` was started on the old one, and the
+    /// The chat's profile points at another folder now (a profile removed and added again on another folder, say): its
+    /// `claude` was started on the old one, and the
     /// conversation lives only in it, so the chat ends and a new one starts on the same profile. What was typed stays.
     func folderChanged(to t: QuickChatTarget) {
         let q = pendingQuestion()
@@ -445,6 +446,8 @@ final class QuickChatModel: ObservableObject {
             // the folder may have changed account since the chat last looked: its file is read again (off the main thread)
             self.freshTarget(first.profileID) { fresh in
                 guard gen == self.generation, let i = self.turns.indices.last, self.turns[i].busy else { return }     // stopped meanwhile
+                // the profile is gone (removed while the folder was being read): nothing to ask on
+                guard fresh != nil else { self.fail(.noProfile); return }
                 if let fresh, fresh != self.target {
                     let was = self.target?.accountUUID
                     self.target = fresh
@@ -470,8 +473,7 @@ final class QuickChatModel: ObservableObject {
         let goesOn = process?.isRunning == true && key == processKey && trail.canContinue(on: target.accountUUID)
         if goesOn {
             if cmd.model != appliedModel {
-                modelBefore = appliedModel
-                modelRequest = process?.setModel(cmd.model)
+                if let id = process?.setModel(cmd.model) { modelRequests[id] = cmd.model }
                 appliedModel = cmd.model
             }
             if cmd.effort != appliedEffort { process?.setThinking(cmd.effort); appliedEffort = cmd.effort }
@@ -495,6 +497,7 @@ final class QuickChatModel: ObservableObject {
             process = p
             processKey = key
             appliedModel = cmd.model
+            confirmedModel = cmd.model
             appliedEffort = cmd.effort
             trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
         }
@@ -562,14 +565,16 @@ final class QuickChatModel: ObservableObject {
                 if turns[i].answer.isEmpty { turns[i].answer = text }
                 turns[i].phase = .done
             }
+            // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
+            guard turns.indices.contains(i) else { return }
             scrollTick += 1
             // a `claude` that says it isn't signed in is let go: Retry (after signing in) asks in a new chat
             if case .notSignedIn? = turns[i].problem { endChat(.failed) } else { armIdle() }
         case .control(let id, let error, _):
-            // a refused `set_model`: the old model is still answering, so the next message asks again
-            if id == modelRequest {
-                modelRequest = nil
-                if error != nil { appliedModel = modelBefore }
+            // a refused `set_model` leaves the model Claude Code confirmed last answering, so the next message asks again
+            if let asked = modelRequests.removeValue(forKey: id) {
+                if error == nil { confirmedModel = asked }
+                else if appliedModel == asked { appliedModel = confirmedModel }
             }
         case .ignored:
             break
@@ -626,14 +631,14 @@ final class QuickChatModel: ObservableObject {
 
     /// Stop was asked and Claude Code hasn't ended the answer: the chat ends instead of hanging on it. It is silence that
     /// counts: 5 seconds with nothing from `claude`, or 20 while it has not said anything yet (a cold start); every line
-    /// it prints, the aborted answer's included, starts the wait over.
+    /// it prints, the aborted answer's included, starts the wait over; but never more than a minute in all.
     private func armStale() {
         staleTimer?.invalidate()
         let from = Date()
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
             guard let self, self.stale.waiting else { timer.invalidate(); return }
             let limit = self.spoken ? Self.stopSeconds : Self.coldStopSeconds
-            guard Date().timeIntervalSince(max(self.lastEvent, from)) >= limit else { return }
+            guard Date().timeIntervalSince(max(self.lastEvent, from)) >= limit || Date().timeIntervalSince(from) >= 60 else { return }
             timer.invalidate()
             if self.busy { self.fail(.stopped(detail: "Claude Code didn't stop the answer in time.")) } else { self.endChat(.stopped) }
         }
@@ -670,7 +675,7 @@ final class QuickChatModel: ObservableObject {
         stale.reset()
         messageSent = false
         spoken = false; lastEvent = .distantPast
-        modelRequest = nil
+        modelRequests = [:]
         process?.onEvent = { _ in }
         process?.onExit = { _, _ in }
         process?.stop()
@@ -737,7 +742,11 @@ final class QuickChat {
             return self.store.profiles.filter(\.inPicker).map { ($0, self.store.level(of: $0)) }
         }
         model.pickProfile = { [weak self] id in self?.move(to: id) }
-        model.levelReported = { [weak self] id, account, l in self?.store.record(id, account: account, l); self?.refresh() }
+        // refresh() may end the chat (profile removed, account or folder changed): never from inside the answer's own handling
+        model.levelReported = { [weak self] id, account, l in
+            self?.store.record(id, account: account, l)
+            DispatchQueue.main.async { self?.refresh() }
+        }
         model.switchTo = { [weak self] o in
             guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id) else { return }
             self.switcher.confirmAndSwitch(p, uuid: o.uuid, email: o.email, origin: .chat)
