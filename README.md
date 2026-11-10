@@ -20,13 +20,34 @@ To build it yourself: `./build.sh` (Xcode's command-line tools; it installs into
 
 A profile is a Claude Code folder cl_quick chats on: `~/.claude`, a `~/.claude-*` folder, or any folder set with
 `CLAUDE_CONFIG_DIR`. On its first run cl_quick takes every one it finds that is signed in, named after the folder (Main
-for `~/.claude`, Work for `~/.claude-work`).
+for `~/.claude`, Work for `~/.claude-work`); two folders signed in to the same account make one profile, `~/.claude`
+first.
 
-In Settings (the menu bar icon ▸ Settings…) each profile has a tile and a card: its name, the account signed in to its
-folder (read from the folder's own `.claude.json`, never the Keychain), its week as Claude Code last reported it,
-whether the shortcut chats on it, and whether the chat's profile picker offers it. The **+** tile adds one: a folder
-found, Choose a folder… (it must be a signed-in Claude Code folder), or Sign in another account…, which makes a new
-folder and opens Claude Code's own sign-in for it in Terminal.
+A profile has several accounts, one folder. A Claude Code folder holds one signed-in account at a time, so a profile
+remembers the accounts that have been signed in to its folder: the one signed in now is **in use**, the others are
+**standby**. Switching to a standby account means signing in again in the same folder as that account. There are no
+helper folders: one profile, one folder.
+
+In Settings (the menu bar icon ▸ Settings…) each profile has a tile and a card: its name, its accounts (the one in use
+with its week as Claude Code last reported it, the others on standby with their last week or "no numbers yet"; read
+from the folder's own `.claude.json`, never the Keychain), whether the shortcut chats on it, and whether the chat's
+profile picker offers it. On the card, **Switch to this account…** changes the account in use, **Sign in again…**
+renews the one in use, and **Add an account…** takes an address and switches to it. The **+** tile adds a profile: a
+folder found, Choose a folder… (it must be a signed-in Claude Code folder), or Sign in another account…, which makes a
+new folder and opens Claude Code's own sign-in for it in Terminal.
+
+### Switching accounts
+
+- cl_quick asks first: "Switch Main to p•••@example.com?" Every Claude Code session using that folder moves to the
+  account when it next renews its sign-in, not just the quick chat.
+- Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. The
+  browser's claude.ai session decides which account actually signs in, so cl_quick checks the result: it looks at the
+  folder's `.claude.json` every 2 seconds, for at most 10 minutes, until the account changes. It never sees a password or
+  a token and never touches the Keychain.
+- If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
+  Sign in again. After 10 minutes with no change it stops looking, quietly.
+- Each account keeps its own week: after a switch the chat shows that account's last-reported week, or "no numbers yet".
+- Addresses are masked everywhere in cl_quick (p•••@example.com).
 
 ## The chat
 
@@ -37,8 +58,12 @@ folder and opens Claude Code's own sign-in for it in Terminal.
   default). A pick holds for that chat; a new chat goes back to the defaults.
 - The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. cl_quick reads no usage of
   its own: the numbers are what Claude Code reports after each answer.
-- When a profile's week is full, the chat says when it resets and offers the profile with the most room: **Ask on
-  Work** sends your question there.
+- When a profile's week (or 5-hour limit) is full, the chat says when it resets and offers the profile with the most
+  room: **Ask on Work** sends your question there. If the profile has a standby account with room, it also offers
+  **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a session may not
+  carry across accounts) and sends what you had typed, with a line saying "Main is on p•••@example.com now."
+- If a profile's Claude Code isn't signed in, the notice offers **Sign in…** (Claude Code's own sign-in, in Terminal)
+  and Try again.
 - If Claude Code stops mid-answer, the window keeps what arrived and offers Retry.
 
 ## Settings ▸ General
@@ -53,8 +78,8 @@ folder and opens Claude Code's own sign-in for it in Terminal.
 
 ## What it keeps, and what it sends
 
-- `~/Library/Application Support/cl_quick/`: its profiles, settings, the weeks last reported, and the work folders
-  Claude Code runs in. Outside it: the login item, and any folder Sign in another account… made (a Claude Code
+- `~/Library/Application Support/cl_quick/`: its profiles (with the addresses and ids of their accounts, never tokens),
+  settings, the weeks last reported per account, and the work folders Claude Code runs in. Outside it: the login item, and any folder Sign in another account… made (a Claude Code
   folder, which Remove leaves).
 - Each chat is a Claude Code session, which Claude Code keeps in the profile's folder under
   `projects/<cl_quick's work folder>/` and deletes after 30 days by default.
