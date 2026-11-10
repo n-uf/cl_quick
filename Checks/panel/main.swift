@@ -11,7 +11,7 @@ import AppKit
 
 Files.readOnly = true
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
 let chat = QuickChat.shared
 chat.start()
 
@@ -19,7 +19,7 @@ var failed = 0, passed = 0
 func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
     if ok { passed += 1 } else { failed += 1; print("FAIL \(name) \(detail())") }
 }
-func spin(_ s: TimeInterval = 0.4) { RunLoop.current.run(until: Date().addingTimeInterval(s)) }
+func spin(_ s: TimeInterval = 0.4) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
 func panel() -> QuickChatPanel? { NSApp.windows.compactMap { $0 as? QuickChatPanel }.first }
 func note(_ name: String) -> Notification { Notification(name: Notification.Name(name)) }
 func oneTurn() -> QuickChatTurn { var t = QuickChatTurn(question: "q", answer: "a", model: "Haiku 5.5"); t.phase = .done; return t }
@@ -106,6 +106,17 @@ func windowShape(_ label: String) {
     walk(cv)
     check("\(label): the content's tracking areas are active always (\(cursorAreas))", badAreas == 0, "\(badAreas)")
 }
+// (Off every screen, where the checks keep the panel, AppKit gives no top or bottom resize region to a window at its least
+// height, as it can't tell how far it could grow; on a screen it does. So the bar's shape and edges are checked 20 pt above
+// its least height, and the bar is put back before its sizes are.)
+let barLeast = p.frame
+func userSizes(_ f: NSRect) {         // as the user's live resize (so fit() keeps it)
+    NotificationCenter.default.post(name: NSWindow.willStartLiveResizeNotification, object: p)
+    p.setFrame(f, display: true)
+    NotificationCenter.default.post(name: NSWindow.didEndLiveResizeNotification, object: p)
+}
+userSizes(NSRect(x: barLeast.minX, y: barLeast.minY - 20, width: barLeast.width, height: barLeast.height + 20))
+spin(0.3)
 windowShape("bar")
 check("the panel is not movable by its background (the window server starts no move of its own)", !p.isMovableByWindowBackground)
 
@@ -208,6 +219,9 @@ func movesFromEmptyOnly(_ label: String) {
     p.setFrameOrigin(start.origin)
 }
 movesFromEmptyOnly("bar")
+userSizes(NSRect(x: p.frame.minX, y: p.frame.maxY - bar.height, width: bar.width, height: bar.height))
+spin(0.3)
+check("the bar is back at its least height after the edge checks", p.frame.size == bar, "\(p.frame.size) vs \(bar)")
 // ── sizes: the least is the content's (320 wide; the bar its content's height, the chat 220), the most is open ────────
 check("bar: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")
 check("bar: the least height is the bar's content (it can't be squashed below its field and keys)",
@@ -482,11 +496,13 @@ do {
         check("focus \(label): the field is the first responder", field() != nil && p.firstResponder === field(),
               "\(String(describing: p.firstResponder))")
     }
+    // (No window here ever takes the real keyboard (Checks/quiet.swift): the panel's makeKey only notes it and does what
+    // becoming key does to its first responder, and "another window has the keyboard" is the panel not being key with
+    // nothing focused in it. The decisions checked are open()'s and becomeKey's: the panel key, the field first.)
+    func elsewhere() { p.quietKey = false; p.makeFirstResponder(nil) }
     // another window had the keyboard (as Settings would): hidden, then the shortcut
-    let other = NSWindow(contentRect: NSRect(x: -30000, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
-    other.isReleasedWhenClosed = false
     chat.hide()
-    other.orderFrontRegardless(); other.makeKey(); spin(0.2)
+    elsewhere(); spin(0.2)
     chat.toggle()
     keyed("right after open(), before any layout pass")          // the first keystroke may come at once
     spin(0.4)
@@ -497,7 +513,7 @@ do {
     keyed("after hiding with the keyboard elsewhere")
     // the bar (a new chat makes the field anew), right after the shortcut
     chat.hide(); chat.model.newChat(); spin(0.3)
-    other.makeKey(); spin(0.1)
+    elsewhere(); spin(0.1)
     chat.open()
     keyed("the bar right after open()")
     spin(0.4)
@@ -508,12 +524,11 @@ do {
     p.isMoving = true; p.setFrameOrigin(NSPoint(x: f0.minX + 20, y: f0.minY)); p.isMoving = false
     keyed("after a move")
     // the panel losing and getting back the key (a menu, Settings): the field again
-    other.makeKey(); spin(0.1)
-    p.makeFirstResponder(nil)
+    elsewhere(); spin(0.1)
     p.makeKey(); spin(0.1)
     keyed("when it becomes key again")
-    other.orderOut(nil)
 }
 
+CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

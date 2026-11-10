@@ -1013,7 +1013,7 @@ final class QuickChat {
     /// (Internal, not private, so Checks/panel can call it.)
     func fit() {
         guard let p = panel, let host, p.isIdle else { return }
-        let vis = (p.screen ?? NSScreen.main)?.visibleFrame
+        let vis = visibleFrame(of: p)
         let chat = model.isWindow
         if chat, sizedForChat { return }
         if !chat { sizedForChat = false }
@@ -1044,7 +1044,7 @@ final class QuickChat {
     /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
     /// side) leaves the panel back inside it, no larger than that frame.
     private func keepOnScreen(_ p: NSPanel) {
-        guard let vis = (p.screen ?? NSScreen.main)?.visibleFrame else { return }
+        guard let vis = visibleFrame(of: p) else { return }
         var f = p.frame
         let top = f.maxY
         f.size = NSSize(width: min(f.width, vis.width), height: min(f.height, vis.height))
@@ -1056,7 +1056,7 @@ final class QuickChat {
 
     /// On opening: the size held to the screen it's on (a smaller display than last time).
     private func clampToScreen(_ p: NSPanel) {
-        guard let vis = (p.screen ?? NSScreen.main)?.visibleFrame else { return }
+        guard let vis = visibleFrame(of: p) else { return }
         var f = p.frame
         let w = min(f.width, vis.width), h = min(f.height, vis.height)
         guard abs(w - f.width) > 0.5 || abs(h - f.height) > 0.5 else { return }
@@ -1066,11 +1066,16 @@ final class QuickChat {
         p.setFrame(f, display: false)
     }
 
+    /// The visible frame of the screen the panel is on (the main one when it's on none); QCQuiet's stand-in in checks.
+    private func visibleFrame(of p: NSWindow) -> NSRect? {
+        QCQuiet.on ? QCQuiet.screen : (p.screen ?? NSScreen.main)?.visibleFrame
+    }
+
     /// The first time: centred on the screen with the mouse, its top a quarter of the way down.
     private func place(_ p: QuickChatPanel) {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
-        guard let vis = screen?.visibleFrame else { return }
+        guard let vis = QCQuiet.on ? QCQuiet.screen : screen?.visibleFrame else { return }
         let w = min(p.frame.width, vis.width)           // the size it has now: a fall-back for a lost place keeps it
         let top = vis.maxY - vis.height * 0.22
         let h = min(p.frame.height, vis.height)
@@ -1081,8 +1086,9 @@ final class QuickChat {
     private func isOnScreen(_ p: NSPanel) -> Bool {
         let f = p.frame
         let strip = NSRect(x: f.minX, y: f.maxY - 44, width: f.width, height: 44)
-        return NSScreen.screens.contains { s in
-            let i = s.visibleFrame.intersection(strip)
+        let frames = QCQuiet.on ? [QCQuiet.screen] : NSScreen.screens.map(\.visibleFrame)
+        return frames.contains { vis in
+            let i = vis.intersection(strip)
             return !i.isNull && i.width >= 80 && i.height >= 24
         }
     }
@@ -1107,6 +1113,15 @@ final class QuickChat {
 }
 
 // MARK: - The panel
+
+/// Checks only (Checks/panel, Checks/bars set `on`): the panel must never disturb the session the checks run in. It is
+/// laid out against a stand-in screen far off every real one (place, fit, the screen clamps), ordered in invisible,
+/// click-through and without a shadow, and never takes the keyboard: makeKey only notes it (isKeyWindow answers from
+/// that) and does what becoming key does to the panel's own first responder. Off in the app.
+enum QCQuiet {
+    static var on = false
+    static let screen = NSRect(x: -24000, y: -24000, width: 2400, height: 1400)
+}
 
 /// A floating panel that takes the keyboard without bringing cl_quick (or anything else) forward, on every Space and
 /// over full-screen apps.
@@ -1233,7 +1248,30 @@ final class QuickChatPanel: NSPanel {
     /// occlusion notice the drag surfaces also act on comes later).
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
+        quietKey = false
         QCDragView.dropHand()
+    }
+
+    // ── checks only (QCQuiet.on): never on a screen, never seen, never clicked, never the keyboard ────────────────────
+    /// Whether the panel would be the key window now (QCQuiet: makeKey only notes it).
+    var quietKey = false
+    override var isKeyWindow: Bool { QCQuiet.on ? quietKey : super.isKeyWindow }
+    override func makeKey() {
+        guard QCQuiet.on else { return super.makeKey() }
+        quietKey = true
+        refocus()              // what becoming key does, without taking the keyboard from the session the checks run in
+    }
+    override func makeKeyAndOrderFront(_ sender: Any?) {
+        guard QCQuiet.on else { return super.makeKeyAndOrderFront(sender) }
+        orderFrontRegardless(); makeKey()
+    }
+    override func orderFrontRegardless() {
+        if QCQuiet.on { alphaValue = 0 }       // off every screen already: no pointer reaches it
+        super.orderFrontRegardless()
+    }
+    /// A titled window is held below the menu bar when it is ordered in; off every screen it stays where it was put.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        QCQuiet.on ? frameRect : super.constrainFrameRect(frameRect, to: screen)
     }
 
     /// The field takes the keyboard (the window's one QCTextView), unless it has it already.
@@ -1249,8 +1287,9 @@ final class QuickChatPanel: NSPanel {
     /// field, unless some other text (a selected answer) has it.
     override func becomeKey() {
         super.becomeKey()
-        if !(firstResponder is NSText) { focusField() }
+        refocus()
     }
+    private func refocus() { if !(firstResponder is NSText) { focusField() } }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }

@@ -15,7 +15,7 @@ import AppKit
 
 Files.readOnly = true
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
 let chat = QuickChat.shared
 chat.start()
 
@@ -23,7 +23,7 @@ var failed = 0, passed = 0
 func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
     if ok { passed += 1 } else { failed += 1; print("FAIL \(name) \(detail())") }
 }
-func spin(_ s: TimeInterval = 0.12) { RunLoop.current.run(until: Date().addingTimeInterval(s)) }
+func spin(_ s: TimeInterval = 0.12) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
 let m = chat.model
 let targets = QCStepTargets.shared
 
@@ -188,5 +188,6 @@ for fams in sets {
     scenario("\(fams.count) families, window at 320", families: fams)
 }
 
+CheckQuiet.verify("at the end")
 print("model and thinking control checks: \(passed)/\(passed + failed) passed")
 exit(failed == 0 ? 0 : 1)

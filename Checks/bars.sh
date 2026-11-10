@@ -10,6 +10,6 @@ out="$repo/build/checks"
 mkdir -p "$out"
 sources=()
 for f in "$repo"/Sources/*.swift; do [ "$(basename "$f")" = main.swift ] || sources+=("$f"); done
-swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/bars" "${sources[@]}" "$here/bars/main.swift" \
+swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/bars" "${sources[@]}" "$here/quiet.swift" "$here/bars/main.swift" \
   -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
 "$out/bars"
