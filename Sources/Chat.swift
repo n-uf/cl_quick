@@ -351,6 +351,20 @@ final class QuickChatModel: ObservableObject {
     func choose(_ c: QuickChatModelChoice) { choice = c; focusTick += 1 }
     func choose(_ t: QuickChatThinking) { thinking = t; focusTick += 1 }
 
+    /// The scroll wheel over a control, and the ⌥⌘ arrows: the model a family up or down among those the account has,
+    /// thinking a step up or down among the model's. Past either end nothing changes (false). The keyboard stays where
+    /// it is (a selected answer keeps its selection); a click on a bar goes through choose(), which hands it to the field.
+    @discardableResult func stepModel(_ by: Int) -> Bool {
+        guard let c = QuickChatModels.step(modelChoices.map(\.choice), from: resolvedModel.family, by: by) else { return false }
+        choice = c
+        return true
+    }
+    @discardableResult func stepThinking(_ by: Int) -> Bool {
+        guard let t = QuickChatModels.step(thinkingSteps, from: effectiveThinking, by: by) else { return false }
+        thinking = t
+        return true
+    }
+
     /// Ask on …: the chat moves to the profile offered and sends the question there. The full one isn't changed.
     func askOnOffer() {
         guard let o = offer else { return }
@@ -970,6 +984,10 @@ final class QuickChat {
         let p = QuickChatPanel()
         p.onEscape = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
+        p.onStep = { [weak self] model, by in
+            guard let m = self?.model else { return }
+            if model { m.stepModel(by) } else { m.stepThinking(by) }
+        }
         p.onResized = { [weak self] in
             guard let self, let p = self.panel, let host = self.host else { return }
             // the user finished sizing it (macOS's live resize): the chat keeps its height; the bar keeps the height it
@@ -1105,6 +1123,8 @@ final class QuickChat {
 final class QuickChatPanel: NSPanel {
     var onEscape: () -> Void = {}
     var onNewChat: () -> Void = {}
+    /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
+    var onStep: (Bool, Int) -> Void = { _, _ in }
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
     // the card, the header's included (under the hidden title bar, which itself never drags: the hosting view covers it
@@ -1134,6 +1154,18 @@ final class QuickChatPanel: NSPanel {
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model: free in the field (its ⌥ and ⌘ arrows move the caret, ⌥⌘ ones
+        // nothing) and not a macOS shortcut. At the last step the key does nothing and is still taken.
+        if flags.intersection([.command, .option, .control, .shift]) == [.command, .option],
+           let k = e.charactersIgnoringModifiers?.unicodeScalars.first.map({ Int($0.value) }) {
+            switch k {
+            case NSUpArrowFunctionKey: onStep(false, 1); return true
+            case NSDownArrowFunctionKey: onStep(false, -1); return true
+            case NSRightArrowFunctionKey: onStep(true, 1); return true
+            case NSLeftArrowFunctionKey: onStep(true, -1); return true
+            default: break
+            }
+        }
         guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
               let key = e.charactersIgnoringModifiers?.lowercased() else { return super.performKeyEquivalent(with: e) }
         let shift = flags.contains(.shift)

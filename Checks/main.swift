@@ -336,6 +336,21 @@ check("models: a bare name with no version anywhere", QuickChatModels.family(.in
       && QuickChatModels.title(.init(value: "x", displayName: "Sonnet")) == "Sonnet")
 check("models: a numbered one beats a bare one", QuickChatModels.newest([.init(value: "sonnet", displayName: "Sonnet"),
       .init(value: "s55", displayName: "Sonnet 5.5")])[.sonnet]?.value == "s55")
+// the model and thinking controls: a step up or down a list of 2 to 6 (the scroll wheel, ⌥⌘ arrows), and the cost tint
+let fams: [QuickChatModelChoice] = [.haiku, .sonnet, .opus]
+check("steps: up and down", QuickChatModels.step(fams, from: .sonnet, by: 1) == .opus && QuickChatModels.step(fams, from: .sonnet, by: -1) == .haiku)
+check("steps: nothing past the ends", QuickChatModels.step(fams, from: .opus, by: 1) == nil && QuickChatModels.step(fams, from: .haiku, by: -1) == nil)
+check("steps: from a step not in the list, up is the first, down none",
+      QuickChatModels.step(fams, from: .fable, by: 1) == .haiku && QuickChatModels.step(fams, from: .fable, by: -1) == nil)
+check("steps: an empty list has no step", QuickChatModels.step([QuickChatModelChoice](), from: .opus, by: 1) == nil)
+check("steps: thinking, Off to Low and Max as the top",
+      QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "off", by: 1) == "low"
+      && QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "max", by: 1) == nil)
+check("cost: Fable, Extra and Max", QuickChatModels.costly(.fable) && !QuickChatModels.costly(.opus)
+      && QuickChatModels.costly(effort: "xhigh") && QuickChatModels.costly(effort: "max") && !QuickChatModels.costly(effort: "high")
+      && !QuickChatModels.costly(effort: nil))
+check("cost: the tint is stronger when both are costly", QuickChatModels.tint(own: true, other: false) == 1
+      && QuickChatModels.tint(own: true, other: true) == 2 && QuickChatModels.tint(own: false, other: true) == 0)
 // settings.json's model: an old "profile" doesn't decode (the settings read it as Haiku, the default), "fable" does
 struct SavedModel: Decodable { var model: QuickChatModelChoice }
 check("settings: an old saved \"profile\" isn't a model", (try? JSONDecoder().decode(SavedModel.self, from: Data(#"{"model":"profile"}"#.utf8))) == nil)
