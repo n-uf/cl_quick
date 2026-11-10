@@ -36,24 +36,43 @@ extension EnvironmentValues {
     }
 }
 
-/// The panel is as wide as the user made it (the bar and the chat share the width). The bar is as tall as its content,
-/// which the hosting view reports as its intrinsic height (QuickChat.fit); the chat fills the panel, the user's to resize.
+/// The panel is as wide as the user made it (the bar and the chat share the width). Both modes fill the panel: the chat's
+/// answers scroll inside it, the bar's field takes any height above its own (the bar's least height is its content's, which
+/// the hosting view reports as its intrinsic height: QuickChat.fit). Around the visible card is a transparent margin the
+/// resize handles sit in (ResizeHandles.swift), so they take nothing from what is inside.
 struct QuickChatRoot: View {
-    static let width: CGFloat = 520            // the first width
+    static let width: CGFloat = 520            // the first width of the card
     static let windowHeight: CGFloat = 580     // the chat's first height
     static let minWidth: CGFloat = 440         // the bar's row (profile, model, thinking, week, send) needs 394 + 20 of padding
     static let minWindowHeight: CGFloat = 340  // header, a few lines of chat, and the field at six lines
+    static let margin: CGFloat = 8             // the transparent margin around the card: the edge handles
     @ObservedObject var model: QuickChatModel
+    @Environment(\.qcRendering) private var rendering
 
     var body: some View {
         Group {
             if model.isWindow { QCWindow(model: model) } else { QCBar(model: model) }
         }
-        // these frames are the panel's limits too (NSHostingView passes them on): the bar's width only, the chat's both
         .frame(minWidth: Self.minWidth, maxWidth: .infinity,
-               minHeight: model.isWindow ? Self.minWindowHeight : nil, maxHeight: model.isWindow ? .infinity : nil, alignment: .top)
-        .fixedSize(horizontal: false, vertical: !model.isWindow)
+               minHeight: model.isWindow ? Self.minWindowHeight : nil, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .bottomTrailing) { QCGrip().padding(.trailing, 4).padding(.bottom, 4) }
+        .padding(rendering ? 0 : Self.margin)
         .environment(\.colorScheme, .dark)
+    }
+}
+
+/// Three short diagonal strokes in the card's bottom-right corner: the mark of a window that can be resized. They sit in
+/// the gap between the card's rounded corner and the send key, and take no mouse.
+struct QCGrip: View {
+    var body: some View {
+        Path { p in
+            for (x, y) in [(10.0, 0.0), (10.0, 3.5), (10.0, 7.0)] {
+                p.move(to: CGPoint(x: x, y: y)); p.addLine(to: CGPoint(x: y, y: x))
+            }
+        }
+        .stroke(QCColor.muted.opacity(0.5), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+        .frame(width: 10, height: 10)
+        .allowsHitTesting(false)
     }
 }
 
@@ -68,11 +87,12 @@ struct QCBar: View {
             else if model.switchNotice != nil { QCSwitchView(model: model) }
             else if model.blocked { QCProblemView(problem: .limitFull, model: model, answered: false) }
             if let note = model.accountNote { QCNote(text: note).padding(.horizontal, 8) }
-            QCField(model: model, placeholder: "Ask anything", size: 17)
+            QCField(model: model, placeholder: "Ask anything", size: 17, grows: true)
                 .padding(.horizontal, 8)
             QCControls(model: model, inBar: true)
         }
         .padding(EdgeInsets(top: 16, leading: 10, bottom: 10, trailing: 10))
+        .frame(maxHeight: .infinity, alignment: .top)       // a bar dragged taller gives the height to the field
         .qcDraggable()
         .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(QCColor.surface.opacity(0.97)))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(QCColor.line))
@@ -1000,6 +1020,8 @@ struct QCField: View {
     @ObservedObject var model: QuickChatModel
     let placeholder: String
     let size: CGFloat
+    /// The bar's field takes the height the panel has beyond its own (a bar dragged taller); the chat's stays its own.
+    var grows = false
     @State private var height: CGFloat = 24
     @Environment(\.qcRendering) private var rendering
 
@@ -1011,7 +1033,7 @@ struct QCField: View {
         } else {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
                         onSubmit: { model.send() }, onEscape: { model.hide() })
-                .frame(height: height)
+                .frame(minHeight: height, maxHeight: grows ? .infinity : height)
         }
     }
 }
@@ -1208,9 +1230,10 @@ enum QuickChatRender {
             }
             return
         }
-        // the panel gives the root its size: the first width, and for the chat the first height
+        // the panel gives the root its size: the first width, and for the chat the first height (bar-tall: a bar dragged
+        // taller, 72 pt above its content's)
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true)
-            .frame(width: QuickChatRoot.width, height: m.isWindow ? QuickChatRoot.windowHeight : nil)
+            .frame(width: QuickChatRoot.width, height: m.isWindow ? QuickChatRoot.windowHeight : state == "bar-tall" ? 170 : nil)
             .padding(30).background(Color(white: 0.1))
         let r = ImageRenderer(content: view)
         r.scale = 2
