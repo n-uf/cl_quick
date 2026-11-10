@@ -2,7 +2,7 @@
 // cl_audit's front panel: it should feel like Claude. The bar is a field over one row of controls; the first message
 // turns it into a chat window: the account line on top, the chat, and the field box at the bottom, all on one 10 pt
 // outer gap (QCSpace). Answers are Markdown in the system font, code blocks have Copy, and the last answer says which
-// model gave it. Model and thinking are step controls (QCStepControl); the profile is a menu.
+// model gave it. The profile, the model and thinking are pickers that open a menu.
 
 import AppKit
 import SwiftUI
@@ -21,8 +21,6 @@ enum QCColor {
     static let soft = hex(0xC2C0B6)
     static let muted = hex(0x9C9A92)
     static let accent = hex(0xD97757)
-    /// The steps that use the limits faster (Fable, Extra, Max): their bars, and the warm control's edge.
-    static let ember = hex(0xE8875F)
     static let send = hex(0xC6613F)
     static let hover = hex(0xFAF9F5, 0.07)
     static let inlineCode = hex(0xF0B39A)
@@ -886,8 +884,10 @@ struct QCControls: View {
                 QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()),
                        help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
             }
-            modelSteps(wide: wide)
-            thinkingSteps(wide: wide)
+            QCChip(title: wide ? model.modelTitle : model.resolvedModel.family.title,
+                   help: "Model. For this chat; a new chat starts on the default in Settings.") { pickModel() }
+            QCChip(title: model.effectiveThinking == .off ? (wide ? "Thinking off" : "Off") : model.effectiveThinking.title,
+                   help: "Thinking: \(model.effectiveThinking == .off ? "off" : model.effectiveThinking.title.lowercased()). For this chat; a new chat starts on the default in Settings.") { pickThinking() }
             Spacer(minLength: 4)
             if inBar, showLevel > 0, let l = model.level, l.weekNow() != nil || l.full() != nil {
                 QCLevelView(level: l, number: showLevel == 2).padding(.trailing, 8)
@@ -921,171 +921,21 @@ struct QCControls: View {
         }))
     }
 
-    /// The model: a step per family the account has, Haiku → Sonnet → Opus → Fable.
-    private func modelSteps(wide: Bool) -> some View {
+    /// The model's menu: the families the account has, each with Claude Code's few words for it.
+    private func pickModel() {
         let now = model.resolvedModel.family
-        // a list with none of the four families (only "default", or models of other names): the one family asked for,
-        // by its alias, as a single step
-        let choices = model.modelChoices.isEmpty ? [(choice: now, title: now.title)] : model.modelChoices
-        let i = choices.firstIndex { $0.choice == now } ?? 0
-        let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
-        return QCStepControl(
-            what: "Model", keys: ("⌥⌘←", "⌥⌘→"), hintEdge: .leading,
-            titles: choices.map(\.title), shown: wide ? (choices.indices.contains(i) ? choices[i].title : now.title) : now.title,
-            costly: choices.map { QuickChatModels.costly($0.choice) }, index: i, barsFrom: 0,
-            tint: QuickChatModels.tint(own: QuickChatModels.costly(now), other: thinkingCostly), hoverKey: "m"
-        ) { j in if choices.indices.contains(j) { model.choose(choices[j].choice) } }
+        // a list with none of the four families (only "default", or models of other names): the one family asked for
+        let choices = model.modelChoices.isEmpty ? [(choice: now, title: now.title, detail: now.blurb)] : model.modelChoices
+        QCMenu.pop(QCMenu.build(header: "Model", items: choices.map { m in
+            QCMenu.Item(title: m.title, detail: m.detail, on: m.choice == now) { model.choose(m.choice) }
+        }, actions: []))
     }
 
-    /// Thinking: Off, then the steps the model takes (Low … Max); Off has no bar.
-    private func thinkingSteps(wide: Bool) -> some View {
-        let steps = model.thinkingSteps
-        let now = model.effectiveThinking
-        let i = steps.firstIndex(of: now) ?? 0
-        return QCStepControl(
-            what: "Thinking", keys: ("⌥⌘↓", "⌥⌘↑"), hintEdge: .trailing,
-            titles: steps.map { $0 == .off ? "Thinking off" : $0.title },
-            shown: now == .off ? (wide ? "Thinking off" : "Off") : now.title,
-            costly: steps.map { QuickChatModels.costly(effort: $0.effort) }, index: i, barsFrom: 1,
-            tint: QuickChatModels.tint(own: QuickChatModels.costly(effort: now.effort), other: QuickChatModels.costly(model.resolvedModel.family)),
-            hoverKey: "t"
-        ) { j in if steps.indices.contains(j) { model.choose(steps[j]) } }
-    }
-}
-
-/// A step control (the model, thinking): its value and rising bars, one per step, filled up to the one in use. A click on
-/// its left half goes a step down, on its right half a step up, on a bar straight to that step; the ⌥⌘ arrows step too.
-/// While the pointer is on a half, the bar it would reach lights and a hint above names that step. A step that uses the
-/// limits faster (Fable, Extra, Max) has an ember bar, and the control is warm while on one (warmer when both are).
-struct QCStepControl: View {
-    let what: String
-    /// The keys that step it: down, up.
-    let keys: (String, String)
-    /// Which edge of the control the hint lines up with: the model's (near the window's left) grows right, thinking's
-    /// grows left, so a long hint stays inside a narrow window.
-    let hintEdge: HorizontalAlignment
-    /// Every step's name, lightest first, and the value shown on the control.
-    let titles: [String]
-    let shown: String
-    let costly: [Bool]
-    let index: Int
-    /// The first step drawn as a bar (thinking's Off has none).
-    let barsFrom: Int
-    /// 0 plain, 1 warm, 2 warmer.
-    let tint: Int
-    /// "m" or "t": which control a picture shows as hovered (`--render-quick-chat hover-…`).
-    let hoverKey: String
-    let go: (Int) -> Void
-    @State private var side: Int?
-    @State private var width: CGFloat = 0
-    @Environment(\.qcStepHover) private var pictureHover
-
-    private var hovered: Int? {
-        if let p = pictureHover, p.hasPrefix(hoverKey) { return Int(p.dropFirst()) }
-        return side
-    }
-    private var target: Int? {
-        guard let s = hovered else { return nil }
-        let j = index + s
-        return titles.indices.contains(j) ? j : nil
-    }
-
-    var body: some View {
-        let ember = QCColor.ember
-        let fg = tint == 2 ? QCColor.hex(0xFFDCCB) : tint == 1 ? QCColor.hex(0xF1C3AE) : hovered != nil ? QCColor.text : QCColor.soft
-        HStack(spacing: 6) {
-            Text(shown).font(.system(size: 13, weight: .medium)).lineLimit(1)
-            if titles.count > barsFrom {
-                // 3 pt bars 2 pt apart; each takes the clicks of a 4 × 14 column around it
-                HStack(alignment: .bottom, spacing: 1) {
-                    ForEach(barsFrom..<titles.count, id: \.self) { j in
-                        let n = titles.count - barsFrom
-                        let h: CGFloat = n == 1 ? 12 : 4 + 8 * CGFloat(j - barsFrom) / CGFloat(n - 1)
-                        let on = j <= index
-                        let leaving = target != nil && target! < index && j == index      // a step down: the top bar goes
-                        let coming = target == j && j > index                               // a step up: the next bar lights
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(costly[j] ? ((on && !leaving) || coming ? ember : ember.opacity(0.38))
-                                  : on ? fg.opacity(leaving ? 0.35 : 1) : QCColor.text.opacity(coming ? 0.5 : 0.17))
-                            .frame(width: 3, height: h)
-                            .frame(width: 4, height: 14, alignment: .bottom)
-                            .contentShape(Rectangle())
-                            .onTapGesture { go(j) }
-                    }
-                }
-            }
-        }
-        .foregroundColor(fg)
-        .padding(.horizontal, QCSpace.keyPadding).frame(height: QCSpace.row)
-        .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).fill(fill))
-        .overlay(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).strokeBorder(tint == 2 ? ember.opacity(0.4) : .clear))
-        .background(GeometryReader { g in Color.clear.onAppear { width = g.size.width }.onChange(of: g.size.width) { width = $0 } })
-        .contentShape(Rectangle())
-        .onTapGesture(coordinateSpace: .local) { p in
-            if let t = QuickChatModels.step(Array(titles.indices), from: index, by: p.x < width / 2 ? -1 : 1) { go(t) }
-        }
-        .onContinuousHover(coordinateSpace: .local) { phase in
-            switch phase {
-            case .active(let p): side = p.x < width / 2 ? -1 : 1
-            case .ended: side = nil
-            }
-        }
-        // the hint hangs from a point above the control's middle (a zero-size frame), so its width never counts in the row
-        .overlay(alignment: hintEdge == .leading ? .topLeading : .topTrailing) {
-            if let s = hovered {
-                hint(s).frame(width: 0, height: 0, alignment: hintEdge == .leading ? .bottomLeading : .bottomTrailing).offset(y: -4)
-            }
-        }
-        .qcPointingHand()
-        // a warm control says why when the pointer rests on it (the hint names the next step, not this one)
-        .help(costly.indices.contains(index) && costly[index] ? "\(titles[index]) uses your limits faster" : "")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(what)
-        .accessibilityValue(titles.indices.contains(index) ? titles[index] : shown)
-        .accessibilityAdjustableAction { d in
-            let t = QuickChatModels.step(Array(titles.indices), from: index, by: d == .increment ? 1 : -1)
-            if let t { go(t) }
-        }
-    }
-
-    private var fill: Color {
-        let warm = tint == 2 ? 0.27 : tint == 1 ? 0.13 : 0
-        if warm > 0 { return QCColor.accent.opacity(warm + (hovered != nil ? 0.06 : 0)) }
-        return hovered != nil ? QCColor.hover : .clear
-    }
-
-    /// Above the control, on one line (the bar has room for one): the step a click on this half goes to, whether it
-    /// uses the limits faster, and its key; at either end, that there is none.
-    private func hint(_ s: Int) -> some View {
-        let words: Text = {
-            guard let t = target else {
-                let name = titles.indices.contains(index) ? titles[index] : shown
-                return Text(s > 0 ? "\(name) is the top step" : "\(name) is the lowest step").foregroundColor(QCColor.muted)
-            }
-            let name = Text(titles[t]).fontWeight(.semibold).foregroundColor(QCColor.text)
-            let step = s > 0 ? name + Text(" ›") : Text("‹ ") + name
-            return costly[t] ? step + Text(" · uses limits faster").foregroundColor(QCColor.hex(0xF1B59B)) : step
-        }()
-        return HStack(spacing: 8) {
-            words
-            Text(s > 0 ? keys.1 : keys.0).foregroundColor(QCColor.muted)
-        }
-        .font(.system(size: 11.5)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(QCColor.hex(0x1C1C1B)))
-        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(QCColor.line))
-        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
-        .allowsHitTesting(false)
-    }
-}
-
-/// Set while drawing a picture: a step control as if the pointer were on one half ("m1": the model's right half,
-/// "t-1": thinking's left half).
-private struct QCStepHoverKey: EnvironmentKey { static let defaultValue: String? = nil }
-extension EnvironmentValues {
-    var qcStepHover: String? {
-        get { self[QCStepHoverKey.self] }
-        set { self[QCStepHoverKey.self] = newValue }
+    /// Thinking's menu: Off, then the steps the model takes.
+    private func pickThinking() {
+        QCMenu.pop(QCMenu.build(header: "Thinking", items: model.thinkingSteps.map { t in
+            QCMenu.Item(title: t.title, detail: t.blurb, on: t == model.effectiveThinking) { model.choose(t) }
+        }, actions: []))
     }
 }
 
@@ -1538,9 +1388,7 @@ enum QuickChatRender {
         let width = env["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
         let height = env["QC_RENDER_HEIGHT"].flatMap { Double($0) }.map { CGFloat($0) }
             ?? (state == "short" ? QuickChatRoot.minWindowHeight : QuickChatRoot.windowHeight)
-        let stepHover: String? = ["hover-model-up": "m1", "hover-model-down": "m-1", "hover-thinking-up": "t1",
-                                  "hover-thinking-down": "t-1", "hover-max-down": "t-1"][state]
-        let view = QuickChatRoot(model: m).environment(\.qcRendering, true).environment(\.qcStepHover, stepHover)
+        let view = QuickChatRoot(model: m).environment(\.qcRendering, true)
             .frame(width: width, height: m.isWindow ? height : state == "bar-tall" ? 170 : nil)
             .padding(30).background(Color(white: 0.1))
         let r = ImageRenderer(content: view)
