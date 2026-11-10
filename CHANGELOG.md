@@ -14,8 +14,9 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **A profile picker** in the chat, with each profile's week as Claude Code last reported it. A full week offers the
   profile with the most room: Ask on Work.
 - **Model and thinking pickers**, Haiku and thinking off by default; every answer says which model gave it.
-- **Any shortcut**: five Space shortcuts or Record another…, checked for clashes, with no Accessibility permission.
+- **Any shortcut**: five Space shortcuts or Record another… (checked against macOS's Space shortcuts), with no
+  Accessibility permission.
 - **Light**: one menu bar app with no Dock icon, one `claude` at a time (closed after 2 minutes idle), no usage reading
-  of its own, about 3 MB.
+  of its own; the app is about 3 MB.
 - **Its files in one place**, listed in Settings, and Remove cl_quick data… moves them to the Trash.
 - Settings in cl_audit's look; the chat in Claude's colours.

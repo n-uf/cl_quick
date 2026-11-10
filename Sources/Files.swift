@@ -4,8 +4,9 @@
 //   each profile's chats: Claude Code sessions, which Claude Code keeps in the profile's folder under
 //   projects/<the work folder, each non-ASCII-alphanumeric UTF-16 unit a "-">/ (and deletes after 30 days by default).
 //
-// The login item (Open at login) is the only thing outside it. Remove moves the chats and the folder above to the Trash
-// and turns the login item off; your Claude Code folders and their other sessions stay.
+// Outside it: the login item (Open at login), and any folder Sign in another account… made (a Claude Code folder, which
+// Remove leaves). Remove moves the chats and the folder above to the Trash and turns the login item off; your Claude Code
+// folders and their other sessions stay.
 
 import AppKit
 

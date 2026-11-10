@@ -4,7 +4,7 @@ A floating Claude chat for the Mac, on a shortcut. Press it over any app: a bar 
 chat window that stays floating, on every Space, until Esc hides it. It never brings another app forward.
 
 Your own Claude Code answers, on the profile's account in use, and it counts against that account's limits. cl_quick
-is small: one menu bar app with no Dock icon, one `claude` at a time, and nothing it doesn't need.
+is one menu bar app with no Dock icon and one `claude` at a time, closed after 2 minutes idle.
 
 ## Install
 
@@ -29,7 +29,8 @@ folder and opens Claude Code's own sign-in for it in Terminal.
 ## The chat
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
-- Answers stream in as Markdown; code blocks have Copy; under each answer are Copy, Ask again and "answered by Haiku 5.5".
+- Answers stream in as Markdown; code blocks have Copy; under each answer Copy and a line like "answered by Haiku 5.5 ·
+  2.4 s"; under the last one also Ask again.
 - Under the field: the profile (its dot in the week's colour), the model (Haiku by default) and thinking (off by
   default). A pick holds for that chat; a new chat goes back to the defaults.
 - The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. cl_quick reads no usage of
@@ -40,9 +41,10 @@ folder and opens Claude Code's own sign-in for it in Terminal.
 
 ## Settings ▸ General
 
-- **Shortcut**: ⌥Space by default (⌃⌥Space if the Claude app's Quick Entry has ⌥Space), four other Space shortcuts, or
-  Record another… for any key with ⌘, ⌃ or ⌥. It's checked against macOS's own shortcuts and Quick Entry, and
-  registered the way macOS's own app shortcuts are, so there's no Accessibility permission to give.
+- **Shortcut**: ⌥Space by default (⌃⌥Space on a first run if the Claude app is installed, as its Quick Entry may use
+  ⌥Space), four other Space shortcuts, or Record another… for any key with ⌘, ⌃ or ⌥. It's checked against macOS's
+  shortcuts that use Space and Quick Entry; other keys aren't checked. It's registered the way macOS's own app
+  shortcuts are, so there's no Accessibility permission to give.
 - **Model** and **Thinking** for a new chat.
 - **Open at login**: in the menu bar, ready for the shortcut.
 - **Files**: each profile's quick chats, cl_quick's own folder, and **Remove cl_quick data…**.
@@ -50,14 +52,16 @@ folder and opens Claude Code's own sign-in for it in Terminal.
 ## What it keeps, and what it sends
 
 - `~/Library/Application Support/cl_quick/`: its profiles, settings, the weeks last reported, and the work folders
-  Claude Code runs in. The login item is the only thing outside it.
+  Claude Code runs in. Outside it: the login item, and any folder Sign in another account… made (a Claude Code
+  folder, which Remove leaves).
 - Each chat is a Claude Code session, which Claude Code keeps in the profile's folder under
   `projects/<cl_quick's work folder>/` and deletes after 30 days by default.
-- Remove cl_quick data… moves all of that to the Trash, turns the login item off and quits. Your Claude Code folders,
-  their sign-ins and their other sessions stay.
+- Remove cl_quick data… moves cl_quick's folder and each profile's quick chats to the Trash, turns the login item off
+  and quits. Your Claude Code folders, their sign-ins and their other sessions stay.
 - It sends nothing but your messages, through Claude Code. Claude Code runs with no tools, no MCP servers, no settings
-  files and its non-essential traffic (telemetry, error reports, update checks) off, and gets only an allowlisted part of
-  the Mac's environment: never a key, a token or another provider's settings.
+  files and its non-essential traffic (telemetry, error reports, update checks) off. It gets only an allowlisted part of
+  the Mac's environment (who you are, the language, proxies and certificates) and answers on the profile's own sign-in;
+  keys, tokens and other providers' settings from your shell are left out.
 
 ## With cl_audit
 
