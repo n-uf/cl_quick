@@ -72,12 +72,16 @@ final class SettingsState: ObservableObject {
         guard !signingIn.isEmpty else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
-            ProfileStore.shared.noteAccounts()
-            let used = Set(ProfileStore.shared.profiles.map(\.path))
-            self.signingIn = self.signingIn.filter { ClaudeFolder.email($0) == nil && used.contains($0) }
-            if Date().timeIntervalSince(self.since) > 600 { self.signingIn = [] }
-            self.tick += 1
-            if self.signingIn.isEmpty { self.timer?.invalidate() }
+            // the folders' files are read off the main thread; what they said is judged from the value kept
+            ClaudeFolder.reload(Array(self.signingIn)) { [weak self] _ in
+                guard let self else { return }
+                ProfileStore.shared.noteAccounts()
+                let used = Set(ProfileStore.shared.profiles.map(\.path))
+                self.signingIn = self.signingIn.filter { ClaudeFolder.email($0) == nil && used.contains($0) }
+                if Date().timeIntervalSince(self.since) > 600 { self.signingIn = [] }
+                self.tick += 1
+                if self.signingIn.isEmpty { self.timer?.invalidate() }
+            }
         }
     }
 
@@ -93,6 +97,7 @@ final class SettingsWindow {
     func show(profile: String?, firstRun: Bool = false) {
         state.settings = QuickChat.shared.settings
         ProfileStore.shared.noteAccounts()
+        ProfileStore.shared.reload()
         let first = ProfileStore.shared.profiles.first?.id
         // the first run: the first profile found, or Add a profile when none was
         state.page = profile.map(SettingsPage.profile) ?? (firstRun ? (first.map(SettingsPage.profile) ?? .add) : .general)

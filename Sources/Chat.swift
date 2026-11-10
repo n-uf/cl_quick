@@ -636,6 +636,7 @@ final class QuickChat {
         p.orderFrontRegardless()
         p.makeKey()
         model.focusTick += 1
+        store.reload(pick.map { [$0.id] })      // the account may have changed since: read off the main thread, drawn again
         if claudePath == nil { resolveClaude { _ in } }   // look early, off the main thread
     }
 

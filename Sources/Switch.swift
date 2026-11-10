@@ -38,7 +38,8 @@ struct SwitchMismatch: Equatable {
 
 final class AccountSwitcher {
     static let shared = AccountSwitcher()
-    /// Posted (main thread) whenever a switch begins, ends or is dropped: the chat and Settings draw again.
+    /// Posted (main thread) whenever a switch begins, ends or is dropped, or the account signed in to a folder changed:
+    /// the chat and Settings draw again.
     static let changed = Notification.Name("cl_quick.accountSwitch.changed")
     /// How long a sign-in is waited for, and how often the folder is looked at.
     static let giveUp: TimeInterval = 10 * 60
@@ -91,8 +92,15 @@ final class AccountSwitcher {
         timer = Timer.scheduledTimer(withTimeInterval: Self.every, repeats: true) { [weak self] _ in self?.look() }
     }
 
-    /// One look at every folder being waited for.
-    func look(now: Date = Date()) {
+    /// One look at every folder being waited for: the files are read off the main thread, and what they said is judged
+    /// here, on the main thread, from the value kept.
+    func look() {
+        guard !waiting.isEmpty else { return }
+        ClaudeFolder.reload(waiting.values.map(\.folder)) { [weak self] _ in self?.judge() }
+    }
+
+    /// Every sign-in waited for: on the account wanted, on another, or past the 10 minutes.
+    func judge(now: Date = Date()) {
         for (id, goal) in waiting {
             if now.timeIntervalSince(goal.started) > Self.giveUp { end(id, goal, .timedOut); continue }
             guard let cur = ClaudeFolder.account(goal.folder) else { continue }       // signed out for a moment: still waiting

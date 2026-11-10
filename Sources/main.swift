@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let store = ProfileStore.shared
         store.noteAccounts()
+        store.reload()          // off the main thread; the next look at the menu has what changed
         for p in store.profiles {
             let l = store.level(of: p)
             let words = l?.full() != nil ? "full" : l?.weekNow().map { "week \(Int($0.rounded()))%" } ?? "no numbers yet"
