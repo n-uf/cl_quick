@@ -370,6 +370,31 @@ do {
     check("cursor: leaving a drag surface for outside the panel drops the open hand", surface != nil && NSCursor.current !== NSCursor.openHand)
 }
 
+// ── a click on the address copies it (to a pasteboard of the check's own: the user's clipboard is never touched) ───────
+do {
+    let pb = NSPasteboard(name: NSPasteboard.Name("local.n-uf.cl-quick.checks"))
+    pb.clearContents(); pb.setString("before", forType: .string)
+    let wrote = QCBlurred.copy("ultra-1@example.com", to: pb)
+    check("address: a click's copy puts the whole address on the pasteboard, as plain text, and nothing else",
+          wrote && pb.string(forType: .string) == "ultra-1@example.com" && (pb.types ?? []).allSatisfy { $0 == .string || $0.rawValue == "NSStringPboardType" },
+          "\(String(describing: pb.string(forType: .string))) \(String(describing: pb.types))")
+    pb.clearContents(); pb.setString("before", forType: .string)
+    check("address: no address known, nothing copied and the pasteboard left alone",
+          !QCBlurred.copy("", to: pb) && !QCBlurred.copy("  ", to: pb) && pb.string(forType: .string) == "before")
+    pb.releaseGlobally()
+    // in the chat's header the address's hover zone is a control with the pointing hand: the name's hand and its own
+    // (wide enough that the header's line keeps the address: a narrow one drops it first)
+    chat.model.turns = [oneTurn()]
+    p.setFrame(NSRect(x: p.frame.minX, y: p.frame.minY, width: 720, height: p.frame.height), display: true); spin(0.6)
+    var hands = 0
+    let headerBand = NSRect(x: 0, y: p.frame.height - QCSpace.header, width: p.frame.width, height: QCSpace.header)
+    func walk(_ v: NSView) { if v is QCCursorView, headerBand.intersects(v.convert(v.bounds, to: nil)) { hands += 1 }; v.subviews.forEach(walk) }
+    walk(cv)
+    if chat.model.target?.email != nil {
+        check("address: the pointing hand over the address's zone as over the name (\(hands) in the header)", hands >= 2)
+    }
+}
+
 // ── after a move, a content change fit() skipped is retried ───────────────────────────────────────────────────────────
 do {
     var retried = 0

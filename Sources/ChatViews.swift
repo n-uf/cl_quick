@@ -261,7 +261,13 @@ struct QCHeaderCard: View {
 /// Set while drawing a picture: the header as if the pointer were over it (the meters' card), or over the address capsule.
 private struct QCHoverKey: EnvironmentKey { static let defaultValue = false }
 private struct QCAddressHoverKey: EnvironmentKey { static let defaultValue = false }
+private struct QCAddressCopiedKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
+    /// Set while drawing a picture: the address capsule as just after a click copied it.
+    var qcAddressCopied: Bool {
+        get { self[QCAddressCopiedKey.self] }
+        set { self[QCAddressCopiedKey.self] = newValue }
+    }
     var qcHover: Bool {
         get { self[QCHoverKey.self] }
         set { self[QCHoverKey.self] = newValue }
@@ -446,13 +452,56 @@ extension EnvironmentValues {
 /// the capsule or the margin around it (not the meters, the name or the buttons) the capsule grows to the whole address,
 /// readable, drawn above whatever is next to it with its own opaque background; it returns to its size when the pointer
 /// leaves. The blur stays inside the capsule, so it has a clear edge rather than a smear.
+/// A click anywhere in the hover zone copies the whole address (`copy`): the capsule says "Copied" with a tick for about
+/// a second, drawn over it like the grown one (nothing else moves), then is the address again. The zone is a control
+/// (never a move) with the pointing hand; VoiceOver has the same as its action "Copy address".
 struct QCBlurred: View {
     let text: String
     /// The pointer is in the hover zone: the capsule shows the whole address. Kept by the header (the line's candidates
     /// replace each other while the pointer is on it).
     @Binding var hover: Bool
     @Environment(\.qcAddressHover) private var pictureHover
+    @Environment(\.qcAddressCopied) private var pictureCopied
     private var reveal: Bool { hover || pictureHover }
+    /// The address was just copied: "Copied" shows until `copiedFor` has passed (a later click starts it again).
+    @State private var copiedAt: Int = 0
+    @State private var copied = false
+    private var showCopied: Bool { copied || pictureCopied }
+    static let copiedFor: TimeInterval = 1.1
+
+    /// Puts the whole address on the pasteboard, as plain text (the pasteboard cleared first). An empty one (no account
+    /// known) puts nothing there and says false. (`pasteboard`: the general one; a check passes its own.)
+    @discardableResult
+    static func copy(_ address: String, to pasteboard: NSPasteboard = .general) -> Bool {
+        let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !a.isEmpty else { return false }
+        pasteboard.clearContents()
+        return pasteboard.setString(a, forType: .string)
+    }
+
+    private func copyNow() {
+        guard Self.copy(text) else { return }
+        copiedAt += 1
+        let mine = copiedAt
+        withAnimation(.easeOut(duration: 0.12)) { copied = true }
+        // one shot: only the latest click's turns "Copied" back into the address
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.copiedFor) {
+            if copiedAt == mine { withAnimation(.easeOut(duration: 0.18)) { copied = false } }
+        }
+    }
+
+    /// "Copied" with a tick, in a capsule at least `width` wide, opaque over what it covers.
+    private func copiedBadge(_ width: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark").font(.system(size: 9.5, weight: .bold))
+            Text("Copied").font(.system(size: 12, weight: .medium))
+        }
+        .foregroundColor(QCColor.text).fixedSize()
+        .padding(.horizontal, Self.inset).frame(minWidth: width, minHeight: Self.height, maxHeight: Self.height)
+        .background(Capsule().fill(QCColor.text.opacity(0.1)))
+        .background(Capsule().fill(QCColor.window))
+        .overlay(Capsule().strokeBorder(QCColor.text.opacity(0.08)))
+    }
 
     static let font = NSFont.systemFont(ofSize: 12)
     static let maxWidth: CGFloat = 132, inset: CGFloat = 7, height: CGFloat = 18
@@ -481,7 +530,9 @@ struct QCBlurred: View {
         capsule(restWidth, blurred: !reveal)
             .animation(.easeOut(duration: 0.18), value: reveal)
             .overlay(alignment: .leading) {
-                if grown {
+                if showCopied {
+                    copiedBadge(grown ? fullWidth : restWidth)
+                } else if grown {
                     capsule(fullWidth, blurred: false)
                         .background(Capsule().fill(QCColor.window))      // opaque: the meters under it don't show through
                         .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
@@ -492,11 +543,17 @@ struct QCBlurred: View {
                     .frame(width: (grown ? fullWidth : restWidth) + Self.zoneLeading + Self.zoneOther, height: Self.height + 2 * Self.zoneOther)
                     .qcControl()         // the hover zone: a press here is never a move
                     .onHover { hover = $0 }
+                    .onTapGesture { copyNow() }
+                    .qcPointingHand()
+                    .help("Copy address")
                     .offset(x: -Self.zoneLeading)
             }
             .fixedSize()
             .zIndex(1)
             .onDisappear { hover = false }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(showCopied ? "Address copied" : "Account address")
+            .accessibilityAction(named: "Copy address") { copyNow() }
     }
 }
 
@@ -1412,7 +1469,8 @@ enum QuickChatRender {
         }
         // the chat's account line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
         // reported), header-long (a long profile name and address), header-longaddr (a long address only), each also with -hover-meter (the pointer on the
-        // meters: their card, the address still blurred) or -hover-address (the pointer on the address capsule)
+        // meters: their card, the address still blurred) or -hover-address (the pointer on the address capsule), and
+        // -copied (the capsule just after a click copied the address; with -hover-address too, over the grown capsule)
         if state.hasPrefix("header") {
             var l = QuickChatLevel()
             l.week = 58; l.weekResets = Date().addingTimeInterval(3 * 86400)
@@ -1428,6 +1486,7 @@ enum QuickChatRender {
             let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
             let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover-meter"))
                 .environment(\.qcAddressHover, state.contains("hover-address"))
+                .environment(\.qcAddressCopied, state.contains("copied"))
                 .environment(\.qcNameHover, state.contains("namehover"))
                 .frame(width: width).background(QCColor.window).padding(.bottom, 80)       // room for the meters' card under it
                 .environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))
