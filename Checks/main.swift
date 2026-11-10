@@ -289,6 +289,17 @@ do {
     let left = AccountBook.removing(profile: "main", from: moved)
     check("remove: every week of the profile goes, others stay", left == ["work": 20, "gone": 7], left)
     check("remove: a profile whose id starts the same stays", AccountBook.removing(profile: "main", from: ["main-2|u1": 1, "main": 2]) == ["main-2|u1": 1])
+
+    // forgetting a standby account takes it from the list and its week from the levels, nothing else
+    let known = [KnownAccount(uuid: "u1", email: "ultra-1@example.com"), KnownAccount(uuid: "u2", email: "ultra-2@example.com")]
+    let weeks: [String: Int] = ["main|u1": 50, "main|u2": 20, "work|u2": 9]
+    let gone = AccountBook.forgetting("u2", of: "main", accounts: known, levels: weeks, inUse: "u1")
+    check("forget: the account leaves the list", gone?.accounts.map(\.uuid) == ["u1"], gone as Any)
+    check("forget: its week goes, other weeks stay (another profile's too)", gone?.levels == ["main|u1": 50, "work|u2": 9], gone as Any)
+    check("forget: the account in use can't be forgotten", AccountBook.forgetting("u1", of: "main", accounts: known, levels: weeks, inUse: "u1") == nil)
+    check("forget: an account that isn't there changes nothing", AccountBook.forgetting("u9", of: "main", accounts: known, levels: weeks, inUse: "u1") == nil)
+    check("forget: with nothing signed in, any account can go", AccountBook.forgetting("u1", of: "main", accounts: known, levels: weeks, inUse: nil)?.accounts.count == 1)
+    check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
 }
 
 try? FileManager.default.removeItem(atPath: argsFile)

@@ -311,6 +311,8 @@ struct AccountList: View {
     var busy = false
     var switchTo: (AccountEntry) -> Void = { _ in }
     var signInAgain: (AccountEntry) -> Void = { _ in }
+    /// Only a standby account can be forgotten.
+    var forget: (AccountEntry) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -321,10 +323,21 @@ struct AccountList: View {
                            level: e.level, noWeek: "no numbers yet",
                            actions: AnyView(HStack(spacing: 8) {
                                if e.inUse { Button("Sign in again…") { signInAgain(e) } }
-                               else { Button("Switch to this account…") { switchTo(e) }.disabled(busy) }
+                               else {
+                                   Button("Switch to this account…") { switchTo(e) }.disabled(busy)
+                                   Button("Forget…") { forget(e) }.disabled(busy)
+                               }
                            }.buttonStyle(PillButtonStyle(compact: true))))
             }
         }
+    }
+}
+
+/// What the Forget… question says (the alert and its picture for checking).
+enum ForgetWords {
+    static func title(_ email: String) -> String { "Forget \(maskEmail(email))?" }
+    static func detail(profile: String) -> String {
+        "cl_quick drops this account from \(profile)'s list, with its week. Nothing is signed out and no session is touched; it comes back if it's signed in on this folder again."
     }
 }
 
@@ -385,7 +398,8 @@ struct ProfilePage: View {
                                 switchTo: { e in switcher.confirmAndSwitch(profile, uuid: e.id, email: e.email, origin: .settings) },
                                 signInAgain: { e in
                                     SignIn.open(folder: profile.path, email: e.email) { why in if let why { SignIn.tell(why) } }
-                                })
+                                },
+                                forget: { e in confirmForget(e) })
                     SwitchLines(waiting: waiting, ended: ended,
                                 showTerminal: { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) },
                                 drop: { switcher.drop(profile.id) },
@@ -457,6 +471,19 @@ struct ProfilePage: View {
         let n = name.trimmingCharacters(in: .whitespaces)
         guard !n.isEmpty, n != profile.name else { name = profile.name; return }
         var p = profile; p.name = n; store.update(p)
+    }
+
+    /// Forget… on a standby account: asks first.
+    private func confirmForget(_ e: AccountEntry) {
+        guard !e.inUse else { return }
+        let a = NSAlert()
+        a.messageText = ForgetWords.title(e.email)
+        a.informativeText = ForgetWords.detail(profile: profile.name)
+        a.addButton(withTitle: "Forget"); a.addButton(withTitle: "Cancel")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        if store.forget(account: e.id, of: profile.id) {
+            NotificationCenter.default.post(name: AccountSwitcher.changed, object: nil)      // the chat's switch offer too
+        }
     }
 
     private func confirmRemove() {
@@ -746,9 +773,9 @@ enum SettingsRender {
                     SRow(label: "In the chat") { SSwitch(isOn: .constant(true), on: "in the profile picker", off: "left out") }
                 }
             })
-        case "accounts", "accounts-timedout":
+        case "accounts", "accounts-timedout", "accounts-forget":
             // one account in use with its week, one on standby with no numbers yet (sample addresses only); the second
-            // page after a sign-in that never came
+            // page after a sign-in that never came; the third with Forget…'s question (an alert, so drawn here from its words)
             let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2",
                                   wantedEmail: "ultra-2@example.com", fromUUID: "u1", fromEmail: "ultra-1@example.com", origin: .settings)
             view = AnyView(VStack(alignment: .leading, spacing: 14) {
@@ -774,6 +801,20 @@ enum SettingsRender {
                         Button("Remove from cl_quick…") {}
                     }
                     .buttonStyle(PillButtonStyle(compact: true)).padding(.top, 8)
+                }
+                if page == "accounts-forget" {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(ForgetWords.title("ultra-2@example.com")).font(.system(size: 13, weight: .bold))
+                        Text(ForgetWords.detail(profile: "Main")).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
+                            Spacer()
+                            Button("Cancel") {}
+                            Button("Forget") {}
+                        }.buttonStyle(PillButtonStyle(compact: true))
+                    }
+                    .padding(16).frame(width: 340)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
+                    .frame(maxWidth: .infinity)
                 }
             })
         default:

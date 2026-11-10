@@ -126,6 +126,16 @@ enum AccountBook {
         levels.filter { $0.key != id && !$0.key.hasPrefix(id + "|") }
     }
 
+    /// Forgets a standby account of a profile: it leaves the list and its week goes (key "<profile>|<uuid>"). The account
+    /// in use can't be forgotten, nor one that isn't in the list: nil. Nothing else moves.
+    static func forgetting<V>(_ uuid: String, of profile: String, accounts: [KnownAccount], levels: [String: V],
+                              inUse: String?) -> (accounts: [KnownAccount], levels: [String: V])? {
+        guard uuid != inUse, accounts.contains(where: { $0.uuid == uuid }) else { return nil }
+        var kept = levels
+        kept[levelKey(profile, uuid)] = nil
+        return (accounts.filter { $0.uuid != uuid }, kept)
+    }
+
     /// Notes the account signed in now in a profile's list. It is found by its uuid; the address finds it only when the
     /// stored uuid is a placeholder made from that address (a file that had no accountUuid, and now has one), so two
     /// accounts that share an address (two organizations) stay two. The time is kept to the hour. Returns whether the

@@ -83,6 +83,14 @@ enum ClaudeFolder {
         return (r.uuid ?? "email:" + email.lowercased(), email)
     }
 
+    /// The account signed in to the folder as the file says now: read on the spot (one parse, on the calling thread; the
+    /// file is MBs), for a one-off action that must not go by a value kept before a sign-in.
+    static func freshAccount(_ path: String) -> (uuid: String, email: String)? {
+        let r = FolderFiles.fresh(json(path))
+        guard let email = r.email else { return nil }
+        return (r.uuid ?? "email:" + email.lowercased(), email)
+    }
+
     /// Claude's name for the plan ("Max"), when Claude Code recorded it.
     static func plan(_ path: String) -> String? { read(path).plan }
 
@@ -233,6 +241,20 @@ final class ProfileStore: ObservableObject {
     }
     /// A folder already used by a profile.
     func uses(_ folder: String) -> Bool { profiles.contains { $0.path == expand(folder) } }
+
+    /// cl_quick forgets a standby account of a profile, and its week. The account in use (as the folder's file says right
+    /// now) is never forgotten. Returns whether it was.
+    @discardableResult
+    func forget(account uuid: String, of id: String) -> Bool {
+        guard let p = profile(id),
+              let r = AccountBook.forgetting(uuid, of: id, accounts: p.accounts, levels: levels,
+                                             inUse: ClaudeFolder.freshAccount(p.path)?.uuid) else { return false }
+        var q = p
+        q.accounts = r.accounts
+        update(q)
+        if r.levels != levels { levels = r.levels; Files.write(levels, Files.levels) }
+        return true
+    }
 
     /// What Claude Code said after an answer on this profile, on the account that answered.
     func record(_ id: String, account uuid: String, _ level: QuickChatLevel) {
