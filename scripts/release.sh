@@ -13,7 +13,9 @@
 #                                  the packaging: no version change, no commit, no tag, no push, any branch
 #   scripts/release.sh --push      the release above, then build dist/cl_quick.zip and dist/cl_quick.dmg, push main and
 #                                  the tag, and publish the GitHub Release on n-uf/cl_quick with both files.
-#                                  Refuses to run while there is no `origin` remote for n-uf/cl_quick.
+#                                  Refuses to run while there is no `origin` remote for n-uf/cl_quick, gh isn't signed in,
+#                                  the repo isn't visible or the tag is already on origin. A failed package undoes the
+#                                  release commit and tag; a failed publish keeps the push and prints the retry command.
 #
 # Signing is the same as cl_audit's: ad hoc (build.sh), no Developer ID and no notarization, so the README and the
 # release notes tell people to use Open Anyway the first time. Nothing here names a certificate or a keychain profile.
