@@ -408,7 +408,7 @@ struct ProfilePage: View {
                     if store.inUse(profile) == nil {
                         let signing = state.signingIn.contains(profile.path)
                         AccountBox(folder: profile.path, signingIn: signing,
-                                   actions: signing ? nil : AnyView(VStack(alignment: .leading, spacing: 6) {
+                                   actions: signing || waiting != nil ? nil : AnyView(VStack(alignment: .leading, spacing: 6) {
                                        Text(SignInProblem.signedOut.words).font(.system(size: 11)).foregroundStyle(face.danger)
                                        Button("Sign in again…") { signInSignedOut() }.buttonStyle(PillButtonStyle(compact: true))
                                    }))

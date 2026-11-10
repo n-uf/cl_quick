@@ -222,7 +222,9 @@ final class ProfileStore: ObservableObject {
     /// and last-seen time updated (found by its uuid). Addresses only; the time is kept to the hour so a busy chat
     /// doesn't write the file at every look. Main thread; not from a view's body.
     func noteAccount(of id: String, now: Date = Date()) {
-        guard let p = profile(id), let a = ClaudeFolder.account(p.path) else { return }
+        guard let p = profile(id) else { return }
+        // signed out: that is the problem now, and signing back in (even as the same account) starts clean
+        guard let a = ClaudeFolder.account(p.path) else { if authFailed[id] != nil { authFailed[id] = nil }; return }
         // a failure was on another account than the one signed in now: it doesn't come back if that one does
         if let failed = authFailed[id], failed != a.uuid { authFailed[id] = nil }
         var q = p
