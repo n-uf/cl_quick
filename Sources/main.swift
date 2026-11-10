@@ -39,7 +39,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var s = chat.settings
         let firstRun = !store.hasProfiles && !FileManager.default.fileExists(atPath: Files.profiles.path)
         if firstRun { store.adoptFound() }
-        if !s.importedFromAudit { s.importFromAuditOnce(); chat.settingsChanged(s) }
+        if !s.importedFromAudit {
+            let fresh = !FileManager.default.fileExists(atPath: Files.settings.path)
+            s.importFromAuditOnce()
+            // a fresh start never takes a shortcut something else already uses (the Claude app's Quick Entry is ⌥Space)
+            if fresh, s.shortcut.clash() != nil, QuickChatShortcut.controlOptionSpace.clash() == nil { s.shortcut = .controlOptionSpace }
+            chat.settingsChanged(s)
+        }
         chat.openSettings = { id in SettingsWindow.shared.show(profile: id) }
         chat.start()
         let it = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
