@@ -151,15 +151,16 @@ struct QCHeader: View {
     @ObservedObject var model: QuickChatModel
     @State private var hover = false
     @State private var nameHover = false
-    @State private var complete = true
+    @State private var line = QCLineState()
     @Environment(\.qcHover) private var pictureHover
 
     var body: some View {
+        let on = hover || pictureHover
         HStack(spacing: 8) {
             QCHeaderInfo(target: model.target, level: model.level, openProfile: {
                 // Settings opens and the chat steps aside (hidden, not closed: the shortcut brings it back as it was)
                 if let id = model.target?.profileID { model.openSettings(id); model.hide() }
-            }, nameHover: $nameHover, complete: $complete)
+            }, nameHover: $nameHover, reveal: on, state: $line)
             Spacer(minLength: 8)
             // a tight pair, each a 24 pt target
             HStack(spacing: 0) {
@@ -171,23 +172,30 @@ struct QCHeader: View {
         .qcDraggable(hover: $hover)       // the pointer anywhere on the line: hover, without taking the mouse from the drag
         .overlay(alignment: .topLeading) {
             // the line can't hold everything: on hover, a card under it does
-            if hover || pictureHover, !complete, let l = model.level, QCHeaderLine.hasMeters(l) {
-                QCHeaderCard(level: l).offset(x: 12, y: 46).allowsHitTesting(false)
+            let email = line.addressComplete ? nil : model.target?.email
+            let meters = (!line.metersComplete ? model.level : nil).flatMap { QCHeaderLine.hasMeters($0) ? $0 : nil }
+            if on, email != nil || meters != nil {
+                QCHeaderCard(email: email, level: meters).offset(x: 12, y: 46).allowsHitTesting(false)
             }
         }
     }
 }
 
-/// Everything the header's meters know, under the header: session and week, each with its share and when it resets.
+/// What the header line left out, under the header: the whole address and/or the meters (session and week, each with its
+/// share and when it resets).
 struct QCHeaderCard: View {
-    let level: QuickChatLevel
+    let email: String?
+    let level: QuickChatLevel?
 
     var body: some View {
-        let full = level.full()
+        let full = level?.full()
         let all = QCHeaderDetail.steps[0]
         VStack(alignment: .leading, spacing: 7) {
-            QCLevelGroup(label: "session", short: "5h", p: level.fiveHourNow(), full: full?.id == "5h" ? full : nil, resets: level.fiveHourResets, detail: all)
-            QCLevelGroup(label: "week", short: "wk", p: level.weekNow(), full: full?.id == "wk" ? full : nil, resets: level.weekResets, detail: all)
+            if let email { Text(email).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1) }
+            if let level {
+                QCLevelGroup(label: "session", short: "5h", p: level.fiveHourNow(), full: full?.id == "5h" ? full : nil, resets: level.fiveHourResets, detail: all)
+                QCLevelGroup(label: "week", short: "wk", p: level.weekNow(), full: full?.id == "wk" ? full : nil, resets: level.weekResets, detail: all)
+            }
         }
         .fixedSize()
         .padding(.horizontal, 12).padding(.vertical, 9)
@@ -216,28 +224,43 @@ extension EnvironmentValues {
 ///   5. the labels go, both;
 ///   6. the address smudge is cut to a short one;
 ///   7. the address goes (and a profile name too long for the window on its own is cut: the only ellipsis).
-/// The address keeps its width on hover. While the pointer is on the header and the line is not at step 1, a card under
-/// it shows everything (both meters with percentage and reset time); the tooltip has it as words.
+/// The address is drawn at its own width (`natural`) only where the line has room to spare after the numbers: at each of
+/// the first levels the natural width comes before the capped one (96 pt), so the numbers win over the address's width.
+/// The address keeps its width on hover; it un-blurs there. While the pointer is on the header, a card under it shows
+/// what the line couldn't: the whole address, and both meters with percentage and reset time (the tooltip has the
+/// meters as words).
 struct QCHeaderDetail: Equatable {
     enum Resets { case words, time, none }
     enum Labels { case full, short, none }
+    enum Address { case natural, capped, short, none }
     var resets: Resets
     var pct: Bool
     var labels: Labels
-    var shortAddress = false
-    var address = true
+    var address: Address = .capped
+
+    /// All the meters say: the reset times are there (the word "resets" or not).
+    var showsMeters: Bool { resets != .none }
 
     static let steps: [QCHeaderDetail] = [
+        .init(resets: .words, pct: true, labels: .full, address: .natural),
         .init(resets: .words, pct: true, labels: .full),
+        .init(resets: .time, pct: true, labels: .full, address: .natural),
         .init(resets: .time, pct: true, labels: .full),
+        .init(resets: .none, pct: true, labels: .full, address: .natural),
         .init(resets: .none, pct: true, labels: .full),
         .init(resets: .none, pct: true, labels: .short),
         .init(resets: .none, pct: false, labels: .full),
         .init(resets: .none, pct: false, labels: .short),
         .init(resets: .none, pct: false, labels: .none),
-        .init(resets: .none, pct: false, labels: .none, shortAddress: true),
-        .init(resets: .none, pct: false, labels: .none, shortAddress: true, address: false),
+        .init(resets: .none, pct: false, labels: .none, address: .short),
+        .init(resets: .none, pct: false, labels: .none, address: .none),
     ]
+}
+
+/// What the line on screen leaves out (told by the step that is shown), so the hover card adds exactly that.
+struct QCLineState: Equatable {
+    var metersComplete = true
+    var addressComplete = true
 }
 
 /// The profile, its address (smudged) and the session and week meters.
@@ -247,21 +270,24 @@ struct QCHeaderInfo: View {
     /// The profile's name was clicked.
     let openProfile: () -> Void
     @Binding var nameHover: Bool
-    /// Whether the line shows all it has (its first step): told by the step that is on screen.
-    @Binding var complete: Bool
+    /// The pointer is on the header: the address is un-blurred.
+    let reveal: Bool
+    /// What the line on screen leaves out: told by the step that is shown.
+    @Binding var state: QCLineState
 
     var body: some View {
         let steps = QCHeaderDetail.steps
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
-                QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover).fixedSize()
-                    .onAppear { complete = (i <= 1) }      // step 2 only lacks the word "resets": nothing a card would add
+                QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover, reveal: reveal)
+                    .fixedSize()
+                    .onAppear { state = QCLineState(metersComplete: steps[i].showsMeters, addressComplete: steps[i].address == .natural) }
             }
             // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
             // pushes the buttons off the panel
             QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, nameHover: $nameHover,
-                         flexible: true)
-                .onAppear { complete = false }
+                         reveal: reveal, flexible: true)
+                .onAppear { state = QCLineState(metersComplete: false, addressComplete: false) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QCHeaderLine.spoken(target: target, level: level))
@@ -275,6 +301,7 @@ struct QCHeaderLine: View {
     let detail: QCHeaderDetail
     let openProfile: () -> Void
     @Binding var nameHover: Bool
+    let reveal: Bool
     /// The name may give way (be cut) to what the window has room for.
     var flexible = false
 
@@ -283,7 +310,7 @@ struct QCHeaderLine: View {
             if let t = target {
                 QCProfileName(name: t.name, hover: $nameHover, action: openProfile).layoutPriority(flexible ? -1 : 0)
                 // a plain label: a drag that starts on it moves the panel
-                if detail.address, let e = t.email { QCBlurred(text: e, short: detail.shortAddress).allowsHitTesting(false) }
+                if detail.address != .none, let e = t.email { QCBlurred(text: e, mode: detail.address, reveal: reveal).allowsHitTesting(false) }
             }
             if let l = level {
                 let full = l.full()
@@ -360,13 +387,16 @@ extension EnvironmentValues {
 /// The address as a smudge: the real text, cut to at most 96 pt (48 when `short`) and blurred.
 struct QCBlurred: View {
     let text: String
-    var short = false
+    var mode: QCHeaderDetail.Address = .capped
+    /// The pointer is on the header: the blur fades out (and back in when it leaves).
+    var reveal = false
 
     var body: some View {
         Text(text).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
-            .frame(minWidth: 0, maxWidth: short ? 48 : 96, alignment: .leading).clipped()
+            .frame(minWidth: 0, maxWidth: mode == .natural ? .infinity : mode == .short ? 48 : 96, alignment: .leading).clipped()
             .padding(.horizontal, 4)
-            .blur(radius: 4.5)
+            .blur(radius: reveal ? 0 : 4.5)
+            .animation(.easeOut(duration: 0.18), value: reveal)
     }
 }
 
