@@ -541,6 +541,11 @@ struct AddPage: View {
 
     private func add(_ folder: String, name: String? = nil) {
         guard !store.uses(folder) else { problem = "\(tilde(expand(folder))) is a profile already."; return }
+        // one account, one profile: the folder's file is read as it is now, not as it was when the list was drawn
+        if let a = ClaudeFolder.freshAccount(folder), let other = store.nameUsing(a) {
+            problem = ProfileStore.inUseWords(a.email, on: other)
+            return
+        }
         let p = Profile(id: ProfileStore.newID(folder, taken: store.profiles.map(\.id)), name: name ?? ClaudeFolder.suggestedName(folder), folder: tilde(expand(folder)))
         store.add(p)
         problem = nil
@@ -816,6 +821,18 @@ enum SettingsRender {
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
                     .frame(maxWidth: .infinity)
                 }
+            })
+        case "add-refused":
+            // the + tile after a folder whose account is in use on another profile was refused (sample address and folder)
+            view = AnyView(SCard(title: "Add a profile") {
+                SRow(label: "Found on this Mac", first: true, stacked: true) {
+                    AccountBox(title: maskEmail("ultra-1@example.com"), detail: "Max · ~/.claude-sample", lit: true, status: "Signed in", tone: .ok,
+                               badge: AnyView(Button("Add") {}.buttonStyle(PillButtonStyle(compact: true))))
+                }
+                SRow(label: "Another folder", stacked: true) {
+                    Button("Choose a folder…") {}.buttonStyle(PillButtonStyle(compact: true))
+                }
+                SRowLine(text: ProfileStore.inUseWords("ultra-1@example.com", on: "Main"), color: FaceTheme.std.danger)
             })
         default:
             view = AnyView(GeneralPage(state: st, store: ProfileStore.shared))

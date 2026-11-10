@@ -126,6 +126,18 @@ enum AccountBook {
         levels.filter { $0.key != id && !$0.key.hasPrefix(id + "|") }
     }
 
+    /// The same account: by uuid, or by address (in any case). The one rule for "one account, one profile".
+    static func same(_ a: (uuid: String, email: String), _ b: (uuid: String, email: String)) -> Bool {
+        a.uuid == b.uuid || a.email.lowercased() == b.email.lowercased()
+    }
+
+    /// The name of the profile the account is in use on, among profiles given as (name, the account signed in to its
+    /// folder now); nil when no profile uses it.
+    static func profileUsing(_ account: (uuid: String, email: String),
+                             among profiles: [(name: String, inUse: (uuid: String, email: String)?)]) -> String? {
+        profiles.first { p in p.inUse.map { same($0, account) } ?? false }?.name
+    }
+
     /// Forgets a standby account of a profile: it leaves the list and its week goes (key "<profile>|<uuid>"). The account
     /// in use can't be forgotten, nor one that isn't in the list: nil. Nothing else moves.
     static func forgetting<V>(_ uuid: String, of profile: String, accounts: [KnownAccount], levels: [String: V],

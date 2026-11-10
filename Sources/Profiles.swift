@@ -167,10 +167,10 @@ final class ProfileStore: ObservableObject {
     func adoptFound() {
         guard profiles.isEmpty else { return }
         var list: [Profile] = []
-        var seen = Set<String>()        // account uuids and addresses already taken by an earlier folder
         for f in ClaudeFolder.found() where ClaudeFolder.usable(f) {
-            guard let a = ClaudeFolder.account(f), !seen.contains(a.uuid), !seen.contains(a.email.lowercased()) else { continue }
-            seen.insert(a.uuid); seen.insert(a.email.lowercased())
+            guard let a = ClaudeFolder.account(f),
+                  AccountBook.profileUsing(a, among: list.map { ($0.name, $0.accounts.first.map { (uuid: $0.uuid, email: $0.email) }) }) == nil
+            else { continue }
             list.append(Profile(id: Self.newID(f, taken: list.map(\.id)), name: ClaudeFolder.suggestedName(f), folder: f,
                                 accounts: [KnownAccount(uuid: a.uuid, email: a.email)]))
         }
@@ -241,6 +241,15 @@ final class ProfileStore: ObservableObject {
     }
     /// A folder already used by a profile.
     func uses(_ folder: String) -> Bool { profiles.contains { $0.path == expand(folder) } }
+
+    /// The name of the profile whose folder has this account signed in now (as last read), if any: one account never
+    /// makes two profiles.
+    func nameUsing(_ account: (uuid: String, email: String)) -> String? {
+        AccountBook.profileUsing(account, among: profiles.map { ($0.name, ClaudeFolder.account($0.path)) })
+    }
+
+    /// What is said when a folder's account is in use on another profile.
+    static func inUseWords(_ email: String, on profile: String) -> String { "\(maskEmail(email)) is already in use on \(profile)." }
 
     /// cl_quick forgets a standby account of a profile, and its week. The account in use (as the folder's file says right
     /// now) is never forgotten. Returns whether it was.

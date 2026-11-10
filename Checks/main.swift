@@ -299,6 +299,16 @@ do {
     check("forget: the account in use can't be forgotten", AccountBook.forgetting("u1", of: "main", accounts: known, levels: weeks, inUse: "u1") == nil)
     check("forget: an account that isn't there changes nothing", AccountBook.forgetting("u9", of: "main", accounts: known, levels: weeks, inUse: "u1") == nil)
     check("forget: with nothing signed in, any account can go", AccountBook.forgetting("u1", of: "main", accounts: known, levels: weeks, inUse: nil)?.accounts.count == 1)
+    // one account, one profile: by uuid or by address, the same rule the first run uses
+    func acct(_ u: String, _ e: String) -> (uuid: String, email: String) { (u, e) }
+    let used = [(name: "Main", inUse: Optional(acct("u1", "ultra-1@example.com"))), (name: "Work", inUse: Optional(acct("u2", "ultra-2@example.com"))),
+                (name: "Out", inUse: nil as (uuid: String, email: String)?)]
+    check("one profile: an account in use on a profile is named", AccountBook.profileUsing(acct("u1", "ultra-1@example.com"), among: used) == "Main")
+    check("one profile: found by uuid, whatever the address", AccountBook.profileUsing(acct("u2", "other@example.com"), among: used) == "Work")
+    check("one profile: found by address in any case, whatever the uuid", AccountBook.profileUsing(acct("u9", "Ultra-1@Example.com"), among: used) == "Main")
+    check("one profile: a free account is free", AccountBook.profileUsing(acct("u3", "ultra-3@example.com"), among: used) == nil)
+    check("one profile: a folder signed out uses nothing", AccountBook.profileUsing(acct("u3", "ultra-3@example.com"), among: [used[2]]) == nil)
+    check("one profile: a placeholder uuid is found by its address", AccountBook.profileUsing(acct("email:ultra-1@example.com", "ultra-1@example.com"), among: used) == "Main")
     check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
 }
 
