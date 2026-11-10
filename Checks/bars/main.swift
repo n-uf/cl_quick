@@ -18,6 +18,9 @@ let app = NSApplication.shared
 CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
 let chat = QuickChat.shared
 chat.start()
+// no real `claude`: opening the panel would start one on the user's own profile (QuickChatModel.warm) and its models
+// would replace the sample list mid-run (on a real account Haiku may well take Max)
+chat.model.resolveClaude = { $0(nil) }
 
 var failed = 0, passed = 0
 func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
@@ -131,17 +134,20 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
         check("\(name): the bar at m\(j)'s centre is m\(j)", click("m\(j)"))
         check("\(name): clicking m\(j) picks \(f.rawValue)", m.resolvedModel.family == f, "\(m.resolvedModel.family)")
     }
-    m.choose(top); m.choose(QuickChatThinking.off); spin()
-    for (j, l) in levels.enumerated() {
-        let before = m.effectiveThinking
-        check("\(name): the bar at t\(j)'s centre is t\(j)", click("t\(j)"))
-        let want = m.thinkingSteps.contains(l) ? l : before
-        check("\(name): clicking t\(j) (\(l.rawValue)) \(want == l ? "picks it" : "does nothing on \(top.rawValue)")",
-              m.effectiveThinking == want, "\(m.effectiveThinking)")
+    // every model and every level: a level the model takes is picked by its bar; one it doesn't (faint) does nothing
+    let takes: [QuickChatModelChoice: [QuickChatThinking]] = [.haiku: [.off, .low, .medium, .high], .sonnet: [.off, .low, .medium, .high, .xhigh],
+                                                              .opus: levels, .fable: levels]
+    for f in families {
+        m.choose(f); m.choose(QuickChatThinking.off); spin()
+        check("\(name): \(f.rawValue) takes the sample list's levels", m.thinkingSteps == takes[f], "\(m.thinkingSteps)")
+        for (j, l) in levels.enumerated() {
+            let before = m.effectiveThinking
+            check("\(name): the bar at t\(j)'s centre is t\(j) on \(f.rawValue)", click("t\(j)"))
+            let want = takes[f]!.contains(l) ? l : before
+            check("\(name): \(f.rawValue), clicking \(l.rawValue) \(want == l ? "picks it" : "(not taken) does nothing")",
+                  m.effectiveThinking == want && m.thinking == (want == l ? l : before), "\(m.effectiveThinking) / saved \(m.thinking)")
+        }
     }
-    m.choose(families.first!); m.choose(QuickChatThinking.medium); spin()
-    _ = click("t5")
-    check("\(name): Max on \(families.first!.rawValue) (not taken) does nothing", m.effectiveThinking == .medium, "\(m.effectiveThinking)")
     check("\(name): the faint levels keep their place", same(frames(), base), moved(base, frames()))
     // the scroll wheel
     m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()
