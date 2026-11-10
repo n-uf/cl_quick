@@ -1182,6 +1182,17 @@ enum QuickChatRender {
         target.email = "ultra-1@example.com"
         m.target = target
         m.knownModels[.haiku] = "Haiku 5.5"
+        // Claude Code's list as an account with all four families gives it (models3: no Fable; models2: Haiku and Sonnet)
+        let efforts = ["low", "medium", "high", "xhigh", "max"]
+        var list: [QuickChatModelEntry] = [
+            .init(value: "claude-haiku-5-5", displayName: "Haiku 5.5", efforts: ["low", "medium", "high"]),
+            .init(value: "claude-sonnet-5-5", displayName: "Sonnet 5.5", efforts: Array(efforts.prefix(4))),
+            .init(value: "claude-opus-5-5", displayName: "Opus 5.5", efforts: efforts),
+            .init(value: "claude-fable-5-2", displayName: "Fable 5.2", efforts: efforts),
+        ]
+        if state.hasPrefix("models3") { list.removeLast() }
+        if state.hasPrefix("models2") { list.removeLast(2) }
+        ModelCatalog.shared.set(list, profile: target.profileID, account: target.accountUUID)
         var level = QuickChatLevel()
         level.week = 62; level.weekResets = Date().addingTimeInterval(3 * 86400)
         m.level = level
@@ -1196,12 +1207,23 @@ enum QuickChatRender {
         case "failed": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .failed
             t.problem = .stopped(detail: "claude exited with code 1: API Error: Connection error."); m.turns = [t]
         case "notsigned": var t = QuickChatTurn(question: q1); t.phase = .failed; t.problem = .notSignedIn(profile: "Main", id: "main"); m.turns = [t]
-        case "thinking":
+        case "thinking", "short", "tint-fable", "tint-extra", "tint-max", "tint-fablemax", "models3", "models2",
+             "hover-model-up", "hover-model-down", "hover-thinking-up", "hover-thinking-down", "hover-max-down":
             var t2 = QuickChatTurn(question: "And only the PID, for a script?",
                                    answer: "Add `-t`, which prints bare PIDs:\n```zsh\nkill $(lsof -t -iTCP:3000 -sTCP:LISTEN)\n```",
                                    thinking: "They want only the PIDs.", model: "Sonnet 5.5", thinkingTitle: "High")
             t2.phase = .done; t2.seconds = 7.8; t2.thinkingSeconds = 5
             m.choice = .sonnet; m.knownModels[.sonnet] = "Sonnet 5.5"; m.thinking = .high; m.turns = [t1, t2]
+            // the step controls: which family and thinking step each picture shows
+            switch state {
+            case "tint-fable": m.choice = .fable; m.thinking = .high
+            case "tint-extra", "models3": m.choice = .opus; m.thinking = .xhigh
+            case "tint-max", "hover-max-down": m.choice = .opus; m.thinking = .max
+            case "tint-fablemax": m.choice = .fable; m.thinking = .max
+            case "models2": m.choice = .haiku; m.thinking = .off
+            case "hover-model-up", "hover-model-down", "hover-thinking-up", "hover-thinking-down": m.choice = .opus; m.thinking = .high
+            default: break
+            }
         case "full":
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
@@ -1255,9 +1277,13 @@ enum QuickChatRender {
             return
         }
         // the panel gives the root its size: the first width, and for the chat the first height (bar-tall: a bar dragged
-        // taller, 72 pt above its content's)
+        // taller, 72 pt above its content's; short: the smallest window); QC_RENDER_WIDTH and QC_RENDER_HEIGHT set others
+        let env = ProcessInfo.processInfo.environment
+        let width = env["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
+        let height = env["QC_RENDER_HEIGHT"].flatMap { Double($0) }.map { CGFloat($0) }
+            ?? (state == "short" ? QuickChatRoot.minWindowHeight : QuickChatRoot.windowHeight)
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true)
-            .frame(width: QuickChatRoot.width, height: m.isWindow ? QuickChatRoot.windowHeight : state == "bar-tall" ? 170 : nil)
+            .frame(width: width, height: m.isWindow ? height : state == "bar-tall" ? 170 : nil)
             .padding(30).background(Color(white: 0.1))
         let r = ImageRenderer(content: view)
         r.scale = 2
