@@ -1141,6 +1141,13 @@ final class QuickChatPanel: NSPanel {
     /// Titled (for the system's resize zones), resizable, the content under the title bar, and never activating cl_quick.
     static let style: NSWindow.StyleMask = [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel]
 
+    /// Hidden (Esc, ⌘W, ✕, the shortcut) with the pointer over an empty area: its open hand goes with it, at once (the
+    /// occlusion notice the drag surfaces also act on comes later).
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        QCDragView.dropHand()
+    }
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onEscape() }

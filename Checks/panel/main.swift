@@ -330,5 +330,60 @@ check("chat: the least height is about 220 (holds the header, a line of chat and
       p.contentMinSize.height >= QuickChatRoot.minWindowHeight - 0.5 && p.contentMinSize.height <= QuickChatRoot.minWindowHeight + 60, "\(p.contentMinSize)")
 check("chat: it can grow both ways", p.contentMaxSize.width > p.frame.width + 100 && p.contentMaxSize.height > p.frame.height + 100, "\(p.contentMaxSize)")
 
+// ── the cursor: the open hand only where a press moves the window, never fighting the pointing hand, never left behind ─
+do {
+    let W = p.frame.width, H = p.frame.height
+    let gap = NSPoint(x: W * 0.45, y: H - 16)          // the header's empty gap
+    check("cursor: the open hand over an empty area", QCDragView.cursor(at: gap, in: p) === NSCursor.openHand)
+    check("cursor: nothing set by the drag surfaces in the resize region (the system's resize cursor)",
+          QCDragView.cursor(at: NSPoint(x: 1, y: H / 2), in: p) == nil && QCDragView.cursor(at: NSPoint(x: 2, y: 2), in: p) == nil)
+    // a control the hosting view takes (any marker's middle): the arrow, or nothing while a pointing-hand control is hovered
+    var mark: NSPoint?
+    func find(_ v: NSView) { if mark == nil, v is QCControlMarkView { let r = v.convert(v.bounds, to: nil); mark = NSPoint(x: r.midX, y: r.midY) }; v.subviews.forEach(find) }
+    find(cv)
+    if let m = mark {
+        let plain = QCDragView.cursor(at: m, in: p)
+        QCCursorView.hovered = true
+        let onHand = QCDragView.cursor(at: m, in: p)
+        QCCursorView.hovered = false
+        check("cursor: over a control the arrow, never the open hand", plain === NSCursor.arrow,
+              "\(String(describing: plain)) at \(m) hit \(QCDragView.hit(at: m, in: p).map { "\(type(of: $0))" } ?? "nil")")
+        check("cursor: over the profile's name (pointing hand hovered) the drag surfaces set nothing", onHand == nil)
+    } else { check("cursor: a control is found", false) }
+    // hidden with the open hand up (Esc, ⌘W, the shortcut): it goes, at once
+    NSCursor.openHand.set()
+    let wasHand = NSCursor.current === NSCursor.openHand
+    chat.hide()
+    check("cursor: hiding the panel drops the open hand", wasHand && NSCursor.current !== NSCursor.openHand, "set: \(wasHand)")
+    check("cursor: nothing is set over a hidden panel", QCDragView.cursor(at: gap, in: p) == nil)
+    chat.open(); spin(0.4)
+    // the pointer leaving a drag surface for somewhere no press moves the window (here: the panel is far off screen, so the
+    // real pointer is outside it): the hand goes
+    p.setFrameOrigin(NSPoint(x: -30000, y: 300))
+    var surface: QCDragView?
+    func findSurface(_ v: NSView) { if surface == nil, let d = v as? QCDragView { surface = d }; v.subviews.forEach(findSurface) }
+    findSurface(cv)
+    NSCursor.openHand.set()
+    let ev = NSEvent.enterExitEvent(with: .mouseExited, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: p.windowNumber,
+                                    context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+    surface?.mouseExited(with: ev)
+    check("cursor: leaving a drag surface for outside the panel drops the open hand", surface != nil && NSCursor.current !== NSCursor.openHand)
+}
+
+// ── after a move, a content change fit() skipped is retried ───────────────────────────────────────────────────────────
+do {
+    var retried = 0
+    let keep = cv.onIntrinsicChange
+    cv.onIntrinsicChange = { retried += 1; keep() }
+    var surface: QCDragView?
+    let gap = NSPoint(x: p.frame.width * 0.45, y: p.frame.height - 16)
+    surface = QCDragView.surface(at: gap, in: p)
+    QCDragView.drag = { w, _ in w.setFrameOrigin(NSPoint(x: w.frame.minX + 10, y: w.frame.minY)) }
+    if let d = surface { press(d, at: gap) }
+    QCDragView.drag = { w, e in w.performDrag(with: e) }
+    cv.onIntrinsicChange = keep
+    check("a move's end retries fit() (the host's onIntrinsicChange)", surface != nil && retried == 1, "\(retried)")
+}
+
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

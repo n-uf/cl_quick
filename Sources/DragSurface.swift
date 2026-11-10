@@ -66,6 +66,8 @@ final class QCDragView: NSView {
         NSCursor.pop()
         panel?.isMoving = false
         setCursor(at: NSEvent.mouseLocation)
+        // a change of the content's height that fit() skipped during the move (a line more in the field): retried now
+        (w.contentView as? QuickChatHostingView)?.onIntrinsicChange()
     }
 
     // One tracking area (events when the pointer enters, leaves and moves, and AppKit's cursor updates: nothing is polled)
@@ -79,22 +81,44 @@ final class QCDragView: NSView {
         tracking = t
     }
     override func mouseEntered(with event: NSEvent) { onHover?(true); setCursor(at: NSEvent.mouseLocation) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
+    override func mouseExited(with event: NSEvent) {
+        onHover?(false)
+        // left for another drag surface, a control, the resize region or another window: whatever is there now; the hand
+        // never stays where no press would move the window
+        setCursor(at: NSEvent.mouseLocation)
+    }
     override func mouseMoved(with event: NSEvent) { setCursor(at: NSEvent.mouseLocation) }
     override func cursorUpdate(with event: NSEvent) { setCursor(at: NSEvent.mouseLocation) }
 
-    /// The cursor for this point, as `hit` finds it: the open hand where a press would move the window (a drag surface);
-    /// over a SwiftUI button or label (the hosting view takes those) the pointing hand or the arrow; in the frame's resize
-    /// region, or over an AppKit view of the content's own (the field, a scroll bar), nothing: the system's resize cursor
-    /// or that view's own.
-    private func setCursor(at screen: NSPoint) {
-        guard let w = window else { return }
-        let hit = Self.hit(at: w.convertPoint(fromScreen: screen), in: w)
-        if hit is QCDragView { (Self.movesWindow ? NSCursor.openHand : NSCursor.arrow).set() }
-        else if hit is NSHostingView<QuickChatRoot> { (QCCursorView.hovered ? NSCursor.pointingHand : NSCursor.arrow).set() }
+    /// The cursor this view sets at a point of the window (window coordinates), as `hit` finds it: the open hand where a
+    /// press would move the window (a drag surface); over SwiftUI's own content, a button or a label (the hosting view
+    /// or one of its internal containers takes those), the arrow, unless the pointer is on a control with the pointing
+    /// hand (QCCursorView sets that one, and this never fights it); nil (nothing set here) in the frame's resize region
+    /// (the system's resize cursor) and over an AppKit view with a cursor of its own (the field, selectable text, a scroll
+    /// bar, a control). Outside a visible window: nil.
+    static func cursor(at inWindow: NSPoint, in w: NSWindow) -> NSCursor? {
+        guard w.isVisible, let content = w.contentView, let hit = Self.hit(at: inWindow, in: w) else { return nil }
+        if hit is QCDragView { return movesWindow ? .openHand : .arrow }
+        if hit is NSText || hit is NSScroller || hit is NSControl || !hit.isDescendant(of: content) { return nil }
+        return QCCursorView.hovered ? nil : .arrow
     }
 
-    // A window that is ordered out (Esc, ✕) is sent no mouseExited: when it is hidden or shown again, ask where the pointer is.
+    /// The hands are this view's alone: wherever no drag surface is (the window hidden, the pointer gone from it), an open
+    /// or closed hand left over goes back to the arrow. Any other cursor is someone else's and stays.
+    static func dropHand() {
+        let c = NSCursor.current
+        if c === NSCursor.openHand || c === NSCursor.closedHand { NSCursor.arrow.set() }
+    }
+
+    private func setCursor(at screen: NSPoint) {
+        guard let w = window else { return }
+        let inWindow = w.convertPoint(fromScreen: screen)
+        if let c = Self.cursor(at: inWindow, in: w) { c.set() }
+        else if !w.isVisible || !NSRect(origin: .zero, size: w.frame.size).contains(inWindow) { Self.dropHand() }
+    }
+
+    // A window that is ordered out (Esc, ⌘W, ✕, the shortcut) is sent no mouseExited: when it is hidden the hand goes and
+    // the hover ends; when it is shown again, ask where the pointer is.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         NotificationCenter.default.removeObserver(self)
@@ -102,7 +126,8 @@ final class QCDragView: NSView {
         NotificationCenter.default.addObserver(self, selector: #selector(windowShownOrHidden), name: NSWindow.didChangeOcclusionStateNotification, object: w)
     }
     @objc private func windowShownOrHidden() {
-        guard onHover != nil, let w = window else { return }
+        guard let w = window else { return }
+        if !w.isVisible { Self.dropHand() }
         onHover?(w.isVisible && bounds.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil)))
     }
 }
