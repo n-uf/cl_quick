@@ -139,6 +139,12 @@ enum AccountBook {
         a.uuid == b.uuid || a.email.lowercased() == b.email.lowercased()
     }
 
+    /// A folder still on the account it was on: by uuid, or by address when that uuid was a placeholder made from the
+    /// address (a file with no accountUuid, which the sign-in has since given one).
+    static func unchanged(from: (uuid: String, email: String), now: (uuid: String, email: String)) -> Bool {
+        from.uuid == now.uuid || (from.uuid.hasPrefix("email:") && from.email.lowercased() == now.email.lowercased())
+    }
+
     /// The name of the profile the account is in use on, among profiles given as (name, the account signed in to its
     /// folder now); nil when no profile uses it.
     static func profileUsing(_ account: (uuid: String, email: String),
@@ -149,8 +155,10 @@ enum AccountBook {
     /// Forgets a standby account of a profile: it leaves the list and its week goes (key "<profile>|<uuid>"). The account
     /// in use can't be forgotten, nor one that isn't in the list: nil. Nothing else moves.
     static func forgetting<V>(_ uuid: String, of profile: String, accounts: [KnownAccount], levels: [String: V],
-                              inUse: String?) -> (accounts: [KnownAccount], levels: [String: V])? {
-        guard uuid != inUse, accounts.contains(where: { $0.uuid == uuid }) else { return nil }
+                              inUse: String?, inUseEmail: String? = nil) -> (accounts: [KnownAccount], levels: [String: V])? {
+        guard uuid != inUse, let a = accounts.first(where: { $0.uuid == uuid }) else { return nil }
+        // a placeholder entry for the address in use (its real uuid not noted yet) is the account in use too
+        if a.isPlaceholder, a.email.lowercased() == inUseEmail?.lowercased() { return nil }
         var kept = levels
         kept[levelKey(profile, uuid)] = nil
         return (accounts.filter { $0.uuid != uuid }, kept)

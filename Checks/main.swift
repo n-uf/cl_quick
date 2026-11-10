@@ -320,6 +320,14 @@ do {
     check("one profile: a free account is free", AccountBook.profileUsing(acct("u3", "ultra-3@example.com"), among: used) == nil)
     check("one profile: a folder signed out uses nothing", AccountBook.profileUsing(acct("u3", "ultra-3@example.com"), among: [used[2]]) == nil)
     check("one profile: a placeholder uuid is found by its address", AccountBook.profileUsing(acct("email:ultra-1@example.com", "ultra-1@example.com"), among: used) == "Main")
+    // a placeholder uuid given a real one by the sign-in is still the same account
+    check("same sign-in: the same uuid", AccountBook.unchanged(from: ("u1", "ultra-1@example.com"), now: ("u1", "ultra-1@example.com")))
+    check("same sign-in: a placeholder upgraded to a real uuid", AccountBook.unchanged(from: ("email:ultra-1@example.com", "Ultra-1@example.com"), now: ("u1", "ultra-1@example.com")))
+    check("same sign-in: another uuid is another account", !AccountBook.unchanged(from: ("u1", "ultra-1@example.com"), now: ("u2", "ultra-1@example.com")))
+    check("same sign-in: a placeholder and another address", !AccountBook.unchanged(from: ("email:ultra-1@example.com", "ultra-1@example.com"), now: ("u2", "ultra-2@example.com")))
+    let ph = [KnownAccount(uuid: "email:ultra-1@example.com", email: "ultra-1@example.com"), KnownAccount(uuid: "u2", email: "ultra-2@example.com")]
+    check("forget: a placeholder for the address in use isn't forgotten", AccountBook.forgetting("email:ultra-1@example.com", of: "main", accounts: ph, levels: weeks, inUse: "u1", inUseEmail: "Ultra-1@example.com") == nil)
+    check("forget: a placeholder for another address can go", AccountBook.forgetting("email:ultra-1@example.com", of: "main", accounts: ph, levels: weeks, inUse: "u2", inUseEmail: "ultra-2@example.com") != nil)
     check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
 }
 

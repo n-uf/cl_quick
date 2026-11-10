@@ -130,7 +130,7 @@ final class AccountSwitcher {
             guard let cur = ClaudeFolder.account(goal.folder) else { continue }       // signed out for a moment: still waiting
             if goal.again {
                 // the same account is no news until Claude Code's login says it ended well; another account is news at once
-                if cur.uuid == goal.fromUUID { if SignIn.finished(id) { end(id, goal, .reached, signedIn: cur.email) }; continue }
+                if let from = goal.fromUUID, AccountBook.unchanged(from: (from, goal.fromEmail ?? goal.wantedEmail), now: cur) { if SignIn.finished(id) { end(id, goal, .reached, signedIn: cur.email) }; continue }
                 end(id, goal, .other(email: cur.email)); continue
             }
             if cur.uuid == goal.fromUUID, cur.email.lowercased() == goal.fromEmail?.lowercased() { continue }

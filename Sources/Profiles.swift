@@ -256,9 +256,10 @@ final class ProfileStore: ObservableObject {
     /// now) is never forgotten. Returns whether it was.
     @discardableResult
     func forget(account uuid: String, of id: String) -> Bool {
-        guard let p = profile(id),
-              let r = AccountBook.forgetting(uuid, of: id, accounts: p.accounts, levels: levels,
-                                             inUse: ClaudeFolder.freshAccount(p.path)?.uuid) else { return false }
+        guard let p = profile(id) else { return false }
+        let now = ClaudeFolder.freshAccount(p.path)
+        guard let r = AccountBook.forgetting(uuid, of: id, accounts: p.accounts, levels: levels,
+                                             inUse: now?.uuid, inUseEmail: now?.email) else { return false }
         var q = p
         q.accounts = r.accounts
         update(q)
