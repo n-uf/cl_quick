@@ -1063,9 +1063,13 @@ final class QuickChatPanel: NSPanel {
     /// Ends a drag that is under way (set by the handle that began it).
     var endResize: (() -> Void)?
     var onResized: () -> Void = {}
+    /// Being ordered out (a drag that ends then leaves the arrow, not a resize cursor).
+    private(set) var hiding = false
     override func orderOut(_ sender: Any?) {
+        hiding = true
         endResize?()
         super.orderOut(sender)
+        hiding = false
     }
     /// The least and the most the panel may be now (frame sizes).
     var limits: () -> (NSSize, NSSize) = { (NSSize(width: 0, height: 0), NSSize(width: 10000, height: 10000)) }

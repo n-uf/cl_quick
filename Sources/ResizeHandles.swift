@@ -81,6 +81,7 @@ final class QCResizeHandle: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard let w = window as? QuickChatPanel else { return }
+        w.endResize?()                       // a drag whose mouse-up was lost: ended first, so the cursor stack stays level
         start = w.frame
         from = w.convertPoint(toScreen: event.locationInWindow)
         w.isResizing = true
@@ -117,7 +118,7 @@ final class QCResizeHandle: NSView {
         NSCursor.pop()
         // still over the handle: its cursor, not whatever was under the push
         let inside = bounds.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil))
-        (inside && w.isVisible ? Self.cursor(for: edges) : NSCursor.arrow).set()
+        (inside && w.isVisible && !w.hiding ? Self.cursor(for: edges) : NSCursor.arrow).set()
         w.onResized()
     }
 
