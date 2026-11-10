@@ -152,7 +152,8 @@ struct QuickChatTurn: Identifiable, Equatable {
 struct QuickChatOffer: Equatable {
     var profileID: String
     var name: String
-    var week: Double
+    /// Its week at its last answer; nil: it hasn't answered anything yet.
+    var week: Double?
 }
 
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
@@ -203,6 +204,8 @@ final class QuickChatModel: ObservableObject {
     private var idleTimer: Timer?
     /// The account line last drawn as full: a limit that resets is drawn again even though its numbers didn't change.
     private var drawnBlocked = false
+    /// Counts new chats: a look for claude that finishes after the chat moved on starts nothing.
+    private var generation = 0
     /// A `claude` sits idle this long after an answer, then it's closed; the next message goes on with the session.
     static let idleSeconds: TimeInterval = 2 * 60
 
@@ -242,6 +245,7 @@ final class QuickChatModel: ObservableObject {
     /// A new chat: the process goes, the session stays in Claude Code's folder, the pickers go back to the defaults.
     /// `keepField`: what you typed stays (another profile was picked).
     func newChat(keepField: Bool = false) {
+        generation += 1
         closeProcess()
         session = nil
         turns = []
@@ -282,8 +286,9 @@ final class QuickChatModel: ObservableObject {
 
     private func ask(_ q: String) {
         guard let target else { fail(.noProfile); return }
+        let gen = generation
         resolveClaude { [weak self] path in
-            guard let self else { return }
+            guard let self, gen == self.generation else { return }
             guard let path else { self.fail(.notInstalled); return }
             let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
                                        workFolder: target.workFolder, model: self.choice.flag, effort: self.thinking.effort,
@@ -489,12 +494,14 @@ final class QuickChat {
     /// The chat's profile, its account and its level now, and while its limit is full the profile with the most room.
     func refresh() {
         guard let id = model.target?.profileID, let p = store.profile(id) else { model.update(target: nil, level: nil, offer: nil); return }
+        // the most room first; one that hasn't answered anything yet comes after, as it may have room too
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in
-                guard let l = store.levels[o.id], l.room(), let w = l.weekNow() else { return nil }
-                return QuickChatOffer(profileID: o.id, name: o.name, week: w)
+                guard let l = store.levels[o.id] else { return QuickChatOffer(profileID: o.id, name: o.name, week: nil) }
+                guard l.full() == nil else { return nil }
+                return QuickChatOffer(profileID: o.id, name: o.name, week: l.weekNow())
             }
-            .sorted { $0.week < $1.week }
+            .sorted { ($0.week ?? 101) < ($1.week ?? 101) }
         model.update(target: QuickChatTarget(p), level: store.levels[id], offer: others.first)
     }
 

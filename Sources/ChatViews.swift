@@ -401,7 +401,8 @@ struct QCProblemView: View {
         case .noProfile: return "Pick a Claude Code folder in Settings."
         case .limitFull:
             guard let o = model.offer else { return "" }
-            return "\(o.name) has room (\(Int(o.week.rounded()))% at its last answer)."
+            guard let w = o.week else { return "\(o.name) has no numbers yet." }
+            return "\(o.name) has room (\(Int(w.rounded()))% at its last answer)."
         }
     }
 
