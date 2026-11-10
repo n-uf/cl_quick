@@ -30,6 +30,8 @@ guard let p = panel() else { print("FAIL no panel"); exit(1) }
 let bar = p.frame.size
 check("the bar opens at the card's width and its content's height", bar.width == QuickChatRoot.width + 2 * QuickChatRoot.margin, "\(bar)")
 check("idle: not moving, not resizing", p.isIdle)
+check("the panel is its own window delegate (macOS calls will-start / did-end of a live resize on it)", p.delegate === p)
+check("the panel is a resizable window and borderless", p.styleMask.contains(.resizable) && !p.styleMask.contains(.titled))
 
 // a move as the window server does it: the origin changes, many times, the size never
 p.isMoving = true
@@ -40,8 +42,10 @@ for i in 0..<500 {
 check("a move keeps the bar's size", p.frame.size == bar, "\(p.frame.size) vs \(bar)")
 // the content changing in the middle of a move (the field grows by two lines): macOS holds the window to the content's own
 // least height, which is not fit(); fit() itself, called by hand now, must leave the frame as it is
+let topBeforeGrowth = p.frame.maxY
 chat.model.field = "a\nb\nc"
 spin(0.5)
+check("a growing field keeps the bar's top edge", abs(p.frame.maxY - topBeforeGrowth) < 0.5, "\(p.frame.maxY) vs \(topBeforeGrowth)")
 let midMove = p.frame
 chat.fit()
 check("fit() stays out during a move", p.frame == midMove, "\(p.frame) vs \(midMove)")
@@ -78,8 +82,11 @@ spin(0.5)
 check("the extra height the user gave the bar is kept when the lines go (content's height + 50 + the 3 lines' share)", p.frame.height >= bar.height + 50 - 0.5, "\(p.frame.height)")
 
 // ── the chat ─────────────────────────────────────────────────────────────────────────────────────
+p.setFrameOrigin(NSPoint(x: -30000, y: 900 - p.frame.height))     // room below for the taller chat: fit() keeps a panel on screen
+let barTop = p.frame.maxY
 chat.model.turns = [oneTurn()]
 spin(0.8)
+check("bar to chat keeps the top edge", abs(p.frame.maxY - barTop) < 0.5, "\(p.frame.maxY) vs \(barTop)")
 let chatSize = p.frame.size
 check("the chat opens at the card's width with the first height", chatSize.width == bar.width && abs(chatSize.height - (QuickChatRoot.windowHeight + 2 * QuickChatRoot.margin)) < 0.5, "\(chatSize)")
 

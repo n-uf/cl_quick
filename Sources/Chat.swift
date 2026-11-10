@@ -717,6 +717,8 @@ final class QuickChat {
     private var modeWatch: AnyCancellable?
     /// The chat's height as the user left it (for this run, like the place and the width). nil: the first height.
     private var chatHeight: CGFloat?
+    /// The panel's top edge as it was when the bar turned into the chat (or back): fit() puts it back.
+    private var topAnchor: CGFloat?
     /// How much taller than its content the user made the bar (for this run).
     private var barExtra: CGFloat = 0
     /// Whether the panel is already sized for the chat: from then on the size is the user's, and fit() leaves it alone.
@@ -852,7 +854,8 @@ final class QuickChat {
         hotKey.unregister()
         // a shortcut that could never have been kept (a hand-edited settings.json): ⌥Space instead
         if settings.shortcut.refused != nil { settings.shortcut = .optionSpace }
-        shortcutState = settings.shortcutOn ? (hotKey.register(settings.shortcut) ?? "on") : nil
+        // (not while only checking: `Files.readOnly`, so a check never takes the shortcut from the installed app)
+        shortcutState = settings.shortcutOn && !Files.readOnly ? (hotKey.register(settings.shortcut) ?? "on") : nil
     }
 
     /// While a new shortcut is recorded the current one is let go, so any keys can be pressed; then it's back.
@@ -916,8 +919,13 @@ final class QuickChat {
         panel = p
         self.host = host
         // the first message turns the bar into the chat, ⌘N back
+        // (this runs just BEFORE the change: the top edge is noted then, as the content's new least height may already have
+        // moved the frame by the time fit() runs)
         modeWatch = model.$turns.map { !$0.isEmpty }.removeDuplicates().dropFirst()
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.fit() } }
+            .sink { [weak self] _ in
+                if let p = self?.panel, p.isIdle { self?.topAnchor = p.frame.maxY }
+                DispatchQueue.main.async { self?.fit() }
+            }
         return p
     }
 
@@ -945,8 +953,9 @@ final class QuickChat {
         }
         if let vis { h = min(h, vis.height) }
         var f = p.frame
-        if abs(f.height - h) > 0.5 {
-            let top = f.maxY
+        let top = topAnchor ?? f.maxY       // the top edge where the mode change found it
+        topAnchor = nil
+        if abs(f.height - h) > 0.5 || abs(f.maxY - top) > 0.5 {
             f.size.height = h
             f.origin.y = top - h
             if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
