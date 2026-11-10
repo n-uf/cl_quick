@@ -67,7 +67,9 @@ struct QCBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let p = model.barProblem { QCProblemView(problem: p, model: model, answered: false) }
+            else if model.switchNotice != nil { QCSwitchView(model: model) }
             else if model.blocked { QCProblemView(problem: .limitFull, model: model, answered: false) }
+            if let note = model.accountNote { QCNote(text: note).padding(.horizontal, 8) }
             QCField(model: model, placeholder: "Ask anything", size: 17)
                 .padding(.horizontal, 8)
             QCControls(model: model, inBar: true)
@@ -122,11 +124,15 @@ struct QCWindow: View {
     }
 
     @ViewBuilder private var turns: some View {
+        if let note = model.accountNote { QCNote(text: note).padding(.top, 14) }
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
             QCTurnView(turn: t, last: i == model.turns.count - 1, model: model)
         }
-        // a limit filled since the last answer: said once, under the chat, with the profile to ask on instead
-        if model.blocked, model.turns.last?.problem != .limitFull {
+        // a switch of account under way (or gone wrong) is said under the chat, in place of the full limit's own notice
+        if model.switchNotice != nil {
+            QCSwitchView(model: model).padding(.top, 12)
+        } else if model.blocked, model.turns.last?.problem != .limitFull {
+            // a limit filled since the last answer: said once, under the chat, with where to ask instead
             QCProblemView(problem: .limitFull, model: model, answered: false).padding(.top, 12)
         }
     }
@@ -395,14 +401,18 @@ struct QCProblemView: View {
     private var more: String {
         switch problem {
         case .notInstalled: return "The quick chat answers through it."
-        case .notSignedIn: return "Sign in with Claude Code in its folder, then try again."
+        case .notSignedIn: return "Its sign-in opens in Terminal. Then try again."
         case .stopped: return answered ? "What arrived is kept above." : ""
         case .refused: return ""
         case .noProfile: return "Pick a Claude Code folder in Settings."
         case .limitFull:
-            guard let o = model.offer else { return "" }
-            guard let w = o.week else { return "\(o.name) has no numbers yet." }
-            return "\(o.name) has room (\(Int(w.rounded()))% at its last answer)."
+            func room(_ who: String, _ week: Double?) -> String {
+                week.map { "\(who) has room (\(Int($0.rounded()))% at its last answer)." } ?? "\(who) has no numbers yet."
+            }
+            var parts: [String] = []
+            if let o = model.offer { parts.append(room(o.name, o.week)) }
+            if let s = model.switchOffer { parts.append(room("Standby " + maskEmail(s.email), s.week)) }
+            return parts.joined(separator: " ")
         }
     }
 
@@ -417,7 +427,7 @@ struct QCProblemView: View {
             QCButton(title: "Install…") { NSWorkspace.shared.open(ClaudeInstall.docs) }
             QCButton(title: "Try again", ghost: true) { retry() }
         case .notSignedIn(_, let id):
-            QCButton(title: "Open its settings") { model.openSettings(id) }
+            QCButton(title: "Sign in…") { model.signIn(id) }
             QCButton(title: "Try again", ghost: true) { retry() }
         case .stopped, .refused:
             if last { QCButton(title: "Retry") { retry() } }
@@ -425,10 +435,67 @@ struct QCProblemView: View {
             QCButton(title: "Open Settings") { model.openSettings(nil) }
         case .limitFull:
             if let o = model.offer { QCButton(title: "Ask on \(o.name)") { model.askOnOffer() } }
+            if let s = model.switchOffer, model.switchNotice == nil {
+                QCButton(title: "Switch to \(maskEmail(s.email))…", ghost: model.offer != nil) { model.switchTo(s) }
+            }
         }
     }
 
     private func retry() { if model.isWindow { model.again() } else { model.barProblem = nil; model.send() } }
+}
+
+/// A switch of the profile to another account: while Claude Code's sign-in is open, or when the browser signed in as
+/// someone else. Drawn in place of the full limit's notice.
+struct QCSwitchView: View {
+    @ObservedObject var model: QuickChatModel
+
+    var body: some View {
+        if let n = model.switchNotice {
+            let waiting: Bool = { if case .waiting = n { return true } else { return false } }()
+            let tint = waiting ? QCColor.accent : QCColor.crimson
+            HStack(alignment: .top, spacing: 10) {
+                if waiting { QCPulse().padding(.top, 3) } else { Circle().fill(tint).frame(width: 8, height: 8).padding(.top, 5) }
+                VStack(alignment: .leading, spacing: 7) {
+                    (Text(title(n)).fontWeight(.semibold).foregroundColor(QCColor.text) + Text(more(n)))
+                        .font(.system(size: 13)).foregroundColor(QCColor.soft).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        if waiting { QCButton(title: "Stop waiting", ghost: true) { model.dropSwitch() } }
+                        else { QCButton(title: "Sign in again") { model.signInAgain() } }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(tint.opacity(0.38)))
+        }
+    }
+
+    private func title(_ n: QuickChatSwitchNotice) -> String {
+        switch n {
+        case .waiting: return "Waiting for the sign-in…"
+        case .wrong(let signedIn, let wanted): return "Signed in as \(maskEmail(signedIn)), not \(maskEmail(wanted))."
+        }
+    }
+
+    private func more(_ n: QuickChatSwitchNotice) -> String {
+        switch n {
+        case .waiting(let wanted): return " Finish it in Terminal and the browser as \(maskEmail(wanted))."
+        case .wrong: return ""
+        }
+    }
+}
+
+/// One line at the top of a chat: where it is now ("Main is on p•••@example.com now.").
+struct QCNote: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle().fill(Color(nsColor: Painter.green)).frame(width: 7, height: 7)
+            Text(text).font(.system(size: 12.5)).foregroundColor(QCColor.muted).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+    }
 }
 
 // MARK: - The keys
