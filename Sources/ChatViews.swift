@@ -1023,6 +1023,7 @@ struct QCField: View {
     /// The bar's field takes the height the panel has beyond its own (a bar dragged taller); the chat's stays its own.
     var grows = false
     @State private var height: CGFloat = 24
+    @State private var caps = false
     @Environment(\.qcRendering) private var rendering
 
     var body: some View {
@@ -1032,8 +1033,15 @@ struct QCField: View {
                 .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
         } else {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
-                        onSubmit: { model.send() }, onEscape: { model.hide() })
+                        onSubmit: { model.send() }, onEscape: { model.hide() }, onCaps: { caps = $0 })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
+                .overlay(alignment: .topTrailing) {
+                    // macOS's own Caps Lock badge would land on the keys below (QuickChatPanel.addChildWindow): this says it
+                    if caps {
+                        Image(systemName: "capslock.fill").font(.system(size: size * 0.7, weight: .medium)).foregroundColor(QCColor.muted)
+                            .help("Caps Lock is on").allowsHitTesting(false)
+                    }
+                }
         }
     }
 }
@@ -1046,6 +1054,7 @@ struct QCTextField: NSViewRepresentable {
     let focusTick: Int
     let onSubmit: () -> Void
     let onEscape: () -> Void
+    var onCaps: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -1071,6 +1080,7 @@ struct QCTextField: NSViewRepresentable {
         scroll.documentView = tv
         context.coordinator.textView = tv
         tv.onWidth = { [weak c = context.coordinator] in c?.measure() }     // the panel was resized: the lines wrap anew
+        tv.onCaps = { [weak c = context.coordinator] on in DispatchQueue.main.async { c?.parent.onCaps(on) } }
         apply(tv)
         return scroll
     }
@@ -1146,7 +1156,18 @@ final class QCTextView: NSTextView {
         super.draw(r)
         if string.isEmpty, let p = placeholder { p.draw(at: NSPoint(x: textContainerOrigin.x, y: textContainerOrigin.y)) }
     }
-    override func becomeFirstResponder() -> Bool { needsDisplay = true; return super.becomeFirstResponder() }
+    /// Called with whether Caps Lock is on, when it changes and when the field takes the keyboard.
+    var onCaps: ((Bool) -> Void)?
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        onCaps?(event.modifierFlags.contains(.capsLock))
+    }
+    override func becomeFirstResponder() -> Bool {
+        needsDisplay = true
+        let ok = super.becomeFirstResponder()
+        onCaps?(NSEvent.modifierFlags.contains(.capsLock))
+        return ok
+    }
 }
 
 // MARK: - A picture of it, for checking (`--render-quick-chat OUT.png STATE`)

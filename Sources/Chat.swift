@@ -1079,6 +1079,17 @@ final class QuickChatPanel: NSPanel {
         animationBehavior = .utilityWindow
     }
 
+    /// With Caps Lock on, macOS (not cl_quick) puts its own round "⇪" badge under the caret, in a text-input window of its
+    /// own (TUINSWindow, a remote view) that it adds to the key window as a child. In the bar that lands on the picker row, so
+    /// that window is kept invisible; the field shows a small Caps Lock mark of its own instead (QCField).
+    override func addChildWindow(_ child: NSWindow, ordered place: NSWindow.OrderingMode) {
+        super.addChildWindow(child, ordered: place)
+        if NSEvent.modifierFlags.contains(.capsLock), String(describing: type(of: child)).hasPrefix("TUI") {
+            child.alphaValue = 0
+            child.ignoresMouseEvents = true
+        }
+    }
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onEscape() }
