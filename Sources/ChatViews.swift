@@ -125,13 +125,16 @@ struct QCWindow: View {
             }
             // the field box: 10 pt from the window's sides and bottom, its text and controls 12 pt inside it
             VStack(alignment: .leading, spacing: 8) {
-                QCField(model: model, placeholder: "Reply…", size: 15)
+                // the whole box above the picker row is the field: its padding and the gap to the row press into it
+                QCField(model: model, placeholder: "Reply…", size: 15,
+                        area: EdgeInsets(top: QCSpace.boxPadding.top, leading: QCSpace.boxPadding.leading, bottom: 8, trailing: QCSpace.boxPadding.trailing))
                 QCControls(model: model, inBar: false)
             }
             .padding(QCSpace.boxPadding)
             .qcDraggable()
             .background(RoundedRectangle(cornerRadius: QCSpace.boxCorner, style: .continuous).fill(QCColor.surface))
-            .overlay(RoundedRectangle(cornerRadius: QCSpace.boxCorner, style: .continuous).strokeBorder(QCColor.line))
+            .overlay(RoundedRectangle(cornerRadius: QCSpace.boxCorner, style: .continuous).strokeBorder(QCColor.line)
+                .allowsHitTesting(false))          // the outline takes no press: its edge is the field's too
             .padding([.horizontal, .bottom], QCSpace.gap)
         }
         .frame(maxHeight: .infinity)
@@ -1226,6 +1229,9 @@ struct QCField: View {
     let size: CGFloat
     /// The bar's field takes the height the panel has beyond its own (a bar dragged taller); the chat's stays its own.
     var grows = false
+    /// How far past the field the press area reaches (QCFieldArea): the gap down to the picker row, and in the chat the
+    /// box's padding, so the whole box above the picker row is the field.
+    var area = EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0)
     @State private var height: CGFloat = 24
     @State private var caps = false
     @Environment(\.qcRendering) private var rendering
@@ -1239,6 +1245,7 @@ struct QCField: View {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
                         onSubmit: { model.send() }, onEscape: { model.hide() }, onCaps: { caps = $0 })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
+                .background(QCFieldArea().padding(EdgeInsets(top: -area.top, leading: -area.leading, bottom: -area.bottom, trailing: -area.trailing)))
                 .onChange(of: height) { _ in model.fieldChanged() }
                 .overlay(alignment: .topTrailing) {
                     // macOS's own Caps Lock badge would land on the keys below (QuickChatPanel.addChildWindow): this says it
@@ -1264,10 +1271,20 @@ struct QCTextField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = QCFieldScroll()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
         scroll.borderType = .noBorder
+        // no automatic insets: since the panel is titled (its title bar transparent and hidden), AppKit insets a scroll
+        // view under the title bar by the bar's height, which pushed the bar's text out of its field
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsetsZero
+        // a flipped clip view: the text sits at the TOP of the field. (The default clip view isn't flipped, so the text view
+        // sat at its bottom, in the bar even below what the clip view shows: no caret, no placeholder, and a press in the
+        // field hit the scroll view instead of the text.)
+        let clip = QCFlippedClip()
+        clip.drawsBackground = false
+        scroll.contentView = clip
         let tv = QCTextView()
         tv.delegate = context.coordinator
         tv.isRichText = false
@@ -1352,8 +1369,91 @@ struct QCTextField: NSViewRepresentable {
     }
 }
 
+/// The field's clip view: flipped, so the text starts at the top.
+final class QCFlippedClip: NSClipView {
+    override var isFlipped: Bool { true }
+}
+
+/// The field's scroll view: the text view is never shorter than what the field shows, so all of the field (a bar dragged
+/// taller gives its extra height to it) is the text: a press anywhere there puts the caret in, under the I-beam.
+final class QCFieldScroll: NSScrollView {
+    override func tile() {
+        super.tile()
+        guard let tv = documentView as? NSTextView else { return }
+        let h = contentSize.height
+        if abs(tv.minSize.height - h) > 0.5 { tv.minSize = NSSize(width: 0, height: h) }
+        if tv.frame.height < h - 0.5 { tv.setFrameSize(NSSize(width: tv.frame.width, height: h)) }
+        // the text fits: it shows from its top. (Resizing the field kept an old scroll offset, which put the text above or
+        // below what the field shows.) Taller text (past six lines) keeps its scroll, so the caret stays in view.
+        if tv.frame.height <= h + 0.5, contentView.bounds.origin != .zero {
+            contentView.scroll(to: .zero)
+            reflectScrolledClipView(contentView)
+        }
+    }
+}
+
+/// The field box's empty part around the field (the box's padding, the gap above the picker row): a press there is a
+/// press in the field (focus, the caret at the nearest place, at the end below the text), under the I-beam, never a
+/// move. It finds the window's field itself, so it needs no wiring.
+struct QCFieldArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { QCFieldAreaView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
+final class QCFieldAreaView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var isOpaque: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// The field this area belongs to: the window's text field nearest to it (there is one per mode).
+    var field: QCTextView? {
+        guard let content = window?.contentView else { return nil }
+        let mine = convert(bounds, to: nil)
+        var best: (QCTextView, CGFloat)?
+        func walk(_ v: NSView) {
+            if let tv = v as? QCTextView {
+                let r = tv.enclosingScrollView.map { $0.convert($0.bounds, to: nil) } ?? tv.convert(tv.bounds, to: nil)
+                let d = r.intersects(mine) ? 0 : hypot(r.midX - mine.midX, r.midY - mine.midY)
+                if best == nil || d < best!.1 { best = (tv, d) }
+            }
+            v.subviews.forEach(walk)
+        }
+        walk(content)
+        return best?.0
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let tv = field else { return }
+        window?.makeFirstResponder(tv)
+        tv.mouseDown(with: event)        // the caret where the press is nearest (the text view clamps it to its text)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.iBeam.set() }
+    override func mouseEntered(with event: NSEvent) { NSCursor.iBeam.set() }
+    override func mouseMoved(with event: NSEvent) { NSCursor.iBeam.set() }
+}
+
 final class QCTextView: NSTextView {
     var placeholder: NSAttributedString? { didSet { needsDisplay = true } }
+    // The I-beam while the panel isn't the key window too (the text view's own cursor rects work only in the key window).
+    private var beam: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let b = beam { removeTrackingArea(b) }
+        let b = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+                               owner: self, userInfo: nil)
+        addTrackingArea(b)
+        beam = b
+    }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.iBeam.set() }
+    override func mouseEntered(with event: NSEvent) { NSCursor.iBeam.set() }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     /// Called when the width changes (the panel is resized).
     var onWidth: (() -> Void)?
     override func setFrameSize(_ s: NSSize) {

@@ -99,6 +99,7 @@ final class QCDragView: NSView {
     static func cursor(at inWindow: NSPoint, in w: NSWindow) -> NSCursor? {
         guard w.isVisible, let content = w.contentView, let hit = Self.hit(at: inWindow, in: w) else { return nil }
         if hit is QCDragView { return movesWindow ? .openHand : .arrow }
+        if hit is QCFieldAreaView || hit is QCTextView { return .iBeam }     // the field and its box: the I-beam, never a hand
         if hit is NSText || hit is NSScroller || hit is NSControl || !hit.isDescendant(of: content) { return nil }
         return QCCursorView.hovered ? nil : .arrow
     }

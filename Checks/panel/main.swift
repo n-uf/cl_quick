@@ -237,6 +237,65 @@ liveResize(to: NSRect(x: p.frame.minX, y: p.frame.maxY - bar.height, width: bar.
 spin(0.3)
 check("the bar is back at its own size", abs(p.frame.width - bar.width) < 0.5 && abs(p.frame.height - bar.height) < 0.5, "\(p.frame.size) vs \(bar)")
 
+// ── the field box: all of it is the field, at any height ─────────────────────────────────────────────────────────────
+// The box above the picker row is the field's scroll view plus its press area (QCFieldArea: the gap to the row, and in
+// the chat the box's padding). Every point of it, on a grid, is the text view or the area that presses into it, is never a
+// drag surface, and has the I-beam (or nothing set by the drag surfaces); the text's first line is inside what the field
+// shows, so the caret and the placeholder can be seen; a press in the area focuses the field.
+func fieldBox(_ label: String) {
+    var tv: QCTextView?, areas: [QCFieldAreaView] = []
+    func walk(_ v: NSView) { if let t = v as? QCTextView { tv = t }; if let a = v as? QCFieldAreaView { areas.append(a) }; v.subviews.forEach(walk) }
+    walk(cv)
+    guard let tv, let scroll = tv.enclosingScrollView, let area = areas.first else { check("\(label): the field and its area are found", false); return }
+    let fieldRect = scroll.convert(scroll.bounds, to: nil)
+    let box = fieldRect.union(area.convert(area.bounds, to: nil))
+    check("\(label): the scroll view has no automatic insets (the title bar's would push the text out of the field)",
+          !scroll.automaticallyAdjustsContentInsets && scroll.contentInsets.top == 0 && scroll.contentInsets.bottom == 0)
+    check("\(label): the text view fills the field (at least as tall as what it shows)",
+          tv.frame.height >= scroll.contentSize.height - 0.5 && abs(tv.frame.width - scroll.contentSize.width) < 0.5, "\(tv.frame) in \(scroll.contentSize)")
+    let line = (tv.font ?? .systemFont(ofSize: 15)).boundingRectForFont.height
+    let first = NSRect(x: tv.textContainerOrigin.x, y: tv.textContainerOrigin.y, width: 10, height: line - 1)
+    check("\(label): the first line (caret, placeholder) is inside what the field shows", tv.visibleRect.contains(first), "\(tv.visibleRect) vs \(first)")
+    var wrong: [String] = [], moves = 0, hands = 0, n = 0
+    for x in stride(from: box.minX + 0.5, to: box.maxX, by: 3) {
+        for y in stride(from: box.minY + 0.5, to: box.maxY, by: 3) {
+            let pt = NSPoint(x: x, y: y)
+            n += 1
+            let hit = QCDragView.hit(at: pt, in: p)
+            let ok = hit === tv || ((hit as? QCFieldAreaView)?.field === tv)
+            if !ok, wrong.count < 6 { wrong.append("\(pt) → \(hit.map { "\(type(of: $0))" } ?? "frame")") }
+            if QCDragView.surface(at: pt, in: p) != nil { moves += 1 }
+            if let c = QCDragView.cursor(at: pt, in: p), c !== NSCursor.iBeam { hands += 1 }
+        }
+    }
+    check("\(label): every point of the field box (\(n), \(Int(box.width))×\(Int(box.height))) is the text view or presses into it",
+          wrong.isEmpty, "\(wrong)")
+    check("\(label): no point of the field box starts a move", moves == 0, "\(moves)")
+    check("\(label): the cursor in the field box is the I-beam (or nothing set), never a hand", hands == 0, "\(hands)")
+    // a press in the area around the field (its bottom gap) focuses the field
+    p.makeFirstResponder(nil)
+    let a = area.convert(area.bounds, to: nil)
+    let at = NSPoint(x: a.midX, y: a.minY + 2)
+    if QCDragView.hit(at: at, in: p) === area {
+        func ev(_ t: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: t, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        NSApp.postEvent(ev(.leftMouseUp), atStart: false)
+        area.mouseDown(with: ev(.leftMouseDown))
+        check("\(label): a press beside the text focuses the field", p.firstResponder === tv, "\(String(describing: p.firstResponder))")
+    } else { check("\(label): the field's area is hit below the text", false, "\(String(describing: QCDragView.hit(at: at, in: p)))") }
+}
+fieldBox("bar")
+let barFrame = p.frame
+liveResize(to: NSRect(x: barFrame.minX, y: barFrame.maxY - barFrame.height * 3, width: barFrame.width, height: barFrame.height * 3))
+spin(0.4)
+check("tall bar: three times the bar's height", abs(p.frame.height - barFrame.height * 3) < 0.5, "\(p.frame)")
+fieldBox("tall bar")
+liveResize(to: barFrame)
+spin(0.4)
+check("the bar is back at its own size after the tall bar", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.size)")
+
 // a move as the window server does it: the origin changes, many times, the size never
 p.isMoving = true
 for i in 0..<500 {
@@ -323,6 +382,7 @@ spin(0.8)
 check("the chat comes back at the height the user gave it", abs(p.frame.height - userChat.height) < 0.5 && p.frame.width == userChat.width, "\(p.frame.size) vs \(userChat)")
 windowShape("chat")
 movesFromEmptyOnly("chat")
+fieldBox("chat")
 
 // ── the least sizes are the system's, from the content's own frames: about 320 × 220 for the chat ─────────────────
 check("chat: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")
