@@ -159,6 +159,23 @@ struct QuickChatOffer: Equatable {
     var week: Double?
 }
 
+/// Another account of the chat's own profile, on standby, offered while a limit is full: signing in again as it moves the
+/// profile (and every Claude Code session using its folder) to it.
+struct QuickChatSwitchOffer: Equatable {
+    var uuid: String
+    var email: String
+    /// Its week at its last answer; nil: it hasn't answered anything yet.
+    var week: Double?
+}
+
+/// A switch of the chat's profile to another account, shown where the limit notice would be.
+enum QuickChatSwitchNotice: Equatable {
+    /// Claude Code's sign-in is open in Terminal; the folder is looked at every 2 s.
+    case waiting(wanted: String)
+    /// The browser signed in as someone else.
+    case wrong(signedIn: String, wanted: String)
+}
+
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
 final class QuickChatModel: ObservableObject {
     @Published var turns: [QuickChatTurn] = []
@@ -178,6 +195,12 @@ final class QuickChatModel: ObservableObject {
     @Published var level: QuickChatLevel?
     /// While a limit is full: the profile with the most room, for Ask on ….
     @Published var offer: QuickChatOffer?
+    /// While a limit is full: the profile's standby account with the most room, for Switch to ….
+    @Published var switchOffer: QuickChatSwitchOffer?
+    /// A switch under way or gone wrong, in place of the limit notice.
+    @Published var switchNotice: QuickChatSwitchNotice?
+    /// One line after a switch: "Main is on p•••@example.com now."
+    @Published var accountNote: String?
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
@@ -196,6 +219,14 @@ final class QuickChatModel: ObservableObject {
     var pickProfile: (String) -> Void = { _ in }
     /// Claude Code reported the account's limits after an answer: the profile, its account's uuid, the level.
     var levelReported: (String, String, QuickChatLevel) -> Void = { _, _, _ in }
+    /// Switch to …: the controller asks first, then opens Claude Code's sign-in and watches the folder.
+    var switchTo: (QuickChatSwitchOffer) -> Void = { _ in }
+    /// Sign in again, as the account that was wanted (after another one signed in).
+    var signInAgain: () -> Void = {}
+    /// Stop waiting for a sign-in, or forget one that went wrong.
+    var dropSwitch: () -> Void = {}
+    /// Sign in to the profile's folder (its Claude Code isn't signed in).
+    var signIn: (String) -> Void = { _ in }
 
     private var process: QuickChatProcess?
     private var processKey = ""
@@ -254,6 +285,8 @@ final class QuickChatModel: ObservableObject {
         turns = []
         if !keepField { field = "" }
         barProblem = nil
+        accountNote = nil
+        dropSwitch()
         let d = defaults()
         choice = d.model; thinking = d.thinking
         focusTick += 1
@@ -266,23 +299,43 @@ final class QuickChatModel: ObservableObject {
     /// Ask on …: the chat moves to the profile offered and sends the question there. The full one isn't changed.
     func askOnOffer() {
         guard let o = offer else { return }
-        let q = field.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
+        let q = pendingQuestion()
         pickProfile(o.profileID)
         field = q
         send()
     }
 
-    /// Another profile: its own account line, nothing carried over from the last one.
-    func forgetAccount() { level = nil; offer = nil; drawnBlocked = false }
+    /// What would be asked again on another profile or account: what's typed, else the question a full limit stopped.
+    func pendingQuestion() -> String {
+        field.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
+    }
 
-    /// The profile, its account and its level as they are now, and the offer while its limit is full.
-    func update(target new: QuickChatTarget?, level: QuickChatLevel?, offer: QuickChatOffer?) {
+    /// The profile is on another account now: a new chat on the same profile (a session may not go on across accounts),
+    /// what was typed (or the question the full limit stopped) is sent, and one line says where it is.
+    /// The caller has set the new target.
+    func continueSwitched(note: String) {
+        let q = pendingQuestion()
+        newChat(keepField: true)
+        field = q
+        accountNote = note
+        send()
+    }
+
+    /// Another profile: its own account line, nothing carried over from the last one.
+    func forgetAccount() { level = nil; offer = nil; switchOffer = nil; switchNotice = nil; drawnBlocked = false }
+
+    /// The profile, its account and its level as they are now, the offers while its limit is full, and a switch under way.
+    func update(target new: QuickChatTarget?, level: QuickChatLevel?, offer: QuickChatOffer?,
+                switchOffer: QuickChatSwitchOffer? = nil, notice: QuickChatSwitchNotice? = nil) {
         if new != target { target = new }
         if level != self.level { self.level = level }
         else if drawnBlocked != blocked { objectWillChange.send() }     // a full limit reset: drawn again
         drawnBlocked = blocked
         let o = blocked ? offer : nil
         if o != self.offer { self.offer = o }
+        let s = blocked ? switchOffer : nil
+        if s != self.switchOffer { self.switchOffer = s }
+        if notice != self.switchNotice { self.switchNotice = notice }
     }
 
     // MARK: talking to Claude Code
@@ -457,6 +510,7 @@ final class QuickChat {
 
     let model = QuickChatModel()
     let store = ProfileStore.shared
+    let switcher = AccountSwitcher.shared
     private(set) var settings = QuickChatSettings.load()
     private var panel: QuickChatPanel?
     private var claudePath: String?
@@ -483,8 +537,39 @@ final class QuickChat {
         }
         model.pickProfile = { [weak self] id in self?.move(to: id) }
         model.levelReported = { [weak self] id, account, l in self?.store.record(id, account: account, l); self?.refresh() }
+        model.switchTo = { [weak self] o in
+            guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id) else { return }
+            self.switcher.confirmAndSwitch(p, uuid: o.uuid, email: o.email, origin: .chat)
+            self.panel?.makeKey()
+        }
+        model.signInAgain = { [weak self] in
+            guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id),
+                  let m = self.switcher.mismatch[id] else { return }
+            self.switcher.begin(p, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: .chat)
+        }
+        model.dropSwitch = { [weak self] in
+            if let id = self?.model.target?.profileID { self?.switcher.drop(id) }
+        }
+        model.signIn = { [weak self] id in
+            guard let p = self?.store.profile(id) else { return }
+            SignIn.open(folder: p.path) { why in if let why { SignIn.tell(why) } }
+        }
+        switcher.onOutcome = { [weak self] goal, outcome in self?.switched(goal, outcome) }
+        NotificationCenter.default.addObserver(forName: AccountSwitcher.changed, object: nil, queue: .main) { [weak self] _ in self?.refresh() }
         hotKey.onPress = { [weak self] in self?.toggle() }
         applyShortcut()
+    }
+
+    /// A switch begun in the chat ended. On the account wanted: a new chat on the same profile sends what was typed;
+    /// on another one, the notice says so. A switch begun in Settings only updates the account line.
+    private func switched(_ goal: SwitchGoal, _ outcome: SwitchOutcome) {
+        guard goal.origin == .chat, outcome == .reached, model.target?.profileID == goal.profileID,
+              let p = store.profile(goal.profileID) else { refresh(); return }
+        model.forgetAccount()
+        model.target = QuickChatTarget(p)          // the account signed in now: its address and uuid, for the next `claude`
+        refresh()
+        model.continueSwitched(note: "\(p.name) is on \(maskEmail(model.target?.email ?? goal.wantedEmail)) now.")
+        if !isOpen { open(profile: p.id) }
     }
 
     /// Settings changed (the settings window): the shortcut is registered again and the next new chat uses the defaults.
@@ -507,7 +592,21 @@ final class QuickChat {
                 return QuickChatOffer(profileID: o.id, name: o.name, week: l.weekNow())
             }
             .sorted { ($0.week ?? 101) < ($1.week ?? 101) }
-        model.update(target: QuickChatTarget(p), level: store.level(of: p), offer: others.first)
+        // the same for the profile's own standby accounts (the most recently seen first among equals)
+        let standby = store.standby(p).enumerated()
+            .compactMap { i, a -> (Int, QuickChatSwitchOffer)? in
+                let l = store.level(of: p, account: a.uuid)
+                guard l?.full() == nil else { return nil }
+                return (i, QuickChatSwitchOffer(uuid: a.uuid, email: a.email, week: l?.weekNow()))
+            }
+            .sorted { a, b in
+                let x = a.1.week ?? 101, y = b.1.week ?? 101
+                return x != y ? x < y : a.0 < b.0
+            }
+        let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }
+            ?? switcher.mismatch[id].map { .wrong(signedIn: $0.signedIn, wanted: $0.goal.wantedEmail) }
+        model.update(target: QuickChatTarget(p), level: store.level(of: p), offer: others.first,
+                     switchOffer: standby.first?.1, notice: notice)
     }
 
     func toggle() { isOpen ? hide() : open() }
