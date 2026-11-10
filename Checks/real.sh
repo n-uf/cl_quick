@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# One real question through the quick chat's engine and the installed `claude`.
+# Real questions through the quick chat's engine and the installed `claude`.
 #   Checks/real.sh              a throwaway, signed-out folder: Claude Code says it isn't signed in
-#   QC_CONFIG=~/.claude-x Checks/real.sh   that folder's account answers (uses a little of its usage)
-# QC_MODEL (haiku), QC_EFFORT (empty: thinking off), QC_QUESTION. The work folder and the throwaway folder are under
-# build/; with QC_CONFIG, the session Claude Code keeps for the work folder is removed afterwards.
+#   QC_CONFIG=~/.claude-x Checks/real.sh   that folder's account answers (uses a little of its usage): one kept-alive
+#                               `claude`, five turns: it remembers, Stop (interrupt) keeps the conversation, the model
+#                               changes in the running chat; then it checks that quick chats are incognito: no session
+#                               file for this run's work folder under the folder's projects/, and it lists every file in
+#                               the folder that changed during the run (other Claude Code sessions on a folder in use
+#                               write there too)
+# QC_MODEL (haiku), QC_EFFORT (empty: thinking off), QC_QUESTION (single question only). The work folder and the
+# throwaway folder are under build/.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
@@ -15,9 +20,23 @@ config="${QC_CONFIG:-$out/throwaway-config}"
 mkdir -p "$config" "$work"
 swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/real" \
   "$repo/Sources/Engine.swift" "$here/real/main.swift"
+marker="$out/real-marker"
+touch "$marker"; sleep 1
 status=0
-QC_CLAUDE="$claude" QC_CONFIG="$config" QC_WORK="$work" "$out/real" || status=$?
-# what Claude Code kept for this run: in a real folder, its session under projects/; the throwaway folder goes whole
+multi=0; [ -n "${QC_CONFIG:-}" ] && multi=1
+QC_MULTI="$multi" QC_CLAUDE="$claude" QC_CONFIG="$config" QC_WORK="$work" "$out/real" || status=$?
+# incognito: Claude Code must not have kept a session for this work folder
 key="$(printf '%s' "$work" | sed 's/[^A-Za-z0-9]/-/g')"
-if [ -z "${QC_CONFIG:-}" ]; then rm -rf "$config"; elif [ -n "$key" ]; then rm -rf "$config/projects/$key"; fi
+sleep 1
+if [ -n "${QC_CONFIG:-}" ]; then
+  echo "--- changed in $config during the run:"
+  find "$config" "$config.json" -newer "$marker" -type f 2>/dev/null | sed "s|^$HOME|~|" | sort | head -60 || true
+  if [ -n "$key" ] && [ -e "$config/projects/$key" ]; then
+    echo "FAIL a session was kept: $config/projects/$key"; ls -la "$config/projects/$key"; status=1
+    rm -rf "$config/projects/$key"
+  else
+    echo "PASS no session kept for this run (no projects/$key)"
+  fi
+fi
+if [ -z "${QC_CONFIG:-}" ]; then rm -rf "$config"; fi
 exit "$status"
