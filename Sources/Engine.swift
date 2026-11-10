@@ -115,6 +115,31 @@ enum QuickChatParse {
     }
 }
 
+// MARK: - Answers Stop gave up on
+
+/// Stop interrupts the answer under way and the chat goes on in the same `claude`. Claude Code ends an interrupted
+/// answer with a `result` of its own (an error, aborted), so every message sent gets exactly one `done`, in order. Until
+/// the `done` of an abandoned answer has come, what Claude Code prints belongs to that answer, not to a later one: it
+/// is dropped (a limit report is about the account and stays), and the `done` ends the wait.
+struct StaleAnswers {
+    private(set) var count = 0
+    var waiting: Bool { count > 0 }
+
+    enum Fate: Equatable { case pass, drop, endsOne }
+
+    mutating func abandon() { count += 1 }
+    mutating func reset() { count = 0 }
+
+    mutating func fate(of e: QuickChatEvent) -> Fate {
+        guard count > 0 else { return .pass }
+        switch e {
+        case .done: count -= 1; return .endsOne
+        case .limit, .ignored: return .pass
+        default: return .drop
+        }
+    }
+}
+
 // MARK: - The command
 
 /// How the quick chat runs `claude` for one chat.

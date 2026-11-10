@@ -88,23 +88,21 @@ enum FolderFiles {
     }
 }
 
-/// The accounts a chat's `claude` and its session started on. What the process reports (a week, a full limit) belongs
-/// to that account, whatever the chat's target says by then: the folder may have changed account while an answer was on
-/// its way. A session belongs to its account too: it is gone on only on the account it began on.
+/// The account a chat's `claude` started on. What the process reports (a week, a full limit) belongs to that account,
+/// whatever the chat's target says by then: the folder may have changed account while an answer was on its way. A chat
+/// is incognito, so its conversation lives only in that process: it goes on only on the account the process started on.
 struct AccountTrail {
+    private(set) var running = false
     private(set) var process: String?
-    private(set) var session: String?
 
-    mutating func processStarted(on uuid: String?) { process = uuid }
-    mutating func processEnded() { process = nil }
-    /// The running `claude` began its session: on the account it started on.
-    mutating func sessionStarted() { session = process }
-    mutating func sessionCleared() { session = nil }
+    mutating func processStarted(on uuid: String?) { running = true; process = uuid }
+    /// The process ended, and the conversation with it.
+    mutating func processEnded() { running = false; process = nil }
 
     /// The account a report from the running `claude` is recorded on.
     var reportAccount: String? { process }
-    /// A session goes on only on the account it began on (no session yet: nothing to carry across).
-    func canResume(on uuid: String?) -> Bool { session == nil || session == uuid }
+    /// The conversation goes on only on the account its process started on (no process: nothing to carry across).
+    func canContinue(on uuid: String?) -> Bool { !running || process == uuid }
 }
 
 enum AccountBook {

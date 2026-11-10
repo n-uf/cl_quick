@@ -7,7 +7,8 @@
 //                                       streaming, answer, failed, notsigned, thinking, full, level95; with accounts:
 //                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
 //                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
-//                                       switched (the new chat's first line))
+//                                       switched (the new chat's first line); incognito: ended-idle, ended-stopped,
+//                                       ended-failed, ended-closed (the line under a chat that ended))
 //   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts,
 //                                       accounts-timedout, accounts-forget, accounts-again, add-refused, general)
 //   --version

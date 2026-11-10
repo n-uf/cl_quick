@@ -128,6 +128,8 @@ struct QCWindow: View {
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
             QCTurnView(turn: t, last: i == model.turns.count - 1, model: model)
         }
+        // the chat ended (idle, a crash, Stop that didn't stop): said once, under the turns that are left to read
+        if let e = model.ended { QCEndNote(text: e.line).padding(.top, 12) }
         // a switch of account under way (or gone wrong) is said under the chat, in place of the full limit's own notice
         if model.switchNotice != nil {
             QCSwitchView(model: model).padding(.top, 12)
@@ -499,6 +501,19 @@ struct QCNote: View {
         HStack(spacing: 7) {
             Circle().fill(Color(nsColor: Painter.green)).frame(width: 7, height: 7)
             Text(text).font(.system(size: 12.5)).foregroundColor(QCColor.muted).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// The plain line under a chat that ended ("This chat ended after 15 minutes idle. Nothing was saved."): the turns above
+/// stay to read, and the next message starts a new chat.
+struct QCEndNote: View {
+    let text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Circle().fill(QCColor.muted).frame(width: 7, height: 7).padding(.top, 5)
+            Text(text).font(.system(size: 12.5)).foregroundColor(QCColor.muted).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
     }
@@ -877,6 +892,11 @@ enum QuickChatRender {
             m.level = nil
             m.accountNote = "Main is on \(maskEmail("ultra-2@example.com")) now."
             m.turns = [t]
+        case "ended-idle": m.turns = [t1]; m.ended = .idle
+        case "ended-stopped": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .stopped; m.turns = [t]; m.ended = .stopped
+        case "ended-failed": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .failed
+            t.problem = .stopped(detail: "claude exited with code 1: API Error: Connection error."); m.turns = [t]; m.ended = .failed
+        case "ended-closed": m.turns = [t1]; m.ended = .closed
         case "level95": level.week = 96; m.level = level; m.turns = [t1]
         default: break
         }

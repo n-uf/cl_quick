@@ -2,8 +2,9 @@
 // that stays floating over any app, on every Space, until Esc hides it. It never brings anything else forward.
 //
 // It answers through your own Claude Code (Engine.swift), on the profile you pick (Profiles.swift), on that profile's
-// account in use, and counts against its limits. One `claude` at a time, closed after 2 minutes idle; the next message
-// goes on with the session. The bar and the window are ChatViews.swift.
+// account in use, and counts against its limits. One `claude` at a time. A chat is incognito: nothing is saved, the
+// conversation lives only in the running `claude`, and it ends with it (15 minutes idle, ⌘N, a crash, another profile
+// or account, quitting); the next message starts a new chat. The bar and the window are ChatViews.swift.
 
 import AppKit
 import SwiftUI
@@ -151,6 +152,29 @@ struct QuickChatTurn: Identifiable, Equatable {
     var busy: Bool { phase == .waiting || phase == .streaming }
 }
 
+/// Why a chat ended while its turns are still on screen. The conversation lived only in its `claude`, so a chat that
+/// ended is gone: the next message starts a new one.
+enum QuickChatEnd: Equatable {
+    /// 15 minutes with no message.
+    case idle
+    /// Stop, and Claude Code didn't stop the answer in time.
+    case stopped
+    /// Claude Code crashed, couldn't start, or needs another sign-in; the failed question can be asked again.
+    case failed
+    /// Claude Code ended on its own while the chat sat idle.
+    case closed
+
+    /// The plain line under the chat.
+    var line: String {
+        switch self {
+        case .idle: return "This chat ended after 15 minutes idle. Nothing was saved."
+        case .stopped: return "Stop ended this chat. Nothing was saved."
+        case .failed: return "This chat ended. Retry asks the last question in a new chat."
+        case .closed: return "Claude Code ended, and this chat with it. Nothing was saved."
+        }
+    }
+}
+
 /// Another profile with room, offered while this one's limit is full.
 struct QuickChatOffer: Equatable {
     var profileID: String
@@ -203,6 +227,8 @@ final class QuickChatModel: ObservableObject {
     @Published var switchNotice: QuickChatSwitchNotice?
     /// One line after a switch: "Main is on p•••@example.com now."
     @Published var accountNote: String?
+    /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
+    @Published var ended: QuickChatEnd?
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
@@ -234,11 +260,15 @@ final class QuickChatModel: ObservableObject {
 
     private var process: QuickChatProcess?
     private var processKey = ""
-    /// The account the running `claude` started on, for what it reports.
+    /// The account the running `claude` started on: what it reports belongs to it, and the chat goes on only on it.
     private var trail = AccountTrail()
-    private var session: String?
-    /// The current `claude` started its session (its first line came): one that ends before can't go on with it.
-    private var processStarted = false
+    /// The model and thinking the running `claude` has now; the pickers change them with control requests.
+    private var appliedModel = "", appliedEffort: String?
+    /// The question being answered reached `claude` (not still waiting for the folder to be read or `claude` to be found).
+    private var messageSent = false
+    /// Answers Stop gave up on whose `done` is still to come (see StaleAnswers), and the wait's limit.
+    private var stale = StaleAnswers()
+    private var staleTimer: Timer?
     private var pending = "", pendingThinking = ""
     private var flushWork: DispatchWorkItem?
     private var idleTimer: Timer?
@@ -246,8 +276,10 @@ final class QuickChatModel: ObservableObject {
     private var drawnBlocked = false
     /// Counts new chats: a look for claude that finishes after the chat moved on starts nothing.
     private var generation = 0
-    /// A `claude` sits idle this long after an answer, then it's closed; the next message goes on with the session.
-    static let idleSeconds: TimeInterval = 2 * 60
+    /// A chat ends this long after its last answer (window open or hidden); nothing is kept.
+    static let idleSeconds: TimeInterval = 15 * 60
+    /// Stop waits this long for Claude Code to end the answer; then the chat ends instead of hanging.
+    static let stopSeconds: TimeInterval = 5
 
     // MARK: keys
 
@@ -257,26 +289,41 @@ final class QuickChatModel: ObservableObject {
         guard target != nil else { barProblem = .noProfile; return }
         field = ""
         barProblem = nil
+        // the chat on screen ended: this message starts a new one, with nothing from the old one
+        if ended != nil { turns = []; ended = nil; accountNote = nil }
         turns.append(QuickChatTurn(question: q, thinkingTitle: thinking.effort == nil ? nil : thinking.title))
         scrollTick += 1
         ask(q)
     }
 
-    /// Stop: the answer ends where it is; the session goes on with the next message.
+    /// Stop: the answer ends where it is and the chat goes on, the conversation staying in the same `claude` (an
+    /// interrupt control request). If it can't be asked, or doesn't end the answer in a few seconds, the chat ends.
     func stop() {
         guard busy, let i = turns.indices.last else { return }
         flush()
         turns[i].phase = .stopped
         turns[i].seconds = Date().timeIntervalSince(turns[i].started)
-        // the process goes at once, so the next message never meets one still stopping; the session stays
-        closeProcess()
+        pending = ""; pendingThinking = ""
         // a message still waiting for its folder to be read (ask()) is let go: Retry or a new message asks on its own
         generation += 1
+        // one that never reached `claude` needs no interrupt
+        guard messageSent, let p = process, p.isRunning else { return }
+        messageSent = false
+        stale.abandon()
+        if p.interrupt() { armStale() } else { endChat(.stopped) }
     }
 
-    /// Retry a failed answer, or ask the last question again.
+    /// Retry a failed answer, or ask the last question again. A chat that ended is gone: the question is asked in a new one.
     func again() {
         guard !busy, let i = turns.indices.last else { return }
+        if ended != nil {
+            let q = turns[i].question
+            turns = [QuickChatTurn(question: q, thinkingTitle: thinking.effort == nil ? nil : thinking.title)]
+            ended = nil; accountNote = nil
+            scrollTick += 1
+            ask(q)
+            return
+        }
         turns[i].answer = ""; turns[i].thinking = ""; turns[i].problem = nil; turns[i].phase = .waiting
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = thinking.effort == nil ? nil : thinking.title
@@ -284,14 +331,13 @@ final class QuickChatModel: ObservableObject {
         ask(turns[i].question)
     }
 
-    /// A new chat: the process goes, the session stays in Claude Code's folder, the pickers go back to the defaults.
+    /// A new chat: the process goes and the old chat with it (nothing was saved), the pickers go back to the defaults.
     /// `keepField`: what you typed stays (another profile was picked). `dropsSwitch`: a switch of account under way or
     /// gone wrong is forgotten too (not when the chat starts anew because the account changed, which is what it says).
     func newChat(keepField: Bool = false, dropsSwitch: Bool = true) {
         generation += 1
         closeProcess()
-        session = nil
-        trail.sessionCleared()
+        ended = nil
         turns = []
         if !keepField { field = "" }
         barProblem = nil
@@ -302,7 +348,7 @@ final class QuickChatModel: ObservableObject {
         focusTick += 1
     }
 
-    /// The pickers: from the next message on (a new `claude` goes on with the session).
+    /// The pickers: from the next message on (the running `claude` is told, so the chat keeps its conversation).
     func choose(_ c: QuickChatModelChoice) { choice = c; focusTick += 1 }
     func choose(_ t: QuickChatThinking) { thinking = t; focusTick += 1 }
 
@@ -365,6 +411,7 @@ final class QuickChatModel: ObservableObject {
     private func ask(_ q: String) {
         guard let first = target else { fail(.noProfile); return }
         let gen = generation
+        messageSent = false
         resolveClaude { [weak self] path in
             guard let self, gen == self.generation else { return }
             guard let path else { self.fail(.notInstalled); return }
@@ -381,12 +428,6 @@ final class QuickChatModel: ObservableObject {
                     }
                 }
                 guard let target = self.target else { self.fail(.noProfile); return }
-                // a session belongs to its account: on another one it isn't gone on with, and a new `claude` begins
-                if !self.trail.canResume(on: target.accountUUID) {
-                    self.session = nil
-                    self.trail.sessionCleared()
-                    self.closeProcess()
-                }
                 self.start(q, path: path, target: target)
             }
         }
@@ -394,13 +435,23 @@ final class QuickChatModel: ObservableObject {
 
     private func start(_ q: String, path: String, target: QuickChatTarget) {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
-                                   workFolder: target.workFolder, model: choice.flag, effort: thinking.effort,
-                                   resume: session)
-        // the same `claude` while nothing it runs with changed; a new one goes on with the session
-        // (the account's uuid, not just its address: two accounts may share one, and must not share a running claude)
-        let key = [path, target.configDir, target.accountUUID ?? target.email ?? "", cmd.model, cmd.effort ?? ""].joined(separator: "|")
-        if process?.isRunning != true || key != processKey {
+                                   workFolder: target.workFolder, model: choice.flag, effort: thinking.effort)
+        // the same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
+        // aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
+        // accounts may share one, and must not share a running claude.
+        let key = [path, target.configDir, target.accountUUID ?? target.email ?? ""].joined(separator: "|")
+        let goesOn = process?.isRunning == true && key == processKey && trail.canContinue(on: target.accountUUID)
+        if goesOn {
+            if cmd.model != appliedModel { process?.setModel(cmd.model); appliedModel = cmd.model }
+            if cmd.effort != appliedEffort { process?.setThinking(cmd.effort); appliedEffort = cmd.effort }
+        } else {
+            // another account, folder or `claude`, or none running: a new chat begins, so nothing said before is on
+            // screen as if the new `claude` knew it
             closeProcess()
+            if turns.count > 1, let last = turns.last {
+                turns = [last]
+                accountNote = (accountNote.map { $0 + " " } ?? "") + "New chat; nothing from the last one was carried over."
+            }
             let p = QuickChatProcess(cmd)
             p.onEvent = { [weak self, weak p] e in guard let self, let p, p === self.process else { return }; self.handle(e) }
             p.onExit = { [weak self, weak p] status, tail in
@@ -412,20 +463,30 @@ final class QuickChatModel: ObservableObject {
             }
             process = p
             processKey = key
-            processStarted = false
+            appliedModel = cmd.model
+            appliedEffort = cmd.effort
             trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
         }
         idleTimer?.invalidate()
-        if process?.send(q) != true { fail(.stopped(detail: "Claude Code didn't take the message.")) }
+        messageSent = process?.send(q) == true
+        if !messageSent { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
     private func handle(_ e: QuickChatEvent) {
         guard let i = turns.indices.last else { return }
+        // what Claude Code still says about an answer Stop gave up on is dropped, up to its `done`
+        switch stale.fate(of: e) {
+        case .pass: break
+        case .drop: return
+        case .endsOne:
+            if !stale.waiting {
+                staleTimer?.invalidate(); staleTimer = nil
+                if !busy { armIdle() }
+            }
+            return
+        }
         switch e {
-        case .started(let s, let model):
-            session = s
-            trail.sessionStarted()
-            processStarted = true
+        case .started(_, let model):
             if !model.isEmpty { setModel(model, turn: i) }
         case .text(let t):
             // the answer begins: how long it thought before
@@ -450,10 +511,10 @@ final class QuickChatModel: ObservableObject {
             var l = level ?? QuickChatLevel()
             l.apply(type: type, used: used, status: status, resets: resets)
             reportLevel(l)
-        case .done(let isError, let text, let ms, let s):
+        case .done(let isError, let text, let ms, _):
             flush()
-            if !s.isEmpty { session = s }
             guard turns[i].busy else { return }
+            messageSent = false
             turns[i].seconds = ms > 0 ? Double(ms) / 1000 : Date().timeIntervalSince(turns[i].started)
             if isError, turns[i].problem == nil, QuickChatParse.isLimit(error: nil, text: text) { turns[i].problem = .limitFull }
             if isError || turns[i].problem != nil {
@@ -470,11 +531,8 @@ final class QuickChatModel: ObservableObject {
                 turns[i].phase = .done
             }
             scrollTick += 1
-            idleTimer?.invalidate()
-            idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleSeconds, repeats: false) { [weak self] _ in
-                guard let self, !self.busy else { return }
-                self.closeProcess()
-            }
+            // a `claude` that says it isn't signed in is let go: Retry (after signing in) asks in a new chat
+            if case .notSignedIn? = turns[i].problem { endChat(.failed) } else { armIdle() }
         case .ignored:
             break
         }
@@ -496,16 +554,45 @@ final class QuickChatModel: ObservableObject {
     }
 
     private func exited(_ status: Int32, _ tail: String) {
-        process = nil
-        processKey = ""
-        trail.processEnded()
+        // the conversation lived only in this process: it is gone with it
+        closeProcess()
         flush()
-        // it ended before its session began (a session to go on with that is gone, say): Retry starts a new one
-        if !processStarted { session = nil; trail.sessionCleared() }
-        guard let i = turns.indices.last, turns[i].busy else { return }
+        guard !turns.isEmpty else { return }
+        guard let i = turns.indices.last, turns[i].busy else { ended = ended ?? .closed; return }
         var detail = "claude exited with code \(status)"
         if !tail.isEmpty { detail += ": \(tail)" }
         fail(.stopped(detail: detail))
+    }
+
+    /// The chat ends: its `claude` goes and the turns stay on screen to read, with a line saying why. The next message
+    /// (or Retry, which asks the last question) starts a new chat.
+    private func endChat(_ kind: QuickChatEnd) {
+        closeProcess()
+        guard !turns.isEmpty else { return }
+        ended = kind
+    }
+
+    /// 15 minutes with no message: the chat ends, window open or hidden.
+    private func armIdle() {
+        idleTimer?.invalidate()
+        let t = Timer(timeInterval: Self.idleSeconds, repeats: false) { [weak self] _ in
+            guard let self, !self.busy, self.process != nil, !self.stale.waiting else { return }
+            self.endChat(.idle)
+        }
+        t.tolerance = 30
+        RunLoop.main.add(t, forMode: .common)
+        idleTimer = t
+    }
+
+    /// Stop was asked and Claude Code hasn't ended the answer: the chat ends instead of hanging on it.
+    private func armStale() {
+        staleTimer?.invalidate()
+        let t = Timer(timeInterval: Self.stopSeconds, repeats: false) { [weak self] _ in
+            guard let self, self.stale.waiting else { return }
+            if self.busy { self.fail(.stopped(detail: "Claude Code didn't stop the answer in time.")) } else { self.endChat(.stopped) }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        staleTimer = t
     }
 
     private func fail(_ p: QuickChatProblem) {
@@ -524,10 +611,18 @@ final class QuickChatModel: ObservableObject {
         turns[i].problem = p
         turns[i].seconds = Date().timeIntervalSince(turns[i].started)
         scrollTick += 1
+        // `claude` stopped or isn't signed in: its conversation is gone, Retry asks this question in a new chat
+        switch p {
+        case .stopped, .notSignedIn: endChat(.failed)
+        default: break
+        }
     }
 
     private func closeProcess() {
-        idleTimer?.invalidate()
+        idleTimer?.invalidate(); idleTimer = nil
+        staleTimer?.invalidate(); staleTimer = nil
+        stale.reset()
+        messageSent = false
         process?.onEvent = { _ in }
         process?.onExit = { _, _ in }
         process?.stop()
