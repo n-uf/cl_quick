@@ -7,6 +7,7 @@
 // or account, quitting); the next message starts a new chat. The bar and the window are ChatViews.swift.
 
 import AppKit
+import Combine
 import SwiftUI
 
 // MARK: - Settings
@@ -726,6 +727,12 @@ final class QuickChat {
     private var claudePath: String?
     private var looking: [(String?) -> Void] = []
     private var placed = false
+    private weak var host: QuickChatHostingView?
+    private var modeWatch: AnyCancellable?
+    /// The chat's height as the user left it (for this run, like the place and the width). nil: the first height.
+    private var chatHeight: CGFloat?
+    /// Whether the panel is already sized for the chat: from then on the size is the user's, and fit() leaves it alone.
+    private var sizedForChat = false
     private let hotKey = QuickChatHotKey()
     /// The shortcut: "on", or why it isn't registered; nil while it's turned off. Shown in Settings.
     private(set) var shortcutState: String?
@@ -876,6 +883,7 @@ final class QuickChat {
         let p = panel ?? makePanel()
         // where the user left it stays (for this run); the first time, or when that place is on no screen now: centred
         if !placed || !isOnScreen(p) { place(p); placed = true }
+        clampToScreen(p)
         p.orderFrontRegardless()
         p.makeKey()
         model.focusTick += 1
@@ -903,23 +911,74 @@ final class QuickChat {
         let p = QuickChatPanel()
         p.onEscape = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
-        let root = QuickChatRoot(model: model) { [weak self] size in self?.fit(size) }
-        p.contentView = QuickChatHostingView(rootView: root)
+        p.onResized = { [weak self] in
+            guard let self, let p = self.panel else { return }
+            // the user sized it: the chat keeps its height (the bar has none to give), both keep the width
+            if self.model.isWindow { self.chatHeight = p.frame.height }
+            self.keepOnScreen(p)
+        }
+        let host = QuickChatHostingView(rootView: QuickChatRoot(model: model))
+        // the content's own limits (QuickChatRoot: the bar's width only, the chat's width and height) are the panel's
+        host.onIntrinsicChange = { [weak self] in self?.fit() }
+        p.contentView = host
         panel = p
+        self.host = host
+        // the first message turns the bar into the chat, ⌘N back
+        modeWatch = model.$turns.map { !$0.isEmpty }.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.fit() } }
         return p
     }
 
-    /// The panel takes the size of what it shows, its top edge staying where it is.
-    private func fit(_ size: CGSize) {
-        guard let p = panel, size.width > 0, size.height > 0 else { return }
+    /// The panel's size follows the mode, its top edge staying where it is. The limits come from the content
+    /// (QuickChatRoot's frames: the bar's height is its content's, the chat's the user's), so here only the height:
+    /// - the bar is as tall as its content (Shift-Return lines);
+    /// - the chat takes the user's height (the first one until the user sizes it) once, when the first message turns the
+    ///   bar into it, and is the user's after that: answers scroll inside it.
+    private func fit() {
+        guard let p = panel, let host else { return }
+        let vis = (p.screen ?? NSScreen.main)?.visibleFrame
+        var h: CGFloat
+        if model.isWindow {
+            if sizedForChat { return }
+            sizedForChat = true
+            h = chatHeight ?? QuickChatRoot.windowHeight
+        } else {
+            sizedForChat = false
+            h = host.intrinsicContentSize.height
+            guard h > 0 else { return }      // not measured yet (NSView.noIntrinsicMetric is -1)
+        }
+        if let vis { h = min(h, vis.height) }
+        host.layoutSubtreeIfNeeded()         // the limits of the mode we are in now, before the frame is set
         var f = p.frame
-        guard abs(f.width - size.width) > 0.5 || abs(f.height - size.height) > 0.5 else { return }
+        guard abs(f.height - h) > 0.5 else { p.invalidateShadow(); return }
         let top = f.maxY
-        f.size = size
-        f.origin.y = top - size.height
-        if let vis = p.screen?.visibleFrame, f.minY < vis.minY { f.origin.y = vis.minY }
+        f.size.height = h
+        f.origin.y = top - h
+        if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
         p.setFrame(f, display: true)
         p.invalidateShadow()
+    }
+
+    /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
+    /// side) leaves the panel back inside it. The size already fits (QuickChatPanel.windowWillResize).
+    private func keepOnScreen(_ p: NSPanel) {
+        guard let vis = (p.screen ?? NSScreen.main)?.visibleFrame else { return }
+        var f = p.frame
+        f.origin.x = min(max(f.minX, vis.minX), vis.maxX - f.width)
+        f.origin.y = min(max(f.minY, vis.minY), vis.maxY - f.height)
+        if f != p.frame { p.setFrame(f, display: true); p.invalidateShadow() }
+    }
+
+    /// On opening: the size held to the screen it's on (a smaller display than last time).
+    private func clampToScreen(_ p: NSPanel) {
+        guard let vis = (p.screen ?? NSScreen.main)?.visibleFrame else { return }
+        var f = p.frame
+        let w = min(f.width, vis.width), h = min(f.height, vis.height)
+        guard abs(w - f.width) > 0.5 || abs(h - f.height) > 0.5 else { return }
+        let top = f.maxY
+        f.size = NSSize(width: w, height: h)
+        f.origin.y = top - h
+        p.setFrame(f, display: false)
     }
 
     /// The first time: centred on the screen with the mouse, its top a quarter of the way down.
@@ -927,10 +986,10 @@ final class QuickChat {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let vis = screen?.visibleFrame else { return }
-        let w = QuickChatRoot.width
+        let w = min(p.frame.width, vis.width)           // the size it has now: a fall-back for a lost place keeps it
         let top = vis.maxY - vis.height * 0.22
-        let h = p.frame.height          // the chat's height too, when this is a fall-back for a lost place
-        p.setFrame(NSRect(x: vis.midX - w / 2, y: top - h, width: w, height: h), display: false)
+        let h = min(p.frame.height, vis.height)
+        p.setFrame(NSRect(x: vis.midX - w / 2, y: max(vis.minY, top - h), width: w, height: h), display: false)
     }
 
     /// Whether the panel's top strip (where it's grabbed) shows on some screen, clear of the menu bar and the Dock.
@@ -966,9 +1025,17 @@ final class QuickChat {
 
 /// A floating panel that takes the keyboard without bringing cl_quick (or anything else) forward, on every Space and
 /// over full-screen apps.
-final class QuickChatPanel: NSPanel {
+final class QuickChatPanel: NSPanel, NSWindowDelegate {
     var onEscape: () -> Void = {}
     var onNewChat: () -> Void = {}
+    /// The user finished resizing it from an edge or corner.
+    var onResized: () -> Void = {}
+    func windowDidEndLiveResize(_ n: Notification) { onResized() }
+    /// Dragging the edges never takes it past the screen it's on.
+    func windowWillResize(_ sender: NSWindow, to size: NSSize) -> NSSize {
+        guard let vis = (sender.screen ?? NSScreen.main)?.visibleFrame else { return size }
+        return NSSize(width: min(size.width, vis.width), height: min(size.height, vis.height))
+    }
 
     /// cl_quick has no menu bar of its own, so the Edit keys are handled here: cut, copy, paste, select all, undo and
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
@@ -994,7 +1061,8 @@ final class QuickChatPanel: NSPanel {
 
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: QuickChatRoot.width, height: 140),
-                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
+                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView, .resizable], backing: .buffered, defer: false)
+        delegate = self
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -1016,4 +1084,14 @@ final class QuickChatPanel: NSPanel {
 /// The panel's content. It doesn't drag by itself (its SwiftUI views catch the mouse): QCDragSurface does, behind them.
 final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Called (once per turn of the run loop) when the content's ideal size changed: a line more in the field, say.
+    var onIntrinsicChange: () -> Void = {}
+    private var told = false
+    override func invalidateIntrinsicContentSize() {
+        super.invalidateIntrinsicContentSize()
+        guard !told else { return }
+        told = true
+        DispatchQueue.main.async { [weak self] in self?.told = false; self?.onIntrinsicChange() }
+    }
 }

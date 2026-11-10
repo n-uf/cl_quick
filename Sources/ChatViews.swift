@@ -36,25 +36,23 @@ extension EnvironmentValues {
     }
 }
 
-private struct QCSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
-}
-
+/// The panel is as wide as the user made it (the bar and the chat share the width). The bar is as tall as its content,
+/// which the hosting view reports as its intrinsic height (QuickChat.fit); the chat fills the panel, the user's to resize.
 struct QuickChatRoot: View {
-    static let width: CGFloat = 520
-    static let windowHeight: CGFloat = 580
+    static let width: CGFloat = 520            // the first width
+    static let windowHeight: CGFloat = 580     // the chat's first height
+    static let minWidth: CGFloat = 440         // the bar's row (profile, model, thinking, week, send) needs 394 + 20 of padding
+    static let minWindowHeight: CGFloat = 340  // header, a few lines of chat, and the field at six lines
     @ObservedObject var model: QuickChatModel
-    var onSize: (CGSize) -> Void = { _ in }
 
     var body: some View {
         Group {
             if model.isWindow { QCWindow(model: model) } else { QCBar(model: model) }
         }
-        .frame(width: Self.width)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(GeometryReader { g in Color.clear.preference(key: QCSizeKey.self, value: g.size) })
-        .onPreferenceChange(QCSizeKey.self) { s in DispatchQueue.main.async { onSize(s) } }
+        // these frames are the panel's limits too (NSHostingView passes them on): the bar's width only, the chat's both
+        .frame(minWidth: Self.minWidth, maxWidth: .infinity,
+               minHeight: model.isWindow ? Self.minWindowHeight : nil, maxHeight: model.isWindow ? .infinity : nil, alignment: .top)
+        .fixedSize(horizontal: false, vertical: !model.isWindow)
         .environment(\.colorScheme, .dark)
     }
 }
@@ -125,7 +123,7 @@ struct QCWindow: View {
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(QCColor.line))
             .padding([.horizontal, .bottom], 12)
         }
-        .frame(height: QuickChatRoot.windowHeight)
+        .frame(maxHeight: .infinity)
         .qcDraggable()
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(QCColor.window.opacity(0.98)))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(QCColor.line))
@@ -608,7 +606,7 @@ struct QCChip: View {
             HStack(spacing: 5) {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
                 if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundColor(lit ? QCColor.accent : QCColor.soft) }
-                Text(title).font(.system(size: 13, weight: .medium))
+                Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.7)
             }
             .foregroundColor(hover ? QCColor.text : QCColor.soft)
@@ -782,6 +780,7 @@ struct QCTextField: NSViewRepresentable {
         tv.insertionPointColor = NSColor(QCColor.accent)
         scroll.documentView = tv
         context.coordinator.textView = tv
+        tv.onWidth = { [weak c = context.coordinator] in c?.measure() }     // the panel was resized: the lines wrap anew
         apply(tv)
         return scroll
     }
@@ -846,6 +845,13 @@ struct QCTextField: NSViewRepresentable {
 
 final class QCTextView: NSTextView {
     var placeholder: NSAttributedString? { didSet { needsDisplay = true } }
+    /// Called when the width changes (the panel is resized).
+    var onWidth: (() -> Void)?
+    override func setFrameSize(_ s: NSSize) {
+        let was = frame.width
+        super.setFrameSize(s)
+        if abs(was - s.width) > 0.5 { onWidth?() }
+    }
     override func draw(_ r: NSRect) {
         super.draw(r)
         if string.isEmpty, let p = placeholder { p.draw(at: NSPoint(x: textContainerOrigin.x, y: textContainerOrigin.y)) }
@@ -910,7 +916,10 @@ enum QuickChatRender {
         case "level95": level.week = 96; m.level = level; m.turns = [t1]
         default: break
         }
-        let view = QuickChatRoot(model: m).environment(\.qcRendering, true).padding(30).background(Color(white: 0.1))
+        // the panel gives the root its size: the first width, and for the chat the first height
+        let view = QuickChatRoot(model: m).environment(\.qcRendering, true)
+            .frame(width: QuickChatRoot.width, height: m.isWindow ? QuickChatRoot.windowHeight : nil)
+            .padding(30).background(Color(white: 0.1))
         let r = ImageRenderer(content: view)
         r.scale = 2
         if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
