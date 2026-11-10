@@ -2,7 +2,8 @@
 # Build cl_quick and install it into /Applications.
 #   ./build.sh               build, install, open it
 #   ./build.sh --no-install  build into ./build only
-# One small program: a menu bar app (no Dock icon), signed ad hoc here; releases are signed and notarized.
+# One small program: a menu bar app (no Dock icon), signed ad hoc, as released too
+# (scripts/release.sh packages the app this builds; there is no Developer ID or notarization yet).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -8,8 +8,10 @@ is one menu bar app with no Dock icon and one `claude` at a time, closed after 2
 
 ## Install
 
-Download the latest release, open the disk image and drag cl_quick to Applications. It needs macOS 13 or later and
-[Claude Code](https://code.claude.com/docs/en/setup), signed in.
+Download the latest release, open the disk image and drag cl_quick to Applications. It needs an Apple silicon Mac,
+macOS 13 or later and [Claude Code](https://code.claude.com/docs/en/setup), signed in. cl_quick isn't signed with an
+Apple Developer ID yet, so the first time macOS says it can't verify the app: open System Settings ▸ Privacy &
+Security and click **Open Anyway** (once).
 
 To build it yourself: `./build.sh` (Xcode's command-line tools; it installs into /Applications and opens it), or
 `./build.sh --no-install`.
@@ -77,6 +79,18 @@ folder's account and removes its session afterwards.
 ## Versioning
 
 Calendar versions, `YY.M.R`: the year and month of the release, then a counter within that month.
+
+## Releases
+
+Downloads come from [GitHub Releases](https://github.com/n-uf/cl_quick/releases): `cl_quick.dmg` and `cl_quick.zip`,
+the same app. Notes go in CHANGELOG.md under "Unreleased" as changes land. To release, from a clean `main`:
+
+```bash
+scripts/release.sh --dry-run   # the next version
+scripts/release.sh             # date the notes, commit "release X", tag vX
+scripts/release.sh --push      # the same, then build the zip and disk image, push, publish the GitHub Release
+scripts/release.sh --local     # only build dist/cl_quick.zip and dist/cl_quick.dmg, to check them
+```
 
 ## License
 
