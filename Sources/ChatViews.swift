@@ -186,6 +186,7 @@ struct QCHeader: View {
                 // Settings opens and the chat steps aside (hidden, not closed: the shortcut brings it back as it was)
                 if let id = model.target?.profileID { model.openSettings(id); model.hide() }
             }, nameHover: $nameHover, addressHover: $addressHover, meterHover: $meterHover, state: $line)
+            .zIndex(1)         // a grown address capsule is drawn over the buttons too
             HStack(spacing: 0) {
                 QCIconButton(symbol: "square.and.pencil", help: "New chat (⌘N)", size: QCSpace.row) { model.newChat() }
                 QCIconButton(symbol: "xmark", help: "Hide (Esc)", size: QCSpace.row) { model.hide() }
@@ -280,10 +281,10 @@ extension EnvironmentValues {
 ///   3. the reset times go (labels full again, then short, the address back while it fits);
 ///   4. the percentages go (bars only; "full" stays), labels first full again, then short;
 ///   5. the labels go, both (and a profile name too long for the window on its own is cut: the only ellipsis).
-/// The address sits in a capsule at most 132 pt wide, blurred at rest; it turns readable in place, the capsule keeping its
-/// width, only while the pointer is on the capsule. While the pointer is on the meters, a card under them shows only
+/// The address sits in a capsule at most 132 pt wide, blurred at rest; while the pointer is on the capsule (or the margin
+/// around it) the capsule grows to show it whole. While the pointer is on the meters, a card under them shows only
 /// what the line dropped (a window's share, reset or label), nothing it already shows, and no card at all when it
-/// dropped nothing. On the address capsule there is no card: the capsule grows to show the whole address.
+/// dropped nothing.
 struct QCHeaderDetail: Equatable {
     enum Resets { case words, none }
     enum Labels { case full, short, none }
@@ -363,8 +364,7 @@ struct QCHeaderLine: View {
                 // the name's hover fill reaches 6 pt past its text, which sits on the 10 pt line
                 QCProfileName(name: t.name, hover: $nameHover, action: openProfile).padding(.leading, -6)
                     .layoutPriority(flexible ? -1 : 0)
-                // a plain label: a drag that starts on it moves the panel (its own drag surface tells the pointer is on it)
-                if detail.address, let e = t.email { QCBlurred(text: e, hover: $addressHover).allowsHitTesting(false) }
+                if detail.address, let e = t.email { QCBlurred(text: e, hover: $addressHover) }
             }
             Spacer(minLength: 0)
             if let l = level {
@@ -441,35 +441,60 @@ extension EnvironmentValues {
     }
 }
 
-/// The address in a capsule: the real text, cut to the capsule's at most 132 pt, blurred at rest and readable only while
-/// the pointer is on the capsule itself (not the meters, the name or the buttons). The blur stays inside the capsule, so
-/// it has a clear edge rather than a smear.
+/// The address in a capsule: the real text, cut to the capsule's at most 132 pt, blurred at rest. While the pointer is on
+/// the capsule or the margin around it (not the meters, the name or the buttons) the capsule grows to the whole address,
+/// readable, drawn above whatever is next to it with its own opaque background; it returns to its size when the pointer
+/// leaves. The blur stays inside the capsule, so it has a clear edge rather than a smear.
 struct QCBlurred: View {
     let text: String
-    /// The pointer is on the capsule (a tracking area, so the drag still works from it): the blur fades out, and back in
-    /// when the pointer leaves.
+    /// The pointer is in the hover zone: the capsule shows the whole address. Kept by the header (the line's candidates
+    /// replace each other while the pointer is on it).
     @Binding var hover: Bool
     @Environment(\.qcAddressHover) private var pictureHover
     private var reveal: Bool { hover || pictureHover }
 
     static let font = NSFont.systemFont(ofSize: 12)
-    static let maxWidth: CGFloat = 132, inset: CGFloat = 7
-    /// Whether the whole address fits in the capsule (else the hover card shows it whole).
-    static func fits(_ s: String) -> Bool {
-        (s as NSString).size(withAttributes: [.font: font]).width + 2 * inset <= maxWidth
-    }
+    static let maxWidth: CGFloat = 132, inset: CGFloat = 7, height: CGFloat = 18
+    /// The margin around the capsule that also counts as on it, so the pointer can rest beside the text: 8 pt on the
+    /// left (the gap to the name), 10 pt on the others. The zone grows with the capsule.
+    static let zoneLeading: CGFloat = 8, zoneOther: CGFloat = 10
 
-    var body: some View {
+    /// The capsule's width when it shows the whole address.
+    private var fullWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: Self.font]).width) + 2 * Self.inset }
+    private var restWidth: CGFloat { min(fullWidth, Self.maxWidth) }
+    private var grown: Bool { reveal && fullWidth > restWidth }
+
+    /// A capsule `width` wide with the address in it, blurred or not.
+    private func capsule(_ width: CGFloat, blurred: Bool) -> some View {
         Text(text).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
-            .frame(minWidth: 0, maxWidth: Self.maxWidth - 2 * Self.inset, alignment: .leading).clipped()
-            .blur(radius: reveal ? 0 : 3.4)
-            .animation(.easeOut(duration: 0.18), value: reveal)
-            .padding(.horizontal, Self.inset).frame(height: 18)
+            .frame(width: width - 2 * Self.inset, alignment: .leading).clipped()
+            .blur(radius: blurred ? 3.4 : 0)
+            .padding(.horizontal, Self.inset).frame(height: Self.height)
             .background(Capsule().fill(QCColor.text.opacity(0.06)))
             .overlay(Capsule().strokeBorder(QCColor.text.opacity(0.05)))
             .clipShape(Capsule())
+    }
+
+    var body: some View {
+        // the line lays out the resting capsule; the grown one and the hover zone are overlays, so nothing else moves
+        capsule(restWidth, blurred: !reveal)
+            .animation(.easeOut(duration: 0.18), value: reveal)
+            .overlay(alignment: .leading) {
+                if grown {
+                    capsule(fullWidth, blurred: false)
+                        .background(Capsule().fill(QCColor.window))      // opaque: the meters under it don't show through
+                        .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
+                }
+            }
+            .overlay(alignment: .leading) {
+                Color.clear
+                    .frame(width: (grown ? fullWidth : restWidth) + Self.zoneLeading + Self.zoneOther, height: Self.height + 2 * Self.zoneOther)
+                    .contentShape(Rectangle())
+                    .onHover { hover = $0 }
+                    .offset(x: -Self.zoneLeading)
+            }
             .fixedSize()
-            .qcDraggable(hover: $hover)
+            .zIndex(1)
             .onDisappear { hover = false }
     }
 }
@@ -1379,7 +1404,7 @@ enum QuickChatRender {
         default: break
         }
         // the chat's account line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
-        // reported), header-long (a long profile name and address), each also with -hover-meter (the pointer on the
+        // reported), header-long (a long profile name and address), header-longaddr (a long address only), each also with -hover-meter (the pointer on the
         // meters: their card, the address still blurred) or -hover-address (the pointer on the address capsule)
         if state.hasPrefix("header") {
             var l = QuickChatLevel()
@@ -1387,15 +1412,17 @@ enum QuickChatRender {
             if !state.contains("nosession") { l.fiveHour = 41; l.fiveHourResets = Date().addingTimeInterval(2 * 3600 + 600) }
             if state.contains("full") { l.week = 100; l.weekResets = Date().addingTimeInterval(26 * 3600) }
             m.level = l
-            if state.contains("long") {
+            if state.contains("longaddr") {
+                target.email = "alexandra.longname@example.com"; m.target = target
+            } else if state.contains("long") {
                 target.name = state.contains("verylong") ? "Work – client project, EU team" : "Personal-work"
-                target.email = "long.address.name@example.com"; m.target = target
+                target.email = "alexandra.longname@example.com"; m.target = target
             }
             let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
             let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover-meter"))
                 .environment(\.qcAddressHover, state.contains("hover-address"))
                 .environment(\.qcNameHover, state.contains("namehover"))
-                .frame(width: width).background(QCColor.window).padding(.bottom, 80)       // room for the hover card under it
+                .frame(width: width).background(QCColor.window).padding(.bottom, 80)       // room for the meters' card under it
                 .environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))
             let r = ImageRenderer(content: header)
             r.scale = 2
