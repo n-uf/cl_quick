@@ -47,6 +47,7 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
 - If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
   Sign in again. After 10 minutes with no change it stops looking, quietly.
 - Each account keeps its own week: after a switch the chat shows that account's last-reported week, or "no numbers yet".
+  Weeks are kept per account (its id in Claude Code's file), not per organization.
 - Addresses are masked everywhere in cl_quick (p•••@example.com).
 
 ## The chat

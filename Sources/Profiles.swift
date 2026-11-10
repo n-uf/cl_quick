@@ -22,23 +22,6 @@ func maskEmail(_ email: String) -> String {
     return String(local.prefix(1)) + String(repeating: "•", count: max(3, min(local.count - 1, 7))) + email[at...]
 }
 
-/// An account that was signed in to a profile's folder: its address and when cl_quick last saw it there. Never a token.
-struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
-    /// Claude Code's accountUuid (the address in lower case, behind "email:", when its file has none).
-    var uuid: String
-    var email: String
-    var lastSeen: Date
-    var id: String { uuid }
-
-    init(uuid: String, email: String, lastSeen: Date = Date()) { self.uuid = uuid; self.email = email; self.lastSeen = lastSeen }
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        uuid = try c.decode(String.self, forKey: .uuid)
-        email = try c.decode(String.self, forKey: .email)
-        lastSeen = (try? c.decodeIfPresent(Date.self, forKey: .lastSeen)) ?? Date()
-    }
-}
-
 /// One Claude Code folder cl_quick chats on, with the accounts that have been signed in to it. One of them is in use
 /// (the one its .claude.json says); the others are standby: signing in again in the same folder switches to one.
 struct Profile: Codable, Identifiable, Equatable, Hashable {
@@ -193,7 +176,7 @@ final class ProfileStore: ObservableObject {
         if levels != read { Files.write(levels, Files.levels) }
     }
 
-    static func levelKey(_ profile: String, _ account: String) -> String { profile + "|" + account }
+    static func levelKey(_ profile: String, _ account: String) -> String { AccountBook.levelKey(profile, account) }
 
     /// A levels.json from before accounts was keyed by profile id alone: each such week goes to the account signed in to
     /// that profile's folder now (the one it was reported on, unless it was switched meanwhile); one whose profile or
@@ -266,18 +249,15 @@ final class ProfileStore: ObservableObject {
     func noteAccount(of id: String, now: Date = Date()) {
         guard let p = profile(id), let a = ClaudeFolder.account(p.path) else { return }
         var q = p
-        if let k = q.accounts.firstIndex(where: { $0.uuid == a.uuid })
-            ?? q.accounts.firstIndex(where: { $0.email.lowercased() == a.email.lowercased() }) {
-            guard q.accounts[k].uuid != a.uuid || q.accounts[k].email != a.email || now.timeIntervalSince(q.accounts[k].lastSeen) > 3600 else { return }
-            // a file that first had no accountUuid and now has one: its week moves to the new key
-            let old = Self.levelKey(id, q.accounts[k].uuid), new = Self.levelKey(id, a.uuid)
-            if old != new, let l = levels[old], levels[new] == nil {
+        let r = AccountBook.note(&q.accounts, uuid: a.uuid, email: a.email, now: now)
+        guard r.changed else { return }
+        // a file that first had no accountUuid and now has one: its week moves to the new key
+        if let was = r.replaced {
+            let old = AccountBook.levelKey(id, was), new = AccountBook.levelKey(id, a.uuid)
+            if let l = levels[old], levels[new] == nil {
                 levels[new] = l; levels[old] = nil
                 Files.write(levels, Files.levels)
             }
-            q.accounts[k].uuid = a.uuid; q.accounts[k].email = a.email; q.accounts[k].lastSeen = now
-        } else {
-            q.accounts.append(KnownAccount(uuid: a.uuid, email: a.email, lastSeen: now))
         }
         update(q)
     }

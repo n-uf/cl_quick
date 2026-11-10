@@ -215,6 +215,31 @@ let missing = QuickChatProcess(QuickChatCommand(claude: "/nonexistent/claude", c
 check("a missing claude throws", (try? missing.start()) == nil)
 check("a missing claude can't be sent to", missing.send("hi") == false)
 
+// MARK: a profile's accounts (Accounts.swift), sample addresses only
+
+do {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    var list: [KnownAccount] = []
+    AccountBook.note(&list, uuid: "u1", email: "ultra-1@example.com", now: t0)
+    check("accounts: the first is added", list.count == 1 && list[0].uuid == "u1")
+    check("accounts: the same one within the hour changes nothing",
+          AccountBook.note(&list, uuid: "u1", email: "ultra-1@example.com", now: t0.addingTimeInterval(600)).changed == false)
+    check("accounts: after the hour its time moves",
+          AccountBook.note(&list, uuid: "u1", email: "ultra-1@example.com", now: t0.addingTimeInterval(7200)).changed && list.count == 1)
+    AccountBook.note(&list, uuid: "u2", email: "ultra-2@example.com", now: t0)
+    check("accounts: another uuid is another account", list.count == 2)
+    // the same address under another uuid (a second organization) is not the first account
+    AccountBook.note(&list, uuid: "u3", email: "ultra-1@example.com", now: t0)
+    check("accounts: one address under two uuids stays two accounts", list.count == 3 && list.filter { $0.email == "ultra-1@example.com" }.count == 2, list)
+    // a file that had no accountUuid and now has one: the placeholder becomes the real uuid
+    var old = [KnownAccount(uuid: "email:ultra-4@example.com", email: "Ultra-4@example.com", lastSeen: t0)]
+    let r = AccountBook.note(&old, uuid: "u4", email: "ultra-4@example.com", now: t0)
+    check("accounts: a placeholder uuid is replaced by the real one", old.count == 1 && old[0].uuid == "u4" && r.replaced == "email:ultra-4@example.com", old)
+    check("accounts: a real uuid is never found by its address", { var l = [KnownAccount(uuid: "u5", email: "ultra-5@example.com")]
+        AccountBook.note(&l, uuid: "email:ultra-5@example.com", email: "ultra-5@example.com"); return l.count == 2 }())
+    check("accounts: week key", AccountBook.levelKey("main", "u1") == "main|u1")
+}
+
 try? FileManager.default.removeItem(atPath: argsFile)
 print("quick chat checks: \(passed)/\(passed + failed) passed")
 exit(failed == 0 ? 0 : 1)

@@ -10,5 +10,5 @@ out="$repo/build/checks"
 mkdir -p "$out"
 chmod +x "$here/stub-claude"
 swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/checks" \
-  "$repo/Sources/Engine.swift" "$repo/Sources/Markdown.swift" "$here/main.swift"
+  "$repo/Sources/Engine.swift" "$repo/Sources/Markdown.swift" "$repo/Sources/Accounts.swift" "$here/main.swift"
 QC_STUB_PATH="$here/stub-claude" QC_WORK="$out/work" "$out/checks"
