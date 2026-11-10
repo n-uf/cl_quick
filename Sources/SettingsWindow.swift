@@ -94,14 +94,19 @@ final class SettingsWindow {
     let state = SettingsState()
     private var window: NSWindow?
 
-    /// Opens the window (and brings cl_quick forward, as a settings window should) on a profile's card, or General.
+    /// What `show(profile:)` takes for Add a profile (the chat's profile menu offers it).
+    static let addPage = "+add"
+
+    /// Opens the window (and brings cl_quick forward, as a settings window should) on a profile's card, Add a profile
+    /// (`addPage`), or General.
     func show(profile: String?, firstRun: Bool = false) {
         state.settings = QuickChat.shared.settings
         ProfileStore.shared.noteAccounts()
         ProfileStore.shared.reload()
         let first = ProfileStore.shared.profiles.first?.id
         // the first run: the first profile found, or Add a profile when none was
-        state.page = profile.map(SettingsPage.profile) ?? (firstRun ? (first.map(SettingsPage.profile) ?? .add) : .general)
+        state.page = profile == Self.addPage ? .add
+            : profile.map(SettingsPage.profile) ?? (firstRun ? (first.map(SettingsPage.profile) ?? .add) : .general)
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 660), styleMask: [.titled, .closable, .resizable],
                              backing: .buffered, defer: false)

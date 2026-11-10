@@ -880,7 +880,8 @@ struct QCControls: View {
     private func row(level showLevel: Bool, wide: Bool, profileWords: Bool) -> some View {
         HStack(spacing: 2) {
             if let t = model.target {
-                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()), help: "Profile: \(t.name)") { pickProfile() }
+                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()),
+                       help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
             }
             modelSteps(wide: wide)
             thinkingSteps(wide: wide)
@@ -910,13 +911,11 @@ struct QCControls: View {
         .padding(.leading, -QCSpace.keyPadding)
     }
 
+    /// The profiles with their weeks, then Add a profile… (so a single profile still has something to offer).
     private func pickProfile() {
-        let list = model.pickable()
-        QCMenu.pop(header: "Profile", items: list.map { p, l in
-            let f = l?.full()
-            let words = f != nil ? "full" : l?.weekNow().map { "week \(Int($0.rounded()))%" } ?? "no numbers yet"
-            return QCMenu.Item(title: p.name, detail: words, on: p.id == model.target?.profileID) { model.pickProfile(p.id) }
-        }, footer: "Weeks as last reported. A new chat goes back to the default. Add or change profiles in Settings.")
+        QCMenu.pop(QCMenu.profiles(model.pickable(), on: model.target?.profileID, pick: { model.pickProfile($0) }, add: {
+            model.openSettings(SettingsWindow.addPage); model.hide()
+        }))
     }
 
     /// The model: a step per family the account has, Haiku → Sonnet → Opus → Fable.
@@ -1103,12 +1102,14 @@ struct QCChip: View {
     }
 }
 
-/// The pickers' menus: macOS's own, at the pointer; each item its name and a few words in grey.
+/// The profile menu: macOS's own, at the pointer. A heading, the profiles (a dot in the level's colour, the week and its
+/// reset in grey under the name), a line, then Add a profile…. No footer: what it used to say is the picker's tooltip.
 enum QCMenu {
     struct Item {
         let title: String
         let detail: String
-        let on: Bool
+        var dot: NSColor? = nil
+        var on = false
         let action: () -> Void
     }
 
@@ -1118,26 +1119,63 @@ enum QCMenu {
         @objc func fire() { run() }
     }
 
-    static func pop(header: String, items: [Item], footer: String) {
+    /// The profile menu for the profiles the picker offers.
+    static func profiles(_ list: [(Profile, QuickChatLevel?)], on: String?, pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
+        build(header: "Profile", items: list.map { p, l in
+            Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.full() != nil ? 100 : l?.weekNow())),
+                 on: p.id == on) { pick(p.id) }
+        }, actions: [Item(title: "Add a profile…", detail: "", action: add)])
+    }
+
+    /// "week 67%, resets Sun 13:00", "week full until Thu 09:00", "no numbers yet".
+    static func weekWords(_ l: QuickChatLevel?) -> String {
+        guard let l else { return "no numbers yet" }
+        if let f = l.full() { return "\(f.name) full" + (f.resets.map { " until \(TimeWords.when($0))" } ?? "") }
+        guard let w = l.weekNow() else { return "no numbers yet" }
+        return "week \(Int(w.rounded()))%" + (l.weekResets.map { ", resets \(TimeWords.when($0))" } ?? "")
+    }
+
+    static func build(header: String, items: [Item], actions: [Item]) -> NSMenu {
         let m = NSMenu(); m.autoenablesItems = false
-        let h = NSMenuItem(title: header, action: nil, keyEquivalent: ""); h.isEnabled = false
-        m.addItem(h)
+        if #available(macOS 14, *) { m.addItem(.sectionHeader(title: header)) }
+        else { let h = NSMenuItem(title: header, action: nil, keyEquivalent: ""); h.isEnabled = false; m.addItem(h) }
         for it in items {
-            let handler = Handler(it.action)
-            let i = NSMenuItem(title: it.title, action: #selector(Handler.fire), keyEquivalent: "")
-            i.target = handler
-            i.representedObject = handler      // the menu item keeps its handler alive
+            let i = item(it)
             i.state = it.on ? .on : .off
-            let s = NSMutableAttributedString(string: it.title, attributes: [.font: NSFont.menuFont(ofSize: 0)])
-            s.append(NSAttributedString(string: "   " + it.detail, attributes: [
-                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor]))
-            i.attributedTitle = s
+            if let c = it.dot { i.image = dot(c) }
+            if #available(macOS 15, *) {
+                i.subtitle = it.detail         // under the name: the menu stays narrow
+            } else {
+                // macOS 13 and 14 show no subtitle: the words in grey after the name, as before
+                let s = NSMutableAttributedString(string: it.title, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+                s.append(NSAttributedString(string: "   " + it.detail, attributes: [
+                    .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor]))
+                i.attributedTitle = s
+            }
             m.addItem(i)
         }
-        m.addItem(.separator())
-        let f = NSMenuItem(title: footer, action: nil, keyEquivalent: ""); f.isEnabled = false
-        m.addItem(f)
-        m.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        if !actions.isEmpty { m.addItem(.separator()) }
+        for a in actions { m.addItem(item(a)) }
+        return m
+    }
+
+    static func pop(_ m: NSMenu) { m.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
+
+    private static func item(_ it: Item) -> NSMenuItem {
+        let handler = Handler(it.action)
+        let i = NSMenuItem(title: it.title, action: #selector(Handler.fire), keyEquivalent: "")
+        i.target = handler
+        i.representedObject = handler      // the menu item keeps its handler alive
+        return i
+    }
+
+    /// An 8 pt dot in a 12 pt square, drawn once per menu.
+    private static func dot(_ c: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 12, height: 12), flipped: false) { r in
+            c.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 8, height: 8)).fill()
+            return true
+        }
     }
 }
 
@@ -1361,6 +1399,28 @@ final class QCTextView: NSTextView {
 
 enum QuickChatRender {
     @MainActor static func write(to path: String, state: String) {
+        // the profile menu can't be drawn to a picture: menu-one and menu-several write what it holds, as text
+        if state.hasPrefix("menu") {
+            var main = QuickChatLevel(); main.week = 67; main.weekResets = Date().addingTimeInterval(4 * 86400)
+            var work = QuickChatLevel(); work.week = 12
+            var spare = QuickChatLevel(); spare.week = 100; spare.weekResets = Date().addingTimeInterval(2 * 86400)
+            var list: [(Profile, QuickChatLevel?)] = [(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), main)]
+            if state == "menu-several" {
+                list += [(Profile(id: "work", name: "Work", folder: "~/.claude-work"), work),
+                         (Profile(id: "spare", name: "Spare", folder: "~/.claude-spare"), spare),
+                         (Profile(id: "lab", name: "Lab", folder: "~/.claude-lab"), nil)]
+            }
+            let menu = QCMenu.profiles(list, on: "main", pick: { _ in }, add: {})
+            let lines = menu.items.map { i -> String in
+                if i.isSeparatorItem { return "———" }
+                var sub = ""
+                if #available(macOS 15, *) { sub = i.subtitle.map { "  /  " + $0 } ?? "" }
+                let title = i.attributedTitle?.string ?? i.title
+                return (i.state == .on ? "✓ " : "  ") + (i.image != nil ? "● " : "") + title + sub + (i.isEnabled ? "" : "  (heading)")
+            }
+            try? (lines.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            return
+        }
         let m = QuickChatModel()
         var target = QuickChatTarget(Profile(id: "main", name: "Main", folder: "~/.claude-sample"))
         target.email = "ultra-1@example.com"
