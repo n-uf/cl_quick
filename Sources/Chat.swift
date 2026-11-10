@@ -509,6 +509,8 @@ final class QuickChat {
 
     private func applyShortcut() {
         hotKey.unregister()
+        // a shortcut that could never have been kept (a hand-edited settings.json): ⌥Space instead
+        if settings.shortcut.refused != nil { settings.shortcut = .optionSpace }
         shortcutState = settings.shortcutOn ? (hotKey.register(settings.shortcut) ?? "on") : nil
     }
 

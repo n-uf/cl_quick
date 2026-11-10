@@ -80,13 +80,14 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
             kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
             kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"]
         if let s = special[Int(e.keyCode)] { return s }
-        return (e.charactersIgnoringModifiers ?? "?").uppercased()
+        let c = (e.charactersIgnoringModifiers ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return c.count == 1 ? c : "Key \(e.keyCode)"     // a dead key or another layout: its code rather than "?"
     }
 
     /// Why it can't be the shortcut at all, or nil.
     var refused: String? {
         let h = has
-        guard h.control || h.option || h.command else { return "\(title) would type into whatever has the keyboard. Hold ⌘, ⌃ or ⌥ too." }
+        guard h.control || h.option || h.command else { return "\(title) alone would take that key from every app. Hold ⌘, ⌃ or ⌥ too." }
         if h.command, !h.control, !h.option, !h.shift {
             let fixed: [Int: String] = [kVK_ANSI_Q: "quits the app you're in", kVK_ANSI_W: "closes the window you're in",
                                         kVK_ANSI_H: "hides the app you're in", kVK_ANSI_M: "minimises the window you're in",
@@ -116,7 +117,7 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
         }
         // the Claude app's Quick Entry is ⌥Space unless changed there; only worth saying where the app is
         if self == .optionSpace, NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop") != nil {
-            return "\(title) also opens the Claude app's Quick Entry when that's turned on."
+            return "\(title) also opens the Claude app's Quick Entry, if that's turned on."
         }
         return nil
     }

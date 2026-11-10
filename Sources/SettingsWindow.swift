@@ -21,6 +21,41 @@ final class SettingsState: ObservableObject {
     private var timer: Timer?
     private var since = Date()
 
+    // MARK: Record another…
+
+    /// nil: not recording; .some(nil): listening; .some(keys): what was pressed.
+    @Published var recording: QuickChatShortcut?? = nil
+    private var monitor: Any?
+    /// The settings window: only its own key presses are recorded.
+    weak var window: NSWindow?
+
+    func startRecording() {
+        stopListening()
+        recording = .some(nil)
+        QuickChat.shared.pauseShortcut(true)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self, let w = self.window, e.window === w else { return e }
+            let mods = e.modifierFlags.intersection([.command, .control, .option, .shift])
+            if e.keyCode == UInt16(kVK_Escape), mods.isEmpty { self.stopRecording(); return nil }
+            self.recording = .some(QuickChatShortcut(event: e))
+            return nil
+        }
+    }
+
+    /// Ends recording, keeping the keys pressed or the old shortcut; the shortcut is registered again either way.
+    func stopRecording(keep s: QuickChatShortcut? = nil) {
+        guard recording != nil else { return }
+        stopListening()
+        recording = nil
+        if let s { settings.shortcut = s; save() }
+        QuickChat.shared.pauseShortcut(false)
+    }
+
+    private func stopListening() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
     /// While a sign-in is under way, its folder is looked at every 2 s; after 10 minutes it's given up.
     func watchSignIns() {
         timer?.invalidate()
@@ -59,6 +94,13 @@ final class SettingsWindow {
             w.contentView = NSHostingView(rootView: SettingsRoot(state: state, store: ProfileStore.shared).face(.std))
             w.center()
             window = w
+            state.window = w
+            // closed or left mid-recording: the old shortcut is back and nothing listens any more
+            for name in [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { [weak self] _ in
+                    self?.state.stopRecording()
+                }
+            }
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -376,7 +418,7 @@ struct GeneralPage: View {
                         HStack(spacing: 10) {
                             SSwitch(isOn: Binding(get: { state.settings.shortcutOn }, set: { state.settings.shortcutOn = $0; state.save() }),
                                     on: "\(state.settings.shortcut.title) opens it", off: "off")
-                            if recorder == nil {
+                            if state.recording == nil {
                                 Picker("", selection: Binding(get: { state.settings.shortcut.id }, set: { pick($0) })) {
                                     ForEach(choices) { Text($0.title).tag($0.id) }
                                     Divider()
@@ -385,7 +427,7 @@ struct GeneralPage: View {
                                 .smallMenu().disabled(!state.settings.shortcutOn)
                             }
                         }
-                        if let r = recorder { recorderRow(r) } else { shortcutNote }
+                        if let r = state.recording { recorderRow(r) } else { shortcutNote }
                     }
                 }
                 SRow(label: "Model", info: "The model a new chat starts with; the chat's own picker changes it for one chat.") {
@@ -414,7 +456,7 @@ struct GeneralPage: View {
                 SRow(label: "cl_quick's own", stacked: true) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(tilde(Files.folder.path)).font(.system(size: 11, design: .monospaced)).foregroundStyle(face.soft)
-                        Text("Its profiles, settings and work folders, \(Files.size(own)). The login item is the only thing outside it.")
+                        Text("Its profiles, settings and work folders, \(Files.size(own)). Outside it: the login item, and any folder Sign in another account… made (a Claude Code folder, which Remove leaves).")
                             .font(.system(size: 10.5)).foregroundStyle(face.muted).fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -426,14 +468,10 @@ struct GeneralPage: View {
             }
         }
         .onAppear(perform: count)
-        .onDisappear { if recorder != nil { stopRecording() } }     // the window closed mid-recording: the old shortcut is back
+        .onDisappear { state.stopRecording() }
     }
 
-    // MARK: Record another…
-
-    /// nil: not recording; .some(nil): listening; .some(keys): what was pressed.
-    @State private var recorder: QuickChatShortcut?? = nil
-    @State private var monitor: Any?
+    // MARK: Record another… (the listening itself is SettingsState's, so closing the window ends it)
 
     /// The five Space shortcuts, and the recorded one when it's none of them.
     private var choices: [QuickChatShortcut] {
@@ -441,27 +479,9 @@ struct GeneralPage: View {
     }
 
     private func pick(_ id: String) {
-        if id == "record" { startRecording(); return }
+        if id == "record" { state.startRecording(); return }
         guard let s = choices.first(where: { $0.id == id }) else { return }
         state.settings.shortcut = s; state.save()
-    }
-
-    private func startRecording() {
-        recorder = .some(nil)
-        QuickChat.shared.pauseShortcut(true)
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
-            if e.keyCode == UInt16(kVK_Escape), e.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { stopRecording(); return nil }
-            recorder = .some(QuickChatShortcut(event: e))
-            return nil
-        }
-    }
-
-    private func stopRecording(keep s: QuickChatShortcut? = nil) {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        recorder = nil
-        if let s { state.settings.shortcut = s; state.save() }
-        QuickChat.shared.pauseShortcut(false)
     }
 
     @ViewBuilder private func recorderRow(_ r: QuickChatShortcut?) -> some View {
@@ -469,18 +489,18 @@ struct GeneralPage: View {
             HStack(spacing: 8) {
                 DisplayWindow(text: r?.title ?? "Press the shortcut…", tone: r == nil ? .amber : .normal, height: 22, size: 10)
                 if let r, r.refused == nil {
-                    Button(r.clash() == nil ? "Keep" : "Keep anyway") { stopRecording(keep: r) }
+                    Button(r.clash() == nil ? "Keep" : "Keep anyway") { state.stopRecording(keep: r) }
                 }
-                if r != nil { Button("Record again") { recorder = .some(nil) } }
-                Button("Cancel") { stopRecording() }
+                if r != nil { Button("Record again") { state.recording = .some(nil) } }
+                Button("Cancel") { state.stopRecording() }
             }
             .buttonStyle(PillButtonStyle(compact: true))
             if let r {
                 if let why = r.refused { note(why, face.danger) }
                 else if let c = r.clash() { note(c + " Keep it anyway, or record another.", face.caution) }
-                else { note("No clash found.", face.ok) }
+                else { note(noClashWords(r), face.ok) }
             } else {
-                note("Hold ⌘, ⌃ or ⌥ and press a key. Esc cancels; \(state.settings.shortcut.title) stays until a new one is kept.", face.muted)
+                note("Hold ⌘, ⌃ or ⌥ and press a key. Esc cancels. \(state.settings.shortcut.title) is off while you record, and back when you keep a new one or cancel.", face.muted)
             }
         }
     }
@@ -492,10 +512,15 @@ struct GeneralPage: View {
         } else if let st = QuickChat.shared.shortcutState, st != "on" {
             note(st + " Pick another.", face.danger)
         } else if let c = s.clash() {
-            note(c + " Pick another, or change that one's shortcut.", face.caution)
+            note(c + " Pick another, or change it where it's set.", face.caution)
         } else {
-            note("No clash found.", face.ok)
+            note(noClashWords(s), face.ok)
         }
+    }
+
+    /// Only macOS's Space shortcuts and Quick Entry are known; another key is said to be unchecked, not free.
+    private func noClashWords(_ s: QuickChatShortcut) -> String {
+        s.keyCode == UInt32(kVK_Space) ? "No clash found." : "Only Space shortcuts are checked for clashes."
     }
 
     private func note(_ t: String, _ c: Color) -> some View {
@@ -520,7 +545,7 @@ struct GeneralPage: View {
         let n = chats.reduce(0) { $0 + $1.1 }
         let a = NSAlert()
         a.messageText = "Move cl_quick's data to the Trash?"
-        a.informativeText = "\(n == 1 ? "1 quick chat" : "\(n) quick chats"), cl_quick's profiles and settings. Open at login turns off and cl_quick quits. Your Claude Code folders, their sign-ins and their other sessions stay; you can bring these back from the Trash."
+        a.informativeText = "This moves \(n == 1 ? "1 quick chat" : "\(n) quick chats") and cl_quick's profiles, settings and work folders to the Trash. Open at login turns off and cl_quick quits. Your Claude Code folders, their sign-ins and their other sessions stay; you can bring these back from the Trash."
         a.addButton(withTitle: "Move to Trash"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         QuickChat.shared.closeForRemoval()
