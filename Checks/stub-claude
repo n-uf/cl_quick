@@ -5,7 +5,10 @@
 #   mode=ok (default)  each message gets "Answer N", streamed, then a result
 #   mode=auth          "Not logged in", as Claude Code says it with no sign-in
 #   mode=crash         half an answer, a line on stderr, then exit 3
-#   mode=slow          half an answer, then it waits (for Stop)
+#   mode=slow          half an answer, then it waits for 30 s and doesn't listen (a Claude Code that can't be interrupted)
+#   mode=abort         half an answer, then it waits for an interrupt control request, ends that answer with an
+#                      aborted result, and answers the next message normally (its count of messages goes on)
+#   control requests   each one is answered with a control_response and written to args.ctl (subtype and what it sets)
 #   args=FILE          writes its arguments, a few environment values, its folder and its pid there
 conf="$(cd "$PWD/.." && pwd)/stub.conf"
 mode="$(sed -n 's/^mode=//p' "$conf" 2>/dev/null)"; mode="${mode:-ok}"
@@ -25,9 +28,31 @@ sid="00000000-0000-4000-8000-000000000001"
 delta() { printf '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}},"session_id":"%s"}\n' "$1" "$sid"; }
 echo '{"type":"system","subtype":"init","session_id":"'$sid'","model":"claude-haiku-5-5","tools":[]}'
 n=0
+ctl() { [ -n "${QC_STUB_ARGS:-}" ] && printf '%s\n' "$1" >> "$QC_STUB_ARGS.ctl"; return 0; }
 while IFS= read -r line; do
+  case "$line" in
+    *'"type":"control_request"'*)
+      rid="$(printf '%s' "$line" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')"
+      sub="$(printf '%s' "$line" | sed -n 's/.*"subtype":"\([^"]*\)".*/\1/p')"
+      ctl "CTRL $sub $(printf '%s' "$line" | sed -n 's/.*"model":"\([^"]*\)".*/model=\1/p') $(printf '%s' "$line" | sed -n 's/.*"settings":\({[^}]*}\).*/settings=\1/p')"
+      echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'"}}'
+      continue ;;
+  esac
   n=$((n + 1))
-  case "$mode" in
+  ctl "USER $n"
+  m="$mode"; [ "$mode" = abort ] && [ "$n" -gt 1 ] && m=ok      # abort mode aborts the first answer only
+  case "$m" in
+    abort)
+      delta "Half an ans"
+      # the next line is the interrupt; the answer ends with an aborted result, as Claude Code's does
+      while IFS= read -r line2; do
+        case "$line2" in *'"subtype":"interrupt"'*) break ;; esac
+      done
+      ctl "CTRL interrupt"
+      rid="$(printf '%s' "$line2" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')"
+      echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"still_queued":[]}}}'
+      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":30,"terminal_reason":"aborted_streaming","session_id":"'$sid'"}'
+      ;;
     auth)
       echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed","session_id":"'$sid'"}'
       echo '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","duration_ms":5,"session_id":"'$sid'"}'

@@ -64,13 +64,45 @@ check("no slash commands", a.contains("--disable-slash-commands"))
 check("its own system prompt", after("--system-prompt", a) == QuickChatCommand.systemPrompt)
 check("the model", after("--model", a) == "haiku")
 check("thinking off", after("--settings", a) == #"{"alwaysThinkingEnabled":false}"# && !a.contains("--effort"), a)
-check("no resume at first", !a.contains("--resume"))
+check("incognito: no session kept", a.contains("--no-session-persistence"))
+check("incognito: nothing to resume, nothing continued", !a.contains("--resume") && !a.contains("-r") && !a.contains("--continue") && !a.contains("-c"), a)
 check("never bare (it would skip the Keychain sign-in)", !a.contains("--bare"))
-var c2 = cmd; c2.model = ""; c2.effort = "high"; c2.resume = "s-1"
+var c2 = cmd; c2.model = ""; c2.effort = "high"
 let a2 = c2.arguments
 check("the profile's own model", !a2.contains("--model"))
 check("thinking high", after("--effort", a2) == "high" && after("--settings", a2) == #"{"alwaysThinkingEnabled":true}"#, a2)
-check("resume", after("--resume", a2) == "s-1")
+check("incognito with thinking too", a2.contains("--no-session-persistence") && !a2.contains("--resume"))
+
+// control requests: one JSON line each, with the id and the subtype Claude Code reads
+func controlObject(_ d: Data) -> [String: Any]? { (try? JSONSerialization.jsonObject(with: d.dropLast())) as? [String: Any] }
+let intr = QuickChatParse.controlLine(id: "qc-1", subtype: "interrupt")
+check("interrupt line", intr.last == 0x0A && controlObject(intr)?["type"] as? String == "control_request"
+      && controlObject(intr)?["request_id"] as? String == "qc-1" && (controlObject(intr)?["request"] as? [String: Any])?["subtype"] as? String == "interrupt", String(decoding: intr, as: UTF8.self))
+let sm = QuickChatParse.controlLine(id: "qc-2", subtype: "set_model", ["model": "sonnet"])
+check("set_model line", ((controlObject(sm)?["request"] as? [String: Any])?["model"] as? String) == "sonnet")
+let th = QuickChatParse.controlLine(id: "qc-3", subtype: "apply_flag_settings", ["settings": QuickChatParse.thinkingSettings("high")])
+let ths = ((controlObject(th)?["request"] as? [String: Any])?["settings"] as? [String: Any])
+check("thinking on at an effort", ths?["alwaysThinkingEnabled"] as? Bool == true && ths?["effortLevel"] as? String == "high", ths as Any)
+check("thinking off", (QuickChatParse.thinkingSettings(nil)["alwaysThinkingEnabled"] as? Bool) == false && QuickChatParse.thinkingSettings(nil)["effortLevel"] == nil)
+
+// answers Stop gave up on: what comes before their `done` is dropped, the `done` ends the wait, a limit report stays
+do {
+    var s = StaleAnswers()
+    let dn = QuickChatEvent.done(isError: true, text: "", ms: 30, session: "s")
+    check("stale: nothing abandoned, everything passes", s.fate(of: .text("x")) == .pass && s.fate(of: dn) == .pass && !s.waiting)
+    s.abandon()
+    check("stale: waiting", s.waiting)
+    check("stale: its text, thinking, message and start are dropped",
+          s.fate(of: .text("late")) == .drop && s.fate(of: .thinking("t")) == .drop && s.fate(of: .started(session: "s", model: "m")) == .drop
+          && s.fate(of: .message(text: "a", model: "m", error: nil)) == .drop)
+    check("stale: a limit report is about the account and passes", s.fate(of: .limit(type: "seven_day", used: 0.5, status: "allowed", resets: nil)) == .pass)
+    check("stale: its done ends the wait", s.fate(of: dn) == .endsOne && !s.waiting)
+    check("stale: then the next answer passes", s.fate(of: .text("Answer")) == .pass && s.fate(of: dn) == .pass)
+    s.abandon(); s.abandon()
+    check("stale: two abandoned, two dones", s.fate(of: dn) == .endsOne && s.waiting && s.fate(of: dn) == .endsOne && !s.waiting)
+    s.abandon(); s.reset()
+    check("stale: a new process starts clean", !s.waiting)
+}
 
 let base = ["PATH": "/usr/bin:/bin", "HOME": "/Users/sample", "LANG": "en_GB.UTF-8", "LC_CTYPE": "UTF-8", "HTTPS_PROXY": "http://proxy.example:8080",
             "ANTHROPIC_API_KEY": "sk-sample", "CLAUDE_CODE_OAUTH_TOKEN": "sample", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "sample",
@@ -141,6 +173,7 @@ func run(_ mode: String, _ body: (QuickChatProcess, () -> [QuickChatEvent], () -
     try? FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
     try? "mode=\(mode)\nargs=\(argsFile)\n".write(toFile: (work as NSString).deletingLastPathComponent + "/stub.conf", atomically: true, encoding: .utf8)
     try? FileManager.default.removeItem(atPath: argsFile)
+    try? FileManager.default.removeItem(atPath: argsFile + ".ctl")
     let p = QuickChatProcess(QuickChatCommand(claude: stub, configDir: "/Users/sample/.claude-work", isDefaultDir: false,
                                               workFolder: work, model: "haiku"))
     var events: [QuickChatEvent] = []
@@ -176,6 +209,20 @@ run("ok") { p, events, exit in
     check("ok: no key passed on", recorded.contains("ENV KEY=<unset>") && recorded.contains("ENV TOKEN=<unset>"))
     check("ok: started once", recorded.components(separatedBy: "PID ").count == 2)
     check("ok: no exit yet", exit() == nil)
+    check("ok: incognito, one process for both questions", recorded.contains("ARG [--no-session-persistence]") && !recorded.contains("ARG [--resume]"), recorded)
+    // the model and thinking change in the running process, between messages, without a new one
+    check("ok: set_model sent", p.setModel("sonnet"))
+    check("ok: thinking sent", p.setThinking("high"))
+    check("ok: the profile's default model sent", p.setModel(""))
+    check("ok: a third question", p.send("third question"))
+    wait(5) { done(events()) == 3 }
+    check("ok: the same process answered the third", p.pid == pid && events().contains(.done(isError: false, text: "Answer 3", ms: 1200, session: "00000000-0000-4000-8000-000000000001")))
+    let ctlLog = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
+    check("ok: the stand-in saw them in order, before the message",
+          ctlLog.contains("CTRL set_model model=sonnet") && ctlLog.contains("CTRL apply_flag_settings") && ctlLog.contains("\"effortLevel\":\"high\"")
+          && ctlLog.range(of: "CTRL set_model model=sonnet")!.lowerBound < ctlLog.range(of: "USER 3")!.lowerBound
+          && ctlLog.range(of: "CTRL apply_flag_settings")!.lowerBound < ctlLog.range(of: "USER 3")!.lowerBound, ctlLog)
+    check("ok: no model means the default", ctlLog.components(separatedBy: "CTRL set_model").count == 3 && ctlLog.contains("CTRL set_model  "), ctlLog)
 }
 
 setenv("ANTHROPIC_API_KEY", "sk-sample-should-not-pass", 1)
@@ -210,10 +257,31 @@ run("slow") { p, events, exit in
     check("slow: Stop twice is harmless", { p.stop(); return true }())
 }
 
+// Stop with the conversation kept: an interrupt control request, the aborted answer ends with its own `done`, and the same
+// process answers the next message (it counts messages, so a new process would say "Answer 1")
+run("abort") { p, events, exit in
+    p.send("long question")
+    wait(5) { events().contains(.text("Half an ans")) }
+    let pid = p.pid
+    check("abort: interrupt sent", p.interrupt())
+    wait(5) { done(events()) == 1 }
+    let first = events().first { if case .done = $0 { return true }; return false }
+    check("abort: the aborted answer ends with an error result", { if case .done(true, _, _, _)? = first { return true }; return false }(), first as Any)
+    check("abort: the process lives", p.isRunning && exit() == nil)
+    check("abort: the next message goes to the same process", p.send("short question"))
+    wait(5) { done(events()) == 2 }
+    check("abort: and is answered, the conversation going on", p.pid == pid && events().contains(.done(isError: false, text: "Answer 2", ms: 1200, session: "00000000-0000-4000-8000-000000000001")), events())
+    let ctlLog = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
+    check("abort: the stand-in got the interrupt between the two messages",
+          ctlLog.contains("CTRL interrupt") && ctlLog.range(of: "USER 1")!.lowerBound < ctlLog.range(of: "CTRL interrupt")!.lowerBound
+          && ctlLog.range(of: "CTRL interrupt")!.lowerBound < ctlLog.range(of: "USER 2")!.lowerBound, ctlLog)
+}
+
 // a `claude` that isn't there: start throws, nothing crashes
 let missing = QuickChatProcess(QuickChatCommand(claude: "/nonexistent/claude", configDir: "/x", isDefaultDir: false, workFolder: work, model: ""))
 check("a missing claude throws", (try? missing.start()) == nil)
 check("a missing claude can't be sent to", missing.send("hi") == false)
+check("a missing claude can't be interrupted or told a model", missing.interrupt() == false && missing.setModel("haiku") == false && missing.setThinking(nil) == false)
 
 // MARK: a profile's accounts (Accounts.swift), sample addresses only
 
@@ -277,16 +345,16 @@ do {
     trail.processStarted(on: "u1")
     let targetNow = "u2"        // the folder moved to another account while the answer was on its way
     check("trail: a report goes to the account the process started on", trail.reportAccount == "u1" && trail.reportAccount != targetNow)
-    // a session belongs to its account
-    check("trail: no session yet can go on anywhere", trail.canResume(on: "u1") && trail.canResume(on: "u2") && trail.canResume(on: nil))
-    trail.sessionStarted()
-    check("trail: a session goes on on the account it began on", trail.canResume(on: "u1"))
-    check("trail: a session isn't gone on with on another account", !trail.canResume(on: "u2") && !trail.canResume(on: nil))
+    // incognito: the conversation lives only in the running process, so it goes on only on the account that process started on
+    check("trail: a chat goes on on the account its process started on", trail.canContinue(on: "u1"))
+    check("trail: it isn't gone on with on another account, or none", !trail.canContinue(on: "u2") && !trail.canContinue(on: nil))
     trail.processEnded()
-    check("trail: the session outlives its process", !trail.canResume(on: "u2") && trail.canResume(on: "u1"))
-    trail.sessionCleared()
-    check("trail: a new chat can begin on any account", trail.canResume(on: "u2"))
+    check("trail: the conversation ends with its process, a new chat can begin on any account",
+          trail.canContinue(on: "u2") && trail.canContinue(on: "u1") && trail.canContinue(on: nil))
     check("trail: a process that ended reports nowhere", trail.reportAccount == nil)
+    var noAccount = AccountTrail()
+    noAccount.processStarted(on: nil)       // a folder whose file names no account
+    check("trail: a chat begun with no account doesn't go on on one that appears", noAccount.canContinue(on: nil) && !noAccount.canContinue(on: "u1"))
 
     // an older levels.json, keyed by profile id (the values stand for weeks)
     let legacy: [String: Int] = ["main": 50, "work": 20, "gone": 7, "main|u9": 33]
