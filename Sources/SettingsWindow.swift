@@ -322,7 +322,7 @@ struct AccountList: View {
                            tone: e.signing ? .amber : e.inUse ? .ok : .normal,
                            level: e.level, noWeek: "no numbers yet",
                            actions: AnyView(HStack(spacing: 8) {
-                               if e.inUse { Button("Sign in again…") { signInAgain(e) } }
+                               if e.inUse { Button("Sign in again…") { signInAgain(e) }.disabled(busy) }
                                else {
                                    Button("Switch to this account…") { switchTo(e) }.disabled(busy)
                                    Button("Forget…") { forget(e) }.disabled(busy)
@@ -346,13 +346,18 @@ enum ForgetWords {
 struct SwitchLines: View {
     var waiting: SwitchGoal?
     var ended: SwitchEnded?
+    /// The address a sign-in again just ended on: the same account.
+    var signedAgain: String?
     var showTerminal: () -> Void = {}
     var drop: () -> Void = {}
     var signInAgain: (SwitchGoal) -> Void = { _ in }
     @Environment(\.face) private var face
 
     var body: some View {
-        if let waiting {
+        if let signedAgain, waiting == nil, ended == nil {
+            SRowLine(text: "Signed in again as \(maskEmail(signedAgain)).", color: face.ok)
+            Button("Dismiss", action: drop).buttonStyle(PillButtonStyle(compact: true))
+        } else if let waiting {
             SRowLine(text: "Waiting for the sign-in… Finish it in Terminal and the browser as \(maskEmail(waiting.wantedEmail)). cl_quick looks at the folder every 2 s, for 10 minutes.", color: face.caution)
             HStack(spacing: 8) {
                 Button("Show Terminal", action: showTerminal)
@@ -362,8 +367,9 @@ struct SwitchLines: View {
             SRowLine(text: m.signedIn.map { "Signed in as \(maskEmail($0)), not \(maskEmail(m.goal.wantedEmail))." }
                         ?? "No sign-in in 10 minutes. The account in use hasn't changed.", color: face.danger)
             HStack(spacing: 8) {
-                // named after the account the switch was for, so it doesn't read as the in-use account's own Sign in again…
-                Button("Switch to \(maskEmail(m.goal.wantedEmail)) again…") { signInAgain(m.goal) }
+                // named after the account the switch was for, so it doesn't read as the in-use account's own Sign in again…;
+                // a sign-in again that never came is just that again
+                Button(m.goal.again && m.signedIn == nil ? "Sign in again…" : "Switch to \(maskEmail(m.goal.wantedEmail)) again…") { signInAgain(m.goal) }
                 Button("Dismiss", action: drop)
             }.buttonStyle(PillButtonStyle(compact: true))
         }
@@ -396,11 +402,9 @@ struct ProfilePage: View {
                     }
                     AccountList(entries: entries(waiting), busy: waiting != nil,
                                 switchTo: { e in switcher.confirmAndSwitch(profile, uuid: e.id, email: e.email, origin: .settings) },
-                                signInAgain: { e in
-                                    SignIn.open(folder: profile.path, email: e.email) { why in if let why { SignIn.tell(why) } }
-                                },
+                                signInAgain: { _ in switcher.signInAgain(profile, origin: .settings) },
                                 forget: { e in confirmForget(e) })
-                    SwitchLines(waiting: waiting, ended: ended,
+                    SwitchLines(waiting: waiting, ended: ended, signedAgain: switcher.signedAgain[profile.id],
                                 showTerminal: { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) },
                                 drop: { switcher.drop(profile.id) },
                                 signInAgain: { g in switcher.begin(profile, uuid: g.wantedUUID, email: g.wantedEmail, origin: .settings) })
@@ -440,7 +444,7 @@ struct ProfilePage: View {
         if let u = store.inUse(profile) {
             out.append(AccountEntry(id: u.uuid, email: u.email,
                                     detail: ([ClaudeFolder.plan(profile.path)].compactMap { $0 } + [tilde(profile.path)]).joined(separator: " · "),
-                                    inUse: true, level: store.level(of: profile, account: u.uuid)))
+                                    inUse: true, level: store.level(of: profile, account: u.uuid), signing: waiting?.again == true))
         }
         for a in store.standby(profile) {
             let signing = waiting.map { $0.wantedUUID == a.id || $0.wantedEmail.lowercased() == a.email.lowercased() } ?? false
@@ -778,7 +782,7 @@ enum SettingsRender {
                     SRow(label: "In the chat") { SSwitch(isOn: .constant(true), on: "in the profile picker", off: "left out") }
                 }
             })
-        case "accounts", "accounts-timedout", "accounts-forget":
+        case "accounts", "accounts-timedout", "accounts-forget", "accounts-again":
             // one account in use with its week, one on standby with no numbers yet (sample addresses only); the second
             // page after a sign-in that never came; the third with Forget…'s question (an alert, so drawn here from its words)
             let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2",
@@ -792,6 +796,7 @@ enum SettingsRender {
                             AccountEntry(id: "u2", email: "ultra-2@example.com", detail: "Last in use \(TimeWords.when(Date().addingTimeInterval(-2 * 86400)))", inUse: false, level: nil),
                         ])
                         if page == "accounts-timedout" { SwitchLines(ended: SwitchEnded(goal: goal, signedIn: nil)) }
+                        if page == "accounts-again" { SwitchLines(signedAgain: "ultra-1@example.com") }
                     }
                     SRow(label: "Another account", stacked: true) {
                         HStack(spacing: 8) {

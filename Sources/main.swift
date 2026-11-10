@@ -9,7 +9,7 @@
 //                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
 //                                       switched (the new chat's first line))
 //   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts,
-//                                       accounts-timedout, accounts-forget, add-refused, general)
+//                                       accounts-timedout, accounts-forget, accounts-again, add-refused, general)
 //   --version
 
 import AppKit

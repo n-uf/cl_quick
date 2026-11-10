@@ -629,7 +629,7 @@ final class QuickChat {
     /// A switch begun in the chat ended. On the account wanted: a new chat on the same profile sends what was typed;
     /// on another one, the notice says so. A switch begun in Settings only updates the account line.
     private func switched(_ goal: SwitchGoal, _ outcome: SwitchOutcome) {
-        guard goal.origin == .chat, outcome == .reached, model.target?.profileID == goal.profileID,
+        guard goal.origin == .chat, outcome == .reached, !goal.again, model.target?.profileID == goal.profileID,
               let p = store.profile(goal.profileID) else { refresh(); return }
         model.forgetAccount()
         model.target = QuickChatTarget(p)          // the account signed in now: its address and uuid, for the next `claude`

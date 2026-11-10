@@ -19,6 +19,10 @@ struct SwitchGoal: Equatable {
     var fromEmail: String?
     var origin: Origin
     var started = Date()
+
+    /// Signing in again on the account already in use (Sign in again…): the folder's account is the same before and after,
+    /// so only Claude Code's login ending says it's done (SignIn.marker).
+    var again: Bool { fromUUID != nil && wantedUUID == fromUUID }
 }
 
 enum SwitchOutcome: Equatable {
@@ -50,6 +54,8 @@ final class AccountSwitcher {
     private(set) var waiting: [String: SwitchGoal] = [:]
     /// By profile id: the last switch that ended on another account or timed out, until it's tried again or dismissed.
     private(set) var ended: [String: SwitchEnded] = [:]
+    /// By profile id: the address a sign-in again just ended on, the same account, until dismissed or something new begins.
+    private(set) var signedAgain: [String: String] = [:]
     /// A switch ended (the chat carries on with it).
     var onOutcome: (SwitchGoal, SwitchOutcome) -> Void = { _, _ in }
     private var timer: Timer?
@@ -70,20 +76,37 @@ final class AccountSwitcher {
         let now = ClaudeFolder.account(p.path)
         waiting[p.id] = SwitchGoal(profileID: p.id, profileName: p.name, folder: p.path, wantedUUID: uuid, wantedEmail: email,
                                    fromUUID: now?.uuid, fromEmail: now?.email, origin: origin)
-        ended[p.id] = nil
+        ended[p.id] = nil; signedAgain[p.id] = nil
+        // a sign-in again leaves a marker when Claude Code's login ends; one left by an earlier try says nothing now
+        let again = waiting[p.id]?.again == true
+        SignIn.clearMarker(p.id)
         startTimer()
         changed()
-        SignIn.open(folder: p.path, email: email) { [weak self] why in
+        SignIn.open(folder: p.path, email: email, marker: again ? SignIn.marker(for: p.id) : nil) { [weak self] why in
             guard let why else { return }
             self?.drop(p.id)
             SignIn.tell(why)
         }
     }
 
-    /// Stops waiting for a profile's sign-in, and dismisses a switch that ended on another account or timed out.
+    /// Signs in again on the account in use: asks nothing (it changes nothing), opens Claude Code's sign-in in Terminal
+    /// and watches the result like a switch: the same account is "Signed in again", another one is the wrong account,
+    /// and no sign-in in 10 minutes is a timeout.
+    func signInAgain(_ p: Profile, origin: SwitchGoal.Origin) {
+        guard waiting[p.id] == nil, let now = ClaudeFolder.freshAccount(p.path) else {
+            // not signed in at all: nothing to watch for a given account; Claude Code's own sign-in, as before
+            SignIn.open(folder: p.path) { why in if let why { SignIn.tell(why) } }
+            return
+        }
+        begin(p, uuid: now.uuid, email: now.email, origin: origin)
+    }
+
+    /// Stops waiting for a profile's sign-in, and dismisses a switch that ended on another account or timed out, or the
+    /// "Signed in again" line.
     func drop(_ id: String) {
-        guard waiting[id] != nil || ended[id] != nil else { return }
-        waiting[id] = nil; ended[id] = nil
+        guard waiting[id] != nil || ended[id] != nil || signedAgain[id] != nil else { return }
+        waiting[id] = nil; ended[id] = nil; signedAgain[id] = nil
+        SignIn.clearMarker(id)
         if waiting.isEmpty { timer?.invalidate(); timer = nil }
         changed()
     }
@@ -105,6 +128,11 @@ final class AccountSwitcher {
         for (id, goal) in waiting {
             if now.timeIntervalSince(goal.started) > Self.giveUp { end(id, goal, .timedOut); continue }
             guard let cur = ClaudeFolder.account(goal.folder) else { continue }       // signed out for a moment: still waiting
+            if goal.again {
+                // the same account is no news until Claude Code's login says it ended well; another account is news at once
+                if cur.uuid == goal.fromUUID { if SignIn.finished(id) { end(id, goal, .reached, signedIn: cur.email) }; continue }
+                end(id, goal, .other(email: cur.email)); continue
+            }
             if cur.uuid == goal.fromUUID, cur.email.lowercased() == goal.fromEmail?.lowercased() { continue }
             end(id, goal, Self.reached(goal, cur) ? .reached : .other(email: cur.email))
         }
@@ -115,12 +143,15 @@ final class AccountSwitcher {
         goal.wantedUUID == now.uuid || now.email.lowercased() == goal.wantedEmail.lowercased()
     }
 
-    private func end(_ id: String, _ goal: SwitchGoal, _ outcome: SwitchOutcome) {
+    private func end(_ id: String, _ goal: SwitchGoal, _ outcome: SwitchOutcome, signedIn: String? = nil) {
         waiting[id] = nil
+        SignIn.clearMarker(id)
         switch outcome {
         case .other(let email): ended[id] = SwitchEnded(goal: goal, signedIn: email)
         case .timedOut: ended[id] = SwitchEnded(goal: goal, signedIn: nil)
-        case .reached: ended[id] = nil
+        case .reached:
+            ended[id] = nil
+            if goal.again { signedAgain[id] = signedIn ?? goal.wantedEmail }
         }
         if waiting.isEmpty { timer?.invalidate(); timer = nil }
         ProfileStore.shared.noteAccount(of: id)          // the account now signed in is remembered
