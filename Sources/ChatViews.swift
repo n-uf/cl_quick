@@ -157,7 +157,8 @@ struct QCHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             QCHeaderInfo(target: model.target, level: model.level, openProfile: {
-                if let id = model.target?.profileID { model.openSettings(id) }      // the chat stays where it is
+                // Settings opens and the chat steps aside (hidden, not closed: the shortcut brings it back as it was)
+                if let id = model.target?.profileID { model.openSettings(id); model.hide() }
             }, nameHover: $nameHover, complete: $complete)
             Spacer(minLength: 8)
             // a tight pair, each a 24 pt target
