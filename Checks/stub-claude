@@ -1,5 +1,5 @@
 #!/bin/bash
-# A stand-in for `claude` in print mode with stream-json in and out, for Checks/quick-chat. No account, no network.
+# A stand-in for `claude` in print mode with stream-json in and out, for cl_quick's Checks. No account, no network.
 # The quick chat passes `claude` only an allowlisted environment, so the stand-in reads its settings from stub.conf in
 # the folder above the one it runs in (the work folder):
 #   mode=ok (default)  each message gets "Answer N", streamed, then a result

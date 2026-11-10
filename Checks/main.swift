@@ -1,4 +1,4 @@
-// Checks for the quick chat's engine and Markdown (Checks/quick-chat/run.sh). Sample data only.
+// Checks for the quick chat's engine and Markdown (Checks/run.sh). Sample data only.
 
 import Foundation
 
