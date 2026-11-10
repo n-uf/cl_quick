@@ -968,7 +968,7 @@ final class QuickChat {
     }
 
     /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
-    /// side) leaves the panel back inside it. The size already fits (QuickChatPanel.windowWillResize).
+    /// side) leaves the panel back inside it. The size already fits (QCResizeHandle.frame holds it to the screen).
     private func keepOnScreen(_ p: NSPanel) {
         guard let vis = (p.screen ?? NSScreen.main)?.visibleFrame else { return }
         var f = p.frame
@@ -1033,29 +1033,26 @@ final class QuickChat {
 
 /// A floating panel that takes the keyboard without bringing cl_quick (or anything else) forward, on every Space and
 /// over full-screen apps.
-final class QuickChatPanel: NSPanel, NSWindowDelegate {
+final class QuickChatPanel: NSPanel {
     var onEscape: () -> Void = {}
     var onNewChat: () -> Void = {}
 
-    // MOVING and SIZING are the user's, and macOS's: the panel is a resizable window, its resize zones are the system's (on
-    // its outer edges and corners only), and moving is the drag surface's performDrag (DragSurface.swift) from any empty
-    // area. While either is under way nothing else may change the frame (QuickChat.fit looks at `isIdle`).
+    // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
+    // the card. Sizing is the rim's (ResizeHandles.swift): the panel is the card plus an 8 pt rim all round, the eight
+    // handles lie in that rim and nowhere on the card, and each has an invisible but non-zero fill (a window whose pixels
+    // are fully transparent lets the mouse through to what is below, so a transparent rim would never get a click).
+    // While either is under way nothing else may change the frame (QuickChat.fit looks at `isIdle`).
     /// Set around a window drag (QCDragView).
     var isMoving = false
-    /// Between the system's "will start" and "did end" of a live resize.
-    private(set) var isLiveResizing = false
-    var isIdle: Bool { !isMoving && !isLiveResizing && !inLiveResize }
+    /// Set around a drag of a rim handle (QCResizeHandle).
+    private(set) var isResizing = false
+    var isIdle: Bool { !isMoving && !isResizing }
     /// The user finished sizing it.
     var onResized: () -> Void = {}
-    func windowWillStartLiveResize(_ n: Notification) { isLiveResizing = true }
-    func windowDidEndLiveResize(_ n: Notification) {
-        isLiveResizing = false
+    func beginResize() { isResizing = true }
+    func endResize() {
+        isResizing = false
         onResized()
-    }
-    /// Dragging an edge never takes it past the screen it's on.
-    func windowWillResize(_ sender: NSWindow, to size: NSSize) -> NSSize {
-        guard let vis = (sender.screen ?? NSScreen.main)?.visibleFrame else { return size }
-        return NSSize(width: min(size.width, vis.width), height: min(size.height, vis.height))
     }
 
     /// cl_quick has no menu bar of its own, so the Edit keys are handled here: cut, copy, paste, select all, undo and
@@ -1081,11 +1078,10 @@ final class QuickChatPanel: NSPanel, NSWindowDelegate {
     }
 
     init() {
-        // the card's width and a thin transparent margin around it, which holds the system's resize zones (they are the
-        // frame's outer 3 pt on the edges, 9 pt at the corners): so none of the card's own area ever resizes it
+        // the card's width and the rim around it, which holds the resize handles: so none of the card's own area ever resizes
+        // it (not `.resizable`: the handles do the sizing, one way)
         super.init(contentRect: NSRect(x: 0, y: 0, width: QuickChatRoot.width + 2 * QuickChatRoot.margin, height: 140),
-                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView, .resizable], backing: .buffered, defer: false)
-        delegate = self
+                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -1129,6 +1125,17 @@ final class QuickChatPanel: NSPanel, NSWindowDelegate {
 /// The panel's content. It doesn't drag by itself (its SwiftUI views catch the mouse): QCDragSurface does, behind them.
 final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // The eight resize handles, in the rim around the card (ResizeHandles.swift), laid out with the view.
+    private(set) var handles: [QCResizeHandle] = []
+    override func layout() {
+        super.layout()
+        if handles.isEmpty {
+            handles = QCResizeHandle.all.map { QCResizeHandle(edges: $0) }
+            handles.forEach { addSubview($0) }
+        }
+        QCResizeHandle.place(handles, in: bounds, flipped: isFlipped)
+    }
 
     /// Called (once per turn of the run loop) when the content's ideal size changed: a line more in the field, say.
     var onIntrinsicChange: () -> Void = {}
