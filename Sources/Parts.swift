@@ -180,21 +180,30 @@ struct TileText: View {
 
 // MARK: - Cards and rows
 
-/// A settings card: a raised module with a printed label, an engraved rule after it, and its rows.
+/// A settings card: a raised module with a printed label, an engraved rule after it, and its rows. An empty title
+/// leaves the label out (a page whose heading names it already); `line`: one plain sentence under the label, in
+/// place of an (i).
 struct SCard<Content: View>: View {
     let title: String
     var info: String? = nil
+    var line: String? = nil
     @ViewBuilder let content: Content
     @Environment(\.face) private var face
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Printed(text: title)
-                if let info { InfoDot(text: info) }
-                EngravedRule(dark: face.light ? .black(0.28) : nil).frame(minWidth: 12)
+            if !title.isEmpty {
+                HStack(spacing: 8) {
+                    Printed(text: title)
+                    if let info { InfoDot(text: info) }
+                    EngravedRule(dark: face.light ? .black(0.28) : nil).frame(minWidth: 12)
+                }
+                .padding(.bottom, line == nil ? 4 : 0)
             }
-            .padding(.bottom, 4)
+            if let line {
+                Text(line).font(.system(size: 11.5)).foregroundStyle(face.muted)
+                    .fixedSize(horizontal: false, vertical: true).padding(.bottom, 6)
+            }
             VStack(spacing: 0) { content }
         }
         .padding(.horizontal, 14).padding(.top, 13).padding(.bottom, 10)

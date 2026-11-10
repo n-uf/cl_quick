@@ -10,9 +10,10 @@ struct PillButtonStyle: ButtonStyle {
     var compact = false
     var primary = false
     var lit = true                  // false: the LED is there but dark (what it stands for isn't running)
+    var sentence = false            // the words as written ("Switch…"), smaller, instead of spaced capitals
 
     func makeBody(configuration: Configuration) -> some View {
-        KeyBody(configuration: configuration, tint: tint, compact: compact, primary: primary, lit: lit)
+        KeyBody(configuration: configuration, tint: tint, compact: compact, primary: primary, lit: lit, sentence: sentence)
     }
 
     private struct KeyBody: View {
@@ -21,6 +22,7 @@ struct PillButtonStyle: ButtonStyle {
         let compact: Bool
         let primary: Bool
         let lit: Bool
+        let sentence: Bool
         @State private var hover = false
         @Environment(\.isEnabled) private var enabled
 
@@ -30,7 +32,9 @@ struct PillButtonStyle: ButtonStyle {
                 HStack(spacing: 6) {
                     // a key that can't be pressed shows its LED dark and grey, no glow (a lit one read as "ready", only paler)
                     if let tint, !primary { LED(color: tint, lit: enabled && lit) }
-                    configuration.label
+                    // the key's own capitals and spacing are set outside; the label's own settings win
+                    if sentence { configuration.label.textCase(nil).tracking(0).font(.system(size: 11.5, weight: .semibold)) }
+                    else { configuration.label }
                 }
             }
             .brightness(hover && enabled ? 0.03 : 0)
@@ -48,6 +52,73 @@ extension ButtonStyle where Self == PillButtonStyle {
     }
     /// The one primary action on a page (Apply).
     static func primaryKey(compact: Bool = false) -> PillButtonStyle { PillButtonStyle(compact: compact, primary: true) }
+    /// The settings window's keys: short words as written, compact. `next`: the one clear next step (the primary key).
+    static func sentenceKey(next: Bool = false) -> PillButtonStyle { PillButtonStyle(compact: true, primary: next, sentence: true) }
+}
+
+/// A choice of a few words (the shortcut, the model, thinking): the words as written on a recessed track, the chosen one
+/// a raised key. Each choice is an action, so a choice can do something other than select (Other… records a key).
+struct KeySegments: View {
+    struct Choice: Identifiable { let id: String; let title: String }
+    let choices: [Choice]
+    let selected: String?
+    let pick: (String) -> Void
+    @Environment(\.face) private var face
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(choices) { c in
+                let on = c.id == selected
+                Button { pick(c.id) } label: {
+                    Text(c.title)
+                        .font(.system(size: 11.5, weight: .semibold)).lineLimit(1).fixedSize()
+                        .foregroundStyle(on ? face.legend : face.trackLegend)
+                        .shadow(color: on ? face.legendShadow : .clear, radius: 0, y: face.legendShadowY)
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background { if on { RaisedShape(finish: face.key, radius: 3) } }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(WellShape(well: face.track, radius: 5))
+        .opacity(enabled ? 1 : 0.5)
+        .fixedSize()
+        .alignmentGuide(.rowLine) { d in d[VerticalAlignment.center] }
+    }
+}
+
+/// A text field in a recessed well. Offscreen pictures (`--render-settings`) can't draw macOS's field, so they get its
+/// text or placeholder printed in the same well.
+struct SField: View {
+    let placeholder: String
+    @Binding var text: String
+    var width: CGFloat? = nil
+    var size: CGFloat = 13
+    var weight: Font.Weight = .regular
+    var onCommit: () -> Void = {}
+    @Environment(\.face) private var face
+    /// Set while a picture of the settings is drawn.
+    static var drawing = false
+
+    var body: some View {
+        Group {
+            if Self.drawing {
+                Text(text.isEmpty ? placeholder : text).foregroundStyle(text.isEmpty ? face.muted : face.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TextField(placeholder, text: $text, onCommit: onCommit).textFieldStyle(.plain)
+            }
+        }
+        .font(.system(size: size, weight: weight))
+        .padding(.horizontal, 7).frame(height: size + 13)
+        .frame(width: width)
+        .background(WellShape(well: face.win, radius: 4))
+    }
 }
 
 /// A segmented picker: printed choices on a recessed track, the chosen one a raised key.
