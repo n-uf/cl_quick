@@ -39,15 +39,14 @@ extension EnvironmentValues {
 
 /// The panel is as wide as the user made it (the bar and the chat share the width). Both modes fill the panel: the chat's
 /// answers scroll inside it, the bar's field takes any height above its own (the bar's least height is its content's, which
-/// the hosting view reports as its intrinsic height: QuickChat.fit). Around the visible card is an 8 pt rim the resize
-/// handles are in (ResizeHandles.swift), so they take nothing from what is inside the card: a drag that starts on the card
-/// is always a move.
+/// the hosting view reports as its intrinsic height: QuickChat.fit). The card fills the panel, so macOS's own resize zones
+/// (QuickChatPanel) lie on its visible edges; the panel's transparent title bar is no safe area.
 struct QuickChatRoot: View {
     static let width: CGFloat = 520            // the first width of the card
     static let windowHeight: CGFloat = 580     // the chat's first height
     static let minWidth: CGFloat = 320         // the key row fits on one line from here (QCControls drops the week, then words)
     static let minWindowHeight: CGFloat = 220  // header, a line of chat and the field at one line; a taller field asks for more
-    static let margin: CGFloat = 8             // the rim around the card: where the resize handles are (ResizeHandles.swift)
+    static let margin: CGFloat = 0             // none: the card's edges are the window's, where macOS's resize zones are
     @ObservedObject var model: QuickChatModel
     @Environment(\.qcRendering) private var rendering
 
@@ -58,6 +57,7 @@ struct QuickChatRoot: View {
         .frame(minWidth: Self.minWidth, maxWidth: .infinity,
                minHeight: model.isWindow ? Self.minWindowHeight : nil, maxHeight: .infinity, alignment: .top)
         .padding(rendering ? 0 : Self.margin)
+        .ignoresSafeArea()
         .environment(\.colorScheme, .dark)
     }
 }

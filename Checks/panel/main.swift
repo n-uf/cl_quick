@@ -1,8 +1,10 @@
-// The quick chat panel's checks, without a mouse or any event posting: a MOVE never changes the size, and QuickChat.fit
-// stays out while the user moves or sizes the panel. The real panel is opened (read-only: nothing is written under the
-// user's folders) and moved far from the screen's middle, and the way a move and a live resize reach the panel is called
-// directly: setFrameOrigin as a move does, `isMoving` as QCDragView sets it around performDrag, and the window delegate's
-// "will start" / "did end" of a live resize.
+// The quick chat panel's checks, without a mouse (this Mac can't post pointer events): the panel is a titled, resizable
+// window with an invisible title bar, so its resize zones, cursors and live resize are the window server's; what can be
+// proved here is everything AppKit decides in the app: the style mask and title bar, that the content fills the frame and
+// the title bar's area belongs to it (AppKit's own hit test from the window's frame view), first-click acceptance, the
+// least and most sizes, that nothing can start a move, and that QuickChat.fit stays out of a move or a live resize (the
+// live resize is reached the way AppKit reaches it: its "will start" / "did end" notifications). The real panel is opened
+// (read-only: nothing is written under the user's folders) and moved far from the screen's middle.
 //   Checks/panel.sh
 
 import AppKit
@@ -30,70 +32,81 @@ guard let p = panel() else { print("FAIL no panel"); exit(1) }
 let bar = p.frame.size
 check("the bar opens at the card's width and its content's height", bar.width == QuickChatRoot.width + 2 * QuickChatRoot.margin, "\(bar)")
 check("idle: not moving, not resizing", p.isIdle)
-check("the panel is borderless, and sized by the rim's handles (not the system's zones)", !p.styleMask.contains(.titled) && !p.styleMask.contains(.resizable))
 check("resizeIncrements are the plain default", p.resizeIncrements == NSSize(width: 1, height: 1), "\(p.resizeIncrements)")
 
-// ── the rim: eight handles with a fill the window server will deliver clicks to, in the rim only ────────────────────
+// ── the window: titled and resizable (the window server's resize zones), with nothing of a title bar showing ─────────
 guard let cv = p.contentView as? QuickChatHostingView else { print("FAIL the content view is not the hosting view"); exit(1) }
-check("eight handles", cv.handles.count == 8, "\(cv.handles.count)")
-check("every handle has a non-zero invisible fill (a fully transparent rim passes the mouse through)",
-      cv.handles.allSatisfy { h in
-          guard let c = h.layer?.backgroundColor.flatMap({ NSColor(cgColor: $0) }) else { return false }
-          return c.alphaComponent >= 0.01 && c.alphaComponent <= 0.03
-      })
-let rim = QuickChatRoot.margin, W = p.frame.width, H = p.frame.height
-func handle(at x: CGFloat, _ y: CGFloat) -> QCEdges? { (cv.hitTest(NSPoint(x: x, y: y)) as? QCResizeHandle)?.edges }
-check("the rim is 8 pt", rim == 8 && QCResizeHandle.rim == rim)
-check("left edge rim hit", handle(at: 4, H / 2) == .left)
-check("right edge rim hit", handle(at: W - 4, H / 2) == .right)
-check("top edge rim hit", handle(at: W / 2, H - 4) == .top)
-check("bottom edge rim hit", handle(at: W / 2, 4) == .bottom)
-check("corners hit (all four)", handle(at: 4, 4) == [.left, .bottom] && handle(at: W - 4, 4) == [.right, .bottom]
-      && handle(at: 4, H - 4) == [.left, .top] && handle(at: W - 4, H - 4) == [.right, .top])
-check("a corner square reaches about 13 pt along the rim", handle(at: 12, 12) == [.left, .bottom] && handle(at: 14.5, 14.5) == nil)
-check("the card is never a handle: its middle, its padding, 1 pt inside its edge and its corners' arcs",
-      handle(at: W / 2, H / 2) == nil && handle(at: 20, 20) == nil && handle(at: W - 20, H - 20) == nil
-      && handle(at: rim + 1, H / 2) == nil && handle(at: W / 2, rim + 1) == nil && handle(at: W / 2, H - rim - 1) == nil
-      && handle(at: 24, 24) == nil)
-// DRAG must not dominate RESIZE: nothing in the rim moves the window, and no drag surface reaches the rim
-func noDragInTheRim(_ label: String) {
-    let wf = p.frame, r = QuickChatRoot.margin
-    let card = NSRect(x: r, y: r, width: wf.width - 2 * r, height: wf.height - 2 * r).insetBy(dx: -0.5, dy: -0.5)
-    var surfaces = 0, outside = 0, movers = 0
-    var names: [String] = []
-    func walk(_ v: NSView) {
-        if v is QCDragView {
-            surfaces += 1
-            if !card.contains(v.convert(v.bounds, to: nil)) { outside += 1 }
+func windowShape(_ label: String) {
+    let m = p.styleMask
+    check("\(label): style mask is titled, resizable, full-size content, non-activating, and nothing else",
+          m == QuickChatPanel.style && m.contains(.titled) && m.contains(.resizable) && m.contains(.fullSizeContentView)
+          && m.contains(.nonactivatingPanel) && !m.contains(.closable) && !m.contains(.miniaturizable), "\(m.rawValue)")
+    check("\(label): the title bar is transparent and its title hidden", p.titlebarAppearsTransparent && p.titleVisibility == .hidden)
+    check("\(label): no window buttons show", [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+          .allSatisfy { p.standardWindowButton($0).map { $0.isHidden } ?? true })
+    check("\(label): the content fills the whole frame (under the title bar too)", cv.frame.size == p.frame.size && cv.frame.origin == .zero,
+          "\(cv.frame) in \(p.frame)")
+    check("\(label): the card fills the frame (no transparent rim: the resize zones are on its visible edges)", QuickChatRoot.margin == 0)
+    check("\(label): clear, non-opaque, with a shadow", !p.isOpaque && p.backgroundColor.alphaComponent == 0 && p.hasShadow)
+    check("\(label): takes the mouse (not ignoresMouseEvents)", !p.ignoresMouseEvents)
+    check("\(label): floating, on every Space and over full-screen apps", p.level == .floating
+          && p.collectionBehavior.contains(.canJoinAllSpaces) && p.collectionBehavior.contains(.fullScreenAuxiliary))
+    check("\(label): becomes key on a click without activating cl_quick", p.canBecomeKey && !p.becomesKeyOnlyIfNeeded && !p.canBecomeMain)
+    check("\(label): the first click on a non-key panel goes through (acceptsFirstMouse)", cv.acceptsFirstMouse(for: nil))
+    check("\(label): the SwiftUI content's safe area ignores the title bar", { if #available(macOS 13.3, *) { return cv.safeAreaRegions.isEmpty }; return true }())
+    // AppKit's own hit test, from the window's frame view (the theme frame, where the title bar lives) as NSWindow.sendEvent
+    // does it. The theme frame keeps the points of its resize region inside the window for itself (a thin band along
+    // every edge, larger at the corners: a press there is a resize, handled by AppKit, never by the content); everything
+    // else, the title bar's top 28 pt included, is the content's, so the header keeps its clicks and no title bar view
+    // takes one. (The part of the resize zones outside the frame is the window server's and can't be hit-tested here.)
+    guard let frameView = cv.superview else { check("\(label): a frame view", false); return }
+    let W = p.frame.width, H = p.frame.height
+    func hit(_ x: CGFloat, _ y: CGFloat) -> NSView? { frameView.hitTest(frameView.convert(NSPoint(x: x, y: y), from: nil)) }
+    func isResizeZone(_ v: NSView?) -> Bool { v === frameView }
+    func isContent(_ v: NSView?) -> Bool { v.map { $0.isDescendant(of: cv) } ?? false }
+    check("\(label): the frame view is AppKit's titled frame (NSThemeFrame)", "\(type(of: frameView))".contains("Theme"), "\(type(of: frameView))")
+    // the edges, 1 pt inside, at their middles and along them: AppKit's resize region
+    var edgeMiss: [String] = []
+    for t in stride(from: 0.25, through: 0.75, by: 0.125) as StrideThrough<CGFloat> {
+        for (n, x, y) in [("left", 1, H * t), ("right", W - 1, H * t), ("bottom", W * t, 1), ("top", W * t, H - 1)] as [(String, CGFloat, CGFloat)]
+        where !isResizeZone(hit(x, y)) { edgeMiss.append("\(n) \(x),\(y) → \(hit(x, y).map { "\(type(of: $0))" } ?? "nil")") }
+    }
+    check("\(label): every edge, 1 pt inside, is AppKit's resize region", edgeMiss.isEmpty, "\(edgeMiss)")
+    let corners: [(String, CGFloat, CGFloat)] = [("bottom-left", 2, 2), ("bottom-right", W - 2, 2), ("top-left", 2, H - 2), ("top-right", W - 2, H - 2),
+                                                 ("bottom-left along", 8, 2), ("top-right along", W - 2, H - 8)]
+    let cornerMiss = corners.filter { !isResizeZone(hit($0.1, $0.2)) }.map(\.0)
+    check("\(label): all four corners are AppKit's resize region", cornerMiss.isEmpty, "\(cornerMiss)")
+    // inside the band (from 4 pt in, away from the corners' 20 pt): the content, the title bar's area included
+    var stolen: [String] = []
+    var x: CGFloat = 20
+    while x < W - 20 {
+        for d in [4, 6, 8, 14, 20, 27, 34] as [CGFloat] where d < H / 2 {
+            for y in [H - d, d] where !isContent(hit(x, y)) { stolen.append("\(x),\(y) → \(hit(x, y).map { "\(type(of: $0))" } ?? "nil")") }
         }
-        // (the SwiftUI views inside the card may say yes; the panel isn't movable by its background, so it is never asked.
-        // Anything that covers the rim must say no.)
-        // (a view wholly outside the window, such as SwiftUI's key-view helper placed below it, is never hit)
-        let r = v.convert(v.bounds, to: nil)
-        if v.mouseDownCanMoveWindow && r.intersects(NSRect(origin: .zero, size: wf.size)) && !card.contains(r) { movers += 1; names.append("\(type(of: v)) \(r)") }
+        x += 7
+    }
+    var y: CGFloat = 20
+    while y < H - 20 {
+        for x in [4, 8, W - 8, W - 4] as [CGFloat] where !isContent(hit(x, y)) { stolen.append("\(x),\(y) → \(hit(x, y).map { "\(type(of: $0))" } ?? "nil")") }
+        y += 7
+    }
+    check("\(label): from 4 pt in, everything is the content's, the title bar's top 28 pt included (no title bar view takes a click)",
+          stolen.isEmpty, "\(stolen.count): \(stolen.prefix(8))")
+    // the resize region is a band, not a strip of the card: the middle of every side, 4 pt in, is the content's
+    check("\(label): the resize band is under 4 pt deep at the sides' middles",
+          isContent(hit(4, H / 2)) && isContent(hit(W - 4, H / 2)) && isContent(hit(W / 2, 4)) && isContent(hit(W / 2, H - 4)))
+    // the content's own cursor views work while the panel isn't key: their tracking areas are active always with cursor updates
+    var cursorAreas = 0, badAreas = 0
+    func walk(_ v: NSView) {
+        if v is QCCursorView || v is QCDragView {
+            for t in v.trackingAreas { cursorAreas += 1; if !t.options.contains(.activeAlways) { badAreas += 1 } }
+        }
         v.subviews.forEach(walk)
     }
     walk(cv)
-    check("\(label): drag surfaces exist (\(surfaces)) and all lie inside the card", surfaces > 0 && outside == 0, "\(outside) outside")
-    check("\(label): no view says the window server may start a move from it", movers == 0, "\(names)")
-    // every point of the rim: what is hit is a handle, which cannot move the window
-    var bad = 0
-    var x = 0.5
-    while x < wf.width {
-        for y in [0.5, 3.5, 7.5, wf.height - 0.5, wf.height - 3.5, wf.height - 7.5] {
-            let v = cv.hitTest(NSPoint(x: x, y: y)); if !(v is QCResizeHandle) || v!.mouseDownCanMoveWindow { bad += 1 }
-        }
-        x += 6
-    }
-    var y = 0.5
-    while y < wf.height {
-        for x in [0.5, 3.5, 7.5, wf.width - 0.5, wf.width - 3.5, wf.width - 7.5] {
-            let v = cv.hitTest(NSPoint(x: x, y: y)); if !(v is QCResizeHandle) || v!.mouseDownCanMoveWindow { bad += 1 }
-        }
-        y += 6
-    }
-    check("\(label): every rim point resolves to a resize handle that cannot move the window", bad == 0, "\(bad) points")
+    check("\(label): the content's tracking areas are active always (\(cursorAreas))", badAreas == 0, "\(badAreas)")
 }
+windowShape("bar")
 check("the panel is not movable by its background (the window server starts no move of its own)", !p.isMovableByWindowBackground)
 
 // ── moving is OFF (the operator, for judging the resize alone): nothing can start a move ─────────────────────────────
@@ -128,51 +141,32 @@ func nothingMoves(_ label: String) {
     check("\(label): presses on all \(surfaces.count) drag surfaces move nothing", surfaces.count > 0 && p.frame == before, "\(p.frame) vs \(before)")
 }
 nothingMoves("bar")
-noDragInTheRim("bar")
-check("the content's least width is the card's 320 plus the rim twice", abs(p.contentMinSize.width - (QuickChatRoot.minWidth + 2 * rim)) < 0.5, "\(p.contentMinSize)")
+// ── sizes: the least is the content's (320 wide; the bar its content's height, the chat 220), the most is open ────────
+check("bar: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")
+check("bar: the least height is the bar's content (it can't be squashed below its field and keys)",
+      p.contentMinSize.height > 60 && p.contentMinSize.height <= bar.height + 0.5, "\(p.contentMinSize) bar \(bar)")
+check("bar: it can grow both ways (the bar resizes as well as the chat)",
+      p.contentMaxSize.width > bar.width + 100 && p.contentMaxSize.height > bar.height + 100, "\(p.contentMaxSize)")
 
-// a drag of a handle, through the handle's own tracking loop: the events are queued, then the press is handed to the handle
-func dragHandle(_ edges: QCEdges, from local: NSPoint, by d: NSPoint) -> (before: NSRect, after: NSRect) {
-    let before = p.frame
-    func ev(_ t: NSEvent.EventType, _ pt: NSPoint) -> NSEvent {
-        let loc = p.convertPoint(fromScreen: NSPoint(x: before.minX + pt.x, y: before.minY + pt.y))
-        return NSEvent.mouseEvent(with: t, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                  windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
-    }
-    // the pointer's place, as the handle asks for it: scripted in screen points, one per event (the real one is
-    // NSEvent.mouseLocation; a queued event's locationInWindow is not a safe stand-in, it is taken against whatever the
-    // window was when the event was made and the window moves under a bottom or left edge drag)
-    var script = [NSPoint(x: before.minX + local.x, y: before.minY + local.y)]
-    for i in 1...6 { script.append(NSPoint(x: before.minX + local.x + d.x * CGFloat(i) / 6, y: before.minY + local.y + d.y * CGFloat(i) / 6)) }
-    QCResizeHandle.pointer = { _ in script.isEmpty ? NSPoint.zero : script.removeFirst() }
-    for i in 1...6 { NSApp.postEvent(ev(.leftMouseDragged, NSPoint(x: local.x + d.x * CGFloat(i) / 6, y: local.y + d.y * CGFloat(i) / 6)), atStart: false) }
-    NSApp.postEvent(ev(.leftMouseUp, NSPoint(x: local.x + d.x, y: local.y + d.y)), atStart: false)
-    cv.handles.first { $0.edges == edges }!.mouseDown(with: ev(.leftMouseDown, local))
-    return (before, p.frame)
+// A live resize, reached the way AppKit reaches it: the window posts "will start", the frame changes, it posts "did end".
+func liveResize(to f: NSRect, during: () -> Void = {}) {
+    NotificationCenter.default.post(name: NSWindow.willStartLiveResizeNotification, object: p)
+    check("a live resize is not idle", !p.isIdle)
+    p.setFrame(f, display: true)
+    during()
+    NotificationCenter.default.post(name: NSWindow.didEndLiveResizeNotification, object: p)
+    check("a live resize ended: idle again", p.isIdle)
 }
-let h0 = dragHandle(.right, from: NSPoint(x: W - 4, y: H / 2), by: NSPoint(x: 60, y: 0))
-check("a right-edge drag widens by what the pointer moved, nothing else", abs(h0.after.width - (h0.before.width + 60)) < 0.5 && h0.after.height == h0.before.height && h0.after.minX == h0.before.minX && h0.after.maxY == h0.before.maxY, "\(h0)")
-check("the drag ended: idle again", p.isIdle)
-// a left-edge drag in steps that are queued before the window moves: it follows the pointer exactly (no overshoot)
-let hl = dragHandle(.left, from: NSPoint(x: 4, y: p.frame.height / 2), by: NSPoint(x: 40, y: 0))
-check("a left-edge drag by 40 narrows by exactly 40, the right edge staying", abs(hl.after.width - (hl.before.width - 40)) < 0.5 && abs(hl.after.maxX - hl.before.maxX) < 0.5, "\(hl)")
-let hb = dragHandle(.bottom, from: NSPoint(x: p.frame.width / 2, y: 4), by: NSPoint(x: 0, y: -25))
-check("a bottom-edge drag by 25 grows by exactly 25, the top staying", abs(hb.after.height - (hb.before.height + 25)) < 0.5 && abs(hb.after.maxY - hb.before.maxY) < 0.5, "\(hb)")
-let hc = dragHandle([.left, .bottom], from: NSPoint(x: 4, y: 4), by: NSPoint(x: -30, y: 15))
-check("a bottom-left corner drag follows both ways exactly", abs(hc.after.width - (hc.before.width + 30)) < 0.5 && abs(hc.after.height - (hc.before.height - 15)) < 0.5 && abs(hc.after.maxX - hc.before.maxX) < 0.5 && abs(hc.after.maxY - hc.before.maxY) < 0.5, "\(hc)")
-let h1 = dragHandle(.left, from: NSPoint(x: 4, y: p.frame.height / 2), by: NSPoint(x: 5000, y: 0))
-check("a left-edge drag stops at the least width, the right edge staying", abs(h1.after.width - p.contentMinSize.width) < 0.5 && abs(h1.after.maxX - h1.before.maxX) < 0.5, "\(h1)")
-let h2 = dragHandle(.bottom, from: NSPoint(x: p.frame.width / 2, y: 4), by: NSPoint(x: 0, y: -40))
-check("a bottom-edge drag makes the bar taller, the top staying", abs(h2.after.height - (h2.before.height + 40)) < 0.5 && abs(h2.after.maxY - h2.before.maxY) < 0.5 && h2.after.width == h2.before.width, "\(h2)")
-let h3 = dragHandle(.top, from: NSPoint(x: p.frame.width / 2, y: p.frame.height - 4), by: NSPoint(x: 0, y: -5000))
-check("a top-edge drag stops at the bar's content height, the bottom staying", abs(h3.after.minY - h3.before.minY) < 0.5 && h3.after.height < h3.before.height && h3.after.height >= bar.height - 0.5, "\(h3)")
-let h4 = dragHandle([.right, .bottom], from: NSPoint(x: p.frame.width - 4, y: 4), by: NSPoint(x: 40, y: -30))
-check("a corner drag moves two edges", abs(h4.after.width - (h4.before.width + 40)) < 0.5 && abs(h4.after.height - (h4.before.height + 30)) < 0.5 && abs(h4.after.maxY - h4.before.maxY) < 0.5, "\(h4)")
-// back to the bar's own size (a drag of a left or top edge can't be queued in pieces: the events' places are taken against
-// the window as it is when they are made), noted as the user's: no extra height is kept
-p.beginResize()
-p.setFrame(NSRect(x: p.frame.minX, y: p.frame.maxY - bar.height, width: bar.width, height: bar.height), display: true)
-p.endResize()
+let r0 = p.frame
+liveResize(to: NSRect(x: r0.minX, y: r0.minY - 40, width: r0.width + 60, height: r0.height + 40)) {
+    chat.fit()
+    check("fit() stays out of a live resize of the bar", p.frame.size == NSSize(width: r0.width + 60, height: r0.height + 40), "\(p.frame.size)")
+}
+spin(0.3)
+check("the bar keeps the size the user gave it (wider and taller), the top edge staying",
+      abs(p.frame.width - (r0.width + 60)) < 0.5 && abs(p.frame.height - (r0.height + 40)) < 0.5 && abs(p.frame.maxY - r0.maxY) < 0.5, "\(p.frame)")
+// back to the bar's own size, noted as the user's: no extra height is kept
+liveResize(to: NSRect(x: p.frame.minX, y: p.frame.maxY - bar.height, width: bar.width, height: bar.height))
 spin(0.3)
 check("the bar is back at its own size", abs(p.frame.width - bar.width) < 0.5 && abs(p.frame.height - bar.height) < 0.5, "\(p.frame.size) vs \(bar)")
 
@@ -202,7 +196,7 @@ spin(0.5)
 check("the bar returns to its height when the lines go", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.height) vs \(bar.height)")
 
 // a resize: while it is under way fit() stays out; when it ends the user's size is kept
-p.beginResize()
+NotificationCenter.default.post(name: NSWindow.willStartLiveResizeNotification, object: p)
 check("a resize is not idle", !p.isIdle)
 chat.model.field = "a\nb\nc\nd"
 spin(0.5)
@@ -211,11 +205,11 @@ chat.model.field = ""        // the lines go: only fit() would shrink the bar ba
 spin(0.5)
 chat.fit()
 check("fit() stays out during a resize", p.frame == before, "\(p.frame) vs \(before)")
-// the user drags the bottom edge down by 50: the handle sets the frame, then ends the resize
+// the user drags the bottom edge down by 50: macOS sets the frame, then ends the live resize
 var f = p.frame
 f.size.height += 50; f.origin.y -= 50
 p.setFrame(f, display: true)
-p.endResize()
+NotificationCenter.default.post(name: NSWindow.didEndLiveResizeNotification, object: p)
 check("a resize ended: idle again", p.isIdle)
 let sized = p.frame
 spin(0.4)
@@ -244,11 +238,9 @@ check("fit() leaves a chat alone during a move", p.frame.size == chatSize, "\(p.
 p.isMoving = false
 
 // the user makes the chat shorter and narrower; it stays that way
-p.beginResize()
 var g = p.frame
 g.size.height = 360; g.size.width = 420; g.origin.y += chatSize.height - 360
-p.setFrame(g, display: true)
-p.endResize()
+liveResize(to: g)
 let userChat = p.frame.size
 chat.fit(); spin(0.4)
 check("the user's chat size is kept by fit()", p.frame.size == userChat, "\(p.frame.size) vs \(userChat)")
@@ -262,12 +254,14 @@ check("the bar after a new chat keeps the width", p.frame.width == userChat.widt
 chat.model.turns = [oneTurn()]
 spin(0.8)
 check("the chat comes back at the height the user gave it", abs(p.frame.height - userChat.height) < 0.5 && p.frame.width == userChat.width, "\(p.frame.size) vs \(userChat)")
-noDragInTheRim("chat")
+windowShape("chat")
 nothingMoves("chat")
 
-// ── the least sizes are the system's, from the content's own frames ───────────────────────────────
-check("the least width is 320 of card plus the margin", abs(p.contentMinSize.width - (QuickChatRoot.minWidth + 2 * QuickChatRoot.margin)) < 0.5, "\(p.contentMinSize)")
-check("the chat's least height holds a line of chat and the field", p.contentMinSize.height >= QuickChatRoot.minWindowHeight + 2 * QuickChatRoot.margin - 0.5, "\(p.contentMinSize)")
+// ── the least sizes are the system's, from the content's own frames: about 320 × 220 for the chat ─────────────────
+check("chat: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")
+check("chat: the least height is about 220 (holds the header, a line of chat and the field)",
+      p.contentMinSize.height >= QuickChatRoot.minWindowHeight - 0.5 && p.contentMinSize.height <= QuickChatRoot.minWindowHeight + 60, "\(p.contentMinSize)")
+check("chat: it can grow both ways", p.contentMaxSize.width > p.frame.width + 100 && p.contentMaxSize.height > p.frame.height + 100, "\(p.contentMaxSize)")
 
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

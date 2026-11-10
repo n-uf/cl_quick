@@ -906,13 +906,13 @@ final class QuickChat {
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onResized = { [weak self] in
             guard let self, let p = self.panel, let host = self.host else { return }
-            // the user finished sizing it (a rim handle's drag): the chat keeps its height; the bar keeps the height it
+            // the user finished sizing it (macOS's live resize): the chat keeps its height; the bar keeps the height it
             // was given beyond its content's; both keep the width (the frame's own)
             if self.model.isWindow { self.chatHeight = p.frame.height }
             else { self.barExtra = max(0, p.frame.height - max(0, host.intrinsicContentSize.height)) }
             self.keepOnScreen(p)
         }
-        // the rim's handles do the sizing (ResizeHandles.swift); the content's own frames (QuickChatRoot: from 320 wide, the
+        // macOS does the sizing (a titled, resizable panel); the content's own frames (QuickChatRoot: from 320 wide, the
         // chat from 220 tall, the bar from its content's height) are the window's least size (the hosting view sets it)
         let host = QuickChatHostingView(rootView: QuickChatRoot(model: model))
         host.onIntrinsicChange = { [weak self] in self?.fit() }
@@ -968,10 +968,13 @@ final class QuickChat {
     }
 
     /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
-    /// side) leaves the panel back inside it. The size already fits (QCResizeHandle.frame holds it to the screen).
+    /// side) leaves the panel back inside it, no larger than that frame.
     private func keepOnScreen(_ p: NSPanel) {
         guard let vis = (p.screen ?? NSScreen.main)?.visibleFrame else { return }
         var f = p.frame
+        let top = f.maxY
+        f.size = NSSize(width: min(f.width, vis.width), height: min(f.height, vis.height))
+        f.origin.y = top - f.height
         f.origin.x = min(max(f.minX, vis.minX), vis.maxX - f.width)
         f.origin.y = min(max(f.minY, vis.minY), vis.maxY - f.height)
         if f != p.frame { p.setFrame(f, display: true); p.invalidateShadow() }
@@ -1038,15 +1041,20 @@ final class QuickChatPanel: NSPanel {
     var onNewChat: () -> Void = {}
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
-    // the card. Sizing is the rim's (ResizeHandles.swift): the panel is the card plus an 8 pt rim all round, the eight
-    // handles lie in that rim and nowhere on the card, and each has an invisible but non-zero fill (a window whose pixels
-    // are fully transparent lets the mouse through to what is below, so a transparent rim would never get a click).
-    // While either is under way nothing else may change the frame (QuickChat.fit looks at `isIdle`).
+    // the card (off for now: QCDragView.movesWindow). SIZING IS macOS's OWN: the panel is a TITLED, resizable window whose
+    // title bar is transparent, hidden and empty, so the window server gives it the real resize zones of any window (a few
+    // points either side of the frame's edges, larger at the corners, the outer part beyond the visible frame), their
+    // cursors, first-click resizing while the panel isn't key, and live resize. A borderless window gets none of that (its
+    // frame view, NSNextStepFrame, has no resize region even with .resizable), and a hand-made rim of (nearly) transparent
+    // pixels is at the mercy of the window server, which passes the mouse through a non-opaque window's transparent
+    // pixels to the window below, and of the cursor, which an inactive app can't hold. The card fills the frame, so the zones lie on
+    // its visible edges. While a move or a live resize is under way nothing else may change the frame (QuickChat.fit looks
+    // at `isIdle`).
     /// Set around a window drag (QCDragView).
     var isMoving = false
-    /// Set around a drag of a rim handle (QCResizeHandle).
+    /// Between the system's "will start" and "did end" of a live resize (a check calls these by hand).
     private(set) var isResizing = false
-    var isIdle: Bool { !isMoving && !isResizing }
+    var isIdle: Bool { !isMoving && !isResizing && !inLiveResize }
     /// The user finished sizing it.
     var onResized: () -> Void = {}
     func beginResize() { isResizing = true }
@@ -1078,10 +1086,21 @@ final class QuickChatPanel: NSPanel {
     }
 
     init() {
-        // the card's width and the rim around it, which holds the resize handles: so none of the card's own area ever resizes
-        // it (not `.resizable`: the handles do the sizing, one way)
+        // titled and resizable for the window server's own resize zones; the title bar is transparent and empty, and the
+        // content goes under it (fullSizeContentView), so nothing of a title bar shows
         super.init(contentRect: NSRect(x: 0, y: 0, width: QuickChatRoot.width + 2 * QuickChatRoot.margin, height: 140),
-                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
+                   styleMask: Self.style, backing: .buffered, defer: false)
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        if #available(macOS 11, *) { titlebarSeparatorStyle = .none }
+        for b: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] { standardWindowButton(b)?.isHidden = true }
+        tabbingMode = .disallowed
+        NotificationCenter.default.addObserver(forName: NSWindow.willStartLiveResizeNotification, object: self, queue: .main) { [weak self] _ in
+            self?.beginResize()
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: self, queue: .main) { [weak self] _ in
+            self?.endResize()
+        }
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -1118,6 +1137,9 @@ final class QuickChatPanel: NSPanel {
         super.sendEvent(event)
     }
 
+    /// Titled (for the system's resize zones), resizable, the content under the title bar, and never activating cl_quick.
+    static let style: NSWindow.StyleMask = [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel]
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onEscape() }
@@ -1125,22 +1147,16 @@ final class QuickChatPanel: NSPanel {
 
 /// The panel's content. It doesn't drag by itself (its SwiftUI views catch the mouse): QCDragSurface does, behind them.
 final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    // This view covers the whole panel, rim included: nothing here may let the window server start a move from the rim.
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    // The eight resize handles, in the rim around the card (ResizeHandles.swift), laid out with the view.
-    private(set) var handles: [QCResizeHandle] = []
-    override func layout() {
-        super.layout()
-        if handles.isEmpty { handles = QCResizeHandle.all.map { QCResizeHandle(edges: $0) } }
-        // topmost, always: SwiftUI adds views of its own (all inside the card's padding) after these, and a later one must
-        // never cover the rim
-        if !subviews.suffix(handles.count).elementsEqual(handles, by: ===) {
-            handles.forEach { addSubview($0, positioned: .above, relativeTo: nil) }
-        }
-        QCResizeHandle.place(handles, in: bounds, flipped: isFlipped)
+    required init(rootView: QuickChatRoot) {
+        super.init(rootView: rootView)
+        // the transparent title bar is no safe area: the card starts at the window's top edge (QuickChatRoot also ignores it)
+        if #available(macOS 13.3, *) { safeAreaRegions = [] }
     }
+    @MainActor required dynamic init?(coder: NSCoder) { nil }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    // This view covers the whole panel: nothing here may let the window server start a move.
+    override var mouseDownCanMoveWindow: Bool { false }
 
     /// Called (once per turn of the run loop) when the content's ideal size changed: a line more in the field, say.
     var onIntrinsicChange: () -> Void = {}
