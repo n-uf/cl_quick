@@ -228,7 +228,7 @@ run("ok") { p, events, exit in
     let modelRequest = p.setModel("sonnet")
     check("ok: set_model sent", modelRequest != nil)
     check("ok: thinking sent", p.setThinking("high"))
-    check("ok: the profile's default model sent", p.setModel("") != nil)
+    check("ok: no model (Claude Code's own default) sent", p.setModel("") != nil)
     check("ok: its answer names the request and the model in effect",
           { wait(3) { events().contains(.control(id: modelRequest ?? "", error: nil, model: "claude-sonnet-5-5")) }
             return events().contains(.control(id: modelRequest ?? "", error: nil, model: "claude-sonnet-5-5")) }(), events())
@@ -278,6 +278,9 @@ check("models: before any list, the alias", before.family == .fable && before.va
 check("thinking: the model's steps, Off first", QuickChatModels.steps(nw[.sonnet], listKnown: true) == ["off", "low", "medium", "high", "xhigh"])
 check("thinking: no list, Low to High", QuickChatModels.steps(nil, listKnown: false) == ["off", "low", "medium", "high"])
 check("thinking: a model with no efforts, Off only", QuickChatModels.steps(nw[.haiku], listKnown: true) == ["off"])
+check("thinking: a model that doesn't say, Low to High", QuickChatModels.steps(QuickChatModelEntry(value: "x", displayName: "Opus 9"), listKnown: true) == ["off", "low", "medium", "high"])
+let tie = QuickChatModels.newest([.init(value: "opus[1m]", displayName: "Opus 5.5 (1M context)"), .init(value: "opus", displayName: "Opus 5.5")])
+check("models: a tie goes to the plain one, not a variant", tie[.opus]?.value == "opus", tie)
 check("thinking: clamped to the nearest, lighter first", QuickChatModels.clamp("max", to: ["off", "low", "medium", "high"]) == "high"
       && QuickChatModels.clamp("medium", to: ["off", "low", "high"]) == "low" && QuickChatModels.clamp("high", to: ["off"]) == "off"
       && QuickChatModels.clamp("xhigh", to: ["off", "low", "medium", "high", "xhigh"]) == "xhigh")

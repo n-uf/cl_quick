@@ -84,7 +84,8 @@ enum QuickChatModels {
         var best: [QuickChatModelChoice: (QuickChatModelEntry, [Int])] = [:]
         for e in list where e.value != "default" {
             guard let (f, v) = family(e) else { continue }
-            if let b = best[f], !newer(v, than: b.1) { continue }
+            // a tie (the same version twice, "opus" and "opus[1m]"): the plain one, not a variant
+            if let b = best[f], !newer(v, than: b.1), !(v == b.1 && b.0.value.contains("[") && !e.value.contains("[")) { continue }
             best[f] = (e, v)
         }
         return best.mapValues(\.0)
@@ -114,10 +115,10 @@ enum QuickChatModels {
         return (f, f.rawValue, nil)       // a list with none of the four: the alias, and Claude Code decides
     }
 
-    /// The thinking steps a model takes: Off, then its efforts in order. With no list known, Low to High; a model that
-    /// names none takes Off only.
+    /// The thinking steps a model takes: Off, then its efforts in order. With no list known, or a model that doesn't
+    /// say, Low to High; a model that says it takes no effort, Off only.
     static func steps(_ entry: QuickChatModelEntry?, listKnown: Bool) -> [String] {
-        let efforts = listKnown ? (entry?.efforts ?? []) : fallbackEfforts
+        let efforts = listKnown ? (entry?.efforts ?? fallbackEfforts) : fallbackEfforts
         return ["off"] + effortOrder.dropFirst().filter { efforts.contains($0) }
     }
 
@@ -195,7 +196,7 @@ enum QuickChatParse {
     }
 
     /// A control request for Claude Code's input (stream-json), ending in a newline: "interrupt" stops the answer under
-    /// way and keeps the conversation; "set_model" (no model: the profile's default) and "apply_flag_settings" change
+    /// way and keeps the conversation; "set_model" (no model: Claude Code's own default) and "apply_flag_settings" change
     /// the model and thinking for the next answers. Claude Code answers each with a control_response, which is ignored.
     static func controlLine(id: String, subtype: String, _ fields: [String: Any] = [:]) -> Data {
         var request: [String: Any] = ["subtype": subtype]
@@ -439,7 +440,8 @@ final class QuickChatProcess {
     @discardableResult
     func initialize() -> Bool { control("initialize") != nil }
 
-    /// The model for the next answers; "" is the profile's default. The request's id, or nil when it can't be asked.
+    /// The model for the next answers (a value from Claude Code's list, or an alias); "" leaves it to Claude Code. The
+    /// request's id, or nil when it can't be asked.
     @discardableResult
     func setModel(_ model: String) -> String? { control("set_model", model.isEmpty ? [:] : ["model": model]) }
 
