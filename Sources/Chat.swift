@@ -878,8 +878,17 @@ final class QuickChat {
         if !placed || !isOnScreen(p) { place(p); placed = true }
         clampToScreen(p)
         p.orderFrontRegardless()
+        // the first keystroke after the shortcut goes into the field, with another app active too (the panel is
+        // non-activating: it becomes key without bringing cl_quick forward). Now, and once more after SwiftUI's layout
+        // pass, for a field that is made (or remade, bar ⇄ chat) only then.
         p.makeKey()
+        p.focusField()
         model.focusTick += 1
+        DispatchQueue.main.async { [weak p] in
+            guard let p, p.isVisible else { return }
+            if !p.isKeyWindow { p.makeKey() }
+            p.focusField()
+        }
         store.reload(pick.map { [$0.id] })      // the account may have changed since: read off the main thread, drawn again
         if claudePath == nil { resolveClaude { _ in } }   // look early, off the main thread
     }
@@ -1146,6 +1155,22 @@ final class QuickChatPanel: NSPanel {
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
         QCDragView.dropHand()
+    }
+
+    /// The field takes the keyboard (the window's one QCTextView), unless it has it already.
+    func focusField() {
+        guard let content = contentView else { return }
+        var field: QCTextView?
+        func walk(_ v: NSView) { if field == nil { if let t = v as? QCTextView { field = t } else { v.subviews.forEach(walk) } } }
+        walk(content)
+        if let field, firstResponder !== field { makeFirstResponder(field) }
+    }
+
+    /// Key again (after a menu, Settings, a resize or a move took the keyboard elsewhere): the keyboard goes back to the
+    /// field, unless some other text (a selected answer) has it.
+    override func becomeKey() {
+        super.becomeKey()
+        if !(firstResponder is NSText) { focusField() }
     }
 
     override var canBecomeKey: Bool { true }

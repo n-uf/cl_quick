@@ -470,5 +470,50 @@ do {
     check("a move's end retries fit() (the host's onIntrinsicChange)", surface != nil && retried == 1, "\(retried)")
 }
 
+// ── the shortcut: the field has the keyboard at once, whatever had it before ──────────────────────────────────────────
+do {
+    func field() -> QCTextView? {
+        var t: QCTextView?
+        func walk(_ v: NSView) { if let x = v as? QCTextView { t = x }; v.subviews.forEach(walk) }
+        walk(cv); return t
+    }
+    func keyed(_ label: String) {
+        check("focus \(label): the panel is the key window", p.isKeyWindow)
+        check("focus \(label): the field is the first responder", field() != nil && p.firstResponder === field(),
+              "\(String(describing: p.firstResponder))")
+    }
+    // another window had the keyboard (as Settings would): hidden, then the shortcut
+    let other = NSWindow(contentRect: NSRect(x: -30000, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    other.isReleasedWhenClosed = false
+    chat.hide()
+    other.orderFrontRegardless(); other.makeKey(); spin(0.2)
+    chat.toggle()
+    keyed("right after open(), before any layout pass")          // the first keystroke may come at once
+    spin(0.4)
+    keyed("after the layout pass")
+    // the keyboard was elsewhere in the panel when it hid (a menu or a control had it)
+    p.makeFirstResponder(nil)
+    chat.hide(); chat.open(); spin(0.3)
+    keyed("after hiding with the keyboard elsewhere")
+    // the bar (a new chat makes the field anew), right after the shortcut
+    chat.hide(); chat.model.newChat(); spin(0.3)
+    other.makeKey(); spin(0.1)
+    chat.open()
+    keyed("the bar right after open()")
+    spin(0.4)
+    // after a resize and a move
+    let f0 = p.frame
+    liveResize(to: NSRect(x: f0.minX, y: f0.minY - 30, width: f0.width + 40, height: f0.height + 30))
+    keyed("after a resize")
+    p.isMoving = true; p.setFrameOrigin(NSPoint(x: f0.minX + 20, y: f0.minY)); p.isMoving = false
+    keyed("after a move")
+    // the panel losing and getting back the key (a menu, Settings): the field again
+    other.makeKey(); spin(0.1)
+    p.makeFirstResponder(nil)
+    p.makeKey(); spin(0.1)
+    keyed("when it becomes key again")
+    other.orderOut(nil)
+}
+
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)
