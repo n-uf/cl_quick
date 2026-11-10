@@ -247,6 +247,8 @@ final class QuickChatModel: ObservableObject {
     var pickProfile: (String) -> Void = { _ in }
     /// Claude Code reported the account's limits after an answer: the profile, its account's uuid, the level.
     var levelReported: (String, String, QuickChatLevel) -> Void = { _, _, _ in }
+    /// An answer failed to authenticate (true) or worked (false), on the account the `claude` started on: profile, account.
+    var authResult: (String, String, Bool) -> Void = { _, _, _ in }
     /// Switch to …: the controller asks first, then opens Claude Code's sign-in and watches the folder.
     var switchTo: (QuickChatSwitchOffer) -> Void = { _ in }
     /// Sign in again, as the account that was wanted (after another one signed in).
@@ -537,6 +539,7 @@ final class QuickChatModel: ObservableObject {
             if !model.isEmpty, !model.hasPrefix("<") { setModel(model, turn: i) }
             if error == "authentication_failed", let target {
                 turns[i].problem = .notSignedIn(profile: target.name, id: target.profileID)
+                if let u = trail.reportAccount { authResult(target.profileID, u, true) }
             } else if QuickChatParse.isLimit(error: error, text: text) {
                 turns[i].problem = .limitFull
             } else if let error, turns[i].answer.isEmpty, pending.isEmpty {
@@ -564,6 +567,7 @@ final class QuickChatModel: ObservableObject {
             } else {
                 if turns[i].answer.isEmpty { turns[i].answer = text }
                 turns[i].phase = .done
+                if let t = target, let u = trail.reportAccount { authResult(t.profileID, u, false) }      // it signed in fine
             }
             // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
             guard turns.indices.contains(i) else { return }
@@ -747,6 +751,8 @@ final class QuickChat {
             self?.store.record(id, account: account, l)
             DispatchQueue.main.async { self?.refresh() }
         }
+        // the flag is only set or cleared here (the store publishes it to Settings); no refresh, so nothing ends the chat
+        model.authResult = { [weak self] id, account, failed in self?.store.authResult(id, account: account, failed: failed) }
         model.switchTo = { [weak self] o in
             guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id) else { return }
             self.switcher.confirmAndSwitch(p, uuid: o.uuid, email: o.email, origin: .chat)

@@ -132,6 +132,9 @@ final class ProfileStore: ObservableObject {
     /// Each account's week as last reported, kept per profile and account: "<profile id>|<account uuid>". A switch shows
     /// the account's own last week, not the one it replaced.
     @Published private(set) var levels: [String: QuickChatLevel] = [:]
+    /// By profile id: the account (uuid) Claude Code's last answer failed to authenticate on. In memory only: the chat
+    /// sets it, a good answer or a sign-in that landed clears it, and cl_quick starting afresh forgets it.
+    @Published private(set) var authFailed: [String: String] = [:]
 
     private init() {
         profiles = Files.read([Profile].self, Files.profiles) ?? []
@@ -194,6 +197,21 @@ final class ProfileStore: ObservableObject {
         ClaudeFolder.account(p.path).map { a in p.accounts.first { $0.uuid == a.uuid } ?? KnownAccount(uuid: a.uuid, email: a.email) }
     }
 
+    /// What is wrong with the profile's sign-in, if anything (SignInProblem): as the folder's file was last read.
+    func signInProblem(_ p: Profile) -> SignInProblem? {
+        AccountBook.signInProblem(signedIn: ClaudeFolder.account(p.path), failedOn: authFailed[p.id])
+    }
+
+    /// The chat's answer on an account: it failed to authenticate (flag set), or it worked (flag cleared).
+    func authResult(_ id: String, account uuid: String, failed: Bool) {
+        guard profile(id) != nil else { return }
+        if failed { if authFailed[id] != uuid { authFailed[id] = uuid } }
+        else if authFailed[id] != nil { authFailed[id] = nil }
+    }
+
+    /// A sign-in landed on the profile's folder: whatever failed before is behind it.
+    func signedIn(_ id: String) { if authFailed[id] != nil { authFailed[id] = nil } }
+
     /// The accounts signed in before and not in use now, the most recently seen first.
     func standby(_ p: Profile) -> [KnownAccount] {
         let current = ClaudeFolder.account(p.path)
@@ -205,6 +223,8 @@ final class ProfileStore: ObservableObject {
     /// doesn't write the file at every look. Main thread; not from a view's body.
     func noteAccount(of id: String, now: Date = Date()) {
         guard let p = profile(id), let a = ClaudeFolder.account(p.path) else { return }
+        // a failure was on another account than the one signed in now: it doesn't come back if that one does
+        if let failed = authFailed[id], failed != a.uuid { authFailed[id] = nil }
         var q = p
         let r = AccountBook.note(&q.accounts, uuid: a.uuid, email: a.email, now: now)
         guard r.changed else { return }

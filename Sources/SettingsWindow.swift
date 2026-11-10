@@ -221,13 +221,13 @@ struct AccountBox: View {
     @Environment(\.face) private var face
 
     /// A folder as a whole: the account signed in to it, if any.
-    init(folder: String, level: QuickChatLevel? = nil, signingIn: Bool = false, badge: AnyView? = nil) {
+    init(folder: String, level: QuickChatLevel? = nil, signingIn: Bool = false, badge: AnyView? = nil, actions: AnyView? = nil) {
         let email = ClaudeFolder.email(folder)
         self.init(title: email.map(maskEmail) ?? tilde(folder),
                   detail: ([ClaudeFolder.plan(folder)].compactMap { $0 } + [tilde(folder)]).joined(separator: " · "),
                   lit: email != nil,
                   status: signingIn ? "Signing in" : email == nil ? "Not signed in" : "Signed in",
-                  tone: signingIn ? .amber : email == nil ? .normal : .ok, level: level, badge: badge)
+                  tone: signingIn ? .amber : email == nil ? .normal : .ok, level: level, badge: badge, actions: actions)
     }
 
     init(title: String, detail: String, lit: Bool, status: String, tone: DisplayWindow.Tone, level: QuickChatLevel? = nil,
@@ -301,6 +301,8 @@ struct AccountEntry: Identifiable, Equatable {
     var level: QuickChatLevel?
     /// A sign-in for it is being waited for.
     var signing = false
+    /// The account in use, when its sign-in is broken: said in a line, with Sign in again…. Nil: it works, no button.
+    var problem: SignInProblem?
 }
 
 /// A profile's accounts: the one in use ("In use", its week, Sign in again…), then the standby ones ("Standby", their
@@ -313,19 +315,25 @@ struct AccountList: View {
     var signInAgain: (AccountEntry) -> Void = { _ in }
     /// Only a standby account can be forgotten.
     var forget: (AccountEntry) -> Void = { _ in }
+    @Environment(\.face) private var face
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(entries) { e in
-                AccountBox(title: maskEmail(e.email), detail: e.detail, lit: e.inUse,
-                           status: e.signing ? "Signing in" : e.inUse ? "In use" : "Standby",
-                           tone: e.signing ? .amber : e.inUse ? .ok : .normal,
+                AccountBox(title: maskEmail(e.email), detail: e.detail, lit: e.inUse && e.problem == nil,
+                           status: e.signing ? "Signing in" : e.problem != nil ? "Needs sign-in" : e.inUse ? "In use" : "Standby",
+                           tone: e.signing ? .amber : e.problem != nil ? .warn : e.inUse ? .ok : .normal,
                            level: e.level, noWeek: "no numbers yet",
-                           actions: AnyView(HStack(spacing: 8) {
-                               if e.inUse { Button("Sign in again…") { signInAgain(e) }.disabled(busy) }
-                               else {
-                                   Button("Switch to this account…") { switchTo(e) }.disabled(busy)
-                                   Button("Forget…") { forget(e) }.disabled(busy)
+                           actions: e.inUse && e.problem == nil ? nil : AnyView(VStack(alignment: .leading, spacing: 6) {
+                               // Sign in again… only while the sign-in is broken; a working one has no button
+                               if let problem = e.problem, e.inUse {
+                                   Text(problem.words).font(.system(size: 11)).foregroundStyle(face.danger)
+                                   Button("Sign in again…") { signInAgain(e) }.disabled(busy)
+                               } else {
+                                   HStack(spacing: 8) {
+                                       Button("Switch to this account…") { switchTo(e) }.disabled(busy)
+                                       Button("Forget…") { forget(e) }.disabled(busy)
+                                   }
                                }
                            }.buttonStyle(PillButtonStyle(compact: true))))
             }
@@ -398,7 +406,12 @@ struct ProfilePage: View {
             SRow(label: "Accounts", info: "A folder holds one signed-in account at a time. Switching signs in again in this same folder, as the other account, so every Claude Code session using it moves to that account. Read from the folder's own Claude Code file, never the Keychain. The week is what Claude Code reported after the last answer on that account; cl_quick reads no usage of its own.", stacked: true) {
                 VStack(alignment: .leading, spacing: 6) {
                     if store.inUse(profile) == nil {
-                        AccountBox(folder: profile.path, signingIn: state.signingIn.contains(profile.path))
+                        let signing = state.signingIn.contains(profile.path)
+                        AccountBox(folder: profile.path, signingIn: signing,
+                                   actions: signing ? nil : AnyView(VStack(alignment: .leading, spacing: 6) {
+                                       Text(SignInProblem.signedOut.words).font(.system(size: 11)).foregroundStyle(face.danger)
+                                       Button("Sign in again…") { signInSignedOut() }.buttonStyle(PillButtonStyle(compact: true))
+                                   }))
                     }
                     AccountList(entries: entries(waiting), busy: waiting != nil,
                                 switchTo: { e in switcher.confirmAndSwitch(profile, uuid: e.id, email: e.email, origin: .settings) },
@@ -438,13 +451,24 @@ struct ProfilePage: View {
         }
     }
 
+    /// Sign in again… on a folder with no account: Claude Code's sign-in in Terminal, and the folder is watched until an
+    /// account is in it (the same watch a new folder gets), 10 minutes at most.
+    private func signInSignedOut() {
+        SignIn.open(folder: profile.path) { why in
+            if let why { SignIn.tell(why); return }
+            state.signingIn.insert(profile.path)
+            state.watchSignIns()
+        }
+    }
+
     /// The account in use first, then the standby ones.
     private func entries(_ waiting: SwitchGoal?) -> [AccountEntry] {
         var out: [AccountEntry] = []
         if let u = store.inUse(profile) {
             out.append(AccountEntry(id: u.uuid, email: u.email,
                                     detail: ([ClaudeFolder.plan(profile.path)].compactMap { $0 } + [tilde(profile.path)]).joined(separator: " · "),
-                                    inUse: true, level: store.level(of: profile, account: u.uuid), signing: waiting?.again == true))
+                                    inUse: true, level: store.level(of: profile, account: u.uuid), signing: waiting?.again == true,
+                                    problem: store.signInProblem(profile)))
         }
         for a in store.standby(profile) {
             let signing = waiting.map { $0.wantedUUID == a.id || $0.wantedEmail.lowercased() == a.email.lowercased() } ?? false
@@ -790,7 +814,24 @@ enum SettingsRender {
                     SRow(label: "In the chat") { SSwitch(isOn: .constant(true), on: "in the profile picker", off: "left out") }
                 }
             })
-        case "accounts", "accounts-timedout", "accounts-forget", "accounts-again":
+        case "accounts-signedout":
+            // a folder with no account signed in: the line and Sign in again…; its earlier account stays on standby
+            view = AnyView(SCard(title: "Profile") {
+                SRow(label: "Name", first: true) { Text("Main").font(.system(size: 13)) }
+                SRow(label: "Accounts", stacked: true) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        AccountBox(title: "~/.claude", detail: "~/.claude", lit: false, status: "Not signed in", tone: .normal,
+                                   actions: AnyView(VStack(alignment: .leading, spacing: 6) {
+                                       Text(SignInProblem.signedOut.words).font(.system(size: 11)).foregroundStyle(FaceTheme.std.danger)
+                                       Button("Sign in again…") {}.buttonStyle(PillButtonStyle(compact: true))
+                                   }))
+                        AccountList(entries: [
+                            AccountEntry(id: "u1", email: "ultra-1@example.com", detail: "Last in use \(TimeWords.when(Date().addingTimeInterval(-3600)))", inUse: false, level: lvl),
+                        ])
+                    }
+                }
+            })
+        case "accounts", "accounts-timedout", "accounts-forget", "accounts-again", "accounts-stopped":
             // one account in use with its week, one on standby with no numbers yet (sample addresses only); the second
             // page after a sign-in that never came; the third with Forget…'s question (an alert, so drawn here from its words)
             let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2",
@@ -800,7 +841,8 @@ enum SettingsRender {
                     SRow(label: "Name", first: true) { Text("Main").font(.system(size: 13)) }
                     SRow(label: "Accounts", stacked: true) {
                         AccountList(entries: [
-                            AccountEntry(id: "u1", email: "ultra-1@example.com", detail: "Max · ~/.claude", inUse: true, level: lvl),
+                            AccountEntry(id: "u1", email: "ultra-1@example.com", detail: "Max · ~/.claude", inUse: true, level: lvl,
+                                         problem: page == "accounts-stopped" ? .stopped : nil),
                             AccountEntry(id: "u2", email: "ultra-2@example.com", detail: "Last in use \(TimeWords.when(Date().addingTimeInterval(-2 * 86400)))", inUse: false, level: nil),
                         ])
                         if page == "accounts-timedout" { SwitchLines(ended: SwitchEnded(goal: goal, signedIn: nil)) }

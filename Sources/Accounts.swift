@@ -105,7 +105,25 @@ struct AccountTrail {
     func canContinue(on uuid: String?) -> Bool { !running || process == uuid }
 }
 
+/// Why a profile's sign-in needs doing again; none while it works.
+enum SignInProblem: Equatable {
+    /// The folder has no signed-in account.
+    case signedOut
+    /// Claude Code's last answer on the account in use failed with authentication_failed.
+    case stopped
+
+    var words: String { self == .signedOut ? "Signed out." : "The sign-in stopped working." }
+}
+
 enum AccountBook {
+    /// "Sign in again…" is for a sign-in that is broken: no account signed in to the folder, or the account in use failed
+    /// to authenticate on the last answer (`failedOn`: the uuid it failed on, kept in memory only). A flag for another
+    /// account says nothing about this one.
+    static func signInProblem(signedIn: (uuid: String, email: String)?, failedOn: String?) -> SignInProblem? {
+        guard let signedIn else { return .signedOut }
+        return failedOn == signedIn.uuid ? .stopped : nil
+    }
+
     /// The key a week is kept under: the profile and the account, "<profile id>|<account uuid>".
     static func levelKey(_ profile: String, _ account: String) -> String { profile + "|" + account }
 

@@ -415,6 +415,14 @@ do {
     let ph = [KnownAccount(uuid: "email:ultra-1@example.com", email: "ultra-1@example.com"), KnownAccount(uuid: "u2", email: "ultra-2@example.com")]
     check("forget: a placeholder for the address in use isn't forgotten", AccountBook.forgetting("email:ultra-1@example.com", of: "main", accounts: ph, levels: weeks, inUse: "u1", inUseEmail: "Ultra-1@example.com") == nil)
     check("forget: a placeholder for another address can go", AccountBook.forgetting("email:ultra-1@example.com", of: "main", accounts: ph, levels: weeks, inUse: "u2", inUseEmail: "ultra-2@example.com") != nil)
+    // Sign in again… only while the sign-in is broken: signed out, or the last answer failed to authenticate on this account
+    let inUse1 = Optional(acct("u1", "ultra-1@example.com"))
+    check("broken: a working sign-in isn't", AccountBook.signInProblem(signedIn: inUse1, failedOn: nil) == nil)
+    check("broken: no account signed in is signed out", AccountBook.signInProblem(signedIn: nil, failedOn: nil) == .signedOut)
+    check("broken: signed out wins over a flag", AccountBook.signInProblem(signedIn: nil, failedOn: "u1") == .signedOut)
+    check("broken: an authentication failure on the account in use", AccountBook.signInProblem(signedIn: inUse1, failedOn: "u1") == .stopped)
+    check("broken: a failure on another account says nothing about this one", AccountBook.signInProblem(signedIn: inUse1, failedOn: "u2") == nil)
+    check("broken: the words", SignInProblem.signedOut.words == "Signed out." && SignInProblem.stopped.words == "The sign-in stopped working.")
     check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
 }
 

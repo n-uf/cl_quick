@@ -10,7 +10,8 @@
 //                                       switched (the new chat's first line); incognito: ended-idle, ended-stopped,
 //                                       ended-failed, ended-closed (the line under a chat that ended))
 //   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts,
-//                                       accounts-timedout, accounts-forget, accounts-again, add-refused, general)
+//                                       accounts-timedout, accounts-forget, accounts-again, accounts-stopped, accounts-signedout, add-refused,
+//                                       general)
 //   --version
 
 import AppKit

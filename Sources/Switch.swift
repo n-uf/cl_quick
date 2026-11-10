@@ -146,6 +146,7 @@ final class AccountSwitcher {
     private func end(_ id: String, _ goal: SwitchGoal, _ outcome: SwitchOutcome, signedIn: String? = nil) {
         waiting[id] = nil
         SignIn.clearMarker(id)
+        if outcome != .timedOut { ProfileStore.shared.signedIn(id) }       // a sign-in landed: an earlier failure is behind it
         switch outcome {
         case .other(let email): ended[id] = SwitchEnded(goal: goal, signedIn: email)
         case .timedOut: ended[id] = SwitchEnded(goal: goal, signedIn: nil)
