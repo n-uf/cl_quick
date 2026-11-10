@@ -874,7 +874,8 @@ final class QuickChat {
         refresh()
         if pick != nil, model.barProblem == .noProfile { model.barProblem = nil }
         let p = panel ?? makePanel()
-        if !placed { place(p); placed = true }
+        // where the user left it stays (for this run); the first time, or when that place is on no screen now: centred
+        if !placed || !isOnScreen(p) { place(p); placed = true }
         p.orderFrontRegardless()
         p.makeKey()
         model.focusTick += 1
@@ -928,7 +929,18 @@ final class QuickChat {
         guard let vis = screen?.visibleFrame else { return }
         let w = QuickChatRoot.width
         let top = vis.maxY - vis.height * 0.22
-        p.setFrame(NSRect(x: vis.midX - w / 2, y: top - 140, width: w, height: 140), display: false)
+        let h = p.frame.height          // the chat's height too, when this is a fall-back for a lost place
+        p.setFrame(NSRect(x: vis.midX - w / 2, y: top - h, width: w, height: h), display: false)
+    }
+
+    /// Whether the panel's top strip (where it's grabbed) shows on some screen, clear of the menu bar and the Dock.
+    private func isOnScreen(_ p: NSPanel) -> Bool {
+        let f = p.frame
+        let strip = NSRect(x: f.minX, y: f.maxY - 44, width: f.width, height: 44)
+        return NSScreen.screens.contains { s in
+            let i = s.visibleFrame.intersection(strip)
+            return !i.isNull && i.width >= 80 && i.height >= 24
+        }
     }
 
     /// Where `claude` is: found once, off the main thread (ClaudeLocator), and again when it's gone.
