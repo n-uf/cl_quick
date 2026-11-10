@@ -8,7 +8,10 @@
 //                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
 //                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
 //                                       switched (the new chat's first line); incognito: ended-idle, ended-stopped,
-//                                       ended-failed, ended-closed (the line under a chat that ended))
+//                                       ended-failed, ended-closed (the line under a chat that ended)); the model and
+//                                       thinking controls: models3, models2 (three or two families), haiku (levels it
+//                                       doesn't take), tint-fable, tint-extra, tint-max, tint-fablemax, hover-m0…m3 and
+//                                       hover-t0…t5 (the pointer on a bar)
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
 //                                       accounts-two, accounts-switching, accounts-wrong, accounts-timedout,
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
