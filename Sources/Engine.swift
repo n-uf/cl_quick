@@ -122,20 +122,6 @@ enum QuickChatModels {
         return ["off"] + effortOrder.dropFirst().filter { efforts.contains($0) }
     }
 
-    /// The step `by` steps from `now` in a step control's list (model families, or thinking steps); nil past either end.
-    /// A `now` that isn't in the list counts as just before its start: a step up is the first entry, a step down none.
-    static func step<T: Equatable>(_ list: [T], from now: T, by: Int) -> T? {
-        let i = (list.firstIndex(of: now) ?? -1) + by
-        return list.indices.contains(i) ? list[i] : nil
-    }
-
-    /// Whether a step uses the account's limits faster: Fable, and thinking at Extra or Max.
-    static func costly(_ f: QuickChatModelChoice) -> Bool { f == .fable }
-    static func costly(effort: String?) -> Bool { effort == "xhigh" || effort == "max" }
-    /// How warm a step control is drawn: 0 a step that costs the usual, 1 a costly one, 2 a costly one while the other
-    /// control is costly too (Fable with Extra or Max).
-    static func tint(own: Bool, other: Bool) -> Int { own ? (other ? 2 : 1) : 0 }
-
     /// The step asked for when the model takes it, else the nearest it takes (the lighter one first).
     static func clamp(_ effort: String, to steps: [String]) -> String {
         if steps.contains(effort) { return effort }
