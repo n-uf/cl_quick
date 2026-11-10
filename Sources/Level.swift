@@ -87,6 +87,12 @@ struct QuickChatLevel: Codable, Equatable {
         return week
     }
 
+    /// The 5-hour session window as last reported, unless it has reset since.
+    func fiveHourNow(_ now: Date = Date()) -> Double? {
+        if let r = fiveHourResets, r <= now { return nil }
+        return fiveHour
+    }
+
     /// Room for a question: not held back, and the week known.
     func room(_ now: Date = Date()) -> Bool { full(now) == nil && weekNow(now) != nil }
 
