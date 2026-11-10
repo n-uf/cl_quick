@@ -45,7 +45,7 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   folder's `.claude.json` every 2 seconds, for at most 10 minutes, until the account changes. It never sees a password or
   a token and never touches the Keychain.
 - If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
-  Sign in again. After 10 minutes with no change it stops looking, quietly.
+  Sign in again. After 10 minutes with no change it stops looking and says "No sign-in in 10 minutes." (in the chat and on the profile's card), with Sign in again and Dismiss.
 - Each account keeps its own week: after a switch the chat shows that account's last-reported week, or "no numbers yet".
   Weeks are kept per account (its id in Claude Code's file), not per organization.
 - Addresses are masked everywhere in cl_quick (p•••@example.com).

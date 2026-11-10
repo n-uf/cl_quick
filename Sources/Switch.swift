@@ -30,10 +30,11 @@ enum SwitchOutcome: Equatable {
     case timedOut
 }
 
-/// A switch that ended on another account than the one wanted.
-struct SwitchMismatch: Equatable {
+/// A switch that ended without reaching the account wanted: another one signed in, or nothing did in 10 minutes.
+struct SwitchEnded: Equatable {
     var goal: SwitchGoal
-    var signedIn: String
+    /// The address that signed in instead; nil: no sign-in came in the 10 minutes.
+    var signedIn: String?
 }
 
 final class AccountSwitcher {
@@ -47,8 +48,8 @@ final class AccountSwitcher {
 
     /// By profile id: the sign-ins being waited for.
     private(set) var waiting: [String: SwitchGoal] = [:]
-    /// By profile id: the last switch that ended on another account, until it's tried again or dropped.
-    private(set) var mismatch: [String: SwitchMismatch] = [:]
+    /// By profile id: the last switch that ended on another account or timed out, until it's tried again or dismissed.
+    private(set) var ended: [String: SwitchEnded] = [:]
     /// A switch ended (the chat carries on with it).
     var onOutcome: (SwitchGoal, SwitchOutcome) -> Void = { _, _ in }
     private var timer: Timer?
@@ -69,7 +70,7 @@ final class AccountSwitcher {
         let now = ClaudeFolder.account(p.path)
         waiting[p.id] = SwitchGoal(profileID: p.id, profileName: p.name, folder: p.path, wantedUUID: uuid, wantedEmail: email,
                                    fromUUID: now?.uuid, fromEmail: now?.email, origin: origin)
-        mismatch[p.id] = nil
+        ended[p.id] = nil
         startTimer()
         changed()
         SignIn.open(folder: p.path, email: email) { [weak self] why in
@@ -79,10 +80,10 @@ final class AccountSwitcher {
         }
     }
 
-    /// Stops waiting for a profile's sign-in, and forgets a switch that ended on another account.
+    /// Stops waiting for a profile's sign-in, and dismisses a switch that ended on another account or timed out.
     func drop(_ id: String) {
-        guard waiting[id] != nil || mismatch[id] != nil else { return }
-        waiting[id] = nil; mismatch[id] = nil
+        guard waiting[id] != nil || ended[id] != nil else { return }
+        waiting[id] = nil; ended[id] = nil
         if waiting.isEmpty { timer?.invalidate(); timer = nil }
         changed()
     }
@@ -116,7 +117,11 @@ final class AccountSwitcher {
 
     private func end(_ id: String, _ goal: SwitchGoal, _ outcome: SwitchOutcome) {
         waiting[id] = nil
-        if case .other(let email) = outcome { mismatch[id] = SwitchMismatch(goal: goal, signedIn: email) }
+        switch outcome {
+        case .other(let email): ended[id] = SwitchEnded(goal: goal, signedIn: email)
+        case .timedOut: ended[id] = SwitchEnded(goal: goal, signedIn: nil)
+        case .reached: ended[id] = nil
+        }
         if waiting.isEmpty { timer?.invalidate(); timer = nil }
         ProfileStore.shared.noteAccount(of: id)          // the account now signed in is remembered
         changed()

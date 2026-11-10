@@ -174,6 +174,8 @@ enum QuickChatSwitchNotice: Equatable {
     case waiting(wanted: String)
     /// The browser signed in as someone else.
     case wrong(signedIn: String, wanted: String)
+    /// No sign-in came in 10 minutes.
+    case timedOut(wanted: String)
 }
 
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
@@ -589,7 +591,7 @@ final class QuickChat {
         }
         model.signInAgain = { [weak self] in
             guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id),
-                  let m = self.switcher.mismatch[id] else { return }
+                  let m = self.switcher.ended[id] else { return }
             self.switcher.begin(p, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: .chat)
         }
         model.dropSwitch = { [weak self] in
@@ -662,7 +664,9 @@ final class QuickChat {
                 return x != y ? x < y : a.0 < b.0
             }
         let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }
-            ?? switcher.mismatch[id].map { .wrong(signedIn: $0.signedIn, wanted: $0.goal.wantedEmail) }
+            ?? switcher.ended[id].map { e in
+                e.signedIn.map { .wrong(signedIn: $0, wanted: e.goal.wantedEmail) } ?? .timedOut(wanted: e.goal.wantedEmail)
+            }
         model.update(target: now, level: store.level(of: p), offer: others.first,
                      switchOffer: standby.first?.1, notice: notice)
     }

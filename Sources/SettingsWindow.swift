@@ -328,6 +328,34 @@ struct AccountList: View {
     }
 }
 
+/// Under a profile's accounts: a sign-in being waited for (Show Terminal, Stop waiting), or a switch that ended without
+/// the account wanted, because another one signed in or because 10 minutes passed (Sign in again…, Dismiss).
+struct SwitchLines: View {
+    var waiting: SwitchGoal?
+    var ended: SwitchEnded?
+    var showTerminal: () -> Void = {}
+    var drop: () -> Void = {}
+    var signInAgain: (SwitchGoal) -> Void = { _ in }
+    @Environment(\.face) private var face
+
+    var body: some View {
+        if let waiting {
+            SRowLine(text: "Waiting for the sign-in… Finish it in Terminal and the browser as \(maskEmail(waiting.wantedEmail)). cl_quick looks at the folder every 2 s, for 10 minutes.", color: face.caution)
+            HStack(spacing: 8) {
+                Button("Show Terminal", action: showTerminal)
+                Button("Stop waiting", action: drop)
+            }.buttonStyle(PillButtonStyle(compact: true))
+        } else if let m = ended {
+            SRowLine(text: m.signedIn.map { "Signed in as \(maskEmail($0)), not \(maskEmail(m.goal.wantedEmail))." }
+                        ?? "No sign-in in 10 minutes. The account in use hasn't changed.", color: face.danger)
+            HStack(spacing: 8) {
+                Button("Sign in again…") { signInAgain(m.goal) }
+                Button("Dismiss", action: drop)
+            }.buttonStyle(PillButtonStyle(compact: true))
+        }
+    }
+}
+
 struct ProfilePage: View {
     @ObservedObject var state: SettingsState
     @ObservedObject var store: ProfileStore
@@ -340,7 +368,7 @@ struct ProfilePage: View {
     private var switcher: AccountSwitcher { .shared }
 
     var body: some View {
-        let waiting = switcher.waiting[profile.id], mismatch = switcher.mismatch[profile.id]
+        let waiting = switcher.waiting[profile.id], ended = switcher.ended[profile.id]
         SCard(title: "Profile", info: "A Claude Code folder cl_quick chats on, with its accounts: the one signed in now, in use, and the others on standby. The chat answers on the account in use and counts against its limits.") {
             SRow(label: "Name", first: true) {
                 TextField("", text: $name, onCommit: rename).textFieldStyle(.plain).font(.system(size: 13)).frame(maxWidth: 220)
@@ -357,17 +385,10 @@ struct ProfilePage: View {
                                 signInAgain: { e in
                                     SignIn.open(folder: profile.path, email: e.email) { why in if let why { SignIn.tell(why) } }
                                 })
-                    if let waiting {
-                        SRowLine(text: "Waiting for the sign-in… Finish it in Terminal and the browser as \(maskEmail(waiting.wantedEmail)). cl_quick looks at the folder every 2 s, for 10 minutes.", color: face.caution)
-                        HStack(spacing: 8) {
-                            Button("Show Terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) }
-                            Button("Stop waiting") { switcher.drop(profile.id) }
-                        }.buttonStyle(PillButtonStyle(compact: true))
-                    } else if let m = mismatch {
-                        SRowLine(text: "Signed in as \(maskEmail(m.signedIn)), not \(maskEmail(m.goal.wantedEmail)).", color: face.danger)
-                        Button("Sign in again…") { switcher.begin(profile, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: .settings) }
-                            .buttonStyle(PillButtonStyle(compact: true))
-                    }
+                    SwitchLines(waiting: waiting, ended: ended,
+                                showTerminal: { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) },
+                                drop: { switcher.drop(profile.id) },
+                                signInAgain: { g in switcher.begin(profile, uuid: g.wantedUUID, email: g.wantedEmail, origin: .settings) })
                 }
             }
             SRow(label: "Another account", info: "Signs in again in this folder, as that address: Claude Code's sign-in opens in Terminal and the browser decides which account signs in. The account becomes the one in use, and the one now in use stays here on standby.", stacked: true) {
@@ -724,8 +745,11 @@ enum SettingsRender {
                     SRow(label: "In the chat") { SSwitch(isOn: .constant(true), on: "in the profile picker", off: "left out") }
                 }
             })
-        case "accounts":
-            // one account in use with its week, one on standby with no numbers yet (sample addresses only)
+        case "accounts", "accounts-timedout":
+            // one account in use with its week, one on standby with no numbers yet (sample addresses only); the second
+            // page after a sign-in that never came
+            let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2",
+                                  wantedEmail: "ultra-2@example.com", fromUUID: "u1", fromEmail: "ultra-1@example.com", origin: .settings)
             view = AnyView(VStack(alignment: .leading, spacing: 14) {
                 SCard(title: "Profile") {
                     SRow(label: "Name", first: true) { Text("Main").font(.system(size: 13)) }
@@ -734,6 +758,7 @@ enum SettingsRender {
                             AccountEntry(id: "u1", email: "ultra-1@example.com", detail: "Max · ~/.claude", inUse: true, level: lvl),
                             AccountEntry(id: "u2", email: "ultra-2@example.com", detail: "Last in use \(TimeWords.when(Date().addingTimeInterval(-2 * 86400)))", inUse: false, level: nil),
                         ])
+                        if page == "accounts-timedout" { SwitchLines(ended: SwitchEnded(goal: goal, signedIn: nil)) }
                     }
                     SRow(label: "Another account", stacked: true) {
                         HStack(spacing: 8) {

@@ -444,8 +444,9 @@ struct QCProblemView: View {
     private func retry() { if model.isWindow { model.again() } else { model.barProblem = nil; model.send() } }
 }
 
-/// A switch of the profile to another account: while Claude Code's sign-in is open, or when the browser signed in as
-/// someone else. Drawn in place of the full limit's notice.
+/// A switch of the profile to another account: while Claude Code's sign-in is open, when the browser signed in as
+/// someone else, or when no sign-in came in 10 minutes (the last two can be dismissed). Drawn in place of the full
+/// limit's notice.
 struct QCSwitchView: View {
     @ObservedObject var model: QuickChatModel
 
@@ -460,7 +461,10 @@ struct QCSwitchView: View {
                         .font(.system(size: 13)).foregroundColor(QCColor.soft).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         if waiting { QCButton(title: "Stop waiting", ghost: true) { model.dropSwitch() } }
-                        else { QCButton(title: "Sign in again") { model.signInAgain() } }
+                        else {
+                            QCButton(title: "Sign in again") { model.signInAgain() }
+                            QCButton(title: "Dismiss", ghost: true) { model.dropSwitch() }
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -475,6 +479,7 @@ struct QCSwitchView: View {
         switch n {
         case .waiting: return "Waiting for the sign-in…"
         case .wrong(let signedIn, let wanted): return "Signed in as \(maskEmail(signedIn)), not \(maskEmail(wanted))."
+        case .timedOut: return "No sign-in in 10 minutes."
         }
     }
 
@@ -482,6 +487,7 @@ struct QCSwitchView: View {
         switch n {
         case .waiting(let wanted): return " Finish it in Terminal and the browser as \(maskEmail(wanted))."
         case .wrong: return ""
+        case .timedOut: return " The account in use hasn't changed."
         }
     }
 }
@@ -855,7 +861,7 @@ enum QuickChatRender {
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
             m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
-        case "switch", "switching", "wrong":
+        case "switch", "switching", "wrong", "timedout":
             // a full week, with the profile's standby account offered besides Ask on …
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
@@ -863,6 +869,7 @@ enum QuickChatRender {
             m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com", week: nil)
             if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
             if state == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
+            if state == "timedout" { m.switchNotice = .timedOut(wanted: "ultra-2@example.com") }
         case "switched":
             // after a switch: a new chat on the same profile, the typed question sent, one line on where it is
             var t = QuickChatTurn(question: q1); t.phase = .waiting

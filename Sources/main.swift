@@ -6,8 +6,10 @@
 //   --render-quick-chat OUT.png STATE   the bar or the chat window with sample data (bar, typing, notinstalled,
 //                                       streaming, answer, failed, notsigned, thinking, full, level95; with accounts:
 //                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
-//                                       wrong (another account signed in), switched (the new chat's first line))
-//   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts, general)
+//                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
+//                                       switched (the new chat's first line))
+//   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts,
+//                                       accounts-timedout, general)
 //   --version
 
 import AppKit
