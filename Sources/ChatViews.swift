@@ -120,6 +120,7 @@ struct QCWindow: View {
                 QCControls(model: model, inBar: false)
             }
             .padding(EdgeInsets(top: 12, leading: 8, bottom: 8, trailing: 8))
+            .qcDraggable()
             .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(QCColor.surface))
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(QCColor.line))
             .padding([.horizontal, .bottom], 12)
