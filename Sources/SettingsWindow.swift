@@ -226,97 +226,6 @@ struct WrapLayout: Layout {
     }
 }
 
-// MARK: - A profile's account
-
-/// The account signed in to a folder, as cl_audit draws an account: a lamp, the address, the plan, a display window
-/// with its state, and the week in twelve segments when Claude Code has reported it.
-struct AccountBox: View {
-    /// The first line: the masked address, or the folder when nothing is signed in.
-    var title: String
-    /// The second line: the plan and the folder, or when a standby account was last seen.
-    var detail: String
-    /// The lamp: lit for the account in use or a folder signed in, dark for a standby account.
-    var lit: Bool
-    var status: String
-    var tone: DisplayWindow.Tone
-    /// The week as last reported on this account.
-    var level: QuickChatLevel? = nil
-    /// Said in place of the week when there are no numbers yet (a standby account says it; a folder just shows none).
-    var noWeek: String? = nil
-    var badge: AnyView? = nil
-    /// Keys under the week.
-    var actions: AnyView? = nil
-    @Environment(\.face) private var face
-
-    /// A folder as a whole: the account signed in to it, if any.
-    init(folder: String, level: QuickChatLevel? = nil, signingIn: Bool = false, badge: AnyView? = nil, actions: AnyView? = nil) {
-        let email = ClaudeFolder.email(folder)
-        self.init(title: email.map(maskEmail) ?? tilde(folder),
-                  detail: ([ClaudeFolder.plan(folder)].compactMap { $0 } + [tilde(folder)]).joined(separator: " · "),
-                  lit: email != nil,
-                  status: signingIn ? "Signing in" : email == nil ? "Not signed in" : "Signed in",
-                  tone: signingIn ? .amber : email == nil ? .normal : .ok, level: level, badge: badge, actions: actions)
-    }
-
-    init(title: String, detail: String, lit: Bool, status: String, tone: DisplayWindow.Tone, level: QuickChatLevel? = nil,
-         noWeek: String? = nil, badge: AnyView? = nil, actions: AnyView? = nil) {
-        self.title = title; self.detail = detail; self.lit = lit; self.status = status; self.tone = tone
-        self.level = level; self.noWeek = noWeek; self.badge = badge; self.actions = actions
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 9) {
-                LED(color: face.ok, lit: lit, size: 7)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(face.text)
-                    Text(detail).font(.system(size: 11)).foregroundStyle(face.muted)
-                }
-                Spacer(minLength: 8)
-                if let badge { badge } else { DisplayWindow(text: status, tone: tone, height: 18, size: 9) }
-            }
-            if let level, level.weekNow() != nil || level.full() != nil { WeekSegments(level: level) }
-            else if let noWeek { Text("Week: \(noWeek)").font(.system(size: 11)).foregroundStyle(face.muted) }
-            if let actions { actions }
-        }
-        .padding(.horizontal, 10).padding(.vertical, 9)
-        .background(WellShape(well: face.win, radius: 7))
-    }
-}
-
-/// The week in cl_audit's twelve segments, its number in the level's colour, and when it resets.
-struct WeekSegments: View {
-    let level: QuickChatLevel
-    @Environment(\.face) private var face
-
-    var body: some View {
-        let full = level.full() != nil
-        let p = full ? 100 : level.weekNow()
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("Week").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(face.text)
-                if let r = full ? level.full()?.resets : level.weekResets {
-                    Text("· resets \(TimeWords.when(r))").font(.system(size: 11)).foregroundStyle(face.muted)
-                }
-                Spacer()
-                Text(full ? "full" : QuickChatLevel.pct(p)).font(.system(size: 12.5, weight: .bold).monospacedDigit())
-                    .foregroundStyle(QuickChatLevel.color(p))
-            }
-            HStack(spacing: 2) {
-                let lit = (p ?? 0) > 0 ? max(1, Int(((p ?? 0) / 100 * 12).rounded())) : 0
-                ForEach(0..<12, id: \.self) { i in
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(i < lit ? Color(nsColor: Painter.segment(i)) : face.segOff)
-                        .frame(height: 8)
-                }
-            }
-            if let at = level.at {
-                Text("As Claude Code reported after the last answer, \(TimeWords.when(at)).").font(.system(size: 10.5)).foregroundStyle(face.muted)
-            }
-        }
-    }
-}
-
 // MARK: - Pages
 
 /// One account of a profile, as its card draws it.
@@ -831,7 +740,98 @@ struct ProfilePage: View {
     }
 }
 
-/// The + tile: the Claude Code folders found and not used yet, Choose a folder…, and Sign in another account….
+/// A Claude Code folder found on this Mac and not a profile yet: the account signed in there, and the profile already
+/// using that account, if one is (then it can't be added: one account, one profile).
+struct FoundFolder: Identifiable {
+    var path: String
+    var email: String?
+    var plan: String?
+    var takenBy: String?
+    var id: String { path }
+}
+
+/// Add a profile, in two parts: the folders found on this Mac (Add, Sign in… for one that isn't signed in, or why it
+/// can't be added), and somewhere else (Choose a folder…, or a new account in a new folder you name).
+struct AddContent<NewName: View>: View {
+    let found: [FoundFolder]
+    var problem: String? = nil
+    var newFolder = "~/.claude-<name>"
+    var canSignIn = false
+    var add: (String) -> Void = { _ in }
+    var signInFound: (String) -> Void = { _ in }
+    var choose: () -> Void = {}
+    var signInNew: () -> Void = {}
+    var dismiss: () -> Void = {}
+    @ViewBuilder let newName: NewName
+    @Environment(\.face) private var face
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Add a profile").font(.system(size: 16, weight: .semibold)).foregroundStyle(face.text)
+                Text("A profile is one Claude Code folder, with the account signed in there.").font(.system(size: 11.5)).foregroundStyle(face.muted)
+            }
+            .padding(.horizontal, 2)
+            SCard(title: "Found on this Mac") {
+                VStack(alignment: .leading, spacing: 8) {
+                    if found.isEmpty {
+                        Text("Every Claude Code folder on this Mac is a profile already.").font(.system(size: 11.5)).foregroundStyle(face.muted)
+                    }
+                    ForEach(found) { f in row(f) }
+                }
+                .padding(.bottom, 4)
+            }
+            SCard(title: "Somewhere else") {
+                LineRow(title: "A folder Claude Code uses elsewhere", sub: "One set with CLAUDE_CONFIG_DIR, say.", first: true) {
+                    Button("Choose a folder…", action: choose).buttonStyle(.sentenceKey())
+                }
+                if let problem {
+                    NoticeBox(tone: .bad, title: problem) { Button("OK", action: dismiss) }.padding(.bottom, 6)
+                }
+                EngravedRule()
+                VStack(alignment: .leading, spacing: 7) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("A new account, in a new folder").font(.system(size: 12.5)).foregroundStyle(face.text)
+                        Text("Makes the folder and opens Claude Code's sign-in in Terminal.").font(.system(size: 11)).foregroundStyle(face.muted)
+                    }
+                    HStack(spacing: 8) {
+                        newName
+                        Text(newFolder).font(.system(size: 11, design: .monospaced)).foregroundStyle(face.muted).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Button("Sign in…", action: signInNew).buttonStyle(.sentenceKey()).disabled(!canSignIn)
+                    }
+                }
+                .padding(.vertical, 7)
+            }
+        }
+    }
+
+    private func row(_ f: FoundFolder) -> some View {
+        HStack(spacing: 9) {
+            LED(color: face.ok, lit: f.email != nil && f.takenBy == nil, size: 7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tilde(f.path)).font(.system(size: 12.5, weight: .semibold, design: .monospaced)).foregroundStyle(face.text).lineLimit(1)
+                Text(detail(f)).font(.system(size: 11)).foregroundStyle(face.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if f.takenBy == nil {
+                if f.email != nil { Button("Add") { add(f.path) }.buttonStyle(.sentenceKey(next: true)) }
+                else { Button("Sign in…") { signInFound(f.path) }.buttonStyle(.sentenceKey()) }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(WellShape(well: face.win, radius: 7))
+        .opacity(f.takenBy == nil ? 1 : 0.6)
+    }
+
+    private func detail(_ f: FoundFolder) -> String {
+        guard let email = f.email else { return "Not signed in" }
+        if let other = f.takenBy { return "\(email) is already on \(other): one account, one profile" }
+        return ([email, f.plan].compactMap { $0 }).joined(separator: " · ")
+    }
+}
+
+/// The + tile: the Claude Code folders found and not used yet, Choose a folder…, and a new account in a new folder.
 struct AddPage: View {
     @ObservedObject var state: SettingsState
     @ObservedObject var store: ProfileStore
@@ -840,33 +840,38 @@ struct AddPage: View {
     @Environment(\.face) private var face
 
     var body: some View {
-        let found = ClaudeFolder.found().filter { !store.uses($0) }
-        SCard(title: "Add a profile", info: "Any Claude Code folder: ~/.claude, a ~/.claude-* folder, or one set with CLAUDE_CONFIG_DIR. cl_quick reads only its .claude.json for the account.") {
-            SRow(label: "Found on this Mac", first: true, stacked: true) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if found.isEmpty { Text("Every Claude Code folder found is a profile already.").font(.system(size: 12)).foregroundStyle(face.muted) }
-                    ForEach(found, id: \.self) { f in
-                        let signedIn = ClaudeFolder.email(f) != nil
-                        AccountBox(folder: f, badge: AnyView(
-                            Button(signedIn ? "Add" : "Not signed in") { add(f) }.buttonStyle(PillButtonStyle(compact: true)).disabled(!signedIn)))
-                    }
-                    if found.contains(where: { ClaudeFolder.email($0) == nil }) {
-                        Text("A folder that isn't signed in: sign in with Claude Code in it first, or use Sign in another account below.")
-                            .font(.system(size: 10.5)).foregroundStyle(face.muted).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+        let found = ClaudeFolder.found().filter { !store.uses($0) }.map { f -> FoundFolder in
+            let a = ClaudeFolder.account(f)
+            return FoundFolder(path: f, email: a?.email, plan: ClaudeFolder.plan(f), takenBy: a.flatMap { store.nameUsing($0) })
+        }
+        AddContent(found: found, problem: problem, newFolder: AddPage.folder(for: newName),
+                   canSignIn: !newName.trimmingCharacters(in: .whitespaces).isEmpty,
+                   add: { add($0) }, signInFound: signInFound, choose: choose, signInNew: signIn, dismiss: { problem = nil }) {
+            SField(placeholder: "Name, e.g. Personal", text: $newName, width: 150, onCommit: { if !newName.trimmingCharacters(in: .whitespaces).isEmpty { signIn() } })
+        }
+    }
+
+    /// A folder refused because its account is already on another profile: why, and what to do instead.
+    static func refusedWords(folder: String, email: String, profile: String) -> String {
+        "\(tilde(expand(folder))) is signed in as \(email), which is already on \(profile). Switch \(profile)'s account instead, or sign this folder in as someone else."
+    }
+
+    /// The folder a new account's name makes: ~/.claude-<name>, in small letters, anything else a dash.
+    static func folder(for name: String) -> String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        return "~/.claude-" + (n.isEmpty ? "<name>" : String(n.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }))
+    }
+
+    /// A folder found that isn't signed in: Claude Code's sign-in on it in Terminal, then it's a profile, "signing in",
+    /// until an account is in it (10 minutes at most).
+    private func signInFound(_ f: String) {
+        SignIn.open(folder: f) { why in
+            if let why { problem = why; return }
+            add(f)
+            if store.uses(f) {
+                state.signingIn.insert(expand(f))
+                state.watchSignIns()
             }
-            SRow(label: "Another folder", stacked: true) {
-                Button("Choose a folder…") { choose() }.buttonStyle(PillButtonStyle(compact: true))
-            }
-            SRow(label: "Sign in another account", info: "Makes a new folder, ~/.claude-<name>, and opens Claude Code in Terminal on it; Claude Code signs in through the browser. cl_quick never sees a password or a token.", stacked: true) {
-                HStack(spacing: 8) {
-                    TextField("Name, e.g. Personal", text: $newName).textFieldStyle(.plain).font(.system(size: 13)).frame(maxWidth: 200)
-                    Button("Sign in…") { signIn() }.buttonStyle(PillButtonStyle(compact: true))
-                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            if let problem { SRowLine(text: problem, color: face.danger) }
         }
     }
 
@@ -874,7 +879,7 @@ struct AddPage: View {
         guard !store.uses(folder) else { problem = "\(tilde(expand(folder))) is a profile already."; return }
         // one account, one profile: the folder's file is read as it is now, not as it was when the list was drawn
         if let a = ClaudeFolder.freshAccount(folder), let other = store.nameUsing(a) {
-            problem = ProfileStore.inUseWords(a.email, on: other)
+            problem = AddPage.refusedWords(folder: folder, email: a.email, profile: other)
             return
         }
         let p = Profile(id: ProfileStore.newID(folder, taken: store.profiles.map(\.id)), name: name ?? ClaudeFolder.suggestedName(folder), folder: tilde(expand(folder)))
@@ -891,7 +896,7 @@ struct AddPage: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         // only a Claude Code folder that is signed in: any other would get Claude Code's files written into it
         guard ClaudeFolder.usable(url.path) else {
-            problem = "\(tilde(url.path)) isn't a signed-in Claude Code folder. Choose one with a .claude.json that is signed in, or use Sign in another account."
+            problem = "\(tilde(url.path)) isn't a signed-in Claude Code folder. Choose one that is signed in, or sign a new account in, below."
             return
         }
         add(url.path)
@@ -900,8 +905,8 @@ struct AddPage: View {
     /// A new folder, and Claude Code in Terminal on it to sign in. The profile is there at once, "signing in".
     private func signIn() {
         let n = newName.trimmingCharacters(in: .whitespaces)
-        let slug = String(n.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" })
-        let folder = "~/.claude-" + slug
+        guard !n.isEmpty else { return }
+        let folder = AddPage.folder(for: n)
         guard !FileManager.default.fileExists(atPath: expand(folder)) else { problem = "\(folder) is there already: add it with Choose a folder…."; return }
         // the full look for claude can take a few seconds (the login shell): off the main thread
         DispatchQueue.global(qos: .userInitiated).async {
@@ -1184,18 +1189,19 @@ enum SettingsRender {
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
                 .frame(maxWidth: .infinity)
             })
-        case "add-refused":
-            // the + tile after a folder whose account is in use on another profile was refused (sample address and folder)
+        case "add", "first", "add-refused", "add-empty":
+            // the + tile: folders found (one to add, one not signed in, one whose account is on Work); after a chosen
+            // folder was refused; with nothing left to add; the first run (no profiles yet)
             at = .add
-            view = AnyView(SCard(title: "Add a profile") {
-                SRow(label: "Found on this Mac", first: true, stacked: true) {
-                    AccountBox(title: maskEmail("ultra-1@example.com"), detail: "Max · ~/.claude-sample", lit: true, status: "Signed in", tone: .ok,
-                               badge: AnyView(Button("Add") {}.buttonStyle(PillButtonStyle(compact: true))))
-                }
-                SRow(label: "Another folder", stacked: true) {
-                    Button("Choose a folder…") {}.buttonStyle(PillButtonStyle(compact: true))
-                }
-                SRowLine(text: ProfileStore.inUseWords("ultra-1@example.com", on: "Main"), color: FaceTheme.std.danger)
+            if page == "first" { tiles = [] }
+            let found: [FoundFolder] = page == "add-empty" ? [] : [
+                FoundFolder(path: "~/.claude-lab", email: "lee@example.com", plan: "Pro"),
+                FoundFolder(path: "~/.claude-test", email: nil),
+                FoundFolder(path: "~/.claude-old", email: "sam@work.example", takenBy: "Work")]
+            view = AnyView(AddContent(found: page == "first" ? [FoundFolder(path: "~/.claude", email: "alex@example.com", plan: "Max")] + found.dropLast() : found,
+                                      problem: page == "add-refused" ? AddPage.refusedWords(folder: "~/Projects/.claude-x", email: "sam@work.example", profile: "Work") : nil,
+                                      newFolder: AddPage.folder(for: "Personal"), canSignIn: true) {
+                SField(placeholder: "Name, e.g. Personal", text: .constant("Personal"), width: 150)
             })
         default:
             at = .general
