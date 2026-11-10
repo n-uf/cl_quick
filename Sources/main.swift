@@ -9,9 +9,12 @@
 //                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
 //                                       switched (the new chat's first line); incognito: ended-idle, ended-stopped,
 //                                       ended-failed, ended-closed (the line under a chat that ended))
-//   --render-settings OUT.png PAGE      the settings window with sample profiles (first, profile, accounts,
-//                                       accounts-timedout, accounts-forget, accounts-again, accounts-stopped, accounts-signedout, add-refused,
-//                                       general)
+//   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
+//                                       accounts-two, accounts-switching, accounts-wrong, accounts-timedout,
+//                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
+//                                       accounts-other, accounts-forget), Add a profile (add, first, add-refused,
+//                                       add-empty) and General (general, general-clash, general-off,
+//                                       general-recording, general-taken)
 //   --version
 
 import AppKit
