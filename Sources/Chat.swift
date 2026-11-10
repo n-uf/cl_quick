@@ -902,19 +902,17 @@ final class QuickChat {
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onResized = { [weak self] in
             guard let self, let p = self.panel, let host = self.host else { return }
-            // the user sized it: the chat keeps its height; the bar keeps the height it was given beyond its content's; both
-            // keep the width (the frame's own)
+            // the user finished sizing it (macOS's own live resize): the chat keeps its height; the bar keeps the height it
+            // was given beyond its content's; both keep the width (the frame's own)
             if self.model.isWindow { self.chatHeight = p.frame.height }
             else { self.barExtra = max(0, p.frame.height - max(0, host.intrinsicContentSize.height)) }
             self.keepOnScreen(p)
-            self.fit()
         }
-        p.limits = { [weak self] in self?.limits() ?? (NSSize(width: 0, height: 0), NSSize(width: 10000, height: 10000)) }
+        // macOS does the sizing: the panel is resizable, and the content's own frames (QuickChatRoot: from 320 wide, the
+        // chat from 220 tall, the bar from its content's height) are the window's least size
         let host = QuickChatHostingView(rootView: QuickChatRoot(model: model))
-        // the content tells its ideal size (the bar's height), nothing more: the panel's size is fit()'s and the user's
-        host.sizingOptions = [.intrinsicContentSize]
         host.onIntrinsicChange = { [weak self] in self?.fit() }
-        p.contentView = QuickChatContainer(content: host)
+        p.contentView = host
         panel = p
         self.host = host
         // the first message turns the bar into the chat, ⌘N back
@@ -923,35 +921,18 @@ final class QuickChat {
         return p
     }
 
-    /// The least and the most the panel may be, for the mode it is in (frame sizes, margins included): the chat from
-    /// 440×340 of card to the screen's visible frame; the bar from 440 of card wide and its content's height (its field at
-    /// the lines it has) to the screen, the same way.
-    private func limits() -> (NSSize, NSSize) {
-        let m = 2 * QuickChatRoot.margin
-        let vis = (panel?.screen ?? NSScreen.main)?.visibleFrame
-        let hi = NSSize(width: vis?.width ?? 10000, height: vis?.height ?? 10000)
-        // the chat's content asks for its own least too: header, a line of chat and the field at the lines it has
-        let ideal = max(0, host?.intrinsicContentSize.height ?? 0)
-        let leastHeight = model.isWindow ? max(QuickChatRoot.minWindowHeight + m, ideal) : ideal
-        return (NSSize(width: QuickChatRoot.minWidth + m, height: leastHeight), hi)
-    }
-
-    /// The panel's size follows the mode, its top edge staying where it is (the width is the panel's own, the user's):
+    /// Sets the panel's HEIGHT from what the content and the user say, the top edge staying where it is. It never touches the
+    /// width, never runs while the user moves or resizes the panel (a move or a live resize owns the frame then), and never
+    /// changes a size the user set except to hold the content:
     /// - the bar is as tall as its content (Shift-Return lines) plus what the user gave it beyond that;
     /// - the chat takes the user's height (the first one until the user sizes it) once, when the first message turns the
-    ///   bar into it, and is the user's after that: answers scroll inside it.
-    /// Not while the user is dragging an edge.
-    private func fit() {
-        guard let p = panel, let host, !p.isResizing else { return }
+    ///   bar into it; after that it is the user's (the content's own least height, which macOS enforces, holds a taller field).
+    /// (Internal, not private, so Checks/panel can call it.)
+    func fit() {
+        guard let p = panel, let host, p.isIdle else { return }
         let vis = (p.screen ?? NSScreen.main)?.visibleFrame
         let chat = model.isWindow
-        if chat, sizedForChat {
-            // the chat is the user's, but not smaller than its content needs (the field grew to more lines)
-            host.layoutSubtreeIfNeeded()
-            let need = host.intrinsicContentSize.height
-            if need > 0, p.frame.height < need - 0.5 { growTo(need, p) }
-            return
-        }
+        if chat, sizedForChat { return }
         if !chat { sizedForChat = false }
         host.layoutSubtreeIfNeeded()         // the content for the mode we are in now, before anything is read or set
         var h: CGFloat
@@ -973,19 +954,6 @@ final class QuickChat {
         }
         // the chat is the user's from here on, once it really has its height (else the next change tries again)
         if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
-        p.invalidateShadow()
-    }
-
-    /// Taller, the top edge staying, within the screen.
-    private func growTo(_ height: CGFloat, _ p: NSPanel) {
-        let vis = (p.screen ?? NSScreen.main)?.visibleFrame
-        let h = min(height, vis?.height ?? height)
-        var f = p.frame
-        let top = f.maxY
-        f.size.height = h
-        f.origin.y = top - h
-        if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
-        p.setFrame(f, display: true)
         p.invalidateShadow()
     }
 
@@ -1055,24 +1023,30 @@ final class QuickChat {
 
 /// A floating panel that takes the keyboard without bringing cl_quick (or anything else) forward, on every Space and
 /// over full-screen apps.
-final class QuickChatPanel: NSPanel {
+final class QuickChatPanel: NSPanel, NSWindowDelegate {
     var onEscape: () -> Void = {}
     var onNewChat: () -> Void = {}
-    /// The user is dragging an edge or corner (ResizeHandles.swift), and has finished.
-    var isResizing = false
-    /// Ends a drag that is under way (set by the handle that began it).
-    var endResize: (() -> Void)?
+
+    // MOVING and SIZING are the user's, and macOS's: the panel is a resizable window, its resize zones are the system's (on
+    // its outer edges and corners only), and moving is the drag surface's performDrag (DragSurface.swift) from any empty
+    // area. While either is under way nothing else may change the frame (QuickChat.fit looks at `isIdle`).
+    /// Set around a window drag (QCDragView).
+    var isMoving = false
+    /// Between the system's "will start" and "did end" of a live resize.
+    private(set) var isLiveResizing = false
+    var isIdle: Bool { !isMoving && !isLiveResizing && !inLiveResize }
+    /// The user finished sizing it.
     var onResized: () -> Void = {}
-    /// Being ordered out (a drag that ends then leaves the arrow, not a resize cursor).
-    private(set) var hiding = false
-    override func orderOut(_ sender: Any?) {
-        hiding = true
-        endResize?()
-        super.orderOut(sender)
-        hiding = false
+    func windowWillStartLiveResize(_ n: Notification) { isLiveResizing = true }
+    func windowDidEndLiveResize(_ n: Notification) {
+        isLiveResizing = false
+        onResized()
     }
-    /// The least and the most the panel may be now (frame sizes).
-    var limits: () -> (NSSize, NSSize) = { (NSSize(width: 0, height: 0), NSSize(width: 10000, height: 10000)) }
+    /// Dragging an edge never takes it past the screen it's on.
+    func windowWillResize(_ sender: NSWindow, to size: NSSize) -> NSSize {
+        guard let vis = (sender.screen ?? NSScreen.main)?.visibleFrame else { return size }
+        return NSSize(width: min(size.width, vis.width), height: min(size.height, vis.height))
+    }
 
     /// cl_quick has no menu bar of its own, so the Edit keys are handled here: cut, copy, paste, select all, undo and
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
@@ -1097,9 +1071,11 @@ final class QuickChatPanel: NSPanel {
     }
 
     init() {
-        // the card's width and a transparent margin around it, where the resize handles are
+        // the card's width and a thin transparent margin around it, which holds the system's resize zones (they are the
+        // frame's outer 3 pt on the edges, 9 pt at the corners): so none of the card's own area ever resizes it
         super.init(contentRect: NSRect(x: 0, y: 0, width: QuickChatRoot.width + 2 * QuickChatRoot.margin, height: 140),
-                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
+                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView, .resizable], backing: .buffered, defer: false)
+        delegate = self
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

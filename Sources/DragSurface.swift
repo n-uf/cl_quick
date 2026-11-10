@@ -31,10 +31,14 @@ final class QCDragView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        // the closed hand for as long as the drag lasts (performDrag returns when the button is let go)
+        // a MOVE: the window server moves the window and nothing here changes its size, so the panel is told it is moving
+        // (QuickChat.fit stays out), with the closed hand for as long as the drag lasts (performDrag returns on mouse-up)
+        let panel = window as? QuickChatPanel
+        panel?.isMoving = true
         NSCursor.closedHand.push()
         window?.performDrag(with: event)
         NSCursor.pop()
+        panel?.isMoving = false
         setCursor(at: NSEvent.mouseLocation)
     }
 
