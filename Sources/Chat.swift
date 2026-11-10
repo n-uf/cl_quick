@@ -29,16 +29,6 @@ enum QuickChatThinking: String, CaseIterable, Codable, Identifiable {
         case .max: return "Max"
         }
     }
-    var blurb: String {
-        switch self {
-        case .off: return "answers at once"
-        case .low: return "thinks briefly first"
-        case .medium: return "thinks a while first"
-        case .high: return "for harder questions"
-        case .xhigh: return "thinks long; uses the week fast"
-        case .max: return "thinks longest; uses the week fastest"
-        }
-    }
 }
 
 struct QuickChatSettings: Codable, Equatable {
@@ -344,16 +334,17 @@ final class QuickChatModel: ObservableObject {
     func choose(_ c: QuickChatModelChoice) { choice = c; focusTick += 1 }
     func choose(_ t: QuickChatThinking) { thinking = t; focusTick += 1 }
 
-    /// The step controls (and ⌥⌘ arrows): the model a family up or down among those the account has, thinking a step
-    /// up or down among the model's. Past either end nothing changes; false then, so the caller can say so.
+    /// The ⌥⌘ arrows: the model a family up or down among those the account has, thinking a step up or down among the
+    /// model's. Past either end nothing changes (false). The keyboard stays where it is (a selected answer keeps its
+    /// selection); a click on a control goes through choose(), which hands the keyboard back to the field.
     @discardableResult func stepModel(_ by: Int) -> Bool {
         guard let c = QuickChatModels.step(modelChoices.map(\.choice), from: resolvedModel.family, by: by) else { return false }
-        choose(c)
+        choice = c
         return true
     }
     @discardableResult func stepThinking(_ by: Int) -> Bool {
         guard let t = QuickChatModels.step(thinkingSteps, from: effectiveThinking, by: by) else { return false }
-        choose(t)
+        thinking = t
         return true
     }
 

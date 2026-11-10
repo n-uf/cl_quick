@@ -52,15 +52,6 @@ enum QuickChatModelChoice: String, CaseIterable, Codable, Identifiable {
     case haiku, sonnet, opus, fable
     var id: String { rawValue }
     var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
-    /// A few words in a picker, when Claude Code's list gives none.
-    var blurb: String {
-        switch self {
-        case .haiku: return "fast, light on the week"
-        case .sonnet: return "for harder questions"
-        case .opus: return "for the hardest questions; uses the week fast"
-        case .fable: return "Claude's Fable family; uses the week fast"
-        }
-    }
 }
 
 /// Choosing from Claude Code's own list: plain functions, for the checks.
@@ -123,9 +114,9 @@ enum QuickChatModels {
     }
 
     /// The step `by` steps from `now` in a step control's list (model families, or thinking steps); nil past either end.
-    /// A `now` that isn't in the list steps from the start.
+    /// A `now` that isn't in the list counts as just before its start: a step up is the first entry, a step down none.
     static func step<T: Equatable>(_ list: [T], from now: T, by: Int) -> T? {
-        let i = (list.firstIndex(of: now) ?? 0) + by
+        let i = (list.firstIndex(of: now) ?? -1) + by
         return list.indices.contains(i) ? list[i] : nil
     }
 

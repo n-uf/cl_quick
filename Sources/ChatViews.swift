@@ -196,7 +196,8 @@ struct QCHeader: View {
         .overlay(alignment: .topTrailing) {
             // the reset times are never on the line, and the address may be cut or gone: on hover a card under the
             // meters, right-aligned to the 10 pt line, says it all
-            let email = line.addressComplete ? nil : model.target?.email
+            // the address as it is now (the profile or account may have changed since the line's step was picked)
+            let email = model.target?.email.flatMap { line.addressShown && QCBlurred.fits($0) ? nil : $0 }
             let meters = model.level.flatMap { QCHeaderLine.hasMeters($0) ? $0 : nil }
             if on, email != nil || meters != nil {
                 QCHeaderCard(email: email, level: meters)
@@ -259,7 +260,7 @@ extension EnvironmentValues {
 /// keeping its width. While the pointer is on the header, a card under the meters shows both with percentage and reset
 /// time, and the whole address when the line cut it or left it out (the tooltip has the meters as words).
 struct QCHeaderDetail: Equatable {
-    enum Resets { case words, time, none }
+    enum Resets { case words, none }
     enum Labels { case full, short, none }
     var resets: Resets = .none
     var pct: Bool
@@ -278,10 +279,10 @@ struct QCHeaderDetail: Equatable {
     static let card = QCHeaderDetail(resets: .words, pct: true, labels: .full)
 }
 
-/// What the line on screen leaves out (told by the step that is shown), so the hover card adds exactly that.
+/// Whether the line on screen shows the address (told by the step that is shown), so the hover card adds it when not
+/// (or when the capsule cuts it).
 struct QCLineState: Equatable {
-    var metersComplete = true
-    var addressComplete = true
+    var addressShown = true
 }
 
 /// The profile, its address (smudged) and the session and week meters.
@@ -293,24 +294,23 @@ struct QCHeaderInfo: View {
     @Binding var nameHover: Bool
     /// The pointer is on the header: the address is un-blurred.
     let reveal: Bool
-    /// What the line on screen leaves out: told by the step that is shown.
+    /// Whether the line on screen shows the address: told by the step that is shown.
     @Binding var state: QCLineState
 
     var body: some View {
         let steps = QCHeaderDetail.steps
         // each candidate is measured at its ideal width (its spacer at its least) and, once picked, spreads to the width
         // the header gives it, so the meters sit on the right next to the buttons
-        let whole = target?.email.map { QCBlurred.fits($0) } ?? true
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
                 QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover, reveal: reveal)
-                    .onAppear { state = QCLineState(metersComplete: false, addressComplete: steps[i].address && whole) }
+                    .onAppear { state = QCLineState(addressShown: steps[i].address) }
             }
             // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
             // pushes the buttons off the panel
             QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, nameHover: $nameHover,
                          reveal: reveal, flexible: true)
-                .onAppear { state = QCLineState(metersComplete: false, addressComplete: false) }
+                .onAppear { state = QCLineState(addressShown: false) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QCHeaderLine.spoken(target: target, level: level))
@@ -478,7 +478,7 @@ struct QCLevelGroup: View {
                 .font(.system(size: size, weight: .semibold).monospacedDigit()).foregroundColor(color).lineLimit(1)
         }
         if let when, detail.resets != .none {
-            Text(detail.resets == .words ? "resets \(TimeWords.when(when))" : TimeWords.when(when))
+            Text("resets \(TimeWords.when(when))")
                 .font(.system(size: size)).foregroundColor(QCColor.muted).lineLimit(1)
         }
     }
@@ -517,7 +517,8 @@ struct QCTurnView: View {
             if turn.phase == .waiting || turn.phase == .streaming { QCPulse().padding(.top, 10) }
             if turn.phase == .done || turn.phase == .stopped {
                 let shown = last || hover
-                footer.padding(.top, 4).opacity(shown ? 1 : 0).allowsHitTesting(shown)
+                // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
+                footer.padding(.top, 4).opacity(shown ? 1 : 0)
             }
             if let p = turn.problem, turn.phase == .failed {
                 QCProblemView(problem: p, model: model, answered: !turn.answer.isEmpty, last: last)
@@ -922,12 +923,14 @@ struct QCControls: View {
 
     /// The model: a step per family the account has, Haiku → Sonnet → Opus → Fable.
     private func modelSteps(wide: Bool) -> some View {
-        let choices = model.modelChoices
         let now = model.resolvedModel.family
+        // a list with none of the four families (only "default", or models of other names): the one family asked for,
+        // by its alias, as a single step
+        let choices = model.modelChoices.isEmpty ? [(choice: now, title: now.title)] : model.modelChoices
         let i = choices.firstIndex { $0.choice == now } ?? 0
         let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
         return QCStepControl(
-            what: "Model", keys: ("⌥⌘←", "⌥⌘→"),
+            what: "Model", keys: ("⌥⌘←", "⌥⌘→"), hintEdge: .leading,
             titles: choices.map(\.title), shown: wide ? (choices.indices.contains(i) ? choices[i].title : now.title) : now.title,
             costly: choices.map { QuickChatModels.costly($0.choice) }, index: i, barsFrom: 0,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(now), other: thinkingCostly), hoverKey: "m"
@@ -940,7 +943,7 @@ struct QCControls: View {
         let now = model.effectiveThinking
         let i = steps.firstIndex(of: now) ?? 0
         return QCStepControl(
-            what: "Thinking", keys: ("⌥⌘↓", "⌥⌘↑"),
+            what: "Thinking", keys: ("⌥⌘↓", "⌥⌘↑"), hintEdge: .trailing,
             titles: steps.map { $0 == .off ? "Thinking off" : $0.title },
             shown: now == .off ? (wide ? "Thinking off" : "Off") : now.title,
             costly: steps.map { QuickChatModels.costly(effort: $0.effort) }, index: i, barsFrom: 1,
@@ -958,6 +961,9 @@ struct QCStepControl: View {
     let what: String
     /// The keys that step it: down, up.
     let keys: (String, String)
+    /// Which edge of the control the hint lines up with: the model's (near the window's left) grows right, thinking's
+    /// grows left, so a long hint stays inside a narrow window.
+    let hintEdge: HorizontalAlignment
     /// Every step's name, lightest first, and the value shown on the control.
     let titles: [String]
     let shown: String
@@ -1025,9 +1031,12 @@ struct QCStepControl: View {
             }
         }
         // the hint hangs from a point above the control's middle (a zero-size frame), so its width never counts in the row
-        .overlay(alignment: .top) {
-            if let s = hovered { hint(s).frame(width: 0, height: 0, alignment: .bottom).offset(y: -4) }
+        .overlay(alignment: hintEdge == .leading ? .topLeading : .topTrailing) {
+            if let s = hovered {
+                hint(s).frame(width: 0, height: 0, alignment: hintEdge == .leading ? .bottomLeading : .bottomTrailing).offset(y: -4)
+            }
         }
+        .qcPointingHand()
         // a warm control says why when the pointer rests on it (the hint names the next step, not this one)
         .help(costly.indices.contains(index) && costly[index] ? "\(titles[index]) uses your limits faster" : "")
         .accessibilityElement(children: .ignore)
@@ -1049,7 +1058,10 @@ struct QCStepControl: View {
     /// uses the limits faster, and its key; at either end, that there is none.
     private func hint(_ s: Int) -> some View {
         let words: Text = {
-            guard let t = target else { return Text(s > 0 ? "\(titles[index]) is the top step" : "\(titles[index]) is the lowest step").foregroundColor(QCColor.muted) }
+            guard let t = target else {
+                let name = titles.indices.contains(index) ? titles[index] : shown
+                return Text(s > 0 ? "\(name) is the top step" : "\(name) is the lowest step").foregroundColor(QCColor.muted)
+            }
             let name = Text(titles[t]).fontWeight(.semibold).foregroundColor(QCColor.text)
             let step = s > 0 ? name + Text(" ›") : Text("‹ ") + name
             return costly[t] ? step + Text(" · uses limits faster").foregroundColor(QCColor.hex(0xF1B59B)) : step
@@ -1077,11 +1089,9 @@ extension EnvironmentValues {
     }
 }
 
-/// A picker's key: its title and a chevron; it opens a menu.
+/// The profile picker's key: a dot, its title and a chevron; it opens a menu.
 struct QCChip: View {
     let title: String
-    var symbol: String? = nil
-    var lit = false
     /// A small dot before the title (the profile's level colour).
     var dot: Color? = nil
     var help = ""
@@ -1092,7 +1102,6 @@ struct QCChip: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
-                if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundColor(lit ? QCColor.accent : QCColor.soft) }
                 if !title.isEmpty { Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1) }
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.7)
             }
@@ -1148,7 +1157,8 @@ enum QCMenu {
             if #available(macOS 15, *) {
                 i.subtitle = it.detail         // under the name: the menu stays narrow
             } else {
-                // macOS 13 and 14 show no subtitle: the words in grey after the name, as before
+                // the subtitle shows from macOS 15 on (14.4 has the property but doesn't show it with an attributed title,
+                // and 13 lacks it): before that, the words in grey after the name
                 let s = NSMutableAttributedString(string: it.title, attributes: [.font: NSFont.menuFont(ofSize: 0)])
                 s.append(NSAttributedString(string: "   " + it.detail, attributes: [
                     .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor]))

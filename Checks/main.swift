@@ -288,7 +288,9 @@ check("thinking: clamped to the nearest, lighter first", QuickChatModels.clamp("
 let fams: [QuickChatModelChoice] = [.haiku, .sonnet, .opus]
 check("steps: up and down", QuickChatModels.step(fams, from: .sonnet, by: 1) == .opus && QuickChatModels.step(fams, from: .sonnet, by: -1) == .haiku)
 check("steps: nothing past the ends", QuickChatModels.step(fams, from: .opus, by: 1) == nil && QuickChatModels.step(fams, from: .haiku, by: -1) == nil)
-check("steps: a step not in the list steps from the start", QuickChatModels.step(fams, from: .fable, by: 1) == .sonnet)
+check("steps: from a step not in the list, up is the first, down none",
+      QuickChatModels.step(fams, from: .fable, by: 1) == .haiku && QuickChatModels.step(fams, from: .fable, by: -1) == nil)
+check("steps: an empty list has no step", QuickChatModels.step([QuickChatModelChoice](), from: .opus, by: 1) == nil)
 check("steps: thinking, Off to Low and Max as the top",
       QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "off", by: 1) == "low"
       && QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "max", by: 1) == nil)
