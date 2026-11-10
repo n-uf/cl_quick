@@ -23,6 +23,10 @@ struct QCDragSurface: NSViewRepresentable {
 }
 
 final class QCDragView: NSView {
+    /// MOVING IS OFF for now (the operator: "disable dragging to ensure it doesn't interfere"), so the resize can be judged
+    /// with nothing else in play: a press here does nothing and no open hand shows. true brings the move back.
+    static let movesWindow = false
+
     var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
 
@@ -33,6 +37,7 @@ final class QCDragView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        guard Self.movesWindow else { return }
         // a MOVE: the window server moves the window and nothing here changes its size, so the panel is told it is moving
         // (QuickChat.fit stays out), with the closed hand for as long as the drag lasts (performDrag returns on mouse-up)
         let panel = window as? QuickChatPanel
@@ -63,7 +68,7 @@ final class QCDragView: NSView {
         guard let w = window, let content = w.contentView else { return }
         let inWindow = w.convertPoint(fromScreen: screen)
         let hit = content.hitTest((content.superview ?? content).convert(inWindow, from: nil))
-        if hit is QCDragView { NSCursor.openHand.set() }
+        if hit is QCDragView { (Self.movesWindow ? NSCursor.openHand : NSCursor.arrow).set() }
         else if hit is NSHostingView<QuickChatRoot> { (QCCursorView.hovered ? NSCursor.pointingHand : NSCursor.arrow).set() }
     }
 

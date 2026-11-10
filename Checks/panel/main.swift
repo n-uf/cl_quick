@@ -95,6 +95,39 @@ func noDragInTheRim(_ label: String) {
     check("\(label): every rim point resolves to a resize handle that cannot move the window", bad == 0, "\(bad) points")
 }
 check("the panel is not movable by its background (the window server starts no move of its own)", !p.isMovableByWindowBackground)
+
+// ── moving is OFF (the operator, for judging the resize alone): nothing can start a move ─────────────────────────────
+func nothingMoves(_ label: String) {
+    check("\(label): moving is off (QCDragView.movesWindow)", !QCDragView.movesWindow)
+    check("\(label): the panel is not movable at all (isMovable false: no title bar or background drag by the window server)", !p.isMovable)
+    check("\(label): not movable by its background", !p.isMovableByWindowBackground)
+    var surfaces: [QCDragView] = [], movers: [String] = []
+    func walk(_ v: NSView) {
+        if let d = v as? QCDragView { surfaces.append(d) }
+        if v is QCDragView && v.mouseDownCanMoveWindow { movers.append("\(type(of: v))") }
+        v.subviews.forEach(walk)
+    }
+    walk(p.contentView!.superview ?? p.contentView!)
+    check("\(label): no drag surface says the window server may move the window", movers.isEmpty, "\(movers)")
+    check("\(label): the hosting view says no to a background move", !(p.contentView?.mouseDownCanMoveWindow ?? true))
+    // a press on every drag surface, its mouse-up already queued: the frame stays and the panel is never "moving"
+    let before = p.frame
+    for d in surfaces {
+        let at = d.convert(NSPoint(x: d.bounds.midX, y: d.bounds.midY), to: nil)
+        func ev(_ t: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: t, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        NSApp.postEvent(ev(.leftMouseUp), atStart: false)
+        d.mouseDown(with: ev(.leftMouseDown))
+        check("\(label): a press on a drag surface leaves the panel idle", p.isIdle)
+    }
+    spin(0.1)
+    // drain the mouse-ups nobody took (a drag surface that no longer drags takes none)
+    while NSApp.nextEvent(matching: [.leftMouseUp], until: Date(), inMode: .default, dequeue: true) != nil {}
+    check("\(label): presses on all \(surfaces.count) drag surfaces move nothing", surfaces.count > 0 && p.frame == before, "\(p.frame) vs \(before)")
+}
+nothingMoves("bar")
 noDragInTheRim("bar")
 check("the content's least width is the card's 320 plus the rim twice", abs(p.contentMinSize.width - (QuickChatRoot.minWidth + 2 * rim)) < 0.5, "\(p.contentMinSize)")
 
@@ -230,6 +263,7 @@ chat.model.turns = [oneTurn()]
 spin(0.8)
 check("the chat comes back at the height the user gave it", abs(p.frame.height - userChat.height) < 0.5 && p.frame.width == userChat.width, "\(p.frame.size) vs \(userChat)")
 noDragInTheRim("chat")
+nothingMoves("chat")
 
 // ── the least sizes are the system's, from the content's own frames ───────────────────────────────
 check("the least width is 320 of card plus the margin", abs(p.contentMinSize.width - (QuickChatRoot.minWidth + 2 * QuickChatRoot.margin)) < 0.5, "\(p.contentMinSize)")

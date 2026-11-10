@@ -1091,6 +1091,7 @@ final class QuickChatPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = true
         isMovableByWindowBackground = false     // dragging is QCDragSurface's (DragSurface.swift), from the empty areas only
+        isMovable = QCDragView.movesWindow      // moving is off for now: nothing, not even the window server, moves the panel
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
     }
