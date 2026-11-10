@@ -92,7 +92,7 @@ struct QuickChatSettings: Codable, Equatable {
         let old = URL(fileURLWithPath: expand("~/Library/Application Support/usage-n-uf/quick-chat/settings.json"))
         guard let d = try? Data(contentsOf: old), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return }
         if let on = o["shortcutOn"] as? Bool { shortcutOn = on }
-        if let s = (o["shortcut"] as? String).flatMap(QuickChatShortcut.init(rawValue:)) { shortcut = s }
+        if let s = (o["shortcut"] as? String).flatMap(QuickChatShortcut.preset(named:)) { shortcut = s }
         if let m = (o["model"] as? String).flatMap(QuickChatModelChoice.init(rawValue:)) { model = m }
         if let t = (o["thinking"] as? String).flatMap(QuickChatThinking.init(rawValue:)) { thinking = t }
     }
@@ -511,6 +511,9 @@ final class QuickChat {
         hotKey.unregister()
         shortcutState = settings.shortcutOn ? (hotKey.register(settings.shortcut) ?? "on") : nil
     }
+
+    /// While a new shortcut is recorded the current one is let go, so any keys can be pressed; then it's back.
+    func pauseShortcut(_ paused: Bool) { if paused { hotKey.unregister() } else { applyShortcut() } }
 
     /// Opens the bar (or the chat as it was) over whatever is in front. `profile`: chat on that one.
     /// The shortcut names none: a chat under way stays on its profile, a new one goes to the default profile.

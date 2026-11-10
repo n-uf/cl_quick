@@ -4,6 +4,7 @@
 // default model and thinking, Open at login, and where cl_quick keeps things with Remove cl_quick data….
 
 import AppKit
+import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
 
@@ -375,12 +376,16 @@ struct GeneralPage: View {
                         HStack(spacing: 10) {
                             SSwitch(isOn: Binding(get: { state.settings.shortcutOn }, set: { state.settings.shortcutOn = $0; state.save() }),
                                     on: "\(state.settings.shortcut.title) opens it", off: "off")
-                            Picker("", selection: Binding(get: { state.settings.shortcut }, set: { state.settings.shortcut = $0; state.save() })) {
-                                ForEach(QuickChatShortcut.allCases) { Text($0.title).tag($0) }
+                            if recorder == nil {
+                                Picker("", selection: Binding(get: { state.settings.shortcut.id }, set: { pick($0) })) {
+                                    ForEach(choices) { Text($0.title).tag($0.id) }
+                                    Divider()
+                                    Text("Record another…").tag("record")
+                                }
+                                .smallMenu().disabled(!state.settings.shortcutOn)
                             }
-                            .smallMenu().disabled(!state.settings.shortcutOn)
                         }
-                        shortcutNote
+                        if let r = recorder { recorderRow(r) } else { shortcutNote }
                     }
                 }
                 SRow(label: "Model", info: "The model a new chat starts with; the chat's own picker changes it for one chat.") {
@@ -421,6 +426,63 @@ struct GeneralPage: View {
             }
         }
         .onAppear(perform: count)
+        .onDisappear { if recorder != nil { stopRecording() } }     // the window closed mid-recording: the old shortcut is back
+    }
+
+    // MARK: Record another…
+
+    /// nil: not recording; .some(nil): listening; .some(keys): what was pressed.
+    @State private var recorder: QuickChatShortcut?? = nil
+    @State private var monitor: Any?
+
+    /// The five Space shortcuts, and the recorded one when it's none of them.
+    private var choices: [QuickChatShortcut] {
+        QuickChatShortcut.presets + (state.settings.shortcut.isPreset ? [] : [state.settings.shortcut])
+    }
+
+    private func pick(_ id: String) {
+        if id == "record" { startRecording(); return }
+        guard let s = choices.first(where: { $0.id == id }) else { return }
+        state.settings.shortcut = s; state.save()
+    }
+
+    private func startRecording() {
+        recorder = .some(nil)
+        QuickChat.shared.pauseShortcut(true)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            if e.keyCode == UInt16(kVK_Escape), e.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { stopRecording(); return nil }
+            recorder = .some(QuickChatShortcut(event: e))
+            return nil
+        }
+    }
+
+    private func stopRecording(keep s: QuickChatShortcut? = nil) {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recorder = nil
+        if let s { state.settings.shortcut = s; state.save() }
+        QuickChat.shared.pauseShortcut(false)
+    }
+
+    @ViewBuilder private func recorderRow(_ r: QuickChatShortcut?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                DisplayWindow(text: r?.title ?? "Press the shortcut…", tone: r == nil ? .amber : .normal, height: 22, size: 10)
+                if let r, r.refused == nil {
+                    Button(r.clash() == nil ? "Keep" : "Keep anyway") { stopRecording(keep: r) }
+                }
+                if r != nil { Button("Record again") { recorder = .some(nil) } }
+                Button("Cancel") { stopRecording() }
+            }
+            .buttonStyle(PillButtonStyle(compact: true))
+            if let r {
+                if let why = r.refused { note(why, face.danger) }
+                else if let c = r.clash() { note(c + " Keep it anyway, or record another.", face.caution) }
+                else { note("No clash found.", face.ok) }
+            } else {
+                note("Hold ⌘, ⌃ or ⌥ and press a key. Esc cancels; \(state.settings.shortcut.title) stays until a new one is kept.", face.muted)
+            }
+        }
     }
 
     @ViewBuilder private var shortcutNote: some View {
