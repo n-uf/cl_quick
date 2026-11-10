@@ -398,8 +398,8 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// The chat's profile points at another folder now (a profile removed and added again on another folder, say): its
-    /// `claude` was started on the old one, and the
-    /// conversation lives only in it, so the chat ends and a new one starts on the same profile. What was typed stays.
+    /// `claude` was started on the old one, and the conversation lives only in it, so the chat ends and a new one starts
+    /// on the same profile. What was typed stays.
     func folderChanged(to t: QuickChatTarget) {
         let q = pendingQuestion()
         newChat(keepField: true, dropsSwitch: false)
