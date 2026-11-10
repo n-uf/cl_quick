@@ -991,7 +991,7 @@ final class QuickChatPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false     // dragging is QCDragSurface's (DragSurface.swift), from the empty areas only
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
     }
@@ -1001,7 +1001,7 @@ final class QuickChatPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) { onEscape() }
 }
 
-/// Drags the panel from anywhere that isn't a key or the field.
+/// The panel's content. It doesn't drag by itself (its SwiftUI views catch the mouse): QCDragSurface does, behind them.
 final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
-    override var mouseDownCanMoveWindow: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

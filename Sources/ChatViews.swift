@@ -75,6 +75,7 @@ struct QCBar: View {
             QCControls(model: model, inBar: true)
         }
         .padding(EdgeInsets(top: 16, leading: 10, bottom: 10, trailing: 10))
+        .qcDraggable()
         .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(QCColor.surface.opacity(0.97)))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(QCColor.line))
     }
@@ -96,17 +97,22 @@ struct QCWindow: View {
                              alignment: .bottom)
                     .clipped()
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            turns
-                            Color.clear.frame(height: 1).id("end")
+                // the chat is at least as tall as the scroll view, so the empty space below a short one drags too
+                GeometryReader { geo in
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                turns
+                                Color.clear.frame(height: 1).id("end")
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+                            .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
+                            .qcDraggable()
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 12)
+                        .onChange(of: model.scrollTick) { _ in proxy.scrollTo("end", anchor: .bottom) }
+                        .onAppear { proxy.scrollTo("end", anchor: .bottom) }
                     }
-                    .onChange(of: model.scrollTick) { _ in proxy.scrollTo("end", anchor: .bottom) }
-                    .onAppear { proxy.scrollTo("end", anchor: .bottom) }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -119,6 +125,7 @@ struct QCWindow: View {
             .padding([.horizontal, .bottom], 12)
         }
         .frame(height: QuickChatRoot.windowHeight)
+        .qcDraggable()
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(QCColor.window.opacity(0.98)))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(QCColor.line))
     }
@@ -147,9 +154,11 @@ struct QCHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             if let t = model.target {
-                Text(t.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text)
+                // plain labels: a drag that starts on them moves the panel
+                Text(t.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(QCColor.text).allowsHitTesting(false)
                 if let e = t.email {
                     Text(maskEmail(e)).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).truncationMode(.middle)
+                        .allowsHitTesting(false)
                 }
             }
             if let l = model.level, l.weekNow() != nil || l.full() != nil { QCLevelView(level: l).padding(.leading, 4) }
