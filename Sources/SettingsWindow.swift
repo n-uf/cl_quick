@@ -329,7 +329,7 @@ struct AccountList: View {
 }
 
 /// Under a profile's accounts: a sign-in being waited for (Show Terminal, Stop waiting), or a switch that ended without
-/// the account wanted, because another one signed in or because 10 minutes passed (Sign in again…, Dismiss).
+/// the account wanted, because another one signed in or because 10 minutes passed (Switch to … again…, Dismiss).
 struct SwitchLines: View {
     var waiting: SwitchGoal?
     var ended: SwitchEnded?
@@ -349,7 +349,8 @@ struct SwitchLines: View {
             SRowLine(text: m.signedIn.map { "Signed in as \(maskEmail($0)), not \(maskEmail(m.goal.wantedEmail))." }
                         ?? "No sign-in in 10 minutes. The account in use hasn't changed.", color: face.danger)
             HStack(spacing: 8) {
-                Button("Sign in again…") { signInAgain(m.goal) }
+                // named after the account the switch was for, so it doesn't read as the in-use account's own Sign in again…
+                Button("Switch to \(maskEmail(m.goal.wantedEmail)) again…") { signInAgain(m.goal) }
                 Button("Dismiss", action: drop)
             }.buttonStyle(PillButtonStyle(compact: true))
         }
