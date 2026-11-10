@@ -22,7 +22,7 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **Model and thinking pickers**, Haiku and thinking off by default; every answer says which model gave it.
 - **Any shortcut**: five Space shortcuts or Record another… (checked against macOS's Space shortcuts), with no
   Accessibility permission.
-- **Incognito chats.** Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under
+- **Incognito chats.** Quick chats are incognito: no message is saved on this Mac. Your messages still go to Anthropic under
   the profile's account. `claude` runs with `--no-session-persistence`, so it writes no transcript, and nothing is ever
   resumed: a chat lives only in its running `claude` and ends with it. It ends after 15 minutes idle (window open or
   hidden), on New chat (⌘N), on another profile or account, if `claude` crashes or needs a sign-in, and when cl_quick

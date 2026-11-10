@@ -7,7 +7,7 @@ Your own Claude Code answers, on the profile's account in use, and it counts aga
 is one menu bar app with no Dock icon and one `claude` at a time, kept while a chat is open and ended after 15 minutes
 idle.
 
-**Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under the profile's
+**Quick chats are incognito: no message is saved on this Mac. Your messages still go to Anthropic under the profile's
 account.** A chat lives only in the running `claude` (it runs with `--no-session-persistence`), so it ends with it: after
 15 minutes idle, on New chat (⌘N), on another profile or account, if `claude` crashes, or when cl_quick quits. The
 window then says "This chat ended after 15 minutes idle. Nothing was saved." and the next message starts a new chat.
@@ -93,8 +93,12 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   settings, the weeks last reported per account, and the work folders Claude Code runs in. Outside it: the login item, and any folder Sign in another account… made (a Claude Code
   folder, which Remove leaves).
 - Chats: nothing. Claude Code runs with `--no-session-persistence`, so it writes no transcript, and a chat is never
-  resumed. (While it runs, Claude Code still notes the session's id in a small file under the profile's `plugins/store/`;
-  no message text.) Chats saved by earlier versions are Claude Code sessions in the profile's folder under
+  resumed. Checked on a signed-in folder (Claude Code 2.1.318): no file names the chat's session id or work folder, and
+  no folder for it appears under `projects/`. Claude Code's built-in AGENTS.md plugin would note the session's id in
+  `plugins/store/`; cl_quick sets `CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS=1` so it notes nothing (and
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so no memory folder appears). What any `claude` start still does, chat or not: it
+  may refresh its feature-flag cache timestamp in the profile's `.claude.json` and take a backup copy of that file.
+  Chats saved by earlier versions are Claude Code sessions in the profile's folder under
   `projects/<cl_quick's work folder>/`, deleted after 30 days by default; cl_quick doesn't touch them except in
   Remove cl_quick data….
 - Remove cl_quick data… moves cl_quick's folder and any old quick chats to the Trash, turns the login item off and

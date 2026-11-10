@@ -651,7 +651,7 @@ struct GeneralPage: View {
             }
             SCard(title: "Files", info: "Everything cl_quick keeps, and one button to remove it all.") {
                 SRow(label: "Chats", info: "cl_quick runs Claude Code without keeping a session, so no transcript is written anywhere. A chat lives only in the running Claude Code, which ends after 15 minutes idle, on New chat (⌘N), on another profile or account, or when cl_quick quits.", first: true, stacked: true) {
-                    Text("Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under the profile's account.")
+                    Text("Quick chats are incognito: no message is saved on this Mac. Your messages still go to Anthropic under the profile's account.")
                         .font(.system(size: 12)).foregroundStyle(face.soft).fixedSize(horizontal: false, vertical: true)
                 }
                 // chats saved by earlier versions, which Remove cl_quick data… still takes
