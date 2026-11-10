@@ -31,6 +31,18 @@ struct Profile: Codable, Identifiable, Equatable, Hashable {
     /// Offered in the chat's profile picker.
     var inPicker = true
 
+    init(id: String, name: String, folder: String, inPicker: Bool = true) {
+        self.id = id; self.name = name; self.folder = folder; self.inPicker = inPicker
+    }
+    /// Tolerant: a field added later never makes older profiles.json files unreadable.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        folder = try c.decode(String.self, forKey: .folder)
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ClaudeFolder.suggestedName(folder)
+        inPicker = (try? c.decodeIfPresent(Bool.self, forKey: .inPicker)) ?? true
+    }
+
     var path: String { expand(folder) }
     /// The plain ~/.claude: Claude Code runs on it without CLAUDE_CONFIG_DIR, as in Terminal.
     var isDefaultFolder: Bool { ClaudeFolder.isDefault(path) }
@@ -46,19 +58,39 @@ enum ClaudeFolder {
         isDefault(path) ? expand("~/.claude.json") : (expand(path) as NSString).appendingPathComponent(".claude.json")
     }
 
-    private static func account(_ path: String) -> [String: Any]? {
-        guard let d = FileManager.default.contents(atPath: json(path)),
-              let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
-        return j["oauthAccount"] as? [String: Any]
+    /// What was read from a .claude.json, kept until the file changes: it can be several MB.
+    private struct Read { var mtime: Date?; var email: String?; var plan: String? }
+    private static var cache: [String: Read] = [:]
+    private static let lock = NSLock()
+
+    private static func read(_ path: String) -> Read {
+        let file = json(path)
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date
+        lock.lock(); let hit = cache[file]; lock.unlock()
+        if let hit, hit.mtime == mtime { return hit }
+        var r = Read(mtime: mtime)
+        if let d = FileManager.default.contents(atPath: file),
+           let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+           let a = j["oauthAccount"] as? [String: Any] {
+            r.email = a["emailAddress"] as? String
+            if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
+                r.plan = p == p.lowercased() ? p.capitalized : p
+            }
+        }
+        lock.lock(); cache[file] = r; lock.unlock()
+        return r
     }
 
     /// The address Claude Code signed the folder in with; nil when it hasn't.
-    static func email(_ path: String) -> String? { account(path)?["emailAddress"] as? String }
+    static func email(_ path: String) -> String? { read(path).email }
 
     /// Claude's name for the plan ("Max"), when Claude Code recorded it.
-    static func plan(_ path: String) -> String? {
-        guard let p = account(path)?["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return p == p.lowercased() ? p.capitalized : p
+    static func plan(_ path: String) -> String? { read(path).plan }
+
+    /// A folder cl_quick can chat on: signed in to Claude Code, and not the home folder itself.
+    static func usable(_ path: String) -> Bool {
+        let p = (expand(path) as NSString).standardizingPath
+        return p != (NSHomeDirectory() as NSString).standardizingPath && email(p) != nil
     }
 
     /// ~/.claude and every ~/.claude-* folder, the plain one first. `home` is for the checks.
@@ -107,7 +139,7 @@ final class ProfileStore: ObservableObject {
     func adoptFound() {
         guard profiles.isEmpty else { return }
         var list: [Profile] = []
-        for f in ClaudeFolder.found() where ClaudeFolder.email(f) != nil {
+        for f in ClaudeFolder.found() where ClaudeFolder.usable(f) {
             list.append(Profile(id: Self.newID(f, taken: list.map(\.id)), name: ClaudeFolder.suggestedName(f), folder: f))
         }
         save(list)
@@ -135,7 +167,7 @@ final class ProfileStore: ObservableObject {
 
     /// What Claude Code said after an answer on this profile.
     func record(_ id: String, _ level: QuickChatLevel) {
-        guard levels[id] != level else { return }
+        guard profile(id) != nil, levels[id] != level else { return }      // a profile removed meanwhile stays gone
         levels[id] = level
         Files.write(levels, Files.levels)
     }
