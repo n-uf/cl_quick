@@ -124,6 +124,28 @@ enum AccountBook {
         return failedOn == signedIn.uuid ? .stopped : nil
     }
 
+    /// A standby account's week in Settings: the share Claude Code reported after the last answer on it, while it was
+    /// in use, and how long ago that was ("98% · 2 days ago"); ", reset since" when the week has started over since.
+    /// Nothing is read live: cl_quick keeps no standby account signed in anywhere. Nil: never reported.
+    static func standbyWeek(_ week: Double?, at: Date?, resets: Date?, now: Date = Date()) -> String? {
+        guard let week, let at else { return nil }
+        let reset = resets.map { $0 <= now } ?? false
+        return "\(Int(week.rounded()))% · \(ago(at, now: now))" + (reset ? ", reset since" : "")
+    }
+
+    /// "just now", "12 min ago", "3 h ago", "yesterday", "4 days ago", "3 weeks ago".
+    static func ago(_ d: Date, now: Date = Date()) -> String {
+        let s = max(0, now.timeIntervalSince(d))
+        switch s {
+        case ..<60: return "just now"
+        case ..<3600: return "\(Int(s / 60)) min ago"
+        case ..<86400: return "\(Int(s / 3600)) h ago"
+        case ..<(2 * 86400): return "yesterday"
+        case ..<(14 * 86400): return "\(Int(s / 86400)) days ago"
+        default: return "\(Int(s / (7 * 86400))) weeks ago"
+        }
+    }
+
     /// The key a week is kept under: the profile and the account, "<profile id>|<account uuid>".
     static func levelKey(_ profile: String, _ account: String) -> String { profile + "|" + account }
 
