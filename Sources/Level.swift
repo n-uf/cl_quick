@@ -104,6 +104,8 @@ struct QuickChatLevel: Codable, Equatable {
 /// session and the week with their reset times: QCHeaderInfo in ChatViews.swift.)
 struct QCLevelView: View {
     let level: QuickChatLevel
+    /// A narrow bar keeps the meter and drops the number ("full" stays).
+    var number = true
 
     var body: some View {
         let full = level.full()
@@ -111,12 +113,14 @@ struct QCLevelView: View {
         HStack(spacing: 6) {
             ZStack(alignment: .leading) {
                 Capsule().fill(QCColor.text.opacity(0.13))
-                Capsule().fill(QuickChatLevel.color(p)).frame(width: 38 * CGFloat(min(100, p ?? 0)) / 100)
+                Capsule().fill(QuickChatLevel.color(p)).frame(width: 24 * CGFloat(min(100, p ?? 0)) / 100)
             }
-            .frame(width: 38, height: 4)
-            Text(full != nil ? "full" : QuickChatLevel.pct(p))
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundColor(p == nil ? QCColor.muted : QuickChatLevel.color(p))
+            .frame(width: 24, height: 4)
+            if number || full != nil {
+                Text(full != nil ? "full" : QuickChatLevel.pct(p))
+                    .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                    .foregroundColor(p == nil ? QCColor.muted : QuickChatLevel.color(p))
+            }
         }
         .help(full != nil ? "Full" : "The week, as Claude Code last reported it")
     }

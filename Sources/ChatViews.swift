@@ -667,7 +667,7 @@ struct QCCodeBlock: View {
             .frame(height: QCSpace.row)
             Rectangle().fill(QCColor.line).frame(height: 1)
             if rendering {        // a picture can't draw a scroll view
-                codeText.frame(maxWidth: .infinity, alignment: .leading).clipped()
+                codeText.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).clipped()
             } else {
                 ScrollView(.horizontal, showsIndicators: false) { codeText }
             }
@@ -865,19 +865,21 @@ struct QCControls: View {
     @ObservedObject var model: QuickChatModel
     var inBar: Bool
 
-    /// The row on one line, whatever the width (ViewThatFits, richest first): the bar's week meter goes first, then the
-    /// model shows its family only ("Opus") and thinking says "Off" for "Thinking off", then the profile key keeps
-    /// just its dot.
+    /// The row on one line, whatever the width (ViewThatFits, richest first): the bar's week meter drops its number,
+    /// then the model shows its family only ("Opus") and thinking says "Off" for "Thinking off", then the meter goes,
+    /// then the profile key keeps just its dot.
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(level: true, wide: true, profileWords: true)
-            row(level: false, wide: true, profileWords: true)
-            row(level: false, wide: false, profileWords: true)
-            row(level: false, wide: false, profileWords: false)
+            row(level: 2, wide: true, profileWords: true)
+            row(level: 1, wide: true, profileWords: true)
+            row(level: 1, wide: false, profileWords: true)
+            row(level: 0, wide: false, profileWords: true)
+            row(level: 0, wide: false, profileWords: false)
         }
     }
 
-    private func row(level showLevel: Bool, wide: Bool, profileWords: Bool) -> some View {
+    /// `level`: the bar's week meter with its number (2), the meter alone (1), none (0).
+    private func row(level showLevel: Int, wide: Bool, profileWords: Bool) -> some View {
         HStack(spacing: 2) {
             if let t = model.target {
                 QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()),
@@ -886,8 +888,8 @@ struct QCControls: View {
             modelSteps(wide: wide)
             thinkingSteps(wide: wide)
             Spacer(minLength: 4)
-            if inBar, showLevel, let l = model.level, l.weekNow() != nil || l.full() != nil {
-                QCLevelView(level: l).padding(.horizontal, 6)
+            if inBar, showLevel > 0, let l = model.level, l.weekNow() != nil || l.full() != nil {
+                QCLevelView(level: l, number: showLevel == 2).padding(.trailing, 8)
             }
             if model.busy {
                 Button(action: model.stop) {
