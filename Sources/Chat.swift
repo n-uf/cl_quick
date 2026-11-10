@@ -397,7 +397,8 @@ final class QuickChatModel: ObservableObject {
                                    workFolder: target.workFolder, model: choice.flag, effort: thinking.effort,
                                    resume: session)
         // the same `claude` while nothing it runs with changed; a new one goes on with the session
-        let key = [path, target.configDir, target.email ?? "", cmd.model, cmd.effort ?? ""].joined(separator: "|")
+        // (the account's uuid, not just its address: two accounts may share one, and must not share a running claude)
+        let key = [path, target.configDir, target.accountUUID ?? target.email ?? "", cmd.model, cmd.effort ?? ""].joined(separator: "|")
         if process?.isRunning != true || key != processKey {
             closeProcess()
             let p = QuickChatProcess(cmd)
