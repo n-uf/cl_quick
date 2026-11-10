@@ -56,24 +56,8 @@ struct QuickChatRoot: View {
         }
         .frame(minWidth: Self.minWidth, maxWidth: .infinity,
                minHeight: model.isWindow ? Self.minWindowHeight : nil, maxHeight: .infinity, alignment: .top)
-        .overlay(alignment: .bottomTrailing) { QCGrip().padding(.trailing, 4).padding(.bottom, 4) }
         .padding(rendering ? 0 : Self.margin)
         .environment(\.colorScheme, .dark)
-    }
-}
-
-/// Three short diagonal strokes in the card's bottom-right corner: the mark of a window that can be resized. They sit in
-/// the gap between the card's rounded corner and the send key, and take no mouse.
-struct QCGrip: View {
-    var body: some View {
-        Path { p in
-            for (x, y) in [(10.0, 0.0), (10.0, 3.5), (10.0, 7.0)] {
-                p.move(to: CGPoint(x: x, y: y)); p.addLine(to: CGPoint(x: y, y: x))
-            }
-        }
-        .stroke(QCColor.muted.opacity(0.5), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-        .frame(width: 10, height: 10)
-        .allowsHitTesting(false)
     }
 }
 
