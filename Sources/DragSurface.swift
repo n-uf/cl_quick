@@ -26,7 +26,9 @@ final class QCDragView: NSView {
     var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
 
-    override var mouseDownCanMoveWindow: Bool { true }
+    // false: the ONLY thing that moves the panel is mouseDown below (performDrag), and only from a drag surface, which lies
+    // inside the card; the window server never starts a move of its own (the panel isn't movable by its background either)
+    override var mouseDownCanMoveWindow: Bool { false }
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 

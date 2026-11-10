@@ -70,12 +70,18 @@ final class QCResizeHandle: NSView {
     }
     override func cursorUpdate(with event: NSEvent) { Self.cursor(for: edges).set() }
     override func mouseEntered(with event: NSEvent) { Self.cursor(for: edges).set() }
-    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+    // (no mouseExited: whatever is entered next sets its own cursor, and AppKit resets it outside the window)
+
+    /// Where the pointer is, in screen points, for an event of the drag. It is the pointer's own place, never an event's
+    /// `locationInWindow` converted with the window as it is now: a resize moves the window, and events queued before the last
+    /// step were measured against its old origin, which would run a bottom or left edge ahead of the pointer. (A check
+    /// replaces this to script a drag.)
+    static var pointer: (NSEvent) -> NSPoint = { _ in NSEvent.mouseLocation }
 
     override func mouseDown(with event: NSEvent) {
         guard let w = window as? QuickChatPanel else { return }
         let start = w.frame
-        let from = w.convertPoint(toScreen: event.locationInWindow)
+        let from = Self.pointer(event)
         w.beginResize()
         Self.cursor(for: edges).push()
         defer {
@@ -87,7 +93,7 @@ final class QCResizeHandle: NSView {
         }
         while let e = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) {
             if e.type == .leftMouseUp || !w.isVisible { break }
-            let f = Self.frame(from: start, edges: edges, by: w.convertPoint(toScreen: e.locationInWindow) - from, in: w)
+            let f = Self.frame(from: start, edges: edges, by: Self.pointer(e) - from, in: w)
             if f != w.frame { w.setFrame(f, display: true); w.invalidateShadow() }
         }
     }

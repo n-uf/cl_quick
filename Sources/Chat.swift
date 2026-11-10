@@ -906,14 +906,14 @@ final class QuickChat {
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onResized = { [weak self] in
             guard let self, let p = self.panel, let host = self.host else { return }
-            // the user finished sizing it (macOS's own live resize): the chat keeps its height; the bar keeps the height it
+            // the user finished sizing it (a rim handle's drag): the chat keeps its height; the bar keeps the height it
             // was given beyond its content's; both keep the width (the frame's own)
             if self.model.isWindow { self.chatHeight = p.frame.height }
             else { self.barExtra = max(0, p.frame.height - max(0, host.intrinsicContentSize.height)) }
             self.keepOnScreen(p)
         }
-        // macOS does the sizing: the panel is resizable, and the content's own frames (QuickChatRoot: from 320 wide, the
-        // chat from 220 tall, the bar from its content's height) are the window's least size
+        // the rim's handles do the sizing (ResizeHandles.swift); the content's own frames (QuickChatRoot: from 320 wide, the
+        // chat from 220 tall, the bar from its content's height) are the window's least size (the hosting view sets it)
         let host = QuickChatHostingView(rootView: QuickChatRoot(model: model))
         host.onIntrinsicChange = { [weak self] in self?.fit() }
         p.contentView = host
@@ -931,7 +931,7 @@ final class QuickChat {
     }
 
     /// Sets the panel's HEIGHT from what the content and the user say, the top edge staying where it is. It never touches the
-    /// width, never runs while the user moves or resizes the panel (a move or a live resize owns the frame then), and never
+    /// width, never runs while the user moves or resizes the panel (a move or a resize owns the frame then), and never
     /// changes a size the user set except to hold the content:
     /// - the bar is as tall as its content (Shift-Return lines) plus what the user gave it beyond that;
     /// - the chat takes the user's height (the first one until the user sizes it) once, when the first message turns the
@@ -1125,14 +1125,18 @@ final class QuickChatPanel: NSPanel {
 /// The panel's content. It doesn't drag by itself (its SwiftUI views catch the mouse): QCDragSurface does, behind them.
 final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    // This view covers the whole panel, rim included: nothing here may let the window server start a move from the rim.
+    override var mouseDownCanMoveWindow: Bool { false }
 
     // The eight resize handles, in the rim around the card (ResizeHandles.swift), laid out with the view.
     private(set) var handles: [QCResizeHandle] = []
     override func layout() {
         super.layout()
-        if handles.isEmpty {
-            handles = QCResizeHandle.all.map { QCResizeHandle(edges: $0) }
-            handles.forEach { addSubview($0) }
+        if handles.isEmpty { handles = QCResizeHandle.all.map { QCResizeHandle(edges: $0) } }
+        // topmost, always: SwiftUI adds views of its own (all inside the card's padding) after these, and a later one must
+        // never cover the rim
+        if !subviews.suffix(handles.count).elementsEqual(handles, by: ===) {
+            handles.forEach { addSubview($0, positioned: .above, relativeTo: nil) }
         }
         QCResizeHandle.place(handles, in: bounds, flipped: isFlipped)
     }
