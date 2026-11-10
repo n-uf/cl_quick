@@ -109,38 +109,105 @@ func windowShape(_ label: String) {
 windowShape("bar")
 check("the panel is not movable by its background (the window server starts no move of its own)", !p.isMovableByWindowBackground)
 
-// ── moving is OFF (the operator, for judging the resize alone): nothing can start a move ─────────────────────────────
-func nothingMoves(_ label: String) {
-    check("\(label): moving is off (QCDragView.movesWindow)", !QCDragView.movesWindow)
-    check("\(label): the panel is not movable at all (isMovable false: no title bar or background drag by the window server)", !p.isMovable)
-    check("\(label): not movable by its background", !p.isMovableByWindowBackground)
-    var surfaces: [QCDragView] = [], movers: [String] = []
+// ── moving: only from the card's empty areas, never from the resize region or anything interactive ────────────────
+// Where a press would start a move is found as NSWindow.sendEvent finds the view for it (QCDragView.hit: from the frame
+// view, so its resize region comes first); a move itself is the window server's (performDrag), scripted here through
+// QCDragView.drag as setFrameOrigin steps, which is all a move does to the window.
+func press(_ d: QCDragView, at inWindow: NSPoint) {
+    let e = NSEvent.mouseEvent(with: .leftMouseDown, location: inWindow, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    d.mouseDown(with: e)
+}
+/// The controls (QCControlMarkView: buttons, pickers, the profile's name, the address's hover zone) and the field (its
+/// text view), with their frames in window points. (SwiftUI builds no accessibility tree without a client, so the
+/// controls carry an inert marker of their frames instead.)
+func interactive() -> [(String, NSRect)] {
+    var out: [(String, NSRect)] = []
     func walk(_ v: NSView) {
-        if let d = v as? QCDragView { surfaces.append(d) }
+        let r = v.convert(v.bounds, to: nil)
+        if v is QCControlMarkView, r.width > 0, r.height > 0 { out.append(("control \(Int(r.minX)),\(Int(r.minY)) \(Int(r.width))×\(Int(r.height))", r)) }
+        if v is NSTextView, v.visibleRect.width > 0 { out.append(("field", v.convert(v.visibleRect, to: nil))) }
+        v.subviews.forEach(walk)
+    }
+    walk(cv)
+    return out
+}
+func movesFromEmptyOnly(_ label: String) {
+    check("\(label): moving is on (QCDragView.movesWindow)", QCDragView.movesWindow)
+    check("\(label): the panel is movable (performDrag needs it), never by its background", p.isMovable && !p.isMovableByWindowBackground)
+    // the transparent title bar is no drag region of its own: the hosting view covers it and says no, and so does every
+    // drag surface (they move the window themselves, from their own mouseDown)
+    var movers: [String] = []
+    func walk(_ v: NSView) {
         if v is QCDragView && v.mouseDownCanMoveWindow { movers.append("\(type(of: v))") }
         v.subviews.forEach(walk)
     }
-    walk(p.contentView!.superview ?? p.contentView!)
-    check("\(label): no drag surface says the window server may move the window", movers.isEmpty, "\(movers)")
-    check("\(label): the hosting view says no to a background move", !(p.contentView?.mouseDownCanMoveWindow ?? true))
-    // a press on every drag surface, its mouse-up already queued: the frame stays and the panel is never "moving"
-    let before = p.frame
-    for d in surfaces {
-        let at = d.convert(NSPoint(x: d.bounds.midX, y: d.bounds.midY), to: nil)
-        func ev(_ t: NSEvent.EventType) -> NSEvent {
-            NSEvent.mouseEvent(with: t, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                               windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    walk(cv)
+    check("\(label): the hosting view covers the title bar and says no to a window-server move; no drag surface says yes",
+          !cv.mouseDownCanMoveWindow && cv.frame.maxY >= p.frame.height && movers.isEmpty, "\(movers)")
+    let W = p.frame.width, H = p.frame.height
+    // the resize region first: a press 1 pt inside any edge or on a corner is the frame's (a resize), never a move
+    var zoneMoves: [String] = []
+    for t in stride(from: 0.1, through: 0.9, by: 0.1) as StrideThrough<CGFloat> {
+        for pt in [NSPoint(x: 1, y: H * t), NSPoint(x: W - 1, y: H * t), NSPoint(x: W * t, y: 1), NSPoint(x: W * t, y: H - 1)] {
+            if QCDragView.surface(at: pt, in: p) != nil || QCDragView.hit(at: pt, in: p) != nil { zoneMoves.append("\(pt)") }
         }
-        NSApp.postEvent(ev(.leftMouseUp), atStart: false)
-        d.mouseDown(with: ev(.leftMouseDown))
-        check("\(label): a press on a drag surface leaves the panel idle", p.isIdle)
     }
-    spin(0.1)
-    // drain the mouse-ups nobody took (a drag surface that no longer drags takes none)
-    while NSApp.nextEvent(matching: [.leftMouseUp], until: Date(), inMode: .default, dequeue: true) != nil {}
-    check("\(label): presses on all \(surfaces.count) drag surfaces move nothing", surfaces.count > 0 && p.frame == before, "\(p.frame) vs \(before)")
+    for pt in [NSPoint(x: 2, y: 2), NSPoint(x: W - 2, y: 2), NSPoint(x: 2, y: H - 2), NSPoint(x: W - 2, y: H - 2)]
+    where QCDragView.surface(at: pt, in: p) != nil || QCDragView.hit(at: pt, in: p) != nil { zoneMoves.append("\(pt)") }
+    check("\(label): every edge 1 pt in and every corner resizes (the frame's), none starts a move", zoneMoves.isEmpty, "\(zoneMoves)")
+    // the card's empty areas move it: the bar's padding, or the chat's header row and empty chat
+    var empty: [(String, NSPoint)] = [("top padding", NSPoint(x: W / 2, y: H - 6)), ("left padding", NSPoint(x: 6, y: H / 2))]
+    if chat.model.isWindow {
+        // the header's empty space under the hidden title bar: the gap between the address and the meters, at the title
+        // bar's heights (4 to 28 pt from the top)
+        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: W * 0.45, y: H - d))) }
+        empty.append(("empty chat", NSPoint(x: W / 2, y: H / 2)))
+    }
+    let notSurfaces = empty.filter { QCDragView.surface(at: $0.1, in: p) == nil }
+        .map { "\($0.0) \($0.1) → \(QCDragView.hit(at: $0.1, in: p).map { "\(type(of: $0))" } ?? "frame")" }
+    check("\(label): the card's empty areas start a move (\(empty.count) points)", notSurfaces.isEmpty, "\(notSurfaces)")
+    // nothing interactive does: every point of every control (its clear padding and the gaps between its glyphs included)
+    // and of the field, on a 2 pt grid 1 pt inside their frames
+    let items = interactive()
+    var moving: [String] = [], probed = 0
+    for (name, r) in items {
+        let inner = r.insetBy(dx: 1, dy: 1).intersection(NSRect(x: 4, y: 4, width: W - 8, height: H - 8))
+        guard !inner.isNull, inner.width > 0, inner.height > 0 else { continue }
+        var bad = 0
+        for x in stride(from: inner.minX, through: inner.maxX, by: 2) {
+            for y in stride(from: inner.minY, through: inner.maxY, by: 2) {
+                probed += 1
+                if QCDragView.surface(at: NSPoint(x: x, y: y), in: p) != nil { bad += 1 }
+            }
+        }
+        if bad > 0 { moving.append("\(name): \(bad) points") }
+    }
+    let controls = items.filter { $0.0 != "field" }.count, fields = items.count - controls
+    // the bar: three pickers and Send; the chat adds the profile's name, the address, New chat, Hide and an answer's Copy
+    check("\(label): the controls and the field are found (\(controls) controls, \(fields) field)",
+          fields >= 1 && controls >= (chat.model.isWindow ? 8 : 4), "\(items.map(\.0))")
+    check("\(label): no point of a control or the field starts a move (\(probed) points)", moving.isEmpty, "\(moving)")
+    // a scripted move from an empty area: the origin follows, the size never changes, fit() stays out, idle after
+    guard let from = empty.first, let d = QCDragView.surface(at: from.1, in: p) else { return }
+    let start = p.frame
+    var during = true, fitOut = true
+    QCDragView.drag = { w, _ in
+        during = during && !(w as! QuickChatPanel).isIdle
+        for i in 1...40 {
+            w.setFrameOrigin(NSPoint(x: start.minX + CGFloat(i) * 3, y: start.minY - CGFloat(i) * 2))
+            if i == 20 { let f = w.frame; chat.fit(); fitOut = fitOut && w.frame == f }
+        }
+    }
+    press(d, at: from.1)
+    QCDragView.drag = { w, e in w.performDrag(with: e) }
+    check("\(label): the panel is moving during a move (fit() stays out)", during && fitOut)
+    check("\(label): a move from an empty area moves the window and keeps its size",
+          p.frame.size == start.size && abs(p.frame.minX - (start.minX + 120)) < 0.5 && abs(p.frame.minY - (start.minY - 80)) < 0.5, "\(p.frame) from \(start)")
+    check("\(label): idle after the move", p.isIdle)
+    p.setFrameOrigin(start.origin)
 }
-nothingMoves("bar")
+movesFromEmptyOnly("bar")
 // ── sizes: the least is the content's (320 wide; the bar its content's height, the chat 220), the most is open ────────
 check("bar: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")
 check("bar: the least height is the bar's content (it can't be squashed below its field and keys)",
@@ -255,7 +322,7 @@ chat.model.turns = [oneTurn()]
 spin(0.8)
 check("the chat comes back at the height the user gave it", abs(p.frame.height - userChat.height) < 0.5 && p.frame.width == userChat.width, "\(p.frame.size) vs \(userChat)")
 windowShape("chat")
-nothingMoves("chat")
+movesFromEmptyOnly("chat")
 
 // ── the least sizes are the system's, from the content's own frames: about 320 × 220 for the chat ─────────────────
 check("chat: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")

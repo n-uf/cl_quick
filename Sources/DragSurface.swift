@@ -23,51 +23,73 @@ struct QCDragSurface: NSViewRepresentable {
 }
 
 final class QCDragView: NSView {
-    /// MOVING IS OFF for now (the operator: "disable dragging to ensure it doesn't interfere"), so the resize can be judged
-    /// with nothing else in play: a press here does nothing and no open hand shows. true brings the move back.
-    static let movesWindow = false
+    /// Whether a press on a drag surface moves the panel (it was off while the resize was judged alone).
+    static let movesWindow = true
+
+    /// What a press does to move the window: the window server's own drag, which follows the pointer and returns on
+    /// mouse-up. (A check replaces it to script a move: no pointer can be driven there.)
+    static var drag: (NSWindow, NSEvent) -> Void = { w, e in w.performDrag(with: e) }
+
+    /// What a press at this point of the window (window coordinates) would hit, as NSWindow.sendEvent finds it: from the
+    /// window's frame view, so the frame's resize region (a band inside every edge, larger at the corners) comes first.
+    /// nil there and outside the window.
+    static func hit(at inWindow: NSPoint, in w: NSWindow) -> NSView? {
+        guard let content = w.contentView else { return nil }
+        let root = content.superview ?? content
+        let v = root.hitTest(root.superview?.convert(inWindow, from: nil) ?? inWindow)
+        return v === root ? nil : v
+    }
+
+    /// The drag surface a press at this point would start a move from: only an empty area of the card, never the frame's
+    /// resize region, the field, a picker, a button, the address's hover zone or the profile's name (SwiftUI's hosting
+    /// view, or an AppKit view of its own, takes those).
+    static func surface(at inWindow: NSPoint, in w: NSWindow) -> QCDragView? { hit(at: inWindow, in: w) as? QCDragView }
 
     var onHover: ((Bool) -> Void)?
     private var tracking: NSTrackingArea?
 
     // false: the ONLY thing that moves the panel is mouseDown below (performDrag), and only from a drag surface, which lies
-    // inside the card; the window server never starts a move of its own (the panel isn't movable by its background either)
+    // inside the card; the window server never starts a move of its own: the panel isn't movable by its background, and
+    // the hosting view (false too) covers the transparent title bar, so no part of it is a title bar drag region
     override var mouseDownCanMoveWindow: Bool { false }
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        guard Self.movesWindow else { return }
+        guard Self.movesWindow, let w = window else { return }
         // a MOVE: the window server moves the window and nothing here changes its size, so the panel is told it is moving
         // (QuickChat.fit stays out), with the closed hand for as long as the drag lasts (performDrag returns on mouse-up)
-        let panel = window as? QuickChatPanel
+        let panel = w as? QuickChatPanel
         panel?.isMoving = true
         NSCursor.closedHand.push()
-        window?.performDrag(with: event)
+        Self.drag(w, event)
         NSCursor.pop()
         panel?.isMoving = false
         setCursor(at: NSEvent.mouseLocation)
     }
 
-    // One tracking area (events when the pointer enters, leaves and moves: nothing is polled) for the hover and the cursor.
+    // One tracking area (events when the pointer enters, leaves and moves, and AppKit's cursor updates: nothing is polled)
+    // for the hover and the cursor. Active always: the hand shows while the panel isn't the key window too.
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let t = tracking { removeTrackingArea(t); tracking = nil }
-        let t = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        let t = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
+                               owner: self, userInfo: nil)
         addTrackingArea(t)
         tracking = t
     }
     override func mouseEntered(with event: NSEvent) { onHover?(true); setCursor(at: NSEvent.mouseLocation) }
     override func mouseExited(with event: NSEvent) { onHover?(false) }
     override func mouseMoved(with event: NSEvent) { setCursor(at: NSEvent.mouseLocation) }
+    override func cursorUpdate(with event: NSEvent) { setCursor(at: NSEvent.mouseLocation) }
 
-    /// The open hand where the window would be dragged from: where the hit view is a drag surface. Over a SwiftUI button
-    /// or label (the hosting view takes those) the arrow; over anything else (the field, a scroll bar, a resize handle)
-    /// whatever that view sets.
+    /// The cursor for this point, as `hit` finds it: the open hand where a press would move the window (a drag surface);
+    /// over a SwiftUI button or label (the hosting view takes those) the pointing hand or the arrow; in the frame's resize
+    /// region, or over an AppKit view of the content's own (the field, a scroll bar), nothing: the system's resize cursor
+    /// or that view's own.
     private func setCursor(at screen: NSPoint) {
-        guard let w = window, let content = w.contentView else { return }
-        let inWindow = w.convertPoint(fromScreen: screen)
-        let hit = content.hitTest((content.superview ?? content).convert(inWindow, from: nil))
+        guard let w = window else { return }
+        let hit = Self.hit(at: w.convertPoint(fromScreen: screen), in: w)
         if hit is QCDragView { (Self.movesWindow ? NSCursor.openHand : NSCursor.arrow).set() }
         else if hit is NSHostingView<QuickChatRoot> { (QCCursorView.hovered ? NSCursor.pointingHand : NSCursor.arrow).set() }
     }
@@ -98,6 +120,31 @@ private struct QCDraggable: ViewModifier {
 extension View {
     /// The panel can be dragged from this view's empty areas. `hover`: also tells whether the pointer is over the view.
     func qcDraggable(hover: Binding<Bool>? = nil) -> some View { modifier(QCDraggable(hover: hover)) }
+}
+
+/// A control (a button, a picker, the address's hover zone): its whole frame takes the press, so no part of it, its
+/// clear padding, the gaps between its glyphs and its rounded corners included, is left to the drag surface behind it
+/// (a plain-style button otherwise takes the press only where it draws). An inert AppKit marker of its frame goes with
+/// it (never hit, no tracking), so Checks/panel can prove no point of a control starts a move.
+private struct QCControl: ViewModifier {
+    @Environment(\.qcRendering) private var rendering
+    func body(content: Content) -> some View {
+        let shaped = content.contentShape(Rectangle())
+        if rendering { shaped } else { shaped.background(QCControlMarkView.Mark()) }
+    }
+}
+
+final class QCControlMarkView: NSView {
+    struct Mark: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView { QCControlMarkView() }
+        func updateNSView(_ view: NSView, context: Context) {}
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+extension View {
+    /// This view is a control: all of its frame takes the press, never the drag surface behind it.
+    func qcControl() -> some View { modifier(QCControl()) }
 }
 
 /// The pointing hand over a view that does something when clicked. A tracking area (cursor updates, active always), so

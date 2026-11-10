@@ -1041,8 +1041,9 @@ final class QuickChatPanel: NSPanel {
     var onNewChat: () -> Void = {}
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
-    // the card (off for now: QCDragView.movesWindow). SIZING IS macOS's OWN: the panel is a TITLED, resizable window whose
-    // title bar is transparent, hidden and empty, so the window server gives it the real resize zones of any window (a few
+    // the card, the header's included (under the hidden title bar, which itself never drags: the hosting view covers it
+    // and says no). The frame's resize region is hit first, so a press there resizes and never moves. SIZING IS macOS's
+    // OWN: the panel is a TITLED, resizable window whose title bar is transparent, hidden and empty, so the window server gives it the real resize zones of any window (a few
     // points either side of the frame's edges, larger at the corners, the outer part beyond the visible frame), their
     // cursors, first-click resizing while the panel isn't key, and live resize. A borderless window gets none of that (its
     // frame view, NSNextStepFrame, has no resize region even with .resizable), and a hand-made rim of (nearly) transparent
@@ -1110,7 +1111,7 @@ final class QuickChatPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = true
         isMovableByWindowBackground = false     // dragging is QCDragSurface's (DragSurface.swift), from the empty areas only
-        isMovable = QCDragView.movesWindow      // moving is off for now: nothing, not even the window server, moves the panel
+        isMovable = QCDragView.movesWindow      // performDrag needs it; with moving off nothing, not even the window server, moves it
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
     }

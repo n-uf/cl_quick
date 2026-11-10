@@ -423,6 +423,7 @@ struct QCProfileName: View {
             Text(name).font(.system(size: 13, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover || pictureHover ? QCColor.hover : .clear))
+                .qcControl()
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
@@ -489,7 +490,7 @@ struct QCBlurred: View {
             .overlay(alignment: .leading) {
                 Color.clear
                     .frame(width: (grown ? fullWidth : restWidth) + Self.zoneLeading + Self.zoneOther, height: Self.height + 2 * Self.zoneOther)
-                    .contentShape(Rectangle())
+                    .qcControl()         // the hover zone: a press here is never a move
                     .onHover { hover = $0 }
                     .offset(x: -Self.zoneLeading)
             }
@@ -619,6 +620,7 @@ struct QCThought: View {
                     Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(open ? 90 : 0))
                 }
                 .font(.system(size: 12.5)).foregroundColor(QCColor.muted).frame(height: 20)
+                .qcControl()
             }
             .buttonStyle(.plain)
             .disabled(turn.thinking.isEmpty)
@@ -955,6 +957,7 @@ struct QCControls: View {
                     Image(systemName: "stop.fill").font(.system(size: 10, weight: .bold))
                         .frame(width: QCSpace.row, height: QCSpace.row).foregroundColor(QCColor.bubble)
                         .background(Circle().fill(QCColor.text))
+                        .qcControl()
                 }
                 .buttonStyle(.plain).help("Stop")
             } else {
@@ -964,6 +967,7 @@ struct QCControls: View {
                         .frame(width: QCSpace.row, height: QCSpace.row)
                         .foregroundColor(empty ? QCColor.text.opacity(0.38) : .white)
                         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(empty ? QCColor.text.opacity(0.1) : QCColor.send))
+                        .qcControl()
                 }
                 .buttonStyle(.plain).disabled(empty).help("Send (Return)")
             }
@@ -1016,6 +1020,7 @@ struct QCChip: View {
             .foregroundColor(hover ? QCColor.text : QCColor.soft)
             .padding(.horizontal, QCSpace.keyPadding).frame(height: QCSpace.row)
             .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).fill(hover ? QCColor.hover : .clear))
+            .qcControl()     // its gaps and padding too, never a move
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
     }
@@ -1109,6 +1114,7 @@ struct QCButton: View {
                 .foregroundColor(ghost ? QCColor.text : QCColor.bubble)
                 .padding(.horizontal, 12).frame(height: 28)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ghost ? QCColor.hover : QCColor.text))
+                .qcControl()
         }
         .buttonStyle(.plain)
     }
@@ -1129,6 +1135,7 @@ struct QCIconButton: View {
                 .frame(width: side, height: side)
                 .foregroundColor(hover ? QCColor.text : QCColor.muted)
                 .background(RoundedRectangle(cornerRadius: small ? 6 : QCSpace.keyCorner, style: .continuous).fill(hover ? QCColor.hover : .clear))
+                .qcControl()     // the whole target
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
     }
