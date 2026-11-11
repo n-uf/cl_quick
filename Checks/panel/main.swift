@@ -15,6 +15,22 @@ let app = NSApplication.shared
 CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
 let chat = QuickChat.shared
 chat.start()
+// Nothing of this Mac's own is read. The store holds one sample profile on a sample Claude Code folder, signed in, with
+// a week reported (readOnly keeps the store in memory; the folder is under build/): every open() finds the profile, as on
+// a Mac with one. Without one (a CI runner has no profiles.json) open() drops the chat's target, no message can be sent,
+// and the header's meters are never drawn. And the field's input source is none (never the keyboard layout or the input
+// method in use here).
+let sampleAccount = "00000000-0000-4000-8000-0000000000a1"
+let sampleFolder = ProcessInfo.processInfo.environment["QC_SAMPLE_DIR"] ?? NSTemporaryDirectory() + "cl_quick-panel-checks-sample"
+try? FileManager.default.createDirectory(atPath: sampleFolder, withIntermediateDirectories: true)
+try? Data(#"{"oauthAccount":{"accountUuid":"\#(sampleAccount)","emailAddress":"ultra-1@example.com","planDisplayName":"max"}}"#.utf8)
+    .write(to: URL(fileURLWithPath: sampleFolder + "/.claude.json"))
+ProfileStore.shared.save([Profile(id: "main", name: "Main", folder: sampleFolder)])
+var sampleLevel = QuickChatLevel()
+sampleLevel.week = 12; sampleLevel.weekResets = Date().addingTimeInterval(4 * 86400)
+sampleLevel.fiveHour = 44; sampleLevel.fiveHourResets = Date().addingTimeInterval(3600); sampleLevel.at = Date()
+ProfileStore.shared.record("main", account: sampleAccount, sampleLevel)
+QCDictation.inputSource = { _ in nil }
 // no real `claude`: opening the panel would start one on the user's own profile (QuickChatModel.warm) and ask its usage
 chat.model.resolveClaude = { $0(nil) }
 
@@ -716,6 +732,9 @@ do {
     let chatField = p.firstResponder as? QCTextView
     m.newChat(keepField: true)
     check("mic: a new chat stops Dictation", stopped(since: n, field: chatField) && !m.dictating, steps(since: n))
+    // the new chat swapped the chat for the bar: SwiftUI remakes the field in its next layout pass (slower on a loaded or
+    // virtual machine, as a CI runner is), so wait for it before Dictation starts for it, or the field it started for goes
+    spin(0.4); p.focusField(); spin(0.1)
     m.dictate(true); spin(0.1); n = sent.count
     let hidField = p.firstResponder as? QCTextView
     chat.hide(); spin(0.1)
