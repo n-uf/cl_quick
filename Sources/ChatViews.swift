@@ -988,37 +988,37 @@ struct QCControls: View {
     @ObservedObject var model: QuickChatModel
     var inBar: Bool
 
-    /// The row on one line, whatever the width (ViewThatFits, richest first): the bar's week meter drops its number,
-    /// then the meter goes, then the profile key keeps just its dot, then the controls' short labels go (the profile's
-    /// name back). Every control is as wide for every value it can take, and the bar's meter keeps its room before the
-    /// week is known, so which row is drawn depends on the width alone: picking a model or a level, or the week
-    /// arriving, never moves anything.
+    /// The row on one line, whatever the width (ViewThatFits, richest first): the profile key keeps just its dot, then
+    /// the bar's usage indicator goes, then the controls' short labels go (the profile's name back). Every control is as
+    /// wide for every value it can take, and the usage indicator keeps its room before anything is known, so which row
+    /// is drawn depends on the width alone: picking a model or a level, or the limits changing, never moves anything.
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(level: 2, labelled: true, profileWords: true)
-            row(level: 1, labelled: true, profileWords: true)
-            row(level: 0, labelled: true, profileWords: true)
-            row(level: 0, labelled: true, profileWords: false)
-            row(level: 0, labelled: false, profileWords: true)
-            row(level: 0, labelled: false, profileWords: false)
+            row(usage: true, labelled: true, profileWords: true)
+            row(usage: true, labelled: true, profileWords: false)
+            row(usage: false, labelled: true, profileWords: true)
+            row(usage: false, labelled: true, profileWords: false)
+            row(usage: false, labelled: false, profileWords: true)
+            row(usage: false, labelled: false, profileWords: false)
         }
     }
 
-    /// `level`: the bar's week meter with its number (2), the meter alone (1), none (0).
-    private func row(level showLevel: Int, labelled: Bool, profileWords: Bool) -> some View {
+    /// `usage`: the bar's usage indicator (in the window the header has the limits).
+    private func row(usage: Bool, labelled: Bool, profileWords: Bool) -> some View {
         HStack(spacing: 2) {
             if let t = model.target {
-                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()),
+                // the dot takes the colour of the limit closest to full, as the usage indicator and the header do
+                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.binding()?.p),
                        help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
             }
             modelSteps(labelled)
             thinkingSteps(labelled)
             Spacer(minLength: 4)
-            if inBar, showLevel > 0 {
-                if let l = model.level, l.weekNow() != nil || l.full() != nil {
-                    QCLevelView(level: l, number: showLevel == 2).padding(.trailing, 8)
+            if inBar, usage {
+                if let l = model.level, l.binding() != nil {
+                    QCUsageView(level: l).padding(.trailing, 6)
                 } else {
-                    Color.clear.frame(width: QCLevelView.width(number: showLevel == 2), height: 4).padding(.trailing, 8)
+                    Color.clear.frame(width: QCUsageView.width, height: 4).padding(.trailing, 6)
                 }
             }
             if model.busy {
@@ -1218,13 +1218,14 @@ struct QCStepControl: View {
         .onHover { inside in
             if inside {
                 hover = j
-                QCStepTip.shared.show(s.why ?? s.title, costly: s.costly && s.takes, muted: !s.takes, keys: keys, over: "\(key)\(j)")
+                QCFloat.shared.show(AnyView(QCStepTipView(text: s.why ?? s.title, costly: s.costly && s.takes, muted: !s.takes, keys: keys)),
+                                    above: QCStepTargets.shared.bars["\(key)\(j)"]?.frame ?? .zero)
             } else if hover == j {
                 hover = nil
-                QCStepTip.shared.hide()
+                QCFloat.shared.hide()
             }
         }
-        .onDisappear { if hover == j { QCStepTip.shared.hide() } }
+        .onDisappear { if hover == j { QCFloat.shared.hide() } }
         .modifier(QCHandIf(on: s.takes))      // a level the model doesn't take does nothing: no pointing hand
         .background(rendering ? nil : GeometryReader { g in
             Color.clear
@@ -1258,20 +1259,21 @@ struct QCStepTipView: View {
     }
 }
 
-/// The hover tip, in a small window of its own just above the bar: it draws over the field (an AppKit view that anything
-/// drawn in the row's own view would sit under) and takes no part in the row's layout or the mouse. One window, made the
-/// first time; a child of the panel, so it moves with it, and taken away when the pointer leaves the bar or the panel
-/// hides.
-final class QCStepTip {
-    static let shared = QCStepTip()
+/// A small window of its own just above a part of the row (a bar's tip, the usage card): it draws over the field (an
+/// AppKit view that anything drawn in the row's own view would sit under) and takes no part in the row's layout or the
+/// mouse. One window, made the first time; a child of the panel, so it moves with it, and taken away when the pointer
+/// leaves or the panel hides.
+final class QCFloat {
+    static let shared = QCFloat()
+    enum Align { case center, trailing }
     private var window: NSPanel?
-    private var host: NSHostingView<QCStepTipView>?
+    private var host: NSHostingView<AnyView>?
 
-    /// Shows the tip centred over a bar (its key in QCStepTargets), inside the panel's width.
-    func show(_ text: String, costly: Bool, muted: Bool, keys: String, over bar: String) {
-        guard let frame = QCStepTargets.shared.bars[bar]?.frame,
-              let panel = NSApp.windows.first(where: { $0 is QuickChatPanel && $0.isVisible }), let cv = panel.contentView else { return }
-        let view = QCStepTipView(text: text, costly: costly, muted: muted, keys: keys)
+    /// Shows a view above a frame of the panel's hosting view (its top-left space), centred on it or right-aligned with
+    /// it, kept inside the panel's width.
+    func show(_ view: AnyView, above frame: CGRect, align: Align = .center) {
+        guard frame != .zero, let panel = NSApp.windows.first(where: { $0 is QuickChatPanel && $0.isVisible }),
+              let cv = panel.contentView else { return }
         let w: NSPanel
         if let window, let host { host.rootView = view; w = window } else {
             w = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -1282,10 +1284,11 @@ final class QCStepTip {
             window = w; host = h
         }
         let size = host!.fittingSize
-        // the bar's top centre, from the hosting view's top-left space to the screen
-        let top = cv.convert(NSPoint(x: frame.midX, y: cv.isFlipped ? frame.minY : cv.bounds.height - frame.minY), to: nil)
+        // the frame's top edge, from the hosting view's top-left space to the screen
+        let anchor = align == .center ? frame.midX : frame.maxX
+        let top = cv.convert(NSPoint(x: anchor, y: cv.isFlipped ? frame.minY : cv.bounds.height - frame.minY), to: nil)
         let onScreen = panel.convertPoint(toScreen: top)
-        var x = onScreen.x - size.width / 2
+        var x = align == .center ? onScreen.x - size.width / 2 : onScreen.x - size.width
         x = min(max(x, panel.frame.minX + 4), panel.frame.maxX - 4 - size.width)
         w.setFrame(NSRect(x: x, y: onScreen.y + 2, width: size.width, height: size.height), display: true)
         if w.parent !== panel { w.parent?.removeChildWindow(w); panel.addChildWindow(w, ordered: .above) }
@@ -1328,6 +1331,10 @@ final class QCStepTargets {
         for k in bars.keys where k.hasPrefix(key) && (Int(k.dropFirst(key.count)) ?? 0) >= count { bars[k] = nil }
         if monitor == nil { watchScrolls() }
     }
+    /// Other parts of the row the checks look at (the usage indicator and its rows), by name.
+    private(set) var marks: [String: CGRect] = [:]
+    func mark(_ key: String, _ frame: CGRect) { marks[key] = frame }
+
     func bar(_ control: String, _ j: Int, _ frame: CGRect, token: UUID, pick: @escaping () -> Void) {
         guard owners[control] == nil || owners[control] == token else { return }
         bars["\(control)\(j)"] = (frame, pick)
@@ -1866,6 +1873,10 @@ enum QuickChatRender {
         var t1 = QuickChatTurn(question: q1, answer: a1, model: "Haiku 5.5"); t1.phase = .done; t1.seconds = 2.4
         switch state {
         case "typing": m.field = q1
+        // the bar's usage indicator: the 5-hour window higher, the week higher, the 5-hour window full
+        case "usage-5h": level.fiveHour = 78; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 20; m.level = level
+        case "usage-wk": level.fiveHour = 30; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 85; m.level = level
+        case "usage-full": level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 64; m.level = level
         case "notinstalled": m.field = q1; m.barProblem = .notInstalled
         case "streaming": var t = t1; t.answer = String(a1.prefix(90)); t.phase = .streaming; m.turns = [t]
         case "answer": m.turns = [t1]

@@ -204,6 +204,27 @@ for fams in sets {
     scenario("\(fams.count) families, window at 320", families: fams)
 }
 
+// the bar's usage indicator: the limit closest to full, its label and share on that window's row, one width whatever
+// it says; the profile's dot in the same colour
+m.turns = []
+spin(0.6)
+for w in [QuickChatRoot.width, CGFloat(440)] {
+    width(w)
+    var first: CGRect?
+    for (five, week) in [(78.0, 20.0), (30.0, 85.0), (9.0, 9.5), (100.0, 64.0), (0.0, 100.0), (55.0, 54.9)] {
+        var l = QuickChatLevel(); l.fiveHour = five; l.fiveHourResets = Date().addingTimeInterval(7200); l.week = week
+        l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin()
+        let higher = l.binding()?.id ?? "-"
+        let ui = targets.marks["usage"] ?? .zero, label = targets.marks["usage-label"] ?? .zero, row = targets.marks["usage-\(higher)"] ?? .zero
+        let name = "usage at \(Int(w)), 5h \(five) wk \(week)"
+        check("\(name): shown", ui != .zero && label != .zero, "\(ui) \(label)")
+        check("\(name): \(higher) is the higher one", higher == (five >= week || l.full()?.id == "5h" ? "5h" : "wk") || (l.full()?.id == "wk" && higher == "wk"))
+        check("\(name): its label sits on the \(higher) row", abs(label.midY - row.midY) <= 1.5, "\(label.midY) vs \(row.midY)")
+        // across the row: a full limit opens its notice above the field and the whole row moves down with the field
+        if let f = first { check("\(name): the indicator never moves sideways or changes width", ui.minX == f.minX && ui.width == f.width, "\(ui) vs \(f)") } else { first = ui }
+    }
+}
+
 CheckQuiet.verify("at the end")
 print("model and thinking control checks: \(passed)/\(passed + failed) passed")
 exit(failed == 0 ? 0 : 1)

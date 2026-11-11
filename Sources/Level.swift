@@ -112,36 +112,118 @@ struct QuickChatLevel: Codable, Equatable {
 
     static func color(_ p: Double?) -> Color { Color(nsColor: Painter.color(p, stale: false)) }
     static func pct(_ p: Double?) -> String { p.map { "\(Int($0.rounded()))%" } ?? "–" }
+
+    /// The window closest to full now: a full one (it holds the account back), else the higher share, the 5-hour
+    /// window on a tie; nil while neither is known. What the bar's indicator and the profile's dot show, so neither reads
+    /// as "plenty left" while the other window is nearly full.
+    func binding(_ now: Date = Date()) -> (id: String, p: Double)? {
+        if let f = full(now) { return (f.id, 100) }
+        switch (fiveHourNow(now), weekNow(now)) {
+        case let (a?, b?): return a >= b ? ("5h", a) : ("wk", b)
+        case let (a?, nil): return ("5h", a)
+        case let (nil, b?): return ("wk", b)
+        default: return nil
+        }
+    }
 }
 
-/// The week in the bar's key row: a thin meter in the level's colour, then the number. (The chat's account line has the
-/// session and the week with their reset times: QCHeaderInfo in ChatViews.swift.)
-struct QCLevelView: View {
+/// The account's limits in the bar's row, small: two thin bars, the 5-hour window over the week, each in its level's
+/// colour, and on the row of the higher one its label and share ("5h 78%", "wk 85%", "5h full"). The label and number
+/// keep one width, so a change never shifts anything. The pointer on it shows both windows with their resets above it
+/// (QCFloat, a window of its own), only what the row doesn't say. (The chat's header has both with their reset times.)
+struct QCUsageView: View {
     let level: QuickChatLevel
-    /// A narrow bar keeps the meter and drops the number (a full week shows as a full red meter, and says so on hover).
-    var number = true
+    @State private var frame: CGRect = .zero
+    @Environment(\.qcRendering) private var rendering
 
-    /// As wide whatever the number ("9%", "100%", "full"), so the row never changes when the week does.
-    static let numberWidth: CGFloat = ceil(("100%" as NSString).size(withAttributes: [
-        .font: NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)]).width) + 1
-    static func width(number: Bool) -> CGFloat { number ? 24 + 6 + numberWidth : 24 }
+    static let font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
+    /// As wide whatever it says ("5h 9%", "wk 100%", "5h full").
+    static let textWidth: CGFloat = ceil(("wk 100%" as NSString).size(withAttributes: [.font: font]).width) + 1
+    static let bar: CGFloat = 24, rowHeight: CGFloat = 12
+    static let width: CGFloat = bar + 5 + textWidth
 
     var body: some View {
-        let full = level.full()
-        let p = full != nil ? 100 : level.weekNow()
-        HStack(spacing: 6) {
+        let b = level.binding()
+        VStack(spacing: 0) {
+            row("5h", level.full()?.id == "5h" ? 100 : level.fiveHourNow(), b)
+            row("wk", level.full()?.id == "wk" ? 100 : level.weekNow(), b)
+        }
+        .frame(width: Self.width, height: 2 * Self.rowHeight)
+        .frame(height: QCSpace.row)
+        .contentShape(Rectangle())
+        .qcControl()
+        .background(rendering ? nil : GeometryReader { g in
+            Color.clear
+                .onAppear { frame = g.frame(in: .global); QCStepTargets.shared.mark("usage", frame) }
+                .onChange(of: g.frame(in: .global)) { frame = $0; QCStepTargets.shared.mark("usage", $0) }
+        })
+        .onHover { inside in
+            if inside { QCFloat.shared.show(AnyView(QCUsageCard(level: level)), above: frame, align: .trailing) } else { QCFloat.shared.hide() }
+        }
+        .onDisappear { QCFloat.shared.hide() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(QCHeaderLine.tooltip(level).replacingOccurrences(of: "\n", with: ". "))
+    }
+
+    /// One window's row: its bar, and, when it is the higher one, its label and share level with the bar.
+    private func row(_ id: String, _ p: Double?, _ b: (id: String, p: Double)?) -> some View {
+        HStack(spacing: 5) {
             ZStack(alignment: .leading) {
                 Capsule().fill(QCColor.text.opacity(0.13))
-                Capsule().fill(QuickChatLevel.color(p)).frame(width: 24 * CGFloat(min(100, p ?? 0)) / 100)
+                Capsule().fill(QuickChatLevel.color(p)).frame(width: Self.bar * CGFloat(min(100, p ?? 0)) / 100)
             }
-            .frame(width: 24, height: 4)
-            if number {
-                Text(full != nil ? "full" : QuickChatLevel.pct(p))
-                    .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
-                    .foregroundColor(p == nil ? QCColor.muted : QuickChatLevel.color(p))
-                    .frame(width: Self.numberWidth, alignment: .leading)
+            .frame(width: Self.bar, height: 3)
+            .background(rendering ? nil : GeometryReader { g in
+                Color.clear.onAppear { QCStepTargets.shared.mark("usage-\(id)", g.frame(in: .global)) }
+                    .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.mark("usage-\(id)", $0) }
+            })
+            Group {
+                if let b, b.id == id {
+                    (Text(id + " ").foregroundColor(QCColor.muted)
+                        + Text(b.p.rounded() >= 100 && level.full() != nil ? "full" : QuickChatLevel.pct(b.p)).foregroundColor(QuickChatLevel.color(b.p)))
+                        .font(Font(Self.font)).lineLimit(1)
+                        .background(rendering ? nil : GeometryReader { g in
+                            Color.clear.onAppear { QCStepTargets.shared.mark("usage-label", g.frame(in: .global)) }
+                                .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.mark("usage-label", $0) }
+                        })
+                } else {
+                    Color.clear.frame(height: 1)
+                }
             }
+            .frame(width: Self.textWidth, alignment: .leading)
         }
-        .help(full != nil ? "Full" : "The week, as Claude Code last reported it")
+        .frame(height: Self.rowHeight)
+    }
+}
+
+/// Both windows under the pointer, in the header's words: each with its bar, share and reset; the share the row
+/// already shows is left out.
+struct QCUsageCard: View {
+    let level: QuickChatLevel
+    var body: some View {
+        let b = level.binding()
+        let full = level.full()
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 5) {
+            line("5h", full?.id == "5h" ? 100 : level.fiveHourNow(), full?.id == "5h" ? full?.resets : level.fiveHourResets, shown: b?.id == "5h")
+            line("wk", full?.id == "wk" ? 100 : level.weekNow(), full?.id == "wk" ? full?.resets : level.weekResets, shown: b?.id == "wk")
+        }
+        .font(.system(size: 12)).foregroundColor(QCColor.muted)
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(QCColor.hex(0x2B2B29)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(QCColor.line))
+        .environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder private func line(_ id: String, _ p: Double?, _ resets: Date?, shown: Bool) -> some View {
+        GridRow {
+            Text(id)
+            ZStack(alignment: .leading) {
+                Capsule().fill(QCColor.text.opacity(0.13))
+                Capsule().fill(QuickChatLevel.color(p)).frame(width: 40 * CGFloat(min(100, p ?? 0)) / 100)
+            }
+            .frame(width: 40, height: 4)
+            Text(shown || p == nil ? "" : QuickChatLevel.pct(p)).fontWeight(.semibold).monospacedDigit().foregroundColor(QuickChatLevel.color(p))
+            Text(p == nil ? "no numbers yet" : resets.map { "resets \(TimeWords.when($0))" } ?? "")
+        }
     }
 }
