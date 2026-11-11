@@ -1797,6 +1797,82 @@ do {
     try? FileManager.default.removeItem(at: c.dir)
 }
 
+// drops on the field: text (with a picture of it) and non-image files are the text field's own (paths go in as before);
+// pictures and image files are attachments; the panel's own view still takes a picture drag anywhere else
+final class ImageFixDrag: NSObject, NSDraggingInfo {
+    let pb: NSPasteboard
+    init(_ pb: NSPasteboard) { self.pb = pb }
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .every }
+    var draggingLocation: NSPoint { NSPoint(x: 4, y: 4) }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggedImage: NSImage? { nil }
+    var draggingPasteboard: NSPasteboard { pb }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass],
+                                searchOptions: [NSPasteboard.ReadingOptionKey: Any], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    func resetSpringLoading() {}
+}
+func firstTextView(_ v: NSView) -> QCTextView? {
+    if let t = v as? QCTextView { return t }
+    for s in v.subviews { if let t = firstTextView(s) { return t } }
+    return nil
+}
+do {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("images-drop")
+    try? FileManager.default.removeItem(at: dir)
+    let folder = dir.appendingPathComponent("a folder")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let txt = dir.appendingPathComponent("notes.txt"), img = dir.appendingPathComponent("pic.png")
+    try? "some notes".write(to: txt, atomically: true, encoding: .utf8)
+    try? noisyPNG(20, 20).write(to: img)
+    let pb = NSPasteboard(name: NSPasteboard.Name("n-uf.cl-quick.image-drop-checks"))
+    func put(_ f: (NSPasteboard) -> Void) { pb.clearContents(); f(pb) }
+    guard let root = panel()?.contentView, let tv = firstTextView(root) else { print("FAIL drop: the bar's text field"); exit(1) }
+    let oldDrag = tv.dragImages, oldDrop = tv.dropImages, hostModel = chat.model
+    var dragLog: [Bool] = [], dropped = 0
+    tv.dragImages = { dragLog.append($0) }
+    tv.dropImages = { _ in dropped += 1; return true }
+    func over(_ label: String, taken: Bool, text: String? = nil) {
+        tv.string = ""; dragLog = []; dropped = 0
+        let d = ImageFixDrag(pb)
+        let entered = tv.draggingEntered(d)
+        let ok = tv.performDragOperation(d)
+        tv.draggingExited(d)
+        check("drop: \(label): \(taken ? "taken as images" : "left to the text field")",
+              taken ? (entered == .copy && ok && dropped == 1) : (dropped == 0 && !dragLog.contains(true)), "\(entered.rawValue) \(ok) dropped=\(dropped) log=\(dragLog)")
+        if let text { check("drop: \(label): the field inserts \(text)", tv.string.contains(text), "\(tv.string.debugDescription)") }
+    }
+    let png = noisyPNG(20, 20)
+    put { $0.declareTypes([.string, .png], owner: nil); $0.setString("cells and words", forType: .string); $0.setData(png, forType: .png) }
+    over("text with a picture of it (a selection from Word)", taken: false, text: "cells and words")
+    put { $0.setData(png, forType: .png) }
+    over("a picture alone", taken: true)
+    put { _ = $0.writeObjects([img as NSURL]) }
+    over("an image file", taken: true)
+    put { _ = $0.writeObjects([txt as NSURL]) }
+    over("a text file", taken: false, text: "notes.txt")
+    put { _ = $0.writeObjects([folder as NSURL]) }
+    over("a folder", taken: false, text: "a folder")
+    put { _ = $0.writeObjects([txt as NSURL, img as NSURL]) }
+    over("an image file with a text file", taken: true)
+    put { $0.setString("words", forType: .string) }
+    over("plain text", taken: false, text: "words")
+    // the panel's own view keeps taking a picture drag (text with its picture included) wherever it isn't over the field
+    put { $0.declareTypes([.string, .png], owner: nil); $0.setString("cells", forType: .string); $0.setData(png, forType: .png) }
+    check("drop: the panel's view still takes text-with-picture as a picture drag", cv.draggingEntered(ImageFixDrag(pb)) == .copy)
+    cv.draggingExited(ImageFixDrag(pb)); hostModel.dropTarget = false
+    tv.string = ""; tv.dragImages = oldDrag; tv.dropImages = oldDrop
+    pb.clearContents()
+    try? FileManager.default.removeItem(at: dir)
+}
+
 // the update notice's setting (Settings ▸ General ▸ Updates): a missing key is on; off is read; a wrong type is on
 do {
     func read(_ json: String) -> Bool? { (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(json.utf8)))?.checkForUpdates }

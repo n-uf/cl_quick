@@ -1996,23 +1996,34 @@ final class QCTextView: NSTextView {
         if pasteImages?(pasteboard) == true { return }
         super.paste(sender)
     }
+    /// Whether the chat takes this drag as images: it carries pictures or image files, and isn't the field's own (text
+    /// with a picture of it, or only non-image files, whose paths the field inserts). Decided once per drag: the files are
+    /// looked at, which would be much for every move of the pointer.
+    private var decided: (seq: Int, change: Int, images: Bool)?
+    private func takesImages(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard, seq = sender.draggingSequenceNumber
+        if let d = decided, d.seq == seq, d.change == pb.changeCount { return d.images }
+        let images = QCImages.isImageDrag(pb) && !QCImages.fieldKeepsDrop(pb)
+        decided = (seq, pb.changeCount, images)
+        return images
+    }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard QCImages.isImageDrag(sender.draggingPasteboard) else { return super.draggingEntered(sender) }
+        guard takesImages(sender) else { return super.draggingEntered(sender) }
         dragImages?(true)
         return .copy
     }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        QCImages.isImageDrag(sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
+        takesImages(sender) ? .copy : super.draggingUpdated(sender)
     }
     override func draggingExited(_ sender: NSDraggingInfo?) {
         dragImages?(false)
         super.draggingExited(sender)
     }
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        QCImages.isImageDrag(sender.draggingPasteboard) ? true : super.prepareForDragOperation(sender)
+        takesImages(sender) ? true : super.prepareForDragOperation(sender)
     }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard QCImages.isImageDrag(sender.draggingPasteboard) else { return super.performDragOperation(sender) }
+        guard takesImages(sender) else { return super.performDragOperation(sender) }
         dragImages?(false)
         return dropImages?(sender.draggingPasteboard) ?? false
     }

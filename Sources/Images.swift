@@ -100,6 +100,16 @@ enum QCImages {
         return types.contains(.fileURL) || dataTypes.contains { types.contains($0) }
     }
 
+    /// Whether the text field keeps a drop for itself: text with no files (the paste rule: a selection dragged out of Word,
+    /// Excel, Numbers or Pages comes with a picture of itself, and the field must take the words), or files that aren't
+    /// images (their paths go in as text, as they always did). Pictures, image files, and a mix with an image file are the
+    /// chat's.
+    static func fieldKeepsDrop(_ pb: NSPasteboard) -> Bool {
+        let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        if !urls.isEmpty { return urls.allSatisfy { !isImageFile($0) } }
+        return (pb.types ?? []).contains(.string)
+    }
+
     // MARK: making one
 
     /// Why an image wasn't taken.
