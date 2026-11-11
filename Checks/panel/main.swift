@@ -671,6 +671,56 @@ do {
     m.dictate(true)
     check("mic: and says it once a run", m.dictationNote == nil && sent.count == before)
 
+    // Return while Dictation runs: by default the first Return ends it and shows the transcript (nothing sent), the next
+    // sends; "sends at once" is the old behaviour; typing always sends at once
+    do {
+        check("return: shows the transcript first by default, also when the key is missing from settings.json",
+              QuickChatSettings().dictationReturn == .showFirst
+              && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data("{}".utf8)))?.dictationReturn == .showFirst
+              && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"dictationReturn":"sendAtOnce"}"#.utf8)))?.dictationReturn == .sendAtOnce)
+        let wasDefaults = m.defaults
+        var s = QuickChatSettings()
+        m.defaults = { s }
+        func fresh() { m.newChat(); m.turns = [oneTurn()]; spin(0.2) }
+        func tvNow() -> QCTextView? { p.firstResponder as? QCTextView }
+        stopTaken = true
+
+        fresh(); m.field = "typed"; m.submit(marked: false)
+        check("return: typing sends at once", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
+
+        fresh(); m.field = "dictated words"; m.dictating = true
+        let n0 = sent.count
+        m.submit(marked: false)
+        check("return: Dictation running, the first Return ends it and keeps the transcript in the field, nothing sent",
+              m.turns.count == 1 && m.field == "dictated words" && !m.dictating && sent.count == n0 + 1 && sent.last?.0 == QCDictation.stop,
+              "\(m.turns.count) \(m.field.debugDescription) \(m.dictating) \(sent.count - n0)")
+        m.submit(marked: false)
+        check("return: the next Return sends it", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
+
+        // Dictation started with macOS's own shortcut: the mic button doesn't know, the field's marked text does
+        fresh(); p.focusField(); spin(0.1)
+        if let tv = tvNow() {
+            tv.setMarkedText("provisional words", selectedRange: NSRange(location: 17, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            let n1 = sent.count
+            m.submit(marked: tv.hasMarkedText())
+            check("return: marked text without the button's state (macOS's shortcut) ends Dictation and sends nothing",
+                  m.turns.count == 1 && sent.count == n1 + 1 && sent.last?.0 == QCDictation.stop && m.field == "provisional words",
+                  "\(m.turns.count) \(sent.count - n1) \(m.field.debugDescription)")
+            tv.unmarkText()
+        } else { check("return: the field has the keyboard", false) }
+
+        s.dictationReturn = .sendAtOnce
+        fresh(); m.field = "dictated words"; m.dictating = true
+        m.submit(marked: false)
+        check("return: \"sends at once\": Return ends Dictation and sends the transcript in one go",
+              m.turns.count == 2 && m.field.isEmpty && !m.dictating && sent.last?.0 == QCDictation.stop, "\(m.turns.count) \(m.field.debugDescription)")
+        fresh(); m.field = "typed"; m.submit(marked: false)
+        check("return: \"sends at once\": typing sends at once too", m.turns.count == 2 && m.field.isEmpty)
+
+        m.defaults = wasDefaults
+        m.newChat()
+    }
+
     m.turns = [oneTurn()]; spin(0.6)          // the chat again (the new chat above made it the bar), for what follows
 }
 

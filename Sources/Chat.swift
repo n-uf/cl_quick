@@ -31,6 +31,14 @@ enum QuickChatThinking: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// What Return does while Dictation is running in the field (typing without it always sends at once).
+enum QuickChatDictationReturn: String, Codable, CaseIterable {
+    /// The first Return ends Dictation and leaves the transcript in the field to read; the next sends it.
+    case showFirst
+    /// Return ends Dictation and sends the transcript in one go.
+    case sendAtOnce
+}
+
 struct QuickChatSettings: Codable, Equatable {
     /// The shortcut opens the chat from any app. On by default: it's what cl_quick is for.
     var shortcutOn = true
@@ -39,6 +47,8 @@ struct QuickChatSettings: Codable, Equatable {
     var defaultProfile: String? = nil
     var model: QuickChatModelChoice = .haiku
     var thinking: QuickChatThinking = .off
+    /// Return during Dictation: shows the transcript first by default (a key missing from the file is the default).
+    var dictationReturn: QuickChatDictationReturn = .showFirst
     /// cl_audit's quick chat settings were looked at once, on the first run.
     var importedFromAudit = false
 
@@ -50,6 +60,7 @@ struct QuickChatSettings: Codable, Equatable {
         defaultProfile = try? c.decodeIfPresent(String.self, forKey: .defaultProfile)
         model = (try? c.decodeIfPresent(QuickChatModelChoice.self, forKey: .model)) ?? .haiku
         thinking = (try? c.decodeIfPresent(QuickChatThinking.self, forKey: .thinking)) ?? .off
+        dictationReturn = (try? c.decodeIfPresent(QuickChatDictationReturn.self, forKey: .dictationReturn)) ?? .showFirst
         importedFromAudit = (try? c.decodeIfPresent(Bool.self, forKey: .importedFromAudit)) ?? false
     }
 
@@ -284,7 +295,26 @@ final class QuickChatModel: ObservableObject {
 
     // MARK: keys
 
+    /// Set when a Return ended Dictation without sending (the transcript is in the field to read): the next Return sends,
+    /// whatever marked text Dictation's last words may still have for a moment. Cleared by a send, a new chat, or the mic.
+    var returnHeld = false
+
+    /// Return in the field; `marked`: the field has marked text (Dictation's provisional words; also set when Dictation
+    /// was started by macOS's own shortcut, which the mic button's state doesn't know). While Dictation runs and the
+    /// setting says to show first, the Return ends Dictation and sends nothing (nothing is eaten twice: the next Return
+    /// sends); otherwise, and always when typing, it sends at once.
+    func submit(marked: Bool) {
+        if returnHeld { returnHeld = false; send(); return }
+        if dictating || marked, defaults().dictationReturn == .showFirst {
+            returnHeld = true
+            dictate(false)
+            return
+        }
+        send()
+    }
+
     func send() {
+        returnHeld = false
         // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
         if dictating, !busy, !blocked { dictate(false) }
         let q = field.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -377,6 +407,7 @@ final class QuickChatModel: ObservableObject {
         closeProcess()
         ended = nil
         turns = []
+        returnHeld = false
         if dictating { dictate(false) }
         if !keepField { field = "" }
         barProblem = nil
@@ -1049,12 +1080,14 @@ final class QuickChat {
     /// Off: Dictation stops. The state is the button's own (QCDictation).
     func dictate(_ on: Bool) {
         guard on else {
-            if model.dictating, let p = panel {
+            // also when the button's state is off: Dictation started with macOS's own shortcut ends the same way
+            if let p = panel, model.dictating || (p.firstResponder as? QCTextView)?.hasMarkedText() == true {
                 QCDictation.end(for: p.firstResponder) { p.makeFirstResponder(nil); p.focusField() }
             }
             model.dictating = false
             return
         }
+        model.returnHeld = false
         guard let p = panel, p.isVisible else { return }
         if QCDictation.isOff() {
             if !dictationOffSaid { model.dictationNote = QCDictation.offWords; dictationOffSaid = true }

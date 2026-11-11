@@ -1705,7 +1705,7 @@ struct QCField: View {
                 .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
         } else {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
-                        onSubmit: { model.send() }, onEscape: { model.escape() }, onCaps: { caps = $0 })
+                        onSubmit: { model.submit(marked: $0) }, onEscape: { model.escape() }, onCaps: { caps = $0 })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
                 .background(QCFieldArea().padding(EdgeInsets(top: -area.top, leading: -area.leading, bottom: -area.bottom, trailing: -area.trailing)))
                 .onChange(of: height) { _ in model.fieldChanged() }
@@ -1726,7 +1726,8 @@ struct QCTextField: NSViewRepresentable {
     let placeholder: String
     let size: CGFloat
     let focusTick: Int
-    let onSubmit: () -> Void
+    /// Return, with whether the field has marked text (Dictation's provisional words).
+    let onSubmit: (Bool) -> Void
     let onEscape: () -> Void
     var onCaps: (Bool) -> Void = { _ in }
 
@@ -1816,7 +1817,7 @@ struct QCTextField: NSViewRepresentable {
             switch sel {
             case #selector(NSResponder.insertNewline(_:)):
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true { tv.insertNewlineIgnoringFieldEditor(nil); return true }
-                parent.onSubmit()
+                parent.onSubmit(tv.hasMarkedText())
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 parent.onEscape()
