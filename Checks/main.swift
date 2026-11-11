@@ -262,8 +262,8 @@ run("ok") { p, events, _ in
     wait(3) { events().contains { if case .usage = $0 { return true }; return false } }
     let u = events().compactMap { e -> QuickChatUsage? in if case .usage(let u) = e { return u }; return nil }.first
     check("usage: both windows", u?.available == true && u?.fiveHour?.used == 44 && u?.week?.used == 12 && u?.fiveHour?.locked == false, u as Any)
-    check("usage: reset times, fractional seconds and offset", u?.fiveHour?.resets == Date(timeIntervalSince1970: 1_794_333_600)
-          && u?.week?.resets == QuickChatParse.isoDate("2026-11-14T09:00:00Z"), u as Any)
+    check("usage: reset times, fractional seconds and offset", u?.fiveHour?.resets == Date(timeIntervalSince1970: 2_109_952_800)
+          && u?.week?.resets == QuickChatParse.isoDate("2036-11-14T09:00:00Z"), u as Any)
     let ctl = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
     check("usage: no message was sent for it", ctl.contains("CTRL get_usage") && !ctl.contains("USER"), ctl)
     check("usage: the process still takes a message after it", p.send("a question") && { wait(5) { done(events()) == 1 }; return done(events()) == 1 }())

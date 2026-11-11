@@ -14,6 +14,8 @@ let app = NSApplication.shared
 CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
 let chat = QuickChat.shared
 chat.start()
+// no real `claude`: opening the panel would start one on the user's own profile (QuickChatModel.warm) and ask its usage
+chat.model.resolveClaude = { $0(nil) }
 
 var failed = 0, passed = 0
 func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
@@ -849,6 +851,48 @@ do {
     // the offer shows the other profile's fuller window, not its week alone
     var other = QuickChatLevel(); other.fiveHour = 95; other.fiveHourResets = now.addingTimeInterval(3600); other.week = 18
     check("limit: an offer's share is its fuller window (95, not the week's 18)", other.binding(now)?.p == 95)
+}
+
+// live usage: a get_usage answer that comes while the bar is open changes what the bar shows (model.level, which the
+// usage indicator, the header and the profile dot draw), over an older level kept from before. A chat model of its own
+// on a stand-in `claude` (Checks/stub-claude: 5 hours 44%, week 12%), in a folder under build/: nothing else is touched
+do {
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("usage-check")
+    try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+    let m = QuickChatModel()
+    var t = QuickChatTarget(Profile(id: "usage-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
+    t.workFolder = dir.appendingPathComponent("work").path
+    t.accountUUID = "u-check"; t.email = "alex@example.com"
+    m.target = t
+    m.resolveClaude = { $0(stub) }
+    var recorded: (String, String, QuickChatLevel)?
+    m.levelReported = { id, account, l in recorded = (id, account, l) }
+    // what the bar showed before: the account's level from its last time in use, the week alone
+    var old = QuickChatLevel(); old.week = 53; old.weekResets = Date().addingTimeInterval(3 * 86400); old.at = Date().addingTimeInterval(-86400)
+    m.level = old
+    var drawn = 0
+    let watch = m.objectWillChange.sink { drawn += 1 }
+    m.warm()            // as the bar opens: the stand-in starts and is asked get_usage
+    let end = Date().addingTimeInterval(8)
+    while m.level?.fiveHour == nil, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    check("live usage: the stand-in was found", FileManager.default.isExecutableFile(atPath: stub), stub)
+    check("live usage: the answer replaced the older level", m.level?.weekNow() == 12 && m.level?.fiveHourNow() == 44, "\(String(describing: m.level))")
+    check("live usage: the 5-hour number shows with its reset", m.level?.fiveHourResets != nil && m.level?.binding() != nil)
+    check("live usage: the view was told", drawn > 0)
+    check("live usage: kept for that profile and account", recorded?.0 == "usage-check" && recorded?.1 == "u-check" && recorded?.2.week == 12)
+    watch.cancel()
+    m.shutdown()
+    try? FileManager.default.removeItem(at: dir)
+}
+
+// a window get_usage gives is taken whole: an old reset already past never hides the number it just gave
+do {
+    var l = QuickChatLevel(); l.fiveHour = 80; l.fiveHourResets = Date().addingTimeInterval(-3600); l.week = 50
+    l.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 0, resets: nil), week: .init(used: 62, resets: Date().addingTimeInterval(86400))))
+    check("usage: a window with no reset yet still shows its number", l.fiveHourNow() == 0 && l.weekNow() == 62, "\(l)")
+    var kept = l; kept.apply(usage: QuickChatUsage(available: false))
+    check("usage: not available keeps the last numbers", kept.fiveHour == 0 && kept.week == 62)
 }
 
 CheckQuiet.verify("at the end")

@@ -71,8 +71,10 @@ struct QuickChatLevel: Codable, Equatable {
     /// Claude Code says the limits aren't available, nothing changes: the last numbers stay.
     mutating func apply(usage u: QuickChatUsage, now: Date = Date()) {
         guard u.available, u.fiveHour != nil || u.week != nil else { return }
-        if let w = u.fiveHour { if let p = w.used { fiveHour = p }; if let r = w.resets { fiveHourResets = r } }
-        if let w = u.week { if let p = w.used { week = p }; if let r = w.resets { weekResets = r } }
+        // a window given is taken whole: its reset as given too (none, for a window that hasn't started), so an old reset
+        // already past never hides the number it just gave
+        if let w = u.fiveHour, let p = w.used { fiveHour = p; fiveHourResets = w.resets }
+        if let w = u.week, let p = w.used { week = p; weekResets = w.resets }
         let locked = [u.fiveHour, u.week].compactMap { $0 }.filter(\.locked)
         // a lock lasts until the window that holds it resets (the later one when both do). No lock here never lifts a
         // refusal Claude Code made: it may come from a limit get_usage files elsewhere, so it ends at its own time or

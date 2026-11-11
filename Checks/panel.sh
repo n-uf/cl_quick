@@ -11,4 +11,5 @@ sources=()
 for f in "$repo"/Sources/*.swift; do [ "$(basename "$f")" = main.swift ] || sources+=("$f"); done
 swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/panel" "${sources[@]}" "$here/quiet.swift" "$here/panel/main.swift" \
   -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
-"$out/panel"
+chmod +x "$here/stub-claude"
+QC_STUB_PATH="$here/stub-claude" "$out/panel"

@@ -969,8 +969,9 @@ final class QuickChat {
             }
         model.update(target: now, level: store.level(of: p), offer: others.first,
                      switchOffer: standby.first?.1, notice: notice)
-        // a new account or folder while the bar is open: its `claude` starts, so its limits show at once
-        if restarted, isOpen { model.warm() }
+        // a new account or folder (a switch landed, open or hidden): its `claude` starts, so its limits are there by the
+        // time the bar shows (a cold start takes about 12 s); with nothing asked it ends after 3 minutes
+        if restarted { model.warm() }
     }
 
     func toggle() { isOpen ? hide() : open() }
