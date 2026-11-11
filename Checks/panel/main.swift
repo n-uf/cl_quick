@@ -672,7 +672,10 @@ do {
         tv.setMarkedText("shortcut words", selectedRange: NSRange(location: 14, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         n = sent.count
         m.dictate(false)
-        check("mic: marked text with the button off (macOS's shortcut): committed and ended",
+        check("mic: marked text alone (an input method's composition) is left alone: nothing ended", sent.count == n && tv.hasMarkedText(), steps(since: n))
+        chat.dictationWatch.entered(Notification(name: QCDictationWatch.enterName))
+        m.dictate(false)
+        check("mic: marked text with the button off and an enter notice (macOS's shortcut): committed and ended",
               !tv.hasMarkedText() && m.field.hasSuffix("shortcut words") && stopped(since: n, field: tv), steps(since: n))
     } else { check("mic: the field has the keyboard (shortcut)", false) }
     // the button off and no marked text: nothing to end, nothing sent
@@ -775,16 +778,77 @@ do {
             check("return: the next Return sends the dictated words", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
         } else { check("return: the field has the keyboard (marked)", false) }
 
-        // Dictation started with macOS's own shortcut: the mic button doesn't know, the field's marked text does
+        // Dictation started with macOS's own shortcut: the mic button doesn't know; DictationIM's enter notice does
         fresh(); p.focusField(); spin(0.1)
         if let tv = tvNow() {
             tv.setMarkedText("provisional words", selectedRange: NSRange(location: 17, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            let enter = Notification(name: QCDictationWatch.enterName), exit = Notification(name: QCDictationWatch.exitName)
+            check("return: the watch listens for DictationIM's enter notice too",
+                  QCDictationWatch.enterName.rawValue == "DictationIMNotificationDidEnterDictationMode")
+            check("return: marked text alone is not Dictation", !m.isDictationActive && !m.dictating && !m.dictationNoticed)
+            chat.dictationWatch.entered(enter)
+            check("return: an enter notice makes Dictation active, the button's state stays off", m.isDictationActive && m.dictationNoticed && !m.dictating)
+            chat.dictationWatch.exited(exit)
+            check("return: an exit notice ends it again", !m.isDictationActive && !m.dictationNoticed)
+            chat.dictationWatch.entered(enter)
+            p.onKeyLost()
+            check("return: the panel losing the keyboard forgets the notice", !m.dictationNoticed)
+            chat.dictationWatch.entered(enter)
             let n1 = sent.count
             m.submit(marked: tv.hasMarkedText())
-            check("return: marked text without the button's state (macOS's shortcut) ends Dictation and sends nothing",
-                  m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "provisional words" && !tv.hasMarkedText(),
+            check("return: marked text with an enter notice (macOS's shortcut) ends Dictation and sends nothing",
+                  m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "provisional words" && !tv.hasMarkedText() && !m.dictationNoticed,
                   "\(m.turns.count) \(steps(since: n1)) \(m.field.debugDescription)")
+            m.submit(marked: false)
+            check("return: and the next Return sends", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
         } else { check("return: the field has the keyboard", false) }
+
+        // Dictation known by the field's input source alone (no button, no notice)
+        fresh(); p.focusField(); spin(0.1)
+        if let tv = tvNow() {
+            let wasSource = QCDictation.inputSource
+            QCDictation.inputSource = { _ in QCDictation.sourceID }
+            tv.setMarkedText("by source", selectedRange: NSRange(location: 9, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            let n1 = sent.count
+            check("return: Dictation's input source (com.apple.inputmethod.ironwood) makes Dictation active", QCDictation.sourceID == "com.apple.inputmethod.ironwood" && m.isDictationActive && !m.dictating && !m.dictationNoticed)
+            m.submit(marked: tv.hasMarkedText())
+            check("return: marked text with Dictation's input source ends Dictation and sends nothing",
+                  m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "by source" && !tv.hasMarkedText(), "\(m.turns.count) \(steps(since: n1))")
+            QCDictation.inputSource = wasSource
+        } else { check("return: the field has the keyboard (source)", false) }
+
+        // an input method composing (Korean, Japanese…): marked text, its own input source, no Dictation. Return only
+        // commits the composition: nothing sent, no stop step, no held Return, the Dictation state untouched
+        for source in ["com.apple.inputmethod.Korean.2SetKorean", "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese", "com.apple.keylayout.US"] {
+            fresh(); p.focusField(); spin(0.1)
+            if let tv = tvNow() {
+                let wasSource = QCDictation.inputSource
+                QCDictation.inputSource = { _ in source }
+                tv.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                let n1 = sent.count
+                m.submit(marked: tv.hasMarkedText())
+                check("return: marked text of \(source) is not Dictation's: committed, nothing sent, no stop step, no held Return",
+                      m.turns.count == 1 && sent.count == n1 && !m.returnHeld && !tv.hasMarkedText() && m.field == "한" && !m.dictating && !m.dictationNoticed,
+                      "\(m.turns.count) \(steps(since: n1)) \(m.returnHeld) \(m.field.debugDescription)")
+                m.submit(marked: false)
+                check("return: and the next Return sends (\(source))", m.turns.count == 2 && m.field.isEmpty && sent.count == n1, "\(m.turns.count) \(m.field.debugDescription)")
+                QCDictation.inputSource = wasSource
+            } else { check("return: the field has the keyboard (IME)", false) }
+        }
+        // "sends at once" leaves an input method's Return alone too
+        do {
+            var once = QuickChatSettings(); once.dictationReturn = .sendAtOnce
+            let was = m.defaults
+            m.defaults = { once }
+            fresh(); p.focusField(); spin(0.1)
+            if let tv = tvNow() {
+                tv.setMarkedText("あ", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                let n1 = sent.count
+                m.submit(marked: tv.hasMarkedText())
+                check("return: \"sends at once\": an input method's marked text is still only committed", m.turns.count == 1 && sent.count == n1 && !tv.hasMarkedText() && m.field == "あ")
+            } else { check("return: the field has the keyboard (IME, at once)", false) }
+            m.defaults = was
+        }
 
         s.dictationReturn = .sendAtOnce
         fresh(); m.field = "dictated words"; m.dictating = true

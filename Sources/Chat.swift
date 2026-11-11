@@ -335,13 +335,27 @@ final class QuickChatModel: ObservableObject {
     /// whatever marked text Dictation's last words may still have for a moment. Cleared by a send, a new chat, or the mic.
     var returnHeld = false
 
-    /// Return in the field; `marked`: the field has marked text (Dictation's provisional words; also set when Dictation
-    /// was started by macOS's own shortcut, which the mic button's state doesn't know). While Dictation runs and the
+    /// An enter notice from Dictation's input method with no exit since: Dictation runs, whoever started it (macOS's own
+    /// shortcut included, which the mic button's state doesn't know). Cleared with the keyboard, a stop, a new chat.
+    var dictationNoticed = false
+    /// Whether the field's text input context has Dictation's input source selected (set by QuickChat; a check replaces it).
+    var inputSourceIsDictation: () -> Bool = { false }
+    /// Commits what an input method is composing in the field, no more (set by QuickChat).
+    var commitComposition: () -> Void = {}
+    /// Dictation is actually running: the mic button's state, an enter notice not yet followed by an exit, or the field's
+    /// input source being Dictation's. Marked text alone is not enough to say so: an input method (Korean, Japanese,
+    /// Chinese, Vietnamese…) composes in marked text too.
+    var isDictationActive: Bool { dictating || dictationNoticed || inputSourceIsDictation() }
+
+    /// Return in the field; `marked`: the field has marked text (Dictation's provisional words, or an input method's
+    /// composition: only Dictation running makes it Dictation's, see `isDictationActive`). While Dictation runs and the
     /// setting says to show first, the Return ends Dictation and sends nothing (nothing is eaten twice: the next Return
-    /// sends); otherwise, and always when typing, it sends at once.
+    /// sends). Marked text with no Dictation running is an input method's: the Return only commits it, nothing is sent,
+    /// nothing stopped, nothing held. Otherwise, and always when typing, it sends at once.
     func submit(marked: Bool) {
         if returnHeld { returnHeld = false; send(); return }
-        if dictating || marked, defaults().dictationReturn == .showFirst {
+        if marked, !isDictationActive { commitComposition(); return }
+        if isDictationActive, defaults().dictationReturn == .showFirst {
             returnHeld = true
             dictate(false)
             return
@@ -352,7 +366,7 @@ final class QuickChatModel: ObservableObject {
     func send() {
         returnHeld = false
         // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
-        if dictating, !busy, !blocked { dictate(false) }
+        if dictating || dictationNoticed, !busy, !blocked { dictate(false) }
         let q = field.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !busy, !blocked else { return }
         guard target != nil else { barProblem = .noProfile; return }
@@ -444,7 +458,7 @@ final class QuickChatModel: ObservableObject {
         ended = nil
         turns = []
         returnHeld = false
-        if dictating { dictate(false) }
+        if dictating || dictationNoticed { dictate(false) }
         if !keepField { field = "" }
         barProblem = nil
         accountNote = nil
@@ -929,6 +943,9 @@ final class QuickChat {
         model.escape = { [weak self] in self?.escape() }
         model.dictate = { [weak self] on in self?.dictate(on) }
         dictationWatch.onExit = { [weak self] in self?.dictationExited() }
+        dictationWatch.onEnter = { [weak self] in self?.dictationEntered() }
+        model.inputSourceIsDictation = { [weak self] in QCDictation.inputSourceIsDictation(self?.panel?.firstResponder) }
+        model.commitComposition = { [weak self] in (self?.panel?.firstResponder as? NSTextView)?.unmarkText() }
         model.openSettings = { [weak self] id in self?.openSettings(id) }
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
@@ -1105,7 +1122,7 @@ final class QuickChat {
     }
 
     func hide() {
-        if model.dictating { dictate(false) }     // Dictation doesn't go on into a hidden field
+        if model.dictating || model.dictationNoticed { dictate(false) }     // Dictation doesn't go on into a hidden field
         panel?.orderOut(nil)
     }
 
@@ -1117,11 +1134,13 @@ final class QuickChat {
     /// Off: Dictation stops. The state is the button's own (QCDictation).
     func dictate(_ on: Bool) {
         guard on else {
-            // also when the button's state is off: Dictation started with macOS's own shortcut ends the same way
-            if let p = panel, model.dictating || (p.firstResponder as? QCTextView)?.hasMarkedText() == true {
+            // also when the button's state is off: Dictation started with macOS's own shortcut ends the same way (known by
+            // its enter notice or its input source; marked text alone may be an input method's composition, left alone)
+            if let p = panel, model.isDictationActive {
                 QCDictation.end(for: p.firstResponder) { p.makeFirstResponder(nil); p.focusField() }
             }
             model.dictating = false
+            model.dictationNoticed = false
             return
         }
         model.returnHeld = false
@@ -1144,7 +1163,14 @@ final class QuickChat {
     }
 
     /// The panel gave up the keyboard (another app, a click elsewhere): Dictation, which follows the keyboard, has ended.
-    func keyLost() { model.dictating = false }
+    func keyLost() { model.dictating = false; model.dictationNoticed = false }
+
+    /// Dictation entered Dictation mode (the button, macOS's shortcut, the Dictation key). Counted only while the panel
+    /// has the keyboard: the notice is system-wide, and Dictation elsewhere is not Dictation in the field.
+    func dictationEntered() {
+        guard panel?.isKeyWindow == true else { return }
+        model.dictationNoticed = true
+    }
 
     /// Dictation left Dictation mode (its floating mic clicked, Esc, the Dictation key, a timeout): the button goes off.
     /// Only the state: nothing is stopped. Not in the first moments after the button started it, when the exit can still
@@ -1152,7 +1178,9 @@ final class QuickChat {
     let dictationWatch = QCDictationWatch(listen: !QCQuiet.on)
     static var exitGrace: TimeInterval = 0.5
     private var dictationStarted = Date.distantPast
+    /// The enter notice state ends with any exit: a stale "Dictation runs" would turn an input method's Return into a stop.
     func dictationExited() {
+        if Date().timeIntervalSince(dictationStarted) >= Self.exitGrace { model.dictationNoticed = false }
         guard model.dictating, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
         model.dictating = false
     }

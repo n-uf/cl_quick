@@ -27,24 +27,37 @@ import AppKit
 /// observed with `.deliverImmediately`. The notification is system-wide and says nothing about which text it ended in:
 /// it only ever turns the button's state off, never stops anything, so an exit from Dictation elsewhere costs at most a
 /// tinted button gone while Dictation runs on (the next click starts it again: still harmless).
+///
+/// Its twin, `DictationIMNotificationDidEnterDictationMode`, says Dictation started, also when macOS's own shortcut or
+/// the Dictation key started it, which the mic button's state doesn't know. Return with marked text counts as Dictation's
+/// only while Dictation is known to run (the button's state, an enter notice with no exit since, or the field's input
+/// source being Dictation's); marked text is also what an input method (Korean, Japanese, Chinese, Vietnamese) composes.
 final class QCDictationWatch: NSObject {
     static let exitName = Notification.Name("DictationIMNotificationDidExitDictationMode")
+    static let enterName = Notification.Name("DictationIMNotificationDidEnterDictationMode")
     /// Called on the main thread when Dictation left Dictation mode.
     var onExit: () -> Void = {}
+    /// Called on the main thread when Dictation entered Dictation mode.
+    var onEnter: () -> Void = {}
     private let listening: Bool
 
-    /// `listen`: false in the checks, which call `exited` themselves (a real Dictation elsewhere must not reach them).
+    /// `listen`: false in the checks, which call `exited` and `entered` themselves (a real Dictation elsewhere must not
+    /// reach them).
     init(listen: Bool) {
         listening = listen
         super.init()
         guard listen else { return }
-        DistributedNotificationCenter.default().addObserver(self, selector: #selector(exited(_:)), name: Self.exitName,
-                                                            object: nil, suspensionBehavior: .deliverImmediately)
+        let center = DistributedNotificationCenter.default()
+        center.addObserver(self, selector: #selector(exited(_:)), name: Self.exitName, object: nil, suspensionBehavior: .deliverImmediately)
+        center.addObserver(self, selector: #selector(entered(_:)), name: Self.enterName, object: nil, suspensionBehavior: .deliverImmediately)
     }
     deinit { if listening { DistributedNotificationCenter.default().removeObserver(self) } }
 
     @objc func exited(_ n: Notification) {
         if Thread.isMainThread { onExit() } else { DispatchQueue.main.async { [weak self] in self?.onExit() } }
+    }
+    @objc func entered(_ n: Notification) {
+        if Thread.isMainThread { onEnter() } else { DispatchQueue.main.async { [weak self] in self?.onEnter() } }
     }
 }
 
@@ -72,6 +85,19 @@ enum QCDictation {
     /// Whether the target or something in the responder chain takes an action (a check replaces it too).
     static var handles: (Selector, AnyObject?) -> Bool = { sel, target in
         target?.responds(to: sel) == true || NSApp.target(forAction: sel, to: nil, from: nil) != nil
+    }
+
+    /// Dictation's input source (DictationIM.app's bundle ID, its TISInputSourceID: an input source of type palette, which
+    /// the field's text input context selects while Dictation runs).
+    static let sourceID = "com.apple.inputmethod.ironwood"
+
+    /// The input source ID the text input context has selected (`selectedKeyboardInputSource`); a check replaces it, so
+    /// the checks can play an input method or Dictation without either running.
+    static var inputSource: (NSTextInputContext?) -> String? = { $0?.selectedKeyboardInputSource }
+
+    /// Whether the field's text input context has Dictation's input source selected.
+    static func inputSourceIsDictation(_ field: NSResponder?) -> Bool {
+        inputSource((field as? NSTextView)?.inputContext) == sourceID
     }
 
     /// Whether Dictation is turned off in macOS (System Settings ▸ Keyboard ▸ Dictation); a setting not found counts as
