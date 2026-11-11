@@ -421,6 +421,7 @@ fieldBox("chat")
 check("chat: the least width is 320", abs(p.contentMinSize.width - QuickChatRoot.minWidth) < 0.5, "\(p.contentMinSize)")
 check("chat: the least height is about 220 (holds the header, a line of chat and the field)",
       p.contentMinSize.height >= QuickChatRoot.minWindowHeight - 0.5 && p.contentMinSize.height <= QuickChatRoot.minWindowHeight + 60, "\(p.contentMinSize)")
+check("chat: the least height has room for the header's \(Int(QCSpace.header)) pt", QuickChatRoot.minWindowHeight - QCSpace.header >= 180)
 check("chat: it can grow both ways", p.contentMaxSize.width > p.frame.width + 100 && p.contentMaxSize.height > p.frame.height + 100, "\(p.contentMaxSize)")
 
 // ── the cursor: the open hand only where a press moves the window, never fighting the pointing hand, never left behind ─

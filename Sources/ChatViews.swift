@@ -48,7 +48,8 @@ struct QuickChatRoot: View {
     static let width: CGFloat = 520            // the first width of the card
     static let windowHeight: CGFloat = 580     // the chat's first height
     static let minWidth: CGFloat = 320         // the key row fits on one line from here (QCControls narrows: dot, letters, bars)
-    static let minWindowHeight: CGFloat = 220  // header, a line of chat and the field at one line; a taller field asks for more
+    // header, a line of chat and the field at one line; a taller field asks for more (220 with the 40 pt header it had)
+    static let minWindowHeight: CGFloat = 180 + QCSpace.header
     static let margin: CGFloat = 0             // none: the card's edges are the window's, where macOS's resize zones are
     @ObservedObject var model: QuickChatModel
     @Environment(\.qcRendering) private var rendering
@@ -1604,7 +1605,9 @@ struct QCCornerButton: View {
         .buttonStyle(Style(hover: hover || picture == "hover-" + key, pressed: picture == "press-" + key))
         .help(help)
         .onHover { hover = $0 }
-        .accessibilityLabel(help)
+        // VoiceOver: the name alone ("New chat"), the shortcut as the hint
+        .accessibilityLabel(help.components(separatedBy: " (").first ?? help)
+        .accessibilityHint(help.components(separatedBy: " (").dropFirst().first.map { String($0.dropLast()) } ?? "")
     }
 
     private struct Style: ButtonStyle {
@@ -1614,9 +1617,9 @@ struct QCCornerButton: View {
             let down = configuration.isPressed || pressed
             configuration.label
                 .foregroundColor(down || hover ? QCColor.text : QCColor.soft)
-                .scaleEffect(down ? 0.92 : 1)
                 .background(RoundedRectangle(cornerRadius: QCCornerButton.radius, style: .continuous)
                     .fill(down ? QCCornerButton.pressFill : hover ? QCCornerButton.hoverFill : .clear))
+                .scaleEffect(down ? 0.92 : 1)          // the glyph and its fill together, pressed in
                 .contentShape(Rectangle())
                 .qcControl()
         }
