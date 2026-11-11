@@ -220,7 +220,7 @@ struct QCHeader: View {
 
 /// What the header line left out, under the header: for each window only the parts of its meter the line dropped (its
 /// share, when it resets, its label when none is left). The bar and anything the line shows are not repeated; the
-/// window's name is the row's key. A label only cut to "5h" or "wk" is not a loss.
+/// window's label ("5h", "wk") is the row's key.
 struct QCHeaderCard: View {
     struct Row: Identifiable {
         let id: String
@@ -242,11 +242,11 @@ struct QCHeaderCard: View {
             var r = Row(id: id, label: label)
             if f == nil, !shown.pct { r.share = (QuickChatLevel.pct(share), QuickChatLevel.color(share)) }
             if shown.resets == .none, let when { r.resets = "resets \(TimeWords.when(when))" }
-            // a label cut to "5h" or "wk" is not a loss; a label that is gone is, and the row says which window it is
-            return r.share == nil && r.resets == nil && shown.labels != .none ? nil : r
+            // a label that is gone is a loss: the row says which window it is
+            return r.share == nil && r.resets == nil && shown.labels ? nil : r
         }
-        return [row("5h", "session", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets),
-                row("wk", "week", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }
+        return [row("5h", "5h", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets),
+                row("wk", "wk", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }
     }
 
     var body: some View {
@@ -280,29 +280,25 @@ extension EnvironmentValues {
 
 /// How much of the header's account line is drawn. Never an ellipsis: the line takes the first step that fits the width it
 /// has (ViewThatFits: measured, no fixed thresholds), richest first, so the numbers show whenever there is room for them.
-/// With room, the line shows everything: "week ▬ 58% · resets Fri 00:29", the session the same way. As the window
-/// narrows it drops parts in this order:
-///   1. both labels shorten together: "session" / "week" become "5h" / "wk";
-///   2. the reset times go (labels full again, then short);
-///   3. the percentages go (bars only; "full" stays), labels first full again, then short;
-///   4. the labels go, both.
+/// With room, the line shows everything: "5h ▬ 41% · resets 23:20   wk ▬ 58% · resets Thu 19:00" (the labels always
+/// short: "5h", "wk"; VoiceOver has the words). As the window narrows it drops parts in this order:
+///   1. the reset times go;
+///   2. the percentages go (bars only; "full" stays);
+///   3. the labels go, both.
 /// While the pointer is on the meters, a card under them shows only what the line dropped (a window's share, reset or
 /// label), nothing it already shows, and no card at all when it dropped nothing.
 struct QCHeaderDetail: Equatable {
     enum Resets { case words, none }
-    enum Labels { case full, short, none }
     var resets: Resets = .none
     var pct: Bool
-    var labels: Labels
+    /// The labels ("5h", "wk") are on the line.
+    var labels = true
 
     static let steps: [QCHeaderDetail] = [
-        .init(resets: .words, pct: true, labels: .full),
-        .init(resets: .words, pct: true, labels: .short),
-        .init(pct: true, labels: .full),
-        .init(pct: true, labels: .short),
-        .init(pct: false, labels: .full),
-        .init(pct: false, labels: .short),
-        .init(pct: false, labels: .none),
+        .init(resets: .words, pct: true),
+        .init(pct: true),
+        .init(pct: false),
+        .init(pct: false, labels: false),
     ]
 }
 
@@ -344,9 +340,9 @@ struct QCHeaderLine: View {
             if let l = level {
                 let full = l.full()
                 HStack(spacing: 12) {
-                    QCLevelGroup(label: "session", short: "5h", p: l.fiveHourNow(), full: full?.id == "5h" ? full : nil,
+                    QCLevelGroup(label: "5h", p: l.fiveHourNow(), full: full?.id == "5h" ? full : nil,
                                  resets: l.fiveHourResets, detail: detail)
-                    QCLevelGroup(label: "week", short: "wk", p: l.weekNow(), full: full?.id == "wk" ? full : nil,
+                    QCLevelGroup(label: "wk", p: l.weekNow(), full: full?.id == "wk" ? full : nil,
                                  resets: l.weekResets, detail: detail)
                 }
                 .fixedSize()
@@ -386,8 +382,8 @@ struct QCHeaderLine: View {
 /// One window's meter: its label, a thin bar in the level's colour, then the share and when it resets (as far as the
 /// detail says). A full limit says "full" whatever the detail. Nothing at all while the window isn't known.
 struct QCLevelGroup: View {
+    /// "5h" or "wk".
     let label: String
-    let short: String
     let p: Double?
     let full: FullLimit?
     let resets: Date?
@@ -405,8 +401,8 @@ struct QCLevelGroup: View {
         let when = (full?.resets ?? resets)
         let size: CGFloat = 11.5
         let bar: CGFloat = 24
-        if detail.labels != .none {
-            Text(detail.labels == .full ? label : short).font(.system(size: size)).foregroundColor(QCColor.muted).lineLimit(1)
+        if detail.labels {
+            Text(label).font(.system(size: size)).foregroundColor(QCColor.muted).lineLimit(1)
         }
         ZStack(alignment: .leading) {
             Capsule().fill(QCColor.text.opacity(0.13))
