@@ -1408,7 +1408,13 @@ final class QuickChat {
             f.size.height = h
             f.origin.y = top - h
             if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
+            // laid out at once, so that a frame below the content's least height is taken back here, not on a later
+            // pass; the constraint updates of this change are fit()'s own, not news (else a least height that stays
+            // above h would set and take back the frame on every turn)
+            host.fitting = true
             p.setFrame(f, display: true)
+            p.layoutIfNeeded()
+            host.fitting = false
         }
         // the chat is the user's from here on, once it really has its height (else the next change tries again)
         if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
@@ -1745,11 +1751,25 @@ final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
     // This view covers the whole panel: nothing here may let the window server start a move.
     override var mouseDownCanMoveWindow: Bool { false }
 
-    /// Called (once per turn of the run loop) when the content's ideal size changed: a line more in the field, say.
+    /// Called (once per turn of the run loop) when the content's ideal size changed (a line more in the field, say), and
+    /// when its size constraints did: the least height macOS holds the window to. Should SwiftUI change that least height
+    /// AFTER the ideal one (the likely reason a macOS 26 runner kept the bar three lines tall), fit() sets the smaller frame
+    /// while the old least height still stands, AppKit takes the frame back (the top edge staying), and without this
+    /// nothing fits again once the least height comes down: the bar keeps the lines just deleted. Fitting again when the
+    /// constraints change ends at the content's height in either order (Checks/panel: "late least height").
     var onIntrinsicChange: () -> Void = {}
+    /// Set while QuickChat.fit() changes the frame: the constraint updates that change brings are its own.
+    var fitting = false
     private var told = false
     override func invalidateIntrinsicContentSize() {
         super.invalidateIntrinsicContentSize()
+        tell()
+    }
+    override func updateConstraints() {
+        super.updateConstraints()
+        if !fitting { tell() }
+    }
+    private func tell() {
         guard !told else { return }
         told = true
         DispatchQueue.main.async { [weak self] in self?.told = false; self?.onIntrinsicChange() }

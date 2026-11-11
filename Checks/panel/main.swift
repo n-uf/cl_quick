@@ -400,6 +400,34 @@ check("after the move the bar takes its content's height (grows, width alone)", 
 chat.model.field = ""
 spin(0.5)
 check("the bar returns to its height when the lines go", abs(p.frame.height - bar.height) < 0.5, barStuck(bar.height))
+// The same, with the content's least height (which macOS holds the window to: a frame set below it is taken back, the top
+// edge staying) catching up with its ideal height only after fit() ran. Which comes first is SwiftUI's: here the least
+// height lowers before the ideal, but a slower runner on macOS 26 kept the bar at three lines (CI, 2026-11-11). A stand-in
+// least height (a constraint on the content, lifted later the way SwiftUI lowers its own) makes that order happen here:
+// the bar must still end at its content's height once the least height lets it.
+do {
+    chat.model.field = "a\nb\nc"
+    spin(0.5)
+    let three = p.frame.height
+    check("late least height: the field's three lines grow the bar", three > bar.height + 20, "\(three) vs \(bar.height)")
+    let held = cv.heightAnchor.constraint(greaterThanOrEqualToConstant: three)
+    held.isActive = true
+    chat.model.field = ""
+    spin(0.5)
+    check("late least height: the bar is held at three lines while the content's least height says so", abs(p.frame.height - three) < 0.5,
+          "\(p.frame.height) vs \(three)")
+    // fit() tries the smaller frame and AppKit takes it back: once, not on every turn while the least height stays
+    var resizes = 0
+    let watch = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: p, queue: nil) { _ in resizes += 1 }
+    spin(0.5)
+    NotificationCenter.default.removeObserver(watch)
+    check("late least height: while held, the frame is left alone (no setting and taking back on every turn)", resizes == 0, "\(resizes) resizes in 0.5 s")
+    held.isActive = false
+    cv.needsUpdateConstraints = true       // as SwiftUI marks its own size constraints when it changes them
+    spin(0.5)
+    check("late least height: the bar returns to its height when the least height lets it", abs(p.frame.height - bar.height) < 0.5,
+          barStuck(bar.height))
+}
 // Dictation's provisional text is marked text (setMarkedText, replaced again and again, then committed): the field grows
 // and shrinks with it as it does with typed text, though the text view may not post a change for it
 do {
