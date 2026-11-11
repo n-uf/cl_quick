@@ -1185,15 +1185,16 @@ final class QuickChat {
         QCQuiet.on ? QCQuiet.screen : (p.screen ?? NSScreen.main)?.visibleFrame
     }
 
-    /// The first time: centred on the screen with the mouse, its top a quarter of the way down.
+    /// The first time: centred on the screen with the mouse, low, its bottom edge 85 pt above the visible frame's
+    /// bottom (just above the Dock); never below the visible frame's bottom nor above its top.
     private func place(_ p: QuickChatPanel) {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let vis = QCQuiet.on ? QCQuiet.screen : screen?.visibleFrame else { return }
         let w = min(p.frame.width, vis.width)           // the size it has now: a fall-back for a lost place keeps it
-        let top = vis.maxY - vis.height * 0.22
         let h = min(p.frame.height, vis.height)
-        p.setFrame(NSRect(x: vis.midX - w / 2, y: max(vis.minY, top - h), width: w, height: h), display: false)
+        let bottom = min(vis.minY + 85, vis.maxY - h)   // h <= vis.height, so this stays inside vis
+        p.setFrame(NSRect(x: vis.midX - w / 2, y: bottom, width: w, height: h), display: false)
     }
 
     /// Whether the panel's top strip (where it's grabbed) shows on some screen, clear of the menu bar and the Dock.
