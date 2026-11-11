@@ -544,6 +544,8 @@ final class QuickChatProcess {
     /// Every write to `claude`'s stdin goes through this one serial queue, never the main thread: a message with images
     /// is up to ~19 MB, and a `claude` that is slow to read (or stalled) would hold the writer. One queue for messages
     /// and control requests, so the lines keep their order and a control line never lands inside an image line.
+    /// (The blocks queued on it hold `self` strongly on purpose: a pending write finishes, or fails when the process is
+    /// stopped, and the object then goes; the chat letting go of it earlier doesn't cancel a write under way.)
     private let writes = DispatchQueue(label: "n-uf.cl-quick.stdin", qos: .userInitiated)
 
     /// A message that couldn't be written (the pipe closed or broke), on the main thread. Not called after stop().
