@@ -333,6 +333,7 @@ final class QuickChatModel: ObservableObject {
     func newChat(keepField: Bool = false, dropsSwitch: Bool = true) {
         generation += 1
         closeProcess()
+        controlsOpen = false
         ended = nil
         turns = []
         if !keepField { field = "" }
@@ -981,6 +982,7 @@ final class QuickChat {
     private func makePanel() -> QuickChatPanel {
         let p = QuickChatPanel()
         p.onEscape = { [weak self] in self?.model.escape() }
+        p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onStep = { [weak self] model, by in
             guard let m = self?.model else { return }
@@ -1135,6 +1137,8 @@ enum QCQuiet {
 /// over full-screen apps.
 final class QuickChatPanel: NSPanel {
     var onEscape: () -> Void = {}
+    /// ⌘W: hide.
+    var onClose: () -> Void = {}
     var onNewChat: () -> Void = {}
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
@@ -1190,7 +1194,7 @@ final class QuickChatPanel: NSPanel {
         case "a": action = #selector(NSText.selectAll(_:))
         case "z": action = shift ? Selector(("redo:")) : Selector(("undo:"))
         case "n" where !shift: onNewChat(); return true
-        case "w" where !shift: onEscape(); return true
+        case "w" where !shift: onClose(); return true          // hides at once, open bars or not (Esc closes them first)
         default: break
         }
         if let action, NSApp.sendAction(action, to: nil, from: self) { return true }

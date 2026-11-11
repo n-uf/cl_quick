@@ -1100,13 +1100,15 @@ struct QCControls: View {
 /// The model and thinking in the row, small: "Opus · High" in one fixed width (the longest pair it can show, so a
 /// change never makes it wobble), warm while either costs more. A click opens the bars over the row, anchored at the
 /// pill and drawn above the rest of the row (no part of its layout); a click on a bar picks it, and they stay open for
-/// another pick; a click outside them, Esc, a click on the pill again or hiding the panel closes them. Nothing in the row
-/// moves, open or not.
+/// another pick; a click outside them, Esc, a click on the pill again, ⌘W or hiding the panel closes them. The scroll
+/// wheel over the pill steps thinking (sideways, the model), as the ⌥⌘ arrows do. Nothing in the row moves, open or not.
 struct QCStepsPill: View {
     @ObservedObject var model: QuickChatModel
     /// The model and thinking bars, as they open.
     let bars: () -> AnyView
     @State private var hover = false
+    /// This drawn pill, owner of the open bars' frame in QCStepTargets.
+    @State private var token = UUID()
     @Environment(\.qcRendering) private var rendering
 
     static let font = NSFont.systemFont(ofSize: 13, weight: .medium)
@@ -1145,33 +1147,39 @@ struct QCStepsPill: View {
                 .onAppear { register(g.frame(in: .global)) }
                 .onChange(of: g.frame(in: .global)) { register($0) }
         })
-        .overlay(alignment: .leading) {
-            if open {
-                bars()
-                    .padding(.horizontal, 4).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(QCColor.hex(0x2B2B29)))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(QCColor.line))
-                    .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
-                    .fixedSize()
-                    .offset(x: -4)
-                    .background(rendering ? nil : GeometryReader { g in
-                        Color.clear
-                            .onAppear { QCStepTargets.shared.mark("open", g.frame(in: .global)) }
-                            .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.mark("open", $0) }
-                            .onDisappear { QCStepTargets.shared.mark("open", .zero) }
-                    })
-            }
-        }
+        // VoiceOver: the pill itself; the open bars are their own adjustable elements
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Model and thinking")
         .accessibilityValue("\(model.modelTitle), thinking \(t.title)")
         .accessibilityAddTraits(.isButton)
+        .overlay(alignment: .leading) {
+            if open {
+                // exactly the row's height, so nothing hangs over the field above (an AppKit view that would draw over
+                // it) or below the card; 4 pt left of the pill, by layout (the frame it reports is where it is drawn)
+                bars()
+                    .padding(.horizontal, 4)
+                    .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner + 2, style: .continuous).fill(QCColor.hex(0x2B2B29)))
+                    .overlay(RoundedRectangle(cornerRadius: QCSpace.keyCorner + 2, style: .continuous).strokeBorder(QCColor.line))
+                    .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                    .fixedSize()
+                    .background(rendering ? nil : GeometryReader { g in
+                        Color.clear
+                            .onAppear { QCStepTargets.shared.opened(g.frame(in: .global), token: token) }
+                            .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.opened($0, token: token) }
+                            .onDisappear { QCStepTargets.shared.closed(token: token) }
+                    })
+                    .padding(.leading, -4)
+            }
+        }
     }
 
-    /// Where the pill is and what it does, for a click outside (and the checks); the model held weakly.
+    /// Where the pill is and what it does, for a click outside, the scroll wheel (and the checks); the model held weakly.
     private func register(_ frame: CGRect) {
         let m = model
-        QCStepTargets.shared.pill(frame, toggle: { [weak m] in m?.controlsOpen.toggle() }, close: { [weak m] in m?.controlsOpen = false })
+        QCStepTargets.shared.pill(.init(frame: frame, toggle: { [weak m] in m?.controlsOpen.toggle() },
+                                        close: { [weak m] in m?.controlsOpen = false },
+                                        stepThinking: { [weak m] in m?.stepThinking($0) ?? false },
+                                        stepModel: { [weak m] in m?.stepModel($0) ?? false }))
     }
 }
 
@@ -1412,27 +1420,48 @@ final class QCStepTargets {
     private(set) var marks: [String: CGRect] = [:]
     func mark(_ key: String, _ frame: CGRect) { marks[key] = frame }
 
-    /// The "Opus · High" pill: where it is, what a click on it does, and how the open bars close.
-    private(set) var pill: (frame: CGRect, toggle: () -> Void, close: () -> Void)?
+    /// The "Opus · High" pill: where it is, what a click on it does, how the open bars close, and what the scroll wheel
+    /// over it steps (up and down thinking, sideways the model, as the ⌥⌘ arrows do).
+    struct Pill {
+        var frame: CGRect
+        var toggle: () -> Void
+        var close: () -> Void
+        var stepThinking: (Int) -> Bool
+        var stepModel: (Int) -> Bool
+    }
+    private(set) var pill: Pill?
     private var presses: Any?
-    func pill(_ frame: CGRect, toggle: @escaping () -> Void, close: @escaping () -> Void) {
-        pill = (frame, toggle, close)
+    func pill(_ p: Pill) {
+        pill = p
+        if monitor == nil { watchScrolls() }
         if presses == nil {
             // a click anywhere else in the panel closes the open bars, and still does what it does there (one local
             // monitor, an event handler: nothing is polled)
             presses = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
-                guard let self, let w = e.window as? QuickChatPanel, let cv = w.contentView else { return e }
-                var p = cv.convert(e.locationInWindow, from: nil)
-                if !cv.isFlipped { p.y = cv.bounds.height - p.y }
-                self.pressed(at: p)
+                self?.press(e)
                 return e
             }
         }
     }
 
-    /// A press at a point of the hosting view: while the bars are open, one outside them and the pill closes them.
+    /// The open bars' panel, drawn over the row: its frame, owned by the pill that opened it (a row that went can't
+    /// clear the one on screen).
+    private var open: (frame: CGRect, token: UUID)?
+    func opened(_ frame: CGRect, token: UUID) { open = (frame, token) }
+    func closed(token: UUID) { if open?.token == token { open = nil } }
+    var openFrame: CGRect? { open?.frame }
+
+    /// A mouse-down in the panel (the monitor's, or a check's event): while the bars are open, a press outside them and
+    /// the pill closes them (a press on the pill is the pill's own: it closes them itself).
+    func press(_ e: NSEvent) {
+        guard let w = e.window as? QuickChatPanel, let cv = w.contentView else { return }
+        var p = cv.convert(e.locationInWindow, from: nil)
+        if !cv.isFlipped { p.y = cv.bounds.height - p.y }
+        pressed(at: p)
+    }
+    /// A press at a point of the hosting view.
     func pressed(at p: CGPoint) {
-        guard let pill, let open = marks["open"], open != .zero else { return }
+        guard let pill, let open = open?.frame else { return }
         if !open.contains(p) && !pill.frame.contains(p) { pill.close() }
     }
 
@@ -1456,19 +1485,23 @@ final class QCStepTargets {
             var p = cv.convert(e.locationInWindow, from: nil)
             if !cv.isFlipped { p.y = cv.bounds.height - p.y }
             let inverted: CGFloat = e.isDirectionInvertedFromDevice ? -1 : 1
-            let d = (abs(e.scrollingDeltaY) >= abs(e.scrollingDeltaX) ? e.scrollingDeltaY : -e.scrollingDeltaX) * inverted
+            let sideways = abs(e.scrollingDeltaX) > abs(e.scrollingDeltaY)
+            let d = (sideways ? -e.scrollingDeltaX : e.scrollingDeltaY) * inverted
             return self.scroll(at: p, by: d, precise: e.hasPreciseScrollingDeltas,
                                began: e.phase.contains(.began) || e.phase.contains(.mayBegin),
-                               momentum: e.momentumPhase != []) ? nil : e
+                               momentum: e.momentumPhase != [], sideways: sideways) ? nil : e
         }
     }
 
-    /// A scroll of `d` (up or right positive) at a point of the hosting view: whether a step control took it. A wheel's
-    /// notch over a control is a step. A trackpad gesture belongs to the control it began over: its deltas add up to
-    /// 24 pt a step and its momentum is taken and steps nothing; a gesture that began anywhere else (the chat scrolling
-    /// onto the row) passes through whole, momentum too.
-    @discardableResult func scroll(at p: CGPoint, by d: CGFloat, precise: Bool, began: Bool, momentum: Bool = false) -> Bool {
+    /// A scroll of `d` (up or right positive) at a point of the hosting view: whether a step control or the pill took
+    /// it (the open bars before the pill they cover; over the pill, up and down steps thinking and sideways the model).
+    /// A wheel's notch is a step. A trackpad gesture belongs to what it began over: its deltas add up to 24 pt a step and
+    /// its momentum is taken and steps nothing; a gesture that began anywhere else (the chat scrolling onto the row)
+    /// passes through whole, momentum too.
+    @discardableResult func scroll(at p: CGPoint, by d: CGFloat, precise: Bool, began: Bool, momentum: Bool = false,
+                                   sideways: Bool = false) -> Bool {
         let over = controls.first(where: { $0.value.frame.contains(p) })?.key
+            ?? (pill.map { $0.frame.contains(p) } == true ? (sideways ? "pill-m" : "pill-t") : nil)
         let key: String
         if precise {
             if began && !momentum { scrolled = over.map { ($0, 0) } }
@@ -1480,11 +1513,11 @@ final class QCStepTargets {
             if scrolled?.key != over { scrolled = (over, 0) }
             key = over
         }
-        guard let c = controls[key] else { return false }
+        guard let step = controls[key]?.step ?? (key == "pill-m" ? pill?.stepModel : key == "pill-t" ? pill?.stepThinking : nil) else { return false }
         let threshold: CGFloat = precise ? 24 : 0.9
         var sum = (scrolled?.sum ?? 0) + d
         while abs(sum) >= threshold {
-            _ = c.step(sum > 0 ? 1 : -1)
+            _ = step(sum > 0 ? 1 : -1)
             sum -= sum > 0 ? threshold : -threshold
         }
         scrolled = (key, sum)
@@ -1550,7 +1583,7 @@ enum QCMenu {
     /// The profile menu for the profiles the picker offers.
     static func profiles(_ list: [(Profile, QuickChatLevel?)], on: String?, pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
         build(header: "Profile", items: list.map { p, l in
-            Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.full() != nil ? 100 : l?.weekNow())),
+            Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.binding()?.p)),
                  on: p.id == on) { pick(p.id) }
         }, actions: [Item(title: "Add a profile…", detail: "", action: add)])
     }
@@ -2016,9 +2049,9 @@ enum QuickChatRender {
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
             m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
             m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com", week: nil)
-            if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
-            if state == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
-            if state == "timedout" { m.switchNotice = .timedOut(wanted: "ultra-2@example.com") }
+            if base == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
+            if base == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
+            if base == "timedout" { m.switchNotice = .timedOut(wanted: "ultra-2@example.com") }
         case "switched":
             // after a switch: a new chat on the same profile, the typed question sent, one line on where it is
             var t = QuickChatTurn(question: q1); t.phase = .waiting
@@ -2069,11 +2102,11 @@ enum QuickChatRender {
         let env = ProcessInfo.processInfo.environment
         let width = env["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
         let height = env["QC_RENDER_HEIGHT"].flatMap { Double($0) }.map { CGFloat($0) }
-            ?? (state == "short" ? QuickChatRoot.minWindowHeight : QuickChatRoot.windowHeight)
+            ?? (base == "short" ? QuickChatRoot.minWindowHeight : QuickChatRoot.windowHeight)
         // hover-m2: the pointer on the model's third bar; hover-t0: on thinking's Off
         let stepHover: String? = state.hasPrefix("hover-") ? String(state.dropFirst("hover-".count)) : nil
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true).environment(\.qcStepHover, stepHover)
-            .frame(width: width, height: m.isWindow ? height : state == "bar-tall" ? 170 : nil)
+            .frame(width: width, height: m.isWindow ? height : base == "bar-tall" ? 170 : nil)
             .padding(30).background(Color(white: 0.1))
         let r = ImageRenderer(content: view)
         r.scale = 2

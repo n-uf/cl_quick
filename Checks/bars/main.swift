@@ -56,8 +56,18 @@ func frames() -> [String: CGRect] {
     for (k, v) in targets.controls { f[k] = v.frame }
     for (k, v) in targets.bars { f[k] = v.frame }
     if let pill = targets.pill { f["pill"] = pill.frame }
-    if let o = targets.marks["open"], o != .zero { f["open"] = o }
+    if let o = targets.openFrame { f["open"] = o }
     return f
+}
+/// A mouse-down at a point of the hosting view, as the window would deliver it, handed to the press handler the local
+/// monitor uses (not posted: nothing reaches the screen).
+func press(_ q: CGPoint) {
+    guard let e = NSEvent.mouseEvent(with: .leftMouseDown, location: inWindow(q), modifierFlags: [], timestamp: 0,
+                                     windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
+        check("a mouse-down event can be made", false); return
+    }
+    targets.press(e)
+    spin()
 }
 /// The pill's frame alone (the row at rest).
 func pillFrame() -> [String: CGRect] { targets.pill.map { ["pill": $0.frame] } ?? [:] }
@@ -125,6 +135,11 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     let keys = ["m", "t"] + families.indices.map { "m\($0)" } + levels.indices.map { "t\($0)" }
     check("\(name): every control and bar is laid out, and no other", Set(base.keys).subtracting(["pill", "open"]) == Set(keys), "\(base.keys.sorted())")
     check("\(name): the open bars are drawn over the pill, not beside it", (base["open"] ?? .zero).intersects(rest["pill"] ?? .zero))
+    if let o = base["open"], let pf = rest["pill"] {
+        check("\(name): the open bars keep to the row's height (nothing over the field or past the card)",
+              o.minY >= pf.minY - 0.5 && o.maxY <= pf.maxY + 0.5, "\(o) vs \(pf)")
+        check("\(name): the open bars start 4 pt left of the pill", abs(o.minX - (pf.minX - 4)) < 0.6, "\(o.minX) vs \(pf.minX)")
+    }
     for k in keys.dropFirst(2) {
         let r = base[k] ?? .zero
         check("\(name): \(k) is an 8 × 28 target", abs(r.width - 8) < 0.01 && abs(r.height - 28) < 0.01, "\(r)")
@@ -211,19 +226,31 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     spin()
     check("\(name): and steps nothing", m.effectiveThinking == was, "\(m.effectiveThinking)")
     check("\(name): after it all, nothing moved", same(frames(), base), moved(base, frames()))
-    // a press inside the open bars keeps them open; one outside closes them (and the press still does its own thing)
-    if let b0 = base["t0"] { targets.pressed(at: CGPoint(x: b0.midX, y: b0.midY)) }
+    // presses through the monitor's own handler: one inside the open bars keeps them open; one on the pill is the
+    // pill's (the handler leaves it, the button closes them: once, never closed and reopened); one outside closes them
+    if let b0 = base["t0"] { press(CGPoint(x: b0.midX, y: b0.midY)) }
     check("\(name): a press on a bar keeps them open", m.controlsOpen)
-    targets.pressed(at: CGPoint(x: 4, y: 4)); spin()
-    check("\(name): a click outside closes them", !m.controlsOpen && targets.controls.isEmpty)
+    if let pf = rest["pill"] { press(CGPoint(x: pf.midX, y: pf.midY)) }
+    check("\(name): a press on the pill leaves it to the pill", m.controlsOpen)
+    targets.pill?.toggle(); spin(0.3)
+    check("\(name): and the pill's click closes them, once", !m.controlsOpen)
+    targets.pill?.toggle(); spin(0.3)
+    press(CGPoint(x: 4, y: 4))
+    check("\(name): a click outside closes them", !m.controlsOpen && targets.controls.isEmpty && targets.openFrame == nil)
     check("\(name): closing moves nothing in the row", same(pillFrame(), rest), moved(rest, pillFrame()))
-    // the pill again, and Esc
+    // Esc (the panel's cancel, as the field's Esc and the menu key reach it): closes them, the panel stays
     targets.pill?.toggle(); spin(0.3)
-    targets.pill?.toggle(); spin(0.3)
-    check("\(name): a second click on the pill closes them", !m.controlsOpen)
-    targets.pill?.toggle(); spin(0.3)
-    m.escape(); spin()
+    p.cancelOperation(nil); spin()
     check("\(name): Esc closes them, and the panel stays", !m.controlsOpen && p.isVisible)
+    // at rest, the scroll wheel over the pill steps thinking, sideways the model
+    if let pf = rest["pill"] {
+        m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()
+        targets.scroll(at: CGPoint(x: pf.midX, y: pf.midY), by: 1, precise: false, began: true); spin()
+        check("\(name): a notch over the pill: thinking a step up", m.effectiveThinking == .medium && !m.controlsOpen, "\(m.effectiveThinking)")
+        targets.scroll(at: CGPoint(x: pf.midX, y: pf.midY), by: 1, precise: false, began: true, sideways: true); spin()
+        check("\(name): sideways over the pill: the model a step up", m.resolvedModel.family == top, "\(m.resolvedModel.family)")
+        check("\(name): and the pill didn't move", same(pillFrame(), rest), moved(rest, pillFrame()))
+    }
 }
 
 let sets: [[QuickChatModelChoice]] = [[.haiku, .sonnet, .opus, .fable], [.haiku, .sonnet, .opus], [.haiku, .sonnet]]
@@ -265,6 +292,15 @@ for w in [QuickChatRoot.width, CGFloat(440)] {
         if let f = first { check("\(name): the indicator never moves sideways or changes width", ui.minX == f.minX && ui.width == f.width, "\(ui) vs \(f)") } else { first = ui }
     }
 }
+
+// ⌘W hides at once, the bars open or not (Esc closes them first; ⌘W doesn't take two presses)
+m.controlsOpen = true; spin(0.3)
+if let w = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber,
+                            context: nil, characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13) {
+    check("⌘W is taken", p.performKeyEquivalent(with: w))
+    spin()
+    check("⌘W hides the panel in one press, and the bars close with it", !p.isVisible && !m.controlsOpen, "visible \(p.isVisible), open \(m.controlsOpen)")
+} else { check("a ⌘W event can be made", false) }
 
 CheckQuiet.verify("at the end")
 print("model and thinking control checks: \(passed)/\(passed + failed) passed")

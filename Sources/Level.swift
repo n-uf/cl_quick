@@ -134,6 +134,7 @@ struct QuickChatLevel: Codable, Equatable {
 struct QCUsageView: View {
     let level: QuickChatLevel
     @State private var frame: CGRect = .zero
+    @State private var hovering = false
     @Environment(\.qcRendering) private var rendering
 
     static let font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
@@ -158,9 +159,12 @@ struct QCUsageView: View {
                 .onChange(of: g.frame(in: .global)) { frame = $0; QCStepTargets.shared.mark("usage", $0) }
         })
         .onHover { inside in
+            hovering = inside
             if inside { QCFloat.shared.show(AnyView(QCUsageCard(level: level)), above: frame, align: .trailing) } else { QCFloat.shared.hide() }
         }
-        .onDisappear { QCFloat.shared.hide() }
+        // new numbers while the card is up: the card says them
+        .onChange(of: level) { l in if hovering { QCFloat.shared.show(AnyView(QCUsageCard(level: l)), above: frame, align: .trailing) } }
+        .onDisappear { if hovering { hovering = false; QCFloat.shared.hide() } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QCHeaderLine.tooltip(level).replacingOccurrences(of: "\n", with: ". "))
     }
