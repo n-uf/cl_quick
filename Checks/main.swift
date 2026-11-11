@@ -611,6 +611,129 @@ do {
           && AccountBook.ago(n0.addingTimeInterval(-21 * 86400), now: n0) == "3 weeks ago" && AccountBook.ago(n0.addingTimeInterval(60), now: n0) == "just now")
 }
 
+// MARK: the update notice (Updates.swift): a stand-in fetcher, a clock of its own, no network
+
+do {
+    func newer(_ t: String, _ c: String) -> Bool { UpdateVersion.isNewer(t, than: c) }
+    check("version: 26.11.10 > 26.11.9", newer("v26.11.10", "26.11.9"))
+    check("version: 26.11.9 is not > 26.11.10", !newer("v26.11.9", "26.11.10"))
+    check("version: 26.12.0 > 26.11.99", newer("v26.12.0", "26.11.99"))
+    check("version: 27.1.0 > 26.12.5", newer("v27.1.0", "26.12.5"))
+    check("version: equal is not newer", !newer("v26.11.3", "26.11.3"))
+    check("version: older is not newer", !newer("v26.10.7", "26.11.3"))
+    check("version: tag without v", newer("26.11.4", "26.11.3"))
+    for bad in ["", "v", "latest", "v26.11", "v26.11.3.1", "v26.11.x", "v26.11.4-rc1", "v26..4", "v-1.2.3", "v26.11.4 beta", "v１.2.3"] {
+        check("version: malformed tag '\(bad)' ignored", !newer(bad, "26.11.3"), UpdateVersion.parse(bad) as Any)
+    }
+    check("version: malformed current is never older", !newer("v26.11.4", "dev"))
+    check("version: shown", UpdateVersion.shown("v26.11.3") == "26.11.3" && UpdateVersion.shown("v26.11") == nil)
+    check("page: the release's own", UpdateVersion.page("https://github.com/n-uf/cl_quick/releases/tag/v26.11.3").absoluteString == "https://github.com/n-uf/cl_quick/releases/tag/v26.11.3")
+    let fallback = "https://github.com/n-uf/cl_quick/releases/latest"
+    check("page: none → the releases page", UpdateVersion.page(nil).absoluteString == fallback)
+    check("page: another host → the releases page", UpdateVersion.page("https://example.com/x").absoluteString == fallback)
+    check("page: not https → the releases page", UpdateVersion.page("http://github.com/n-uf/cl_quick").absoluteString == fallback)
+
+    // GitHub's answers
+    func ans(_ body: String?, _ status: Int?, failed: Bool = false) -> UpdateFetch { UpdateChecker.answer(data: body.map { Data($0.utf8) }, status: status, failed: failed) }
+    check("answer: a release", ans(#"{"tag_name":"v26.11.3","html_url":"https://github.com/n-uf/cl_quick/releases/tag/v26.11.3","draft":false,"prerelease":false}"#, 200)
+          == .release(tag: "v26.11.3", page: "https://github.com/n-uf/cl_quick/releases/tag/v26.11.3"))
+    check("answer: a pre-release is none", ans(#"{"tag_name":"v26.11.3","prerelease":true}"#, 200) == .none)
+    check("answer: a draft is none", ans(#"{"tag_name":"v26.11.3","draft":true}"#, 200) == .none)
+    check("answer: unreadable", ans("nope", 200) == .other && ans(#"{"x":1}"#, 200) == .other)
+    check("answer: 404", ans(#"{"message":"Not Found"}"#, 404) == .none)
+    check("answer: 403 and 429", ans(nil, 403) == .limited && ans(nil, 429) == .limited)
+    check("answer: 500", ans(nil, 500) == .other)
+    check("answer: no answer", ans(nil, nil, failed: true) == .offline)
+
+    // the checker, with a fetcher that counts and a clock that is moved by hand
+    final class Fake {
+        var result: UpdateFetch = .none
+        var requests = 0
+        var clock = Date(timeIntervalSince1970: 1_800_000_000)
+        var on = true
+        func fetch(_ done: @escaping (UpdateFetch) -> Void) { requests += 1; done(result) }
+    }
+    func make(_ f: Fake, current: String = "26.11.0", file: URL? = nil) -> UpdateChecker {
+        UpdateChecker(current: current, enabled: { f.on }, fetch: f.fetch, now: { f.clock }, file: file)
+    }
+    let rel = "https://github.com/n-uf/cl_quick/releases/tag/v26.11.3"
+
+    let a = Fake(); a.result = .release(tag: "v26.11.3", page: rel)
+    let ca = make(a); var changes = 0; ca.changed = { changes += 1 }
+    check("updates: nothing known before the first check", ca.available == nil)
+    ca.checkIfDue()
+    check("updates: a newer release is shown", ca.available?.version == "26.11.3" && ca.available?.page.absoluteString == rel, ca.available as Any)
+    check("updates: one request, the change reported once", a.requests == 1 && changes == 1, (a.requests, changes))
+    ca.checkIfDue()
+    check("updates: no second request within the day", a.requests == 1, a.requests)
+    a.clock.addTimeInterval(23 * 3600 + 59 * 60)
+    ca.checkIfDue()
+    check("updates: still none a minute short of the day", a.requests == 1, a.requests)
+    a.clock.addTimeInterval(2 * 60)
+    ca.checkIfDue()
+    check("updates: asked again after the day", a.requests == 2, a.requests)
+    check("updates: the same answer changes nothing", changes == 1, changes)
+
+    let b = Fake(); b.result = .release(tag: "v26.11.0", page: nil)
+    let cb = make(b); cb.checkIfDue()
+    check("updates: an equal release shows nothing", cb.available == nil && b.requests == 1)
+    let b2 = Fake(); b2.result = .release(tag: "v26.10.9", page: nil)
+    let cb2 = make(b2); cb2.checkIfDue()
+    check("updates: an older release shows nothing", cb2.available == nil)
+    let b3 = Fake(); b3.result = .release(tag: "v26.11.4-rc1", page: nil)
+    let cb3 = make(b3); cb3.checkIfDue()
+    check("updates: a malformed tag shows nothing", cb3.available == nil && cb3.state.latest == nil)
+
+    let c = Fake(); c.result = .none
+    let cc = make(c); cc.checkIfDue()
+    check("updates: 404 shows nothing", cc.available == nil && cc.state.latest == nil && c.requests == 1)
+
+    let d = Fake(); d.on = false; d.result = .release(tag: "v26.11.3", page: rel)
+    let cd = make(d); cd.checkIfDue(); cd.checkIfDue()
+    check("updates: off makes no request", d.requests == 0, d.requests)
+    check("updates: off shows nothing", cd.available == nil)
+    d.clock.addTimeInterval(3 * 86400); cd.checkIfDue()
+    check("updates: off makes no request, days later either", d.requests == 0, d.requests)
+    d.on = true; cd.checkIfDue()
+    check("updates: turned on, the first check goes out", d.requests == 1 && cd.available?.version == "26.11.3", d.requests)
+    d.on = false
+    check("updates: turned off, a known newer release is no longer shown", cd.available == nil)
+
+    let e = Fake(); e.result = .release(tag: "v26.11.3", page: rel)
+    let ce = make(e); ce.checkIfDue()
+    e.result = .limited; e.clock.addTimeInterval(25 * 3600); ce.checkIfDue()
+    check("updates: rate limited keeps what was known", ce.available?.version == "26.11.3" && e.requests == 2)
+    ce.checkIfDue(); e.clock.addTimeInterval(3600); ce.checkIfDue()
+    check("updates: rate limited waits the day", e.requests == 2, e.requests)
+    e.clock.addTimeInterval(24 * 3600); e.result = .none; ce.checkIfDue()
+    check("updates: next day it asks again (and 404 clears it)", e.requests == 3 && ce.available == nil, e.requests)
+
+    let g = Fake(); g.result = .offline
+    let cg = make(g); cg.checkIfDue(); cg.checkIfDue()
+    check("updates: offline, not again at once", g.requests == 1, g.requests)
+    g.clock.addTimeInterval(61 * 60); g.result = .release(tag: "v26.11.3", page: nil)
+    cg.checkIfDue()
+    check("updates: offline, tried again in an hour", g.requests == 2 && cg.available?.version == "26.11.3", g.requests)
+    check("updates: no page given → the releases page", cg.available?.page.absoluteString == fallback)
+
+    let h = Fake(); h.result = .release(tag: "v26.11.3", page: rel)
+    let ch = make(h, current: "26.11.3"); ch.checkIfDue()
+    check("updates: after updating the notice goes by itself", ch.available == nil)
+
+    // what is kept: the last check and the latest seen, read back by the next launch, which doesn't ask again at once
+    let kept = URL(fileURLWithPath: work + "-updates/updates.json")
+    try? FileManager.default.removeItem(at: kept.deletingLastPathComponent())
+    let k = Fake(); k.result = .release(tag: "v26.11.3", page: rel)
+    make(k, file: kept).checkIfDue()
+    let kn = make(k, file: kept)
+    check("updates: kept across launches", kn.available?.version == "26.11.3" && kn.state.lastCheck == k.clock, kn.state)
+    kn.checkIfDue()
+    check("updates: a restart doesn't ask again", k.requests == 1, k.requests)
+    let keys = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: kept))) as? [String: Any])?.keys.sorted() ?? []
+    check("updates: only the last check, the version and its page are kept", keys == ["lastCheck", "latest", "page"], keys)
+    try? FileManager.default.removeItem(at: kept.deletingLastPathComponent())
+}
+
 try? FileManager.default.removeItem(atPath: argsFile)
 print("quick chat checks: \(passed)/\(passed + failed) passed")
 exit(failed == 0 ? 0 : 1)

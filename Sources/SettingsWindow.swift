@@ -2,7 +2,7 @@
 // lamp, and the + tile to add one. A profile's page in three layers: its name and folder; its accounts (the one in use
 // with its 5 hours and week, standby ones with their week as last reported, Add an account…); how the chat uses it
 // (the default, the picker); then Remove. General: one grid for the shortcut, the model and thinking new chats start
-// with, and Open at login, then one strip for cl_quick's own data. No (i): a plain line where something needs saying.
+// with, Open at login and Updates (the daily look for a newer release), then one strip for cl_quick's own data. No (i): a plain line where something needs saying.
 
 import AppKit
 import Carbon.HIToolbox
@@ -1041,6 +1041,15 @@ struct GeneralPage: View {
                 }
                 GridLine(label: "Open at login") {
                     SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
+                }
+                GridLine(label: "Updates") {
+                    VStack(alignment: .leading, spacing: 7) {
+                        SSwitch(isOn: Binding(get: { state.settings.checkForUpdates },
+                                              set: { state.settings.checkForUpdates = $0; state.save() }), on: "", off: "")
+                        note(state.settings.checkForUpdates
+                             ? "About once a day, asks GitHub for a newer version; the menu says so. Nothing is downloaded."
+                             : "No check: cl_quick makes no request to GitHub.", face.muted)
+                    }
                 }
             }
             HStack(spacing: 10) {

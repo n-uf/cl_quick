@@ -1,6 +1,6 @@
 // Files: where cl_quick keeps things, and Remove cl_quick data….
 //
-//   ~/Library/Application Support/cl_quick/   profiles.json, settings.json, levels.json, models.json, work/<profile id>/
+//   ~/Library/Application Support/cl_quick/   profiles.json, settings.json, levels.json, models.json, updates.json, work/<profile id>/
 //
 // Quick chats are incognito: Claude Code runs with --no-session-persistence, so a chat writes nothing. Chats saved by
 // earlier versions are Claude Code sessions in the profile's folder under projects/<the work folder, each
@@ -19,6 +19,8 @@ enum Files {
     static var profiles: URL { folder.appendingPathComponent("profiles.json") }
     static var settings: URL { folder.appendingPathComponent("settings.json") }
     static var levels: URL { folder.appendingPathComponent("levels.json") }
+    /// When the update check last asked, and the newest release it saw (Updates.swift).
+    static var updates: URL { folder.appendingPathComponent("updates.json") }
     /// Each profile's account's models, as Claude Code last listed them (ModelCatalog).
     static var models: URL { folder.appendingPathComponent("models.json") }
     static var work: URL { folder.appendingPathComponent("work") }
@@ -99,4 +101,12 @@ enum Files {
         while !FileManager.default.fileExists(atPath: u.path), u.path != "/" { u = u.deletingLastPathComponent() }
         NSWorkspace.shared.open(u)
     }
+}
+
+extension UpdateChecker {
+    /// The app's one update check: this version (the bundle's YY.M.R), Settings ▸ General ▸ Updates, updates.json.
+    static let shared = UpdateChecker(
+        current: (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.0",
+        enabled: { QuickChat.shared.settings.checkForUpdates },
+        file: Files.updates)
 }

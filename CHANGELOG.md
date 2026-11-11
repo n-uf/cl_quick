@@ -66,3 +66,7 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **Its files in one place**, listed in Settings, and Remove… (General) moves them to the Trash. Quick chats write no
   files; chats saved by earlier versions are listed as old chats and removed with the rest.
 - Settings in cl_audit's look; the chat in Claude's colours.
+- **An update notice.** About once a day cl_quick asks GitHub Releases (anonymously, User-Agent "cl_quick") for the latest
+  release; when it is newer than the app, the menu bar menu shows **Update available: <version>**, which opens the
+  release's page. Nothing is downloaded or installed. **Settings ▸ General ▸ Updates** turns it off (no request at
+  all); the time of the last check and the newest version seen are kept in `updates.json`.

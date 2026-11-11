@@ -52,6 +52,8 @@ struct QuickChatSettings: Codable, Equatable {
     var dictationReturn: QuickChatDictationReturn = .showFirst
     /// cl_audit's quick chat settings were looked at once, on the first run.
     var importedFromAudit = false
+    /// About once a day, ask GitHub whether a newer release exists (Updates.swift); a key missing from the file is on.
+    var checkForUpdates = true
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -63,6 +65,7 @@ struct QuickChatSettings: Codable, Equatable {
         thinking = (try? c.decodeIfPresent(QuickChatThinking.self, forKey: .thinking)) ?? .off
         dictationReturn = (try? c.decodeIfPresent(QuickChatDictationReturn.self, forKey: .dictationReturn)) ?? .showFirst
         importedFromAudit = (try? c.decodeIfPresent(Bool.self, forKey: .importedFromAudit)) ?? false
+        checkForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checkForUpdates)) ?? true
     }
 
     static func load() -> QuickChatSettings { Files.read(QuickChatSettings.self, Files.settings) ?? .init() }

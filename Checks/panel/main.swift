@@ -1588,6 +1588,17 @@ do {
     print("  images: \(passed - passedBefore) of \(passed + failed - passedBefore - failedBefore) checks passed")
 }
 
+// the update notice's setting (Settings ▸ General ▸ Updates): a missing key is on; off is read; a wrong type is on
+do {
+    func read(_ json: String) -> Bool? { (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(json.utf8)))?.checkForUpdates }
+    check("update setting: a missing key is on", read("{}") == true)
+    check("update setting: off is read", read(#"{"checkForUpdates":false}"#) == false)
+    check("update setting: a wrong type is on", read(#"{"checkForUpdates":"no"}"#) == true)
+    var s = QuickChatSettings(); s.checkForUpdates = false
+    let back = (try? JSONEncoder().encode(s)).flatMap { try? JSONDecoder().decode(QuickChatSettings.self, from: $0) }
+    check("update setting: off survives a save", back?.checkForUpdates == false)
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

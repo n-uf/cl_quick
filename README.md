@@ -5,7 +5,7 @@
 >
 > **cl_quick is young and still changing. Its settings, the few files it stores and the way it talks to Claude Code are not final.**
 >
-> Version numbers are dates (YY.M.R), not semantic versions, so any release may change them, and a newer Claude Code can stop parts of cl_quick working until it is updated. cl_quick stores nothing beyond its settings and a few small files in `~/Library/Application Support/cl_quick` (levels.json, models.json, profiles.json and settings.json) and the work folders Claude Code runs in, and it has no backups or exports. Read the [CHANGELOG](CHANGELOG.md) before you upgrade.
+> Version numbers are dates (YY.M.R), not semantic versions, so any release may change them, and a newer Claude Code can stop parts of cl_quick working until it is updated. cl_quick stores nothing beyond its settings and a few small files in `~/Library/Application Support/cl_quick` (levels.json, models.json, profiles.json, settings.json and updates.json) and the work folders Claude Code runs in, and it has no backups or exports. Read the [CHANGELOG](CHANGELOG.md) before you upgrade.
 
 A floating Claude chat for the Mac, on a shortcut. Press it over any app: a bar opens; the first message turns it into a
 chat window that stays floating, on every Space, until Esc hides it. It never brings another app forward.
@@ -155,6 +155,9 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   is Off or the efforts the chosen model takes (Low, Medium, High, Extra, Max); a step it doesn't take moves to the
   nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
 - **Open at login**: in the menu bar, ready for the shortcut.
+- **Updates**: on by default. About once a day cl_quick checks GitHub Releases and, when a newer version exists, the
+  menu bar menu shows **Update available: 26.11.3**; it opens the release's page in your browser. Nothing is
+  downloaded or installed by the app. Off: no request at all (see "What it keeps, and what it sends").
 - A strip at the bottom: the incognito note ("Quick chats are incognito: nothing is saved on this Mac."), the size of
   cl_quick's own files, any old chats saved by earlier versions, **Show in Finder**, and **Remove…**, which moves
   cl_quick's data to the Trash.
@@ -175,7 +178,12 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   Settings ▸ General ▸ Remove….
 - Remove… (it asks "Move cl_quick's data to the Trash?") moves cl_quick's folder and any old quick chats to the Trash, turns the login item off and
   quits. Your Claude Code folders, their sign-ins and their other sessions stay.
-- It sends nothing but your messages, through Claude Code. Claude Code runs with no tools, no MCP servers, no settings
+- Apart from your messages (through Claude Code, below), the one thing it sends is an update check: about once a day it
+  asks GitHub for cl_quick's latest release (`api.github.com/repos/n-uf/cl_quick/releases/latest`, anonymous, with the
+  User-Agent "cl_quick"), compares the version and, if a newer one exists, adds "Update available" to the menu, which
+  opens the release's page; nothing is downloaded or installed. It keeps the time of the last check and the newest
+  version seen in `updates.json`. Settings ▸ General ▸ Updates turns it off, and then no request is made.
+- Your messages go through Claude Code. Claude Code runs with no tools, no MCP servers, no settings
   files and its non-essential traffic (telemetry, error reports, update checks) off. It gets only an allowlisted part of
   the Mac's environment (who you are, the language, proxies and certificates) and answers on the profile's own sign-in;
   keys, tokens and other providers' settings from your shell are left out.

@@ -78,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         it.menu = menu
         item = it
+        UpdateChecker.shared.start()    // a newer release: a line in the menu (nothing at all while Updates is off)
         if firstRun { SettingsWindow.shared.show(profile: nil, firstRun: true) }
     }
 
@@ -104,6 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(i)
         }
         if !store.profiles.isEmpty { menu.addItem(.separator()) }
+        if let u = UpdateChecker.shared.available {
+            let up = NSMenuItem(title: "Update available: \(u.version)", action: #selector(openUpdate(_:)), keyEquivalent: "")
+            up.target = self; up.representedObject = u.page
+            menu.addItem(up)
+        }
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -112,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openChat() { chat.open() }
     @objc private func openProfile(_ sender: NSMenuItem) { chat.open(profile: sender.representedObject as? String) }
+    @objc private func openUpdate(_ sender: NSMenuItem) { if let u = sender.representedObject as? URL { NSWorkspace.shared.open(u) } }
     @objc private func openSettings() { SettingsWindow.shared.show(profile: nil) }
 }
 
