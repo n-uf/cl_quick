@@ -231,6 +231,10 @@ final class QuickChatModel: ObservableObject {
     @Published var preparing = 0
     /// Counts the times the attachments were cleared (a new chat): images still being read for an earlier count are dropped.
     private var attachGeneration = 0
+    /// A send was asked while images were still being read: it goes when the last one is in. A new chat or hiding the
+    /// panel forgets it.
+    private(set) var sendWhenReady = false
+    func cancelSendWhenReady() { sendWhenReady = false }
     /// One line over the field when something was left out (a file that isn't an image, more than five); goes after a while.
     @Published var imageNote: String?
     /// A drag with images is over the panel: its card is outlined.
@@ -390,8 +394,12 @@ final class QuickChatModel: ObservableObject {
         // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
         if dictating || dictationNoticed, !busy, !blocked { dictate(false) }
         let q = field.trimmingCharacters(in: .whitespacesAndNewlines)
-        // images alone are a message too; images still being read wait (a moment) for the next Return
-        guard !q.isEmpty || !images.isEmpty, preparing == 0, !busy, !blocked else { return }
+        // images still being read: the message goes as soon as they are in (attach calls send() again), whoever asked
+        // (Return, an automatic resend after an account switch or Ask on …)
+        if preparing > 0, !busy, !blocked { sendWhenReady = true; return }
+        sendWhenReady = false
+        // images alone are a message too
+        guard !q.isEmpty || !images.isEmpty, !busy, !blocked else { return }
         guard target != nil else { barProblem = .noProfile; return }
         dictationNote = nil
         let sent = images
@@ -456,6 +464,8 @@ final class QuickChatModel: ObservableObject {
                     case .failure(let why): failures.append(why)
                     }
                 }
+                // a message waiting for these goes now (its note, if any, is said after: send() clears the old one)
+                if self.preparing == 0, self.sendWhenReady { self.send() }
                 self.say(QCImages.note(notImages: notImages, failures: failures, overCount: over, chatFull: chatFull))
                 done()
             }
@@ -569,6 +579,7 @@ final class QuickChatModel: ObservableObject {
         ended = nil
         turns = []
         returnHeld = false
+        sendWhenReady = false
         if dictating || dictationNoticed { dictate(false) }
         if !keepField { field = ""; images = []; imageNote = nil; attachGeneration += 1 }
         barProblem = nil
@@ -1258,6 +1269,7 @@ final class QuickChat {
     }
 
     func hide() {
+        model.cancelSendWhenReady()
         if model.dictating || model.dictationNoticed { dictate(false) }     // Dictation doesn't go on into a hidden field
         panel?.orderOut(nil)
     }

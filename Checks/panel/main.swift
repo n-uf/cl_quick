@@ -1797,6 +1797,59 @@ do {
     try? FileManager.default.removeItem(at: c.dir)
 }
 
+// Return (or an automatic send: after an account switch, Ask on …) while pictures are being read sends once they are in
+do {
+    let slow = noisyPNG(3000, 3000)
+    let c = imageFixChat("images-ready"), m = c.m
+    func waitLanded(_ f: () -> Bool, _ secs: Double = 20) {
+        let end = Date().addingTimeInterval(secs)
+        while !f(), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    // Return during preparation: nothing yet, then one message with the picture
+    m.field = "go"
+    m.attach(QCImages.Found(sources: [.data(slow)]))
+    m.send()
+    check("ready: Return while preparing sends nothing yet and waits", m.turns.isEmpty && m.preparing == 1 && m.sendWhenReady && m.field == "go", "\(m.turns.count) \(m.preparing) \(m.sendWhenReady)")
+    waitLanded { m.turns.count == 1 && m.turns[0].phase == .done }
+    check("ready: …and sends once the picture is in, once, with the text and the picture",
+          m.turns.count == 1 && m.turns[0].question == "go" && m.turns[0].images.count == 1 && m.images.isEmpty && m.field.isEmpty && !m.sendWhenReady,
+          "\(m.turns.count) \(m.images.count) \(m.sendWhenReady)")
+    check("ready: the stand-in got exactly one line, with one picture", c.lines.count == 1 && c.imageBlocks(c.lines[0]) == 1, "\(c.lines.count)")
+    // a picture alone is a message too
+    m.attach(QCImages.Found(sources: [.data(slow)]))
+    m.send()
+    waitLanded { m.turns.count == 2 && m.turns[1].phase == .done }
+    check("ready: a picture alone, Return during preparation, is sent", m.turns.count == 2 && m.turns[1].question.isEmpty && m.turns[1].images.count == 1, "\(m.turns.count)")
+    // an automatic resend (the account switch's continueSwitched) waits as well
+    m.field = "again"
+    m.attach(QCImages.Found(sources: [.data(slow)]))
+    m.continueSwitched(note: "Moved.")
+    check("ready: an automatic resend waits for the picture", m.sendWhenReady && m.turns.isEmpty, "\(m.sendWhenReady) \(m.turns.count)")
+    waitLanded { m.turns.count == 1 && m.turns[0].phase == .done }
+    check("ready: …and goes with it", m.turns.count == 1 && m.turns[0].question == "again" && m.turns[0].images.count == 1, "\(m.turns.count)")
+    // ⌘N while it waits forgets it; so does hiding the panel
+    let before = c.lines.count
+    m.field = "never"
+    m.attach(QCImages.Found(sources: [.data(slow)]))
+    m.send()
+    m.newChat()
+    waitLanded { m.preparing == 0 }
+    spin(0.3)
+    check("ready: ⌘N while waiting forgets the send: nothing sent, field empty", c.lines.count == before && m.turns.isEmpty && m.images.isEmpty && m.field.isEmpty && !m.sendWhenReady, "\(c.lines.count) \(before)")
+    let cm = chat.model
+    cm.field = "hidden"
+    cm.attach(QCImages.Found(sources: [.data(slow)]))
+    cm.send()
+    let flagged = cm.sendWhenReady
+    chat.hide()
+    check("ready: hiding the panel forgets the waiting send", flagged && !cm.sendWhenReady, "\(flagged) \(cm.sendWhenReady)")
+    waitLanded { cm.preparing == 0 }
+    check("ready: …and nothing was sent", cm.turns.isEmpty && cm.images.count == 1, "\(cm.turns.count) \(cm.images.count)")
+    cm.newChat()
+    m.shutdown()
+    try? FileManager.default.removeItem(at: c.dir)
+}
+
 // drops on the field: text (with a picture of it) and non-image files are the text field's own (paths go in as before);
 // pictures and image files are attachments; the panel's own view still takes a picture drag anywhere else
 final class ImageFixDrag: NSObject, NSDraggingInfo {
