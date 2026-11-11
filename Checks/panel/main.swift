@@ -1173,6 +1173,80 @@ do {
           && QuickChatShortcut.keyName(keyCode: UInt32(kVK_Space), layout: nil) == "Space")
 }
 
+// ── ⌘⇧C: the latest complete answer to the pasteboard (an injectable one, never the operator's) ──────────────────
+do {
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("copy-check")
+    try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+    let m = chat.model
+    chat.hide(); m.newChat(); spin(0.3)
+    let pb = NSPasteboard(name: NSPasteboard.Name("cl-quick-copy-check-\(ProcessInfo.processInfo.processIdentifier)"))
+    pb.clearContents()
+    let realPasteboard = m.pasteboard
+    m.pasteboard = pb
+    defer { pb.releaseGlobally(); m.pasteboard = realPasteboard }
+    func key(_ ch: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [.command, .shift]) -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                       context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
+    // nothing yet: the key is taken and copies nothing
+    pb.setString("before", forType: .string)
+    check("⌘⇧C with no answer: taken, the pasteboard untouched", key("C", 8) && pb.string(forType: .string) == "before", "\(pb.string(forType: .string) ?? "nil")")
+    // a real answer from the stand-in `claude`
+    var t = QuickChatTarget(Profile(id: "copy-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
+    t.workFolder = dir.appendingPathComponent("work").path
+    t.accountUUID = "u-copy"; t.email = "alex@example.com"
+    // (a chat model of its own talks to the stand-in; its finished turn is then put on the panel's model, which the keys reach)
+    let s = QuickChatModel()
+    s.target = t
+    s.resolveClaude = { $0(stub) }
+    s.freshTarget = { _, done in done(t) }
+    s.field = "hello"; s.send()
+    let end = Date().addingTimeInterval(8)
+    while s.turns.last?.phase != .done, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    let answer = s.turns.last?.answer ?? ""
+    s.shutdown()
+    m.turns = s.turns; m.level = nil; spin(0.2)
+    check("copy: the stand-in answered", s.turns.last?.phase == .done && !answer.isEmpty, "\(String(describing: s.turns.last))")
+    check("copy: not copied before the key", m.copied == nil && pb.string(forType: .string) == "before")
+    check("copy: ⌘⇧C is taken and puts the answer on the pasteboard", key("C", 8) && pb.string(forType: .string) == answer, "\(pb.string(forType: .string) ?? "nil") vs \(answer)")
+    check("copy: it is plain text only, nothing else on the pasteboard", Set(pb.types ?? []).isSubset(of: [.string, NSPasteboard.PasteboardType("NSStringPboardType")]) && pb.pasteboardItems?.count == 1, "\(String(describing: pb.types))")
+    check("copy: the answer's footer says Copied", m.copied == m.turns.last?.id)
+    // Cyrillic (the C key gives "с"/"С"), and Caps Lock; other letters do nothing
+    pb.clearContents(); m.copied = nil
+    check("copy: Cyrillic ⌘⇧C (С on the C key) copies", key("С", 8) && pb.string(forType: .string) == answer)
+    pb.clearContents()
+    check("copy: Cyrillic ⌘⇧C with Caps Lock on copies", key("с", 8, [.command, .shift, .capsLock]) && pb.string(forType: .string) == answer)
+    pb.clearContents(); pb.setString("other", forType: .string)
+    _ = key("M", 46)                                       // ⌘⇧M: not ours
+    check("copy: another letter does not copy", pb.string(forType: .string) == "other")
+    // ⌘C (no shift) is still the selection's: with nothing selected it copies nothing of the answer
+    pb.clearContents(); pb.setString("other", forType: .string)
+    _ = key("c", 8, [.command]); spin(0.2)
+    check("copy: ⌘C without Shift does not copy the answer", pb.string(forType: .string) != answer || answer == "other")
+    // the footer's Copy button copies the same (and flashes the same tick)
+    pb.clearContents(); m.copied = nil
+    if let first = m.turns.last { m.copyAnswer(of: first) }
+    check("copy: a click on Copy puts the answer there too", pb.string(forType: .string) == answer && m.copied != nil)
+    // while a later answer streams: the previous complete one is copied
+    var live = QuickChatTurn(question: "next"); live.answer = "half an ans"; live.phase = .streaming
+    m.turns.append(live)
+    pb.clearContents(); m.copied = nil
+    check("streaming: ⌘⇧C copies the previous complete answer", key("C", 8) && pb.string(forType: .string) == answer && m.copied == m.turns[0].id, "\(pb.string(forType: .string) ?? "nil")")
+    // a lone streaming answer: nothing, the pasteboard as it was
+    m.turns = [live]
+    pb.clearContents(); pb.setString("kept", forType: .string); m.copied = nil
+    check("streaming, no earlier answer: ⌘⇧C copies nothing (taken, pasteboard untouched)", key("C", 8) && pb.string(forType: .string) == "kept" && m.copied == nil)
+    // a stopped answer counts, a failed or empty one never
+    var stopped = QuickChatTurn(question: "s", answer: "partial text"); stopped.phase = .stopped
+    var failedT = QuickChatTurn(question: "f", answer: "broken"); failedT.phase = .failed
+    m.turns = [stopped, failedT]
+    check("a stopped answer is copied, a later failed one skipped", key("C", 8) && pb.string(forType: .string) == "partial text")
+    m.newChat()
+    try? FileManager.default.removeItem(at: dir)
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

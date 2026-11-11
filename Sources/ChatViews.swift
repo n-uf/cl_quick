@@ -455,7 +455,7 @@ struct QCTurnView: View {
             }
             if turn.phase == .waiting || turn.phase == .streaming { QCPulse().padding(.top, 10) }
             if turn.phase == .done || turn.phase == .stopped {
-                let shown = last || hover
+                let shown = last || hover || model.copied == turn.id       // ⌘⇧C on an earlier answer says "Copied" under it
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
                 footer.padding(.top, 4).opacity(shown ? 1 : 0)
             }
@@ -473,9 +473,11 @@ struct QCTurnView: View {
     /// 24 pt: Copy and Ask again (their glyphs on the chat's edge), then "Opus 5.5 · high · 7.8 s".
     private var footer: some View {
         HStack(spacing: 0) {
-            QCCopyIcon(text: turn.answer)
+            // the tick and "Copied" come from the model, so ⌘⇧C and a click say the same thing
+            let copied = model.copied == turn.id
+            QCIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy (⌘⇧C copies the last answer)", small: true) { model.copyAnswer(of: turn) }
             if last { QCIconButton(symbol: "arrow.clockwise", help: "Ask again", small: true) { model.again() } }
-            Text(words).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).padding(.leading, 4)
+            Text(copied ? "Copied" : words).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).padding(.leading, 4)
         }
         .frame(height: QCSpace.small)
         .padding(.leading, -5)
@@ -1278,6 +1280,7 @@ struct QCKeysView: View {
             ("Return", "Send"),
             ("⇧Return", "New line"),
             ("⌘N", "New chat"),
+            ("⌘⇧C", "Copy the last answer"),
             ("Esc  ⌘W", "Hide"),
             (opener, "Open cl_quick"),
         ]
@@ -2148,6 +2151,7 @@ enum QuickChatRender {
         case "notinstalled": m.field = q1; m.barProblem = .notInstalled
         case "streaming": var t = t1; t.answer = String(a1.prefix(90)); t.phase = .streaming; m.turns = [t]
         case "answer": m.turns = [t1]
+        case "copied": m.turns = [t1]; m.copied = t1.id          // after ⌘⇧C or a click on Copy: the tick and "Copied"
         case "failed": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .failed
             t.problem = .stopped(detail: "claude exited with code 1: API Error: Connection error."); m.turns = [t]
         case "notsigned": var t = QuickChatTurn(question: q1); t.phase = .failed; t.problem = .notSignedIn(profile: "Main", id: "main"); m.turns = [t]

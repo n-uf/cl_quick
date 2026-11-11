@@ -227,6 +227,41 @@ final class QuickChatModel: ObservableObject {
     /// A limit holds the account back: nothing is sent until it resets or another profile is picked.
     var blocked: Bool { level?.full() != nil }
 
+    // COPY: an answer goes to the pasteboard as plain text, its Markdown source (what Claude wrote: code blocks, lists and
+    // links stay as written, which is what pastes well into a note, a commit or another chat). Nothing is kept anywhere else.
+    /// The turn whose answer was copied a moment ago: its footer says "Copied" (and shows, hovered or not).
+    @Published var copied: UUID?
+    /// Where a copy goes (the general pasteboard; a check passes its own).
+    var pasteboard = NSPasteboard.general
+    static let copiedFor: TimeInterval = 1.4
+    private var copiedReset: DispatchWorkItem?
+
+    /// The answer ⌘⇧C copies: the latest complete one. One still streaming is not complete, so while it streams this is
+    /// the one before it (nil if there is none); an answer the user stopped counts (its text is on screen and its Copy
+    /// button works); a failed or empty one never does.
+    var latestAnswer: QuickChatTurn? {
+        turns.last { ($0.phase == .done || $0.phase == .stopped) && !$0.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// Puts a turn's answer on the pasteboard (cleared first) and says "Copied" under it. False when there is nothing to copy.
+    @discardableResult
+    func copyAnswer(of turn: QuickChatTurn) -> Bool {
+        let s = turn.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return false }
+        pasteboard.clearContents()
+        guard pasteboard.setString(s, forType: .string) else { return false }
+        copied = turn.id
+        copiedReset?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.copied = nil }
+        copiedReset = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.copiedFor, execute: w)
+        return true
+    }
+
+    /// ⌘⇧C: the latest complete answer.
+    @discardableResult
+    func copyLatestAnswer() -> Bool { latestAnswer.map { copyAnswer(of: $0) } ?? false }
+
     // set by QuickChat
     var resolveClaude: (@escaping (String?) -> Void) -> Void = { $0(nil) }
     var hide: () -> Void = {}
@@ -1134,6 +1169,7 @@ final class QuickChat {
         p.onEscape = { [weak self] in self?.escape() }
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
+        p.onCopyAnswer = { [weak self] in _ = self?.model.copyLatestAnswer() }
         p.onKeyLost = { [weak self] in self?.keyLost() }
         p.onStep = { [weak self] model, by in
             guard let m = self?.model else { return }
@@ -1298,6 +1334,8 @@ final class QuickChatPanel: NSPanel {
     /// ⌘W: hide.
     var onClose: () -> Void = {}
     var onNewChat: () -> Void = {}
+    /// ⌘⇧C: copy the latest complete answer (nothing if there is none). The key is taken either way.
+    var onCopyAnswer: () -> Void = {}
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
 
@@ -1361,6 +1399,7 @@ final class QuickChatPanel: NSPanel {
         var action: Selector?
         switch key {
         case "x": action = #selector(NSText.cut(_:))
+        case "c" where shift: onCopyAnswer(); return true        // the answer, not the selection (⌘C copies that)
         case "c": action = #selector(NSText.copy(_:))
         case "v": action = #selector(NSText.paste(_:))
         case "a": action = #selector(NSText.selectAll(_:))
