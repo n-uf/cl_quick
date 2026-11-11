@@ -453,11 +453,19 @@ final class QuickChatProcess {
     private var errTail = Data()
     private var stopping = false
     private var exited = false      // its exit has been reported: nothing a leftover child writes after that is an event
+    private var exitReported = false    // the same, as the main thread has it: set where onExit is called (main thread only)
 
     /// An event to the main thread, unless the exit was already reported (it stays the last thing the chat hears).
     private func deliver(_ e: QuickChatEvent) {
         lock.lock(); let gone = exited; lock.unlock()
-        if !gone { DispatchQueue.main.async { [weak self] in self?.onEvent(e) } }
+        guard !gone else { return }
+        // checked again on the main thread, against the exit having been *reported* there (not merely noticed): the exit's
+        // block can be queued between the check above and this block, and nothing is an event after it. An event queued
+        // before it still arrives first, as the queue keeps order.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.exitReported else { return }
+            self.onEvent(e)
+        }
     }
 
     init(_ command: QuickChatCommand) { self.command = command }
@@ -508,7 +516,7 @@ final class QuickChatProcess {
             self.lock.lock(); self.exited = true; self.lock.unlock()
             let status = self.process.terminationStatus
             let tail = self.stderrTail()
-            DispatchQueue.main.async { self.onExit(status, tail) }
+            DispatchQueue.main.async { self.exitReported = true; self.onExit(status, tail) }
         }
         // stderr: only its last 4 KB is kept, for "what happened"
         DispatchQueue.global(qos: .utility).async { [weak self] in
