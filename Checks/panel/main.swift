@@ -1835,6 +1835,28 @@ do {
           QCImages.note(notImages: [], failures: [.tooManyPixels], overCount: 0) == "An image has too many pixels to read (over 100 megapixels).")
 }
 
+// a file with several images is read at its primary image, not at index 0 (a HEIC with a small first picture and the
+// primary one second: 10 × 10 square first, 40 × 30 primary)
+do {
+    func solid(_ w: Int, _ h: Int) -> CGImage? {
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.setFillColor(CGColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
+    }
+    let out = NSMutableData()
+    if let d = CGImageDestinationCreateWithData(out, "public.heic" as CFString, 2, nil), let a = solid(10, 10), let b = solid(40, 30) {
+        CGImageDestinationAddImage(d, a, nil)
+        CGImageDestinationAddImage(d, b, [kCGImagePropertyPrimaryImage: true] as CFDictionary)
+        if CGImageDestinationFinalize(d), let s = CGImageSourceCreateWithData(out as CFData, nil), CGImageSourceGetPrimaryImageIndex(s) == 1 {
+            if case .success(let i) = QCImages.prepare(out as Data) {
+                // (ImageIO hands back the 10 pt picture as the primary's embedded thumbnail, so only the shape is compared)
+                check("primary: a multi-image file is read at its primary image (4:3), not at index 0 (square)", i.pixels.width / i.pixels.height > 1.2, "\(i.pixels)")
+            } else { check("primary: the multi-image file is read", false) }
+        } else { print("  primary: this Mac writes no HEIC with a second primary image; skipped") }
+    } else { print("  primary: no HEIC encoder here; skipped") }
+}
+
 // the ✕ on an attached picture's thumbnail removes it, and neither it nor the tile moves the window. The bar's own views
 // are hosted in a window of their own (titled like the panel, far off every screen, never key): the real panel is
 // click-through in the checks, so a press is delivered to this one, through NSWindow.sendEvent as a click is.

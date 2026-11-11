@@ -140,14 +140,16 @@ enum QCImages {
         guard let src = CGImageSourceCreateWithData(data as CFData, opts), CGImageSourceGetCount(src) > 0,
               let typeID = CGImageSourceGetType(src), let type = UTType(typeID as String), type.conforms(to: .image),
               !type.conforms(to: .pdf) else { return .failure(.notAnImage) }
-        guard let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+        // the file's primary image: not always the first (a HEIC may lead with a thumbnail or an auxiliary picture)
+        let index = CGImageSourceGetPrimaryImageIndex(src)
+        guard let props = CGImageSourceCopyPropertiesAtIndex(src, index, nil) as? [CFString: Any],
               let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int, w > 0, h > 0
         else { return .failure(.unreadable) }
         // refused before any decoding: a picture this large would take a gigabyte or more of memory to read
         guard w * h <= maxPixels else { return .failure(.tooManyPixels) }
         // decoded once, at the size that is sent; the smaller passes and the thumbnail are drawn from that
         var side = min(maxSide, max(w, h))          // never larger than it is
-        guard let base = scaled(src, side) else { return .failure(.unreadable) }
+        guard let base = scaled(src, index, side) else { return .failure(.unreadable) }
         for _ in 0..<7 {
             guard let cg = resized(base, side: side) else { return .failure(.unreadable) }
             if let e = encode(cg) {
@@ -182,11 +184,11 @@ enum QCImages {
         return ctx.makeImage()
     }
 
-    /// The image at index 0 with its long side `side` pixels at most (never enlarged), turned upright by its orientation.
-    private static func scaled(_ src: CGImageSource, _ side: Int) -> CGImage? {
+    /// The image at `index` with its long side `side` pixels at most (never enlarged), turned upright by its orientation.
+    private static func scaled(_ src: CGImageSource, _ index: Int, _ side: Int) -> CGImage? {
         let o: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
                                   kCGImageSourceShouldCacheImmediately: true, kCGImageSourceThumbnailMaxPixelSize: side]
-        return CGImageSourceCreateThumbnailAtIndex(src, 0, o as CFDictionary)
+        return CGImageSourceCreateThumbnailAtIndex(src, index, o as CFDictionary)
     }
 
     /// PNG when it fits the target; else JPEG at 0.85 (transparency flattened onto white) when that fits. nil: too big as
