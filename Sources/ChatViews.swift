@@ -456,7 +456,7 @@ struct QCTurnView: View {
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
                 footer.padding(.top, 4).opacity(shown ? 1 : 0)
             }
-            if let p = turn.problem, turn.phase == .failed {
+            if let p = model.shownProblem(turn) {      // a full limit only while it is still full
                 QCProblemView(problem: p, model: model, answered: !turn.answer.isEmpty, last: last)
                     .padding(.top, 12).padding(.bottom, 8)
             }
@@ -2092,6 +2092,12 @@ enum QuickChatRender {
             level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level
             var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull; m.turns = [t]
             m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
+        case "ended-reopen":
+            // the operator's stale chat (a refused "hi", the idle end) and then the shortcut: what the open shows
+            level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level
+            var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull; m.turns = [t]; m.ended = .idle
+            m.leaveEnded()
+            level.fiveHour = 20; m.level = level          // the open asked for the limits anew: room again
         case "full-wk":
             level.week = 100; level.weekResets = Date().addingTimeInterval(3 * 86400)
             level.fiveHour = 12; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level

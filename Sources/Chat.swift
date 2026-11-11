@@ -176,7 +176,11 @@ enum QuickChatSwitchNotice: Equatable {
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
 final class QuickChatModel: ObservableObject {
     @Published var turns: [QuickChatTurn] = []
-    @Published var field = ""
+    @Published var field = "" {
+        // the first keystroke after a chat ended: the dead chat goes (its turns, notices and the ended line), the bar is
+        // what's typed in
+        didSet { if ended != nil, oldValue.isEmpty, !field.isEmpty { leaveEnded() } }
+    }
     /// A problem shown in the bar, before the chat has a message (Claude Code missing, no profile).
     @Published var barProblem: QuickChatProblem?
     @Published var target: QuickChatTarget?
@@ -320,6 +324,26 @@ final class QuickChatModel: ObservableObject {
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
         ask(turns[i].question)
+    }
+
+    /// A chat that ended (idle, a crash, Stop that ended it, the account changed) leaves nothing behind: its turns, its
+    /// notices and the ended line go, and the bar is ready. What's typed stays. (The ended line shows only while the
+    /// window is open when the chat ends: the next open or keystroke comes here.)
+    func leaveEnded() {
+        guard ended != nil else { return }
+        ended = nil
+        turns = []
+        accountNote = nil
+        barProblem = nil
+        scrollTick += 1
+    }
+
+    /// The notice a turn shows now. A full limit is live state: once the level shows room again it is gone (the turn
+    /// keeps its question; a new message or Ask again goes through).
+    func shownProblem(_ t: QuickChatTurn) -> QuickChatProblem? {
+        guard t.phase == .failed, let p = t.problem else { return nil }
+        if p == .limitFull, !blocked { return nil }
+        return p
     }
 
     /// A new chat: the process goes and the old chat with it (nothing was saved), the model and thinking go back to the defaults.
@@ -940,6 +964,8 @@ final class QuickChat {
     /// Opens the bar (or the chat as it was) over whatever is in front. `profile`: chat on that one.
     /// The shortcut names none: a chat under way stays on its profile, a new one goes to the default profile.
     func open(profile: String? = nil) {
+        // a chat that ended while away is gone: a fresh bar, ready to type (warm() below asks for the limits anew)
+        model.leaveEnded()
         let list = store.profiles
         let wanted = profile ?? (model.isWindow ? model.target?.profileID : nil) ?? settings.defaultProfile
         let pick = list.first { $0.id == wanted } ?? list.first

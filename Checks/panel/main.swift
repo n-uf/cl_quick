@@ -649,6 +649,46 @@ do {
     try? FileManager.default.removeItem(at: dir)
 }
 
+// ── an ended chat leaves nothing behind; a limit notice lasts only while the limit is full ──────────────────────────────
+do {
+    let m = chat.model
+    func deadChat() {
+        var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull
+        m.turns = [t]; m.ended = .idle
+    }
+    // ended while hidden (15 minutes idle): the shortcut opens a fresh bar
+    chat.hide(); deadChat(); m.field = ""
+    chat.open(); spin(0.5)
+    check("ended: the next open shows the bar, not the dead chat", !m.isWindow && m.turns.isEmpty && m.ended == nil,
+          "\(m.turns.count) turns, ended \(String(describing: m.ended))")
+    check("ended: the bar is ready to type (key, the field first)", p.isKeyWindow && p.firstResponder is QCTextView)
+    check("ended: the panel is the bar's height again", p.frame.height < QuickChatRoot.minWindowHeight, "\(p.frame.size)")
+    // ended while open: the ended line shows; the first keystroke takes the dead chat away and keeps what's typed
+    deadChat(); spin(0.3)
+    check("ended: while open the dead chat and its line stay to read", m.isWindow && m.ended == .idle)
+    m.field = "n"
+    check("ended: the first keystroke leaves the dead chat (bar, the letter kept)", !m.isWindow && m.ended == nil && m.field == "n")
+    m.field = ""
+    // a live chat is never cleared by typing or opening
+    var live = QuickChatTurn(question: "q", answer: "a", model: "Haiku 5.5"); live.phase = .done
+    m.turns = [live]; m.ended = nil
+    m.field = "x"; chat.hide(); chat.open(); spin(0.3)
+    check("ended: a chat that hasn't ended stays through typing and an open", m.turns.count == 1 && m.field == "x")
+    m.field = ""; m.newChat(); spin(0.3)
+    // a limit notice is live: it shows while the limit is full and goes when the level shows room
+    let now = Date()
+    var full = QuickChatLevel(); full.fiveHour = 100; full.fiveHourResets = now.addingTimeInterval(3600); full.week = 53
+    var refused = QuickChatTurn(question: "hi"); refused.phase = .failed; refused.problem = .limitFull
+    m.level = full; m.turns = [refused]
+    check("limit notice: shown while the 5-hour window is full", m.shownProblem(m.turns[0]) == .limitFull)
+    var room = full; room.fiveHour = 30
+    m.update(target: m.target, level: room, offer: nil)
+    check("limit notice: gone as soon as the level shows room", m.shownProblem(m.turns[0]) == nil && !m.blocked)
+    var other = QuickChatTurn(question: "q"); other.phase = .failed; other.problem = .stopped(detail: "x")
+    check("limit notice: other problems stay", m.shownProblem(other) == .stopped(detail: "x"))
+    m.newChat(); spin(0.3)
+}
+
 // ── a full limit is named by the window that is full (the operator's "Main's week is full." with the week at 53%) ─────
 do {
     let now = Date()
