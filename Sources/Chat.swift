@@ -819,7 +819,7 @@ final class QuickChatModel: ObservableObject {
             // aren't this account's, so it goes and a new one starts below (the chat couldn't go on there anyway)
             if !busy, let t = target, trail.reportAccount != t.accountUUID { closeProcess() }
             else {
-                if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() { usageAsked = Date() }
+                if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() != nil { usageAsked = Date() }
                 return
             }
         }
@@ -911,7 +911,7 @@ final class QuickChatModel: ObservableObject {
                 turns[i].phase = .done
                 if let t = target, let u = trail.reportAccount { authResult(t.profileID, u, false) }      // it signed in fine
             }
-            if process?.getUsage() == true { usageAsked = Date() }    // the limits after this answer (rate_limit_event stays as the fallback)
+            if process?.getUsage() != nil { usageAsked = Date() }    // the limits after this answer (rate_limit_event stays as the fallback)
             // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
             guard turns.indices.contains(i) else { return }
             scrollTick += 1

@@ -190,6 +190,22 @@ lost.refresh(store: store)
 spin(0.3)
 check("refresh: no claude found, nothing started", lostStarted == 0)
 
+// an error answer to get_usage ends the refresh at once, not after the 25 s wait
+do {
+    try? "mode=ok\nusage=error\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+    let refused = QCMenuUsageRefresher()
+    refused.findClaude = refresher.findClaude
+    refused.command = refresher.command
+    var refusedEnded: [String] = []
+    refused.onEnd = { refusedEnded.append($0) }
+    let t0 = Date()
+    refused.refresh(store: store)
+    spin(until: { !refusedEnded.isEmpty })
+    let took = Date().timeIntervalSince(t0)
+    check("refresh: an error answer to get_usage ends the refresh at once", refusedEnded == ["alpha"] && took < 5, "\(refusedEnded) after \(took) s")
+    try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+}
+
 // the give-up timer runs while a menu is open (the run loop is then in the event-tracking mode, not the default one):
 // a `claude` that never answers get_usage is let go after the wait
 do {

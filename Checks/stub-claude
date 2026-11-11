@@ -16,6 +16,7 @@
 #   args=FILE          writes its arguments, a few environment values, its folder and its pid there; each user message
 #                      line, as it came, goes to FILE.in
 #   usage=none         `get_usage` gets no answer at all
+#   usage=error        `get_usage` gets an error answer
 #   delay=SECONDS    waits that long, after its first line, before it reads any stdin (a slow or stalled reader)
 conf="$(cd "$PWD/.." && pwd)/stub.conf"
 mode="$(sed -n 's/^mode=//p' "$conf" 2>/dev/null)"; mode="${mode:-ok}"
@@ -55,6 +56,8 @@ while IFS= read -r line; do
         echo '{"type":"control_response","response":{"subtype":"error","request_id":"'$rid'","error":"no such model"}}'
       elif [ "$sub" = get_usage ] && [ "$usage" = none ]; then
         :       # no answer at all
+      elif [ "$sub" = get_usage ] && [ "$usage" = error ]; then
+        echo '{"type":"control_response","response":{"subtype":"error","request_id":"'$rid'","error":"usage unavailable"}}'
       elif [ "$sub" = get_usage ]; then
         # the two windows (resets far ahead, so they're never past when a check reads them), plus keys cl_quick leaves
         # alone (spend, the per-model weeks, unknown ones)

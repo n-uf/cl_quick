@@ -315,7 +315,7 @@ do {
         let d = p.send("second", images: [big])
         let e = p.send("third")
         let took = Date().timeIntervalSince(t0)
-        check("writes: send returns before a big line is written (a reader 2 s late)", a && b && c != nil && d && e && took < 0.5, took)
+        check("writes: send returns before a big line is written (a reader 2 s late)", a && b != nil && c != nil && d && e && took < 0.5, took)
         wait(40) { done(events()) == 3 }
         check("writes: all three messages were answered", done(events()) == 3, done(events()))
         let lines = ((try? String(contentsOfFile: argsFile + ".in", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
@@ -338,7 +338,7 @@ do {
 
 // the account's limits before any message: `get_usage` on a `claude` that was only started (the bar opened)
 run("ok") { p, events, _ in
-    check("usage: asked before any message", p.getUsage())
+    check("usage: asked before any message", p.getUsage() != nil)
     wait(3) { events().contains { if case .usage = $0 { return true }; return false } }
     let u = events().compactMap { e -> QuickChatUsage? in if case .usage(let u) = e { return u }; return nil }.first
     check("usage: both windows", u?.available == true && u?.fiveHour?.used == 44 && u?.week?.used == 12 && u?.fiveHour?.locked == false, u as Any)

@@ -470,6 +470,8 @@ final class QCMenuUsageRefresher {
     private var claudePath: String?
     private var lastTried: [String: Date] = [:]
     private var timeout: Timer?
+    /// The id of the running `claude`'s `get_usage` request.
+    private var usageRequest: String?
 
     /// Whether a profile's numbers are worth asking for now.
     func needs(_ p: Profile, store: ProfileStore = .shared, now: Date = Date()) -> Bool {
@@ -504,11 +506,17 @@ final class QCMenuUsageRefresher {
         let process = QuickChatProcess(command(p, claude))
         process.onEvent = { [weak self, weak process] e in
             guard let self, let process, process === self.current else { return }
-            if case .usage(let u) = e {
+            switch e {
+            case .usage(let u):
                 var l = store.levels[ProfileStore.levelKey(p.id, uuid)] ?? QuickChatLevel()
                 l.apply(usage: u)
                 store.record(p.id, account: uuid, l)
                 self.finish(p.id, store)
+            case .control(let id, _, _):
+                // Claude Code answered `get_usage` with something that isn't limits (an error, say): nothing to keep, and
+                // nothing more to wait for
+                if id == self.usageRequest { self.finish(p.id, store) }
+            default: break
             }
         }
         process.onExit = { [weak self, weak process] _, _ in
@@ -519,7 +527,7 @@ final class QCMenuUsageRefresher {
         current = process
         onStart(p.id)
         process.initialize()          // as the chat's own `claude` is, at its start (nothing goes to a model)
-        process.getUsage()
+        usageRequest = process.getUsage()
         // in .common mode: an open menu runs the run loop in the event-tracking mode, where a default-mode timer waits
         let t = Timer(timeInterval: Self.giveUp, repeats: false) { [weak self] _ in self?.finish(p.id, store) }
         RunLoop.main.add(t, forMode: .common)
@@ -531,6 +539,7 @@ final class QCMenuUsageRefresher {
         timeout?.invalidate(); timeout = nil
         let p = current
         current = nil
+        usageRequest = nil
         running = nil
         p?.stop()
         onEnd(id)

@@ -593,9 +593,9 @@ final class QuickChatProcess {
     func initialize() -> Bool { control("initialize") != nil }
 
     /// Asks for the account's limits now (a `.usage` event answers), with Claude Code's own sign-in. Nothing goes to a
-    /// model. False when it can't be asked.
+    /// model. The request's id (a `.control` event carries it when the answer is no limits), or nil when it can't be asked.
     @discardableResult
-    func getUsage() -> Bool { control("get_usage") != nil }
+    func getUsage() -> String? { control("get_usage") }
 
     /// The model for the next answers (a value from Claude Code's list, or an alias); "" leaves it to Claude Code. The
     /// request's id, or nil when it can't be asked.
