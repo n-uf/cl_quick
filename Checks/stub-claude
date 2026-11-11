@@ -15,10 +15,12 @@
 #                      `get_usage` gets limits shaped like 2.1.318's (sample numbers: 5 hours 44%, week 12%)
 #   args=FILE          writes its arguments, a few environment values, its folder and its pid there; each user message
 #                      line, as it came, goes to FILE.in
-#   delay=SECONDS      waits that long, after its first line, before it reads any stdin (a slow or stalled reader)
+#   usage=none         `get_usage` gets no answer at all
+#   delay=SECONDS    waits that long, after its first line, before it reads any stdin (a slow or stalled reader)
 conf="$(cd "$PWD/.." && pwd)/stub.conf"
 mode="$(sed -n 's/^mode=//p' "$conf" 2>/dev/null)"; mode="${mode:-ok}"
 QC_STUB_ARGS="$(sed -n 's/^args=//p' "$conf" 2>/dev/null)"
+usage="$(sed -n 's/^usage=//p' "$conf" 2>/dev/null)"
 if [ -n "${QC_STUB_ARGS:-}" ]; then
   {
     for a in "$@"; do printf 'ARG [%s]\n' "$a"; done
@@ -51,6 +53,8 @@ while IFS= read -r line; do
       ctl "CTRL $sub ${mdl:+model=$mdl} $(printf '%s' "$line" | sed -n 's/.*"settings":\({[^}]*}\).*/settings=\1/p')"
       if [ "$mdl" = refuse ]; then
         echo '{"type":"control_response","response":{"subtype":"error","request_id":"'$rid'","error":"no such model"}}'
+      elif [ "$sub" = get_usage ] && [ "$usage" = none ]; then
+        :       # no answer at all
       elif [ "$sub" = get_usage ]; then
         # the two windows (resets far ahead, so they're never past when a check reads them), plus keys cl_quick leaves
         # alone (spend, the per-model weeks, unknown ones)

@@ -450,7 +450,7 @@ final class QCMenuUsageRefresher {
     /// A profile is tried at most this often, answered or not.
     static let retryAfter: TimeInterval = 3 * 60
     /// A `claude` that hasn't answered by then is ended.
-    static let giveUp: TimeInterval = 25
+    static var giveUp: TimeInterval = 25      // (var: the checks shorten it)
 
     /// Where `claude` is (looked for off the main thread, kept once found). The checks replace it.
     var findClaude: (@escaping (String?) -> Void) -> Void = { done in
@@ -520,7 +520,10 @@ final class QCMenuUsageRefresher {
         onStart(p.id)
         process.initialize()          // as the chat's own `claude` is, at its start (nothing goes to a model)
         process.getUsage()
-        timeout = Timer.scheduledTimer(withTimeInterval: Self.giveUp, repeats: false) { [weak self] _ in self?.finish(p.id, store) }
+        // in .common mode: an open menu runs the run loop in the event-tracking mode, where a default-mode timer waits
+        let t = Timer(timeInterval: Self.giveUp, repeats: false) { [weak self] _ in self?.finish(p.id, store) }
+        RunLoop.main.add(t, forMode: .common)
+        timeout = t
     }
 
     private func finish(_ id: String, _ store: ProfileStore) {

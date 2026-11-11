@@ -190,5 +190,25 @@ lost.refresh(store: store)
 spin(0.3)
 check("refresh: no claude found, nothing started", lostStarted == 0)
 
+// the give-up timer runs while a menu is open (the run loop is then in the event-tracking mode, not the default one):
+// a `claude` that never answers get_usage is let go after the wait
+do {
+    try? "mode=ok\nusage=none\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+    let waiting = QCMenuUsageRefresher()
+    waiting.findClaude = refresher.findClaude
+    waiting.command = refresher.command
+    var waitEnded: [String] = []
+    waiting.onEnd = { waitEnded.append($0) }
+    let saved = QCMenuUsageRefresher.giveUp
+    QCMenuUsageRefresher.giveUp = 1
+    let t0 = Date()
+    waiting.refresh(store: store)
+    // only the event-tracking mode is run, as an open menu does
+    while waitEnded.isEmpty, Date().timeIntervalSince(t0) < 6 { RunLoop.current.run(mode: .eventTracking, before: Date().addingTimeInterval(0.05)) }
+    QCMenuUsageRefresher.giveUp = saved
+    check("refresh: a claude that never answers is let go after the wait, also while a menu is open", waitEnded == ["alpha"], "\(waitEnded) after \(Date().timeIntervalSince(t0)) s")
+    try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+}
+
 print(failed == 0 ? "menu checks: \(passed) passed" : "menu checks: \(failed) FAILED, \(passed) passed")
 exit(failed == 0 ? 0 : 1)
