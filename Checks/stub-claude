@@ -82,7 +82,11 @@ while IFS= read -r line; do
       ;;
     slow)
       delta "Half an ans"
-      sleep 30
+      # a child in a group of its own, as a tool Claude Code runs would be: when this script is stopped the child lives
+      # on holding the output pipe open (macOS 26's Process.terminate ends only the process, not its group)
+      set -m
+      sleep 30 &
+      wait $!
       ;;
     *)
       delta "Answer "

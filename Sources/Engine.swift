@@ -452,6 +452,13 @@ final class QuickChatProcess {
     private let lock = NSLock()
     private var errTail = Data()
     private var stopping = false
+    private var exited = false      // its exit has been reported: nothing a leftover child writes after that is an event
+
+    /// An event to the main thread, unless the exit was already reported (it stays the last thing the chat hears).
+    private func deliver(_ e: QuickChatEvent) {
+        lock.lock(); let gone = exited; lock.unlock()
+        if !gone { DispatchQueue.main.async { [weak self] in self?.onEvent(e) } }
+    }
 
     init(_ command: QuickChatCommand) { self.command = command }
 
@@ -470,9 +477,12 @@ final class QuickChatProcess {
         process.standardError = errors
         try process.run()
         let out = output.fileHandleForReading, err = errors.fileHandleForReading
-        // stdout: whole lines, parsed off the main thread, delivered on it; at its end, the process's exit. Read with
-        // read(2), which reports a failed read as an error rather than raising
+        // stdout: whole lines, parsed off the main thread, delivered on it. Read with read(2), which reports a failed
+        // read as an error rather than raising. Its end isn't the exit's cue: a child `claude` started (a tool) can hold
+        // the pipe open long after `claude` itself is gone, so the exit has a thread of its own
+        let drained = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            defer { drained.signal() }
             var buffer = Data()
             while let chunk = Self.read(out) {
                 buffer.append(chunk)
@@ -480,16 +490,22 @@ final class QuickChatProcess {
                     let line = buffer[buffer.startIndex..<nl]
                     buffer.removeSubrange(buffer.startIndex...nl)
                     let e = QuickChatParse.event(Data(line))
-                    if e != .ignored { DispatchQueue.main.async { self?.onEvent(e) } }
+                    if e != .ignored { self?.deliver(e) }
                 }
             }
             if !buffer.isEmpty {
                 let e = QuickChatParse.event(buffer)
-                if e != .ignored { DispatchQueue.main.async { self?.onEvent(e) } }
+                if e != .ignored { self?.deliver(e) }
             }
-            guard let self else { return }
-            self.process.waitUntilExit()
+        }
+        // the process's exit: once `claude` is gone, what it wrote is read within a moment (at once, when its output
+        // ends with it) and the exit is reported, whatever still holds the pipe
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.process.waitUntilExit()
+            _ = drained.wait(timeout: .now() + 0.3)
             usleep(50_000)      // the last of stderr
+            guard let self else { return }
+            self.lock.lock(); self.exited = true; self.lock.unlock()
             let status = self.process.terminationStatus
             let tail = self.stderrTail()
             DispatchQueue.main.async { self.onExit(status, tail) }
