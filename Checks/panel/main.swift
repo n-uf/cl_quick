@@ -1798,6 +1798,43 @@ do {
     try? FileManager.default.removeItem(at: c.dir)
 }
 
+// a picture of more than 100 megapixels is refused from its header, before any decoding, with one line
+do {
+    // a PNG that is only a header (IHDR, an empty IDAT, IEND) claiming 20000 × 20000 pixels: nothing to decode, 400 MP claimed
+    func crc32(_ bytes: [UInt8]) -> UInt32 {
+        var table = [UInt32](repeating: 0, count: 256)
+        for i in 0..<256 { var c = UInt32(i); for _ in 0..<8 { c = c & 1 == 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1 }; table[i] = c }
+        var c: UInt32 = 0xFFFFFFFF
+        for b in bytes { c = table[Int((c ^ UInt32(b)) & 0xFF)] ^ (c >> 8) }
+        return c ^ 0xFFFFFFFF
+    }
+    func be(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24), UInt8((v >> 16) & 0xFF), UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)] }
+    func chunk(_ type: String, _ body: [UInt8]) -> [UInt8] { be(UInt32(body.count)) + Array(type.utf8) + body + be(crc32(Array(type.utf8) + body)) }
+    /// A real PNG, 1 bit per pixel, all white: a few tens of KB, though it claims w × h pixels.
+    func headerOnlyPNG(_ w: UInt32, _ h: UInt32) -> Data {
+        let row = Int((w + 7) / 8) + 1
+        let raw = Data(repeating: 0, count: row * Int(h))
+        guard let deflated = try? (raw as NSData).compressed(using: .zlib) as Data else { return Data() }
+        let adler = (UInt32(raw.count % 65521) << 16) | 1     // Adler-32 of n zero bytes: s1 stays 1, s2 is n mod 65521
+        var d: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        d += chunk("IHDR", be(w) + be(h) + [1, 0, 0, 0, 0])
+        d += chunk("IDAT", [0x78, 0x9C] + [UInt8](deflated) + be(adler))
+        d += chunk("IEND", [])
+        return Data(d)
+    }
+    let hugeData = headerOnlyPNG(20000, 20000)
+    if case .failure(let why) = QCImages.prepare(hugeData) { check("pixels: 400 megapixels is refused as too many pixels, unread", why == .tooManyPixels, "\(why)") }
+    else { check("pixels: 400 megapixels is refused", false) }
+    // a normal size on the same path still goes (and is not mistaken for it)
+    check("pixels: the limit is 100 megapixels", QCImages.maxPixels == 100_000_000)
+    if case .failure(let why) = QCImages.prepare(headerOnlyPNG(10001, 10000)) { check("pixels: just over 100 megapixels is refused too", why == .tooManyPixels, "\(why)") }
+    else { check("pixels: just over 100 megapixels is refused too", false) }
+    if case .failure(let why) = QCImages.prepare(headerOnlyPNG(4000, 2500)) { check("pixels: 10 megapixels is not refused for its size", why != .tooManyPixels, "\(why)") }
+    else { check("pixels: 10 megapixels is not refused for its size", true) }
+    check("pixels: the note says so in one line",
+          QCImages.note(notImages: [], failures: [.tooManyPixels], overCount: 0) == "An image has too many pixels to read (over 100 megapixels).")
+}
+
 // the ✕ on an attached picture's thumbnail removes it, and neither it nor the tile moves the window. The bar's own views
 // are hosted in a window of their own (titled like the panel, far off every screen, never key): the real panel is
 // click-through in the checks, so a press is delivered to this one, through NSWindow.sendEvent as a click is.

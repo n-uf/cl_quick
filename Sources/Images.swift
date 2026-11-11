@@ -40,6 +40,8 @@ enum QCImages {
     /// The images one chat holds (its process's conversation), in bytes of base64: the API refuses a request over 32 MB,
     /// and the whole conversation is in every request.
     static let chatCap = 20_000_000
+    /// A picture of more pixels than this (width × height) is refused unread.
+    static let maxPixels = 100_000_000
     static let jpegQuality = 0.85
     static let thumbnailPixels = 168
 
@@ -117,6 +119,8 @@ enum QCImages {
         case notAnImage
         case unreadable
         case tooLarge
+        /// More than `maxPixels`: refused before it is decoded.
+        case tooManyPixels
     }
 
     /// Reads, scales down and encodes one image, in memory. Off the main thread is fine.
@@ -139,12 +143,16 @@ enum QCImages {
         guard let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
               let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int, w > 0, h > 0
         else { return .failure(.unreadable) }
+        // refused before any decoding: a picture this large would take a gigabyte or more of memory to read
+        guard w * h <= maxPixels else { return .failure(.tooManyPixels) }
+        // decoded once, at the size that is sent; the smaller passes and the thumbnail are drawn from that
         var side = min(maxSide, max(w, h))          // never larger than it is
+        guard let base = scaled(src, side) else { return .failure(.unreadable) }
         for _ in 0..<7 {
-            guard let cg = scaled(src, side) else { return .failure(.unreadable) }
+            guard let cg = resized(base, side: side) else { return .failure(.unreadable) }
             if let e = encode(cg) {
                 let pixels = CGSize(width: cg.width, height: cg.height)
-                guard let thumb = scaled(src, min(thumbnailPixels, max(w, h))) else { return .failure(.unreadable) }
+                guard let thumb = resized(base, side: thumbnailPixels) else { return .failure(.unreadable) }
                 let img = NSImage(cgImage: thumb, size: NSSize(width: thumb.width, height: thumb.height))
                 return .success(QCImage(payload: e, thumbnail: img, pixels: pixels))
             }
@@ -152,6 +160,26 @@ enum QCImages {
             if side < 128 { break }
         }
         return .failure(.tooLarge)
+    }
+
+    /// `cg` with its long side `side` pixels at most (never enlarged), drawn at high quality; `cg` itself when it is that
+    /// small already. Keeps an alpha channel only when it has one.
+    private static func resized(_ cg: CGImage, side: Int) -> CGImage? {
+        let long = max(cg.width, cg.height)
+        guard long > side, side > 0 else { return cg }
+        let k = Double(side) / Double(long)
+        let w = max(1, Int((Double(cg.width) * k).rounded())), h = max(1, Int((Double(cg.height) * k).rounded()))
+        let alpha: Bool
+        switch cg.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast: alpha = false
+        default: alpha = true
+        }
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: (alpha ? CGImageAlphaInfo.premultipliedLast : CGImageAlphaInfo.noneSkipLast).rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     /// The image at index 0 with its long side `side` pixels at most (never enlarged), turned upright by its orientation.
@@ -200,6 +228,7 @@ enum QCImages {
         else if notImages.count > 1 { parts.append("Only images can be attached; \(notImages.count) of those files aren't.") }
         if failures.contains(.notAnImage) && notImages.isEmpty { parts.append("That isn't an image Claude can read.") }
         if failures.contains(.unreadable) { parts.append("An image couldn't be read.") }
+        if failures.contains(.tooManyPixels) { parts.append("An image has too many pixels to read (over 100 megapixels).") }
         if failures.contains(.tooLarge) { parts.append("An image was too large to send, even scaled down.") }
         if overCount > 0 { parts.append("Up to \(maxCount) images go with a message; \(overCount == 1 ? "one was" : "\(overCount) were") left out.") }
         if chatFull { parts.append("This chat holds as many images as it can; start a new chat (⌘N) for more.") }
