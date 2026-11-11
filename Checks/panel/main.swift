@@ -598,19 +598,29 @@ do {
 do {
     if !p.isVisible { chat.open(); spin() }
     let keep = (send: QCDictation.send, handles: QCDictation.handles, isOff: QCDictation.isOff)
-    var sent: [(Selector, NSResponder?)] = []
-    var stopTaken = false, off = false
-    // the real routing first, without performing anything: the field doesn't take the actions, the app does (so a send
-    // to the field goes up the key window's chain to NSApplication)
+    var sent: [(Selector, AnyObject?)] = []
+    var off = false
+    // the real routing first, without performing anything: the field doesn't take startDictation:, the app does (so a
+    // send to the field goes up the key window's chain to NSApplication); the field's text input context takes every
+    // stop step (sent to it alone)
     p.focusField()
     if let f = p.firstResponder as? QCTextView {
-        check("mic: the field passes startDictation: up the chain, the app takes it (and stopDictation:)",
-              !f.responds(to: QCDictation.start) && NSApp.responds(to: QCDictation.start) && NSApp.responds(to: QCDictation.stop)
-              && keep.handles(QCDictation.start, f) && keep.handles(QCDictation.stop, f))
+        check("mic: the field passes startDictation: up the chain, the app takes it",
+              !f.responds(to: QCDictation.start) && NSApp.responds(to: QCDictation.start) && keep.handles(QCDictation.start, f))
+        let ctx = f.inputContext
+        let missing = QCDictation.stopSteps.filter { ctx?.responds(to: $0) != true }.map { "\($0)" }
+        check("mic: the field's text input context takes every stop step (\(QCDictation.stopSteps.count))", ctx != nil && missing.isEmpty, "\(missing)")
     } else { check("mic: the field has the keyboard", false) }
-    QCDictation.send = { sel, field in sent.append((sel, field)); return true }
-    QCDictation.handles = { sel, _ in sel == QCDictation.stop ? stopTaken : true }
+    QCDictation.send = { sel, target in sent.append((sel, target)); return true }
+    QCDictation.handles = { _, _ in true }
     QCDictation.isOff = { off }
+    /// The sends since `from`, as selectors; whether they are exactly the stop steps, each to the field's input context.
+    func stopped(since from: Int, field: QCTextView?) -> Bool {
+        let tail = sent.dropFirst(from)
+        return tail.map(\.0) == QCDictation.stopSteps && tail.allSatisfy { $0.1 != nil && $0.1 === field?.inputContext }
+    }
+    func steps(since from: Int) -> String { "\(sent.dropFirst(from).map { "\($0.0)" })" }
+    let neverToggled = { sent.allSatisfy { $0.0 != QCDictation.stop } && sent.filter { $0.0 == QCDictation.start }.allSatisfy { $0.1 is QCTextView } }
     defer { QCDictation.send = keep.send; QCDictation.handles = keep.handles; QCDictation.isOff = keep.isOff }
     let m = chat.model
 
@@ -632,29 +642,56 @@ do {
     check("mic: a click makes the panel key and the field its first responder", p.isKeyWindow && field != nil)
     check("mic: and starts Dictation for that field", sent.count == 1 && sent[0].0 == QCDictation.start && sent[0].1 === field && m.dictating,
           "\(sent.map { "\($0.0)" })")
-    // a click again: stopDictation: (taken by the app); never the start action again
-    stopTaken = true
+    // a click again: Dictation's marked text is committed (the words stay), then the field's input context ends it
+    // (discard, its own stop, deactivate, activate); never the app's stopDictation: (a toggle) or the start action
+    if let tv = field {
+        tv.setMarkedText("said so far", selectedRange: NSRange(location: 11, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+    var n = sent.count
     m.dictate(false)
-    check("mic: a second click stops it with stopDictation:", sent.count == 2 && sent[1].0 == QCDictation.stop && !m.dictating)
-    // where nothing takes stopDictation:, the field gives up the keyboard and takes it back: nothing is sent
-    stopTaken = false
-    m.dictate(true); spin(0.1); m.dictate(false)
-    check("mic: without stopDictation:, nothing is sent to stop it (the start action would start it anew)",
-          sent.count == 3 && sent.allSatisfy { $0.0 != QCDictation.start || $0.1 is QCTextView } && !m.dictating
-          && p.firstResponder is QCTextView, "\(sent.map { "\($0.0)" })")
-    stopTaken = true
-    // a state gone stale (Dictation ended by Esc or the Dictation key) never starts it again: stopping sends a stop
+    check("mic: a second click commits Dictation's marked text, the words stay in the field",
+          field?.hasMarkedText() == false && m.field.hasSuffix("said so far"), "\(m.field.debugDescription)")
+    check("mic: and ends Dictation in the field's input context, step by step", stopped(since: n, field: field) && !m.dictating, steps(since: n))
+    check("mic: the field still has the keyboard after, the panel still key", p.isKeyWindow && p.firstResponder === field && field != nil)
+    // a state gone stale (Dictation ended by Esc or the Dictation key): the same steps, each harmless when it has ended;
+    // nothing that could start it again
+    n = sent.count
     m.dictating = true; m.dictate(false)
-    check("mic: a stale state stops with a stop, never a start", sent.last?.0 == QCDictation.stop && !m.dictating)
+    check("mic: a stale state ends with the same steps, never a start or the app's toggle", stopped(since: n, field: field) && neverToggled() && !m.dictating,
+          steps(since: n))
+    // the panel not key (the keyboard elsewhere): the context ends the session but doesn't take the keyboard back
+    n = sent.count
+    p.quietKey = false
+    m.dictating = true; m.dictate(false)
+    check("mic: not key, the context doesn't take the keyboard back (no activate)",
+          sent.dropFirst(n).map(\.0) == QCDictation.stopSteps.filter { $0 != QCDictation.activate }, steps(since: n))
+    p.makeKey(); spin(0.1)
+    // Dictation started with macOS's own shortcut (the button's state off): marked text in the field ends it the same way
+    if let tv = p.firstResponder as? QCTextView {
+        tv.setMarkedText("shortcut words", selectedRange: NSRange(location: 14, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        n = sent.count
+        m.dictate(false)
+        check("mic: marked text with the button off (macOS's shortcut): committed and ended",
+              !tv.hasMarkedText() && m.field.hasSuffix("shortcut words") && stopped(since: n, field: tv), steps(since: n))
+    } else { check("mic: the field has the keyboard (shortcut)", false) }
+    // the button off and no marked text: nothing to end, nothing sent
+    n = sent.count
+    m.dictate(false)
+    check("mic: off with nothing running sends nothing", sent.count == n)
+    m.field = ""
     // the panel giving up the keyboard: Dictation has ended with it
     m.dictate(true); spin(0.1)
     p.onKeyLost()
     check("mic: the panel losing the keyboard ends the dictating state", !m.dictating)
     // a new chat or hiding stops it too
-    m.dictate(true); spin(0.1); m.newChat(keepField: true)
-    check("mic: a new chat stops Dictation", sent.last?.0 == QCDictation.stop && !m.dictating)
-    m.dictate(true); spin(0.1); chat.hide(); spin(0.1)
-    check("mic: hiding stops Dictation", sent.last?.0 == QCDictation.stop && !m.dictating && !p.isVisible)
+    m.dictate(true); spin(0.1); n = sent.count
+    let chatField = p.firstResponder as? QCTextView
+    m.newChat(keepField: true)
+    check("mic: a new chat stops Dictation", stopped(since: n, field: chatField) && !m.dictating, steps(since: n))
+    m.dictate(true); spin(0.1); n = sent.count
+    let hidField = p.firstResponder as? QCTextView
+    chat.hide(); spin(0.1)
+    check("mic: hiding stops Dictation (before the panel goes)", stopped(since: n, field: hidField) && !m.dictating && !p.isVisible, steps(since: n))
     chat.open(); spin()
     // a start nothing takes: the button doesn't stay silent
     let wasSend = QCDictation.send
@@ -683,7 +720,6 @@ do {
         m.defaults = { s }
         func fresh() { m.newChat(); m.turns = [oneTurn()]; spin(0.2) }
         func tvNow() -> QCTextView? { p.firstResponder as? QCTextView }
-        stopTaken = true
 
         fresh(); m.field = "typed"; m.submit(marked: false)
         check("return: typing sends at once", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
@@ -692,10 +728,27 @@ do {
         let n0 = sent.count
         m.submit(marked: false)
         check("return: Dictation running, the first Return ends it and keeps the transcript in the field, nothing sent",
-              m.turns.count == 1 && m.field == "dictated words" && !m.dictating && sent.count == n0 + 1 && sent.last?.0 == QCDictation.stop,
-              "\(m.turns.count) \(m.field.debugDescription) \(m.dictating) \(sent.count - n0)")
+              m.turns.count == 1 && m.field == "dictated words" && !m.dictating && stopped(since: n0, field: tvNow()),
+              "\(m.turns.count) \(m.field.debugDescription) \(m.dictating) \(steps(since: n0))")
         m.submit(marked: false)
         check("return: the next Return sends it", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
+
+        // the operator's case: Dictation running with its last words still marked; the first Return commits them, ends
+        // Dictation in the field's input context, keeps the panel key and the field focused, and sends nothing
+        fresh(); p.focusField(); spin(0.1)
+        if let tv = tvNow() {
+            tv.setMarkedText("still provisional", selectedRange: NSRange(location: 17, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            m.dictating = true
+            let n2 = sent.count
+            m.submit(marked: tv.hasMarkedText())
+            check("return: the first Return commits the marked words, ends Dictation step by step, sends nothing",
+                  m.turns.count == 1 && !tv.hasMarkedText() && m.field == "still provisional" && !m.dictating && stopped(since: n2, field: tv),
+                  "\(m.turns.count) \(m.field.debugDescription) \(steps(since: n2))")
+            check("return: and the field keeps the keyboard, the panel key, the caret after the words",
+                  p.isKeyWindow && p.firstResponder === tv && tv.selectedRange() == NSRange(location: 17, length: 0), "\(tv.selectedRange())")
+            m.submit(marked: tv.hasMarkedText())
+            check("return: the next Return sends the dictated words", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
+        } else { check("return: the field has the keyboard (marked)", false) }
 
         // Dictation started with macOS's own shortcut: the mic button doesn't know, the field's marked text does
         fresh(); p.focusField(); spin(0.1)
@@ -704,16 +757,16 @@ do {
             let n1 = sent.count
             m.submit(marked: tv.hasMarkedText())
             check("return: marked text without the button's state (macOS's shortcut) ends Dictation and sends nothing",
-                  m.turns.count == 1 && sent.count == n1 + 1 && sent.last?.0 == QCDictation.stop && m.field == "provisional words",
-                  "\(m.turns.count) \(sent.count - n1) \(m.field.debugDescription)")
-            tv.unmarkText()
+                  m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "provisional words" && !tv.hasMarkedText(),
+                  "\(m.turns.count) \(steps(since: n1)) \(m.field.debugDescription)")
         } else { check("return: the field has the keyboard", false) }
 
         s.dictationReturn = .sendAtOnce
         fresh(); m.field = "dictated words"; m.dictating = true
         m.submit(marked: false)
         check("return: \"sends at once\": Return ends Dictation and sends the transcript in one go",
-              m.turns.count == 2 && m.field.isEmpty && !m.dictating && sent.last?.0 == QCDictation.stop, "\(m.turns.count) \(m.field.debugDescription)")
+              m.turns.count == 2 && m.field.isEmpty && !m.dictating && sent.last?.0 == QCDictation.activate && neverToggled(),
+              "\(m.turns.count) \(m.field.debugDescription)")
         fresh(); m.field = "typed"; m.submit(marked: false)
         check("return: \"sends at once\": typing sends at once too", m.turns.count == 2 && m.field.isEmpty)
 
