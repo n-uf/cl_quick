@@ -7,7 +7,7 @@ Your own Claude Code answers, on the profile's account in use, and it counts aga
 is one menu bar app with no Dock icon and one `claude` at a time, kept while a chat is open and ended after 15 minutes
 idle.
 
-**Quick chats are incognito: no message is saved on this Mac. Your messages still go to Anthropic under the profile's
+**Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under the profile's
 account.** A chat lives only in the running `claude` (it runs with `--no-session-persistence`), so it ends with it: after
 15 minutes idle, on New chat (⌘N), on another profile or account, if `claude` crashes, or when cl_quick quits. The
 window then says "This chat ended after 15 minutes idle. Nothing was saved." and the next message starts a new chat.
@@ -34,54 +34,87 @@ remembers the accounts that have been signed in to its folder: the one signed in
 **standby**. Switching to a standby account means signing in again in the same folder as that account. There are no
 helper folders: one profile, one folder.
 
-In Settings (the menu bar icon ▸ Settings…) each profile has a tile and a card: its name, its accounts (the one in use
-with its week as Claude Code last reported it, the others on standby with their last week or "no numbers yet"; read
-from the folder's own `.claude.json`, never the Keychain), whether the shortcut chats on it, and whether the chat's
-profile picker offers it. On the card, **Switch to this account…** changes the account in use, **Sign in again…**
-renews the one in use, and **Add an account…** takes an address and switches to it. The **+** tile adds a profile: a
-folder found, Choose a folder… (it must be a signed-in Claude Code folder), or Sign in another account…, which makes a
-new folder and opens Claude Code's own sign-in for it in Terminal.
+In Settings (the menu bar icon ▸ Settings…) the profiles are tiles along the top, next to General and a **+** tile.
+A tile has a lamp (green signed in, amber waiting for a sign-in, red when the sign-in is broken), the profile's name and
+the account in use. A profile's page has:
+
+- Its name and folder, and Show in Finder.
+- **Accounts**. The account in use comes first, in a box with its address, its plan, an "In use" tag and two bars, the
+  5-hour limit and the week, each with its share and when it resets, as Claude Code last reported them (or "No limits
+  yet"). Under it, each standby account is a row with its address and when it was last in use, and two buttons,
+  **Switch…** and **Forget…**. A standby account shows no usage: one folder holds one sign-in, so its limits aren't
+  known here. **Sign in again…** appears only when the sign-in is broken (or the folder has no account signed in).
+  **Add an account…** takes an address and signs in as it; the account in use then goes to standby. Accounts are
+  read from the folder's own `.claude.json`, never the Keychain.
+- **In the chat**: Make default (the profile the shortcut opens on), and whether the chat's profile picker offers it.
+- **Remove from cl_quick…**, which leaves the folder, its sign-in and its sessions as they are.
+
+**Forget…** asks first, then drops a standby account from the profile's list. Nothing is signed out and no session is
+touched; the account comes back if it signs in on that folder again.
+
+Account addresses are shown in full in Settings. Prompts, dialogs and the chat's notices may mask them
+(p•••@example.com).
+
+The **+** tile adds a profile: a folder found on this Mac (Add, or Sign in… for one that isn't signed in), Choose a
+folder… (it must be a signed-in Claude Code folder), or "A new account, in a new folder", which takes a name, makes
+`~/.claude-<name>` and opens Claude Code's own sign-in for it in Terminal.
 
 ### Switching accounts
 
-- cl_quick asks first: "Switch Main to p•••@example.com?" Every Claude Code session using that folder moves to the
-  account when it next renews its sign-in, not just the quick chat.
+- cl_quick asks first: "Switch Main to p•••@example.com?" The question says that Claude Code in Terminal and editors on
+  that folder (for a folder other than `~/.claude`, Claude Code pointed at it with `CLAUDE_CONFIG_DIR`) moves to the new
+  account, sessions running now included, and that the Claude app keeps its own sign-in. It's not just the quick chat.
 - Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. The
   browser's claude.ai session decides which account actually signs in, so cl_quick checks the result: it looks at the
   folder's `.claude.json` every 2 seconds, for at most 10 minutes, until the account changes. It never sees a password or
   a token and never touches the Keychain.
 - If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
-  Sign in again. After 10 minutes with no change it stops looking and says "No sign-in in 10 minutes." (in the chat and on the profile's card), with Sign in again and Dismiss.
-- Each account keeps its own week: after a switch the chat's new `claude` is asked for the new account's limits at once
-  (until they come, its last-reported week, or "no numbers yet").
-  Weeks are kept per account (its id in Claude Code's file), not per organization.
-- Addresses are masked everywhere in cl_quick (p•••@example.com), except in the chat's profile menu: each profile's row
-  has the address of its account in use (never a standby one's), blurred until the pointer is on it; the copy glyph
-  beside it copies it.
+  to try again. After 10 minutes with no change it stops looking and says "No sign-in in 10 minutes." (in the chat, and
+  on the profile's page in Settings), with a way to try again and Dismiss (OK in Settings).
+- Limits belong to the account: after a switch the chat's new `claude` is asked for the new account's limits at once,
+  and the new account's own numbers show, never the old account's. They are kept per account (its id in Claude Code's
+  file), not per organization.
+- Addresses are in full in Settings. Prompts and dialogs may mask them (p•••@example.com). In the chat the address is in
+  the profile menu only: each profile's row has the address of its account in use (never a standby one's), blurred
+  until the pointer is on it; a copy button beside it copies it.
 
 ## The chat
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
 - Answers stream in as Markdown; code blocks have Copy; under each answer Copy and a line like "answered by Haiku 5.5 ·
   2.4 s"; under the last one also Ask again.
-- Under the field: the profile (its dot in the week's colour), the model (Haiku by default) and thinking (off by
-  default). A pick holds for that chat; a new chat goes back to the defaults. Click a bar to pick it, or the right half
-  of a control's label for the next value and the left half for the one before (round past either end); the scroll
-  wheel and ⌥⌘ arrows step too. The keyboard button at the end of the controls lists every key.
+- The header (once the bar has become a chat window) shows only the usage meters, "5h" and "wk", each with its bar,
+  its share and, when there's room, when it resets, and, at the right, a darker capsule with **+** (new chat) and **✕**
+  (hide). No profile name and no address. The empty part of the header moves the window.
+- Under the field, in one row: the profile, then the model (Haiku by default) and thinking (off by default) together in
+  one outlined group, always visible, then a keys button, and at the end the mic and Send. A pick holds for that chat;
+  a new chat goes back to the defaults.
+  - Model and thinking are rows of bars. Click a bar to pick it. Click the right half of a control's label for the next
+    value up and the left half for the one before, wrapping round past either end. The scroll wheel steps too, and so
+    do ⌥⌘↑ and ⌥⌘↓ (thinking) and ⌥⌘→ and ⌥⌘← (model).
+  - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
+  - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
+  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, Return, ⇧Return, ⌘N, Esc and
+    ⌘W, and the shortcut that opens cl_quick. A click elsewhere or Esc closes it.
+  - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
+    fuller), two thin stacked bars (the 5-hour window over the week) and the share of the fuller window, such as
+    "5h ▬ 78%" ("full" when a limit is full). On a narrow bar it drops the share, then the label.
+- The profile is a key in that row (a dot in the colour of its fuller limit, and its name). It opens a menu with each
+  profile, its week under the name, and its account in use's address, blurred until the pointer is on it, with a copy
+  button beside it (the copy shows "Copied" for a moment); below, **Settings for <profile>…** and **Add a profile…**.
+  The address is nowhere else in the chat.
 - The mic button left of Send starts macOS Dictation into the field (cl_quick stays in the background: the panel takes
   the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); a click again,
   sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on.
-- The profile lives only in that row: its menu has each profile with its week and the address of its account in use,
-  Settings for the chat's profile, and Add a profile…. The chat's top line has just the session and week meters, New
-  chat and Hide.
-- The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from the
-  chat's own Claude Code: it starts as the bar opens (the same `claude` the chat then uses; with nothing asked it ends
-  after 3 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again (at most
-  once a minute)
-  (Claude Code's `get_usage`, which sends nothing to a model and uses its own sign-in, never the Keychain). After each
-  answer Claude Code also reports them on its own, which stays as the fallback. Standby accounts show no usage.
-- When a profile's week (or 5-hour limit) is full, the chat says when it resets and offers the profile with the most
-  room: **Ask on Work** sends your question there. If the profile has a standby account with room, it also offers
+- The window resizes from its edges and corners, and moves from any empty area of it (the header, the gaps around
+  and between answers); the field, the buttons and the controls never move it.
+- The limits show in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from
+  the chat's own Claude Code: it starts as the bar opens (the same `claude` the chat then uses; with nothing asked it
+  ends after 3 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again (at
+  most once a minute) (Claude Code's `get_usage`, which sends no message to a model and uses its own sign-in, and reads
+  nothing from the Keychain). After each answer Claude Code also reports them on its own, which stays as the fallback.
+- When a profile's 5-hour limit or week is full, the chat's notice names the window that is full ("Main's 5-hour limit
+  is full, resets 23:20.") and offers the profile with the most room: **Ask on Work** sends your question there. If the profile has a standby account with room, it also offers
   **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a chat may not
   carry across accounts) and sends what you had typed, with a line saying "Main is on p•••@example.com now."
 - If a profile's Claude Code isn't signed in, the notice offers **Sign in…** (Claude Code's own sign-in, in Terminal)
@@ -93,26 +126,29 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
 
 ## Settings ▸ General
 
-- **Shortcut**: ⌥Space by default, four other Space shortcuts, Other… for any key with ⌘, ⌃ or ⌥, or Off. It's checked
-  against macOS's own shortcuts that use Space (Spotlight, Finder's search, the input sources, as this Mac has them).
-  Other apps' shortcuts can't be read and macOS lets two apps register the same key, so a clash with another app isn't
-  caught and none is guessed at: if the key opens something else too, pick another. If macOS does refuse the key, or
-  one of its own shortcuts uses it, Settings says so and offers a preset none of macOS's own shortcuts uses. It's
-  registered the way macOS's own app shortcuts are, so there's no Accessibility permission to give.
+- **Shortcut**: ⌥Space by default, four other Space shortcuts, Other… for any key with ⌘, ⌃ or ⌥, or Off. It warns
+  only about real clashes, and with a way out (a button that picks a preset none of macOS's own shortcuts uses):
+  - a macOS shortcut that uses the key, as this Mac has them set (Spotlight, Finder's search, the input sources);
+  - a key another app holds, when macOS refuses to register it ("taken by another app").
+
+  Other apps' shortcuts can't be read, and macOS lets two apps register the same key, so nothing else is guessed at: if
+  the key also opens something else, pick another. It's registered the way macOS's own app shortcuts are, so there's no
+  Accessibility permission to give.
 - **Model** and **Thinking** for a new chat. The model is one of four families, Haiku, Sonnet, Opus and Fable, each the
   newest the account has, by Claude Code's own list (asked when a chat's `claude` starts, with `initialize`, which sends
   nothing to a model; kept per profile and account in models.json). A family the account lacks isn't offered. Thinking
   is Off or the efforts the chosen model takes (Low, Medium, High, Extra, Max); a step it doesn't take moves to the
   nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
 - **Open at login**: in the menu bar, ready for the shortcut.
-- **Files**: the incognito note, cl_quick's own folder, any old chats saved by earlier versions, and
-  **Remove cl_quick data…**.
+- A strip at the bottom: the incognito note ("Quick chats are incognito: nothing is saved on this Mac."), the size of
+  cl_quick's own files, any old chats saved by earlier versions, **Show in Finder**, and **Remove…**, which moves
+  cl_quick's data to the Trash.
 
 ## What it keeps, and what it sends
 
 - `~/Library/Application Support/cl_quick/`: its profiles (with the addresses and ids of their accounts, never tokens),
-  settings, the weeks last reported per account, and the work folders Claude Code runs in. Outside it: the login item, and any folder Sign in another account… made (a Claude Code
-  folder, which Remove leaves).
+  settings, the limits last reported per account, and the work folders Claude Code runs in. Outside it: the login item,
+  and any folder "A new account, in a new folder" made (a Claude Code folder, which Remove leaves).
 - Chats: nothing. Claude Code runs with `--no-session-persistence`, so it writes no transcript, and a chat is never
   resumed. Checked on a signed-in folder (Claude Code 2.1.318): no file names the chat's session id or work folder, and
   no folder for it appears under `projects/`. Claude Code's built-in AGENTS.md plugin would note the session's id in
@@ -121,8 +157,8 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   may refresh its feature-flag cache timestamp in the profile's `.claude.json` and take a backup copy of that file.
   Chats saved by earlier versions are Claude Code sessions in the profile's folder under
   `projects/<cl_quick's work folder>/`, deleted after 30 days by default; cl_quick doesn't touch them except in
-  Remove cl_quick data….
-- Remove cl_quick data… moves cl_quick's folder and any old quick chats to the Trash, turns the login item off and
+  Settings ▸ General ▸ Remove….
+- Remove… (it asks "Move cl_quick's data to the Trash?") moves cl_quick's folder and any old quick chats to the Trash, turns the login item off and
   quits. Your Claude Code folders, their sign-ins and their other sessions stay.
 - It sends nothing but your messages, through Claude Code. Claude Code runs with no tools, no MCP servers, no settings
   files and its non-essential traffic (telemetry, error reports, update checks) off. It gets only an allowlisted part of
