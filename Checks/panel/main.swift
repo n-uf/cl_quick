@@ -1132,6 +1132,24 @@ do {
     check("AZERTY: the key at A's place gives q, no select-all", sel() == 0, "\(sel())")
     _ = cmdKey("a", 12); spin(0.2)
     check("AZERTY: the key that gives a selects all", sel() == ("pasted layout" as NSString).length, "\(sel())")
+    // the letter a shortcut names: Russian and Ukrainian keys (N "т", W "ц" in both; Ukrainian has "і", "ї", "є", "ґ" on keys that
+    // are no edit key), a digit or a symbol stays as it is
+    func letter(_ ch: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = .command) -> String? {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                         characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code).flatMap(QuickChatPanel.shortcutLetter)
+    }
+    check("Cyrillic ⌘N and ⌘W (т, ц) name n and w", letter("т", 45) == "n" && letter("ц", 13) == "w", "\(String(describing: letter("т", 45))) \(String(describing: letter("ц", 13)))")
+    check("Cyrillic ⌘⇧Z (Я) names z", letter("Я", 6, [.command, .shift]) == "z")
+    check("Ukrainian keys that are no edit key stay as they are", letter("і", 1) == "і" && letter("ї", 30) == "ї" && letter("ґ", 42) == "ґ")
+    check("a digit, a symbol and an ASCII capital keep their letter", letter("1", 18) == "1" && letter(",", 43) == "," && letter("V", 9) == "v")
+    // ⌥⌘ arrows are function keys, the same on every layout (here with a Cyrillic layout's modifiers-ignored characters)
+    var steps: [(Bool, Int)] = []
+    let oldStep = p.onStep
+    p.onStep = { steps.append(($0, $1)) }
+    let L = String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!), U = String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!)
+    _ = cmdKey(L, 123, [.command, .option]); _ = cmdKey(U, 126, [.command, .option])
+    p.onStep = oldStep
+    check("⌥⌘← and ⌥⌘↑ still step the model and thinking", steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
     pb.clearContents()
     if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
 }
