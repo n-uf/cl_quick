@@ -148,7 +148,8 @@ struct QCUsageView: View {
     }
     /// As wide whatever they say: the label ("5h", "wk") and the share ("9%", "100%", "full").
     static let labelWidth = widest(["5h", "wk"]), shareWidth = widest(["100%", "full"])
-    static let bar: CGFloat = 24, rowHeight: CGFloat = 12, gap: CGFloat = 3
+    /// The tracks: 24 × 3 pt, the 5-hour window's 3 pt above the week's, the pair centred on the row.
+    static let bar: CGFloat = 24, track: CGFloat = 3, trackGap: CGFloat = 3, gap: CGFloat = 3
     static func width(_ says: Says) -> CGFloat {
         switch says {
         case .all: return labelWidth + gap + bar + gap + shareWidth
@@ -159,12 +160,25 @@ struct QCUsageView: View {
 
     var body: some View {
         let b = level.binding()
-        VStack(spacing: 0) {
-            row("5h", level.full()?.id == "5h" ? 100 : level.fiveHourNow(), b)
-            row("wk", level.full()?.id == "wk" ? 100 : level.weekNow(), b)
+        let full = level.full()
+        let p5 = full?.id == "5h" ? 100 : level.fiveHourNow(), pw = full?.id == "wk" ? 100 : level.weekNow()
+        // three columns (label, tracks, share), each two cells as tall as a track: a word sits exactly level with the
+        // track it describes, and the tracks stay one tight pair whatever is known
+        HStack(spacing: Self.gap) {
+            if says != .bars {
+                column { id in
+                    slot(b?.id == id ? id : nil, width: Self.labelWidth, align: .trailing, colour: b?.p, mark: "usage-label")
+                }
+            }
+            column { id in track(id, id == "5h" ? p5 : pw) }
+            if says == .all {
+                column { id in
+                    slot(b.flatMap { $0.id == id ? ($0.p.rounded() >= 100 && full != nil ? "full" : QuickChatLevel.pct($0.p)) : nil },
+                         width: Self.shareWidth, align: .leading, colour: b?.p, mark: "usage-share")
+                }
+            }
         }
-        .frame(width: Self.width(says), height: 2 * Self.rowHeight)
-        .frame(height: QCSpace.row)
+        .frame(width: Self.width(says), height: QCSpace.row)
         .contentShape(Rectangle())
         .qcControl()
         .background(rendering ? nil : GeometryReader { g in
@@ -184,35 +198,35 @@ struct QCUsageView: View {
         .accessibilityLabel(QCHeaderLine.tooltip(level).replacingOccurrences(of: "\n", with: ". "))
     }
 
-    /// One window's row: its bar, and, when it is the higher one (and the row has room), its label before the bar and
-    /// its share after it, level with the bar, both in its level's colour. The other row keeps the same empty slots.
-    @ViewBuilder private func row(_ id: String, _ p: Double?, _ b: (id: String, p: Double)?) -> some View {
-        let higher = b.flatMap { $0.id == id ? $0.p : nil }
-        HStack(spacing: Self.gap) {
-            if says != .bars {
-                slot(higher.map { _ in id }, width: Self.labelWidth, align: .trailing, colour: higher, mark: "usage-label")
-            }
-            ZStack(alignment: .leading) {
-                Capsule().fill(QCColor.text.opacity(0.13))
-                Capsule().fill(QuickChatLevel.color(p)).frame(width: Self.bar * CGFloat(min(100, p ?? 0)) / 100)
-            }
-            .frame(width: Self.bar, height: 3)
-            .qcMark("usage-\(id)")
-            if says == .all {
-                slot(higher.map { $0.rounded() >= 100 && level.full() != nil ? "full" : QuickChatLevel.pct($0) },
-                     width: Self.shareWidth, align: .leading, colour: higher, mark: "usage-share")
-            }
+    /// A column's two cells, the 5-hour window's over the week's, each a track tall.
+    private func column<V: View>(@ViewBuilder _ cell: @escaping (String) -> V) -> some View {
+        VStack(spacing: Self.trackGap) {
+            cell("5h").frame(height: Self.track)
+            cell("wk").frame(height: Self.track)
         }
-        .frame(height: Self.rowHeight)
     }
 
-    /// A fixed-width slot: the words in the level's colour, or nothing.
+    /// A window's track: its share in its level's colour on a faint fill, or, with no number yet, a faint outline in
+    /// the same place.
+    /// (One view whatever is known, only its colours change: the track never goes and comes back.)
+    private func track(_ id: String, _ p: Double?) -> some View {
+        ZStack(alignment: .leading) {
+            Capsule().fill(QCColor.text.opacity(p == nil ? 0 : 0.13))
+            Capsule().fill(QuickChatLevel.color(p)).frame(width: Self.bar * CGFloat(min(100, p ?? 0)) / 100)
+            Capsule().strokeBorder(QCColor.text.opacity(p == nil ? 0.16 : 0), lineWidth: 0.75)
+        }
+        .frame(width: Self.bar, height: Self.track)
+        .qcMark("usage-\(id)")
+    }
+
+    /// A fixed-width slot: the words in the level's colour, centred on its cell (they stand out of it above and below,
+    /// beside the tracks), or nothing.
     @ViewBuilder private func slot(_ words: String?, width: CGFloat, align: Alignment, colour p: Double?, mark: String) -> some View {
         Group {
             if let words {
-                Text(words).font(Font(Self.font)).lineLimit(1).foregroundColor(QuickChatLevel.color(p)).qcMark(mark)
+                Text(words).font(Font(Self.font)).lineLimit(1).fixedSize().foregroundColor(QuickChatLevel.color(p)).qcMark(mark)
             } else {
-                Color.clear.frame(height: 1)
+                Color.clear
             }
         }
         .frame(width: width, alignment: align)

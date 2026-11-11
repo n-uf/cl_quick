@@ -86,9 +86,12 @@ struct QCBar: View {
         .padding(QCSpace.barPadding)
         .frame(maxHeight: .infinity, alignment: .top)       // a bar dragged taller gives the height to the field
         .qcDraggable()
-        .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(QCColor.surface.opacity(0.97)))
+        .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(Self.fill))
         .overlay(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).strokeBorder(QCColor.line))
     }
+
+    /// The card's fill: opaque (alpha 1), so nothing of the windows behind ever shows through.
+    static let fill = QCColor.surface
 }
 
 // MARK: - The chat window
@@ -142,9 +145,12 @@ struct QCWindow: View {
         }
         .frame(maxHeight: .infinity)
         .qcDraggable()
-        .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(QCColor.window.opacity(0.98)))
+        .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(Self.fill))
         .overlay(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).strokeBorder(QCColor.line))
     }
+
+    /// The window's fill: opaque (alpha 1), so nothing of the windows behind ever shows through.
+    static let fill = QCColor.window
 
     /// The answers start on the same 10 pt line as the header's name and the field box.
     static let chatPadding = EdgeInsets(top: 4, leading: QCSpace.gap, bottom: 12, trailing: QCSpace.gap)
@@ -2014,6 +2020,21 @@ final class QCTextView: NSTextView {
 
 // MARK: - A picture of it, for checking (`--render-quick-chat OUT.png STATE`)
 
+/// A picture's busy backdrop: lines of dark text on a light page, as a browser window behind the panel would be.
+private struct QCBusyBackdrop: View {
+    var body: some View {
+        let words = "that the site loaded fine on the second try, and the left column showed every result as expected. "
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(0..<60, id: \.self) { i in
+                Text(String(repeating: words, count: 3)).font(.system(size: i % 7 == 0 ? 15 : 12, weight: i % 7 == 0 ? .bold : .regular))
+                    .foregroundColor(i % 5 == 0 ? Color(red: 0.1, green: 0.3, blue: 0.8) : .black).lineLimit(1).fixedSize()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).clipped()
+        .background(Color(white: 0.97))
+    }
+}
+
 enum QuickChatRender {
     @MainActor static func write(to path: String, state: String) {
         // the profile menu can't be drawn to a picture: menu-one and menu-several write what it holds, as text
@@ -2036,6 +2057,25 @@ enum QuickChatRender {
                 return (i.state == .on ? "✓ " : "  ") + (i.image != nil ? "● " : "") + title + sub + (i.isEnabled ? "" : "  (heading)")
             }
             try? (lines.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            return
+        }
+        // the bar's usage indicator alone on the bar's fill, twice the size of the other pictures: indicator-5h (the
+        // 5-hour window higher), indicator-wk (the week higher), indicator-no5h (no 5-hour number yet), indicator-full
+        if state.hasPrefix("indicator-") {
+            var l = QuickChatLevel(); l.week = 21; l.weekResets = Date().addingTimeInterval(3 * 86400)
+            switch state {
+            case "indicator-5h": l.fiveHour = 78; l.fiveHourResets = Date().addingTimeInterval(7200)
+            case "indicator-wk": l.fiveHour = 30; l.fiveHourResets = Date().addingTimeInterval(7200); l.week = 85
+            case "indicator-full": l.fiveHour = 100; l.fiveHourResets = Date().addingTimeInterval(7200); l.week = 64
+            default: break
+            }
+            let v = QCUsageView(level: l).padding(.horizontal, 12).padding(.vertical, 4).background(QCBar.fill)
+                .environment(\.qcRendering, true).environment(\.colorScheme, .dark)
+            let r = ImageRenderer(content: v)
+            r.scale = 4
+            if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
             return
         }
         let m = QuickChatModel()
@@ -2067,6 +2107,7 @@ enum QuickChatRender {
         case "usage-5h": level.fiveHour = 78; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 20; m.level = level
         case "usage-wk": level.fiveHour = 30; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 85; m.level = level
         case "usage-full": level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 64; m.level = level
+        case "usage-no5h": level.week = 21; m.level = level           // no 5-hour number yet: its track an outline
         case "notinstalled": m.field = q1; m.barProblem = .notInstalled
         case "streaming": var t = t1; t.answer = String(a1.prefix(90)); t.phase = .streaming; m.turns = [t]
         case "answer": m.turns = [t1]
@@ -2157,9 +2198,11 @@ enum QuickChatRender {
             ?? (state == "short" ? QuickChatRoot.minWindowHeight : QuickChatRoot.windowHeight)
         // hover-m2: the pointer on the model's third bar; hover-t0: on thinking's Off
         let stepHover: String? = state == "keys" ? "keys" : state.hasPrefix("hover-") ? String(state.dropFirst("hover-".count)) : nil
+        // QC_RENDER_BUSY=1: over a busy page of text instead of a plain grey, to show nothing of it comes through the card
+        let busy = env["QC_RENDER_BUSY"] == "1"
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true).environment(\.qcStepHover, stepHover)
             .frame(width: width, height: m.isWindow ? height : state == "bar-tall" ? 170 : nil)
-            .padding(30).background(Color(white: 0.1))
+            .padding(30).background(busy ? AnyView(QCBusyBackdrop()) : AnyView(Color(white: 0.1)))
         let r = ImageRenderer(content: view)
         r.scale = 2
         if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {

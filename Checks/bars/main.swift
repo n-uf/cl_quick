@@ -338,6 +338,11 @@ for w in [CGFloat(320), 440, 640] {
         } else {
             check("\(name): no share drawn", targets.marks["usage-share"] == nil)
         }
+        // exactly two tracks, one tight pair (5h on top, 3 pt apart), centred on the row
+        check("\(name): two tracks, 5h over wk, 3 pt apart, as wide", abs(rows.week.minY - rows.five.maxY - QCUsageView.trackGap) < 0.5
+              && abs(rows.five.width - QCUsageView.bar) < 0.5 && abs(rows.week.width - QCUsageView.bar) < 0.5 && abs(rows.five.minX - rows.week.minX) < 0.5,
+              "\(rows)")
+        check("\(name): the pair is centred on the indicator", abs((rows.five.minY + rows.week.maxY) / 2 - ui.midY) < 0.5, "\(rows) in \(ui)")
         if let s = targets.marks["send"] { check("\(name): it ends before Send", ui.maxX <= s.minX, "\(ui.maxX) vs \(s.minX)") }
         // across the row: a full limit opens its notice above the field and the whole row moves down with the field
         if let f = first {
@@ -345,6 +350,17 @@ for w in [CGFloat(320), 440, 640] {
             check("\(name): its bars never move sideways", rows.five.minX == f.five.minX && rows.week.minX == f.week.minX && rows.five.width == f.five.width,
                   "\(rows) vs \(f)")
         } else { first = (ui, rows.five, rows.week) }
+    }
+    // no 5-hour number yet: its track is an outline in the very same place (not a bar of its own elsewhere), and the
+    // week's label sits on the week's track
+    var l = QuickChatLevel(); l.week = 21; l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin()
+    let five = targets.marks["usage-5h"] ?? .zero, wk = targets.marks["usage-wk"] ?? .zero, ui = targets.marks["usage"] ?? .zero
+    if let f = first {
+        check("usage at \(Int(w)), no 5h number: both tracks where they always are", five == f.five && wk == f.week && ui.minX == f.ui.minX,
+              "\(five) \(wk) vs \(f)")
+    }
+    if let label = targets.marks["usage-label"], abs(ui.width - QCUsageView.width(.bars)) > 0.5 {
+        check("usage at \(Int(w)), no 5h number: the label sits on the week's track", abs(label.midY - wk.midY) <= 1.5, "\(label) vs \(wk)")
     }
 }
 

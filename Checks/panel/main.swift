@@ -48,6 +48,15 @@ func windowShape(_ label: String) {
           "\(cv.frame) in \(p.frame)")
     check("\(label): the card fills the frame (no transparent rim: the resize zones are on its visible edges)", QuickChatRoot.margin == 0)
     check("\(label): clear, non-opaque, with a shadow", !p.isOpaque && p.backgroundColor.alphaComponent == 0 && p.hasShadow)
+    // the window is clear around the card's rounded corners, so the card itself must be opaque: nothing of the windows
+    // behind may show through it (a 97% fill let a page's text through, around the usage indicator)
+    check("\(label): the card's fills are opaque", NSColor(QCBar.fill).alphaComponent == 1 && NSColor(QCWindow.fill).alphaComponent == 1)
+    if let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) {
+        cv.cacheDisplay(in: cv.bounds, to: rep)
+        let at: [(Double, Double)] = [(0.5, 0.5), (0.06, 0.5), (0.94, 0.5), (0.5, 0.2), (0.5, 0.8), (0.8, 0.75)]
+        let alphas = at.map { rep.colorAt(x: Int(Double(rep.pixelsWide) * $0.0), y: Int(Double(rep.pixelsHigh) * $0.1))?.alphaComponent ?? 0 }
+        check("\(label): drawn, the card is opaque inside (alpha 1)", alphas.allSatisfy { $0 >= 0.999 }, "\(alphas)")
+    } else { check("\(label): the card can be drawn to check it", false) }
     check("\(label): takes the mouse (not ignoresMouseEvents)", !p.ignoresMouseEvents)
     check("\(label): floating, on every Space and over full-screen apps", p.level == .floating
           && p.collectionBehavior.contains(.canJoinAllSpaces) && p.collectionBehavior.contains(.fullScreenAuxiliary))

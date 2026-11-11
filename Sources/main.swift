@@ -13,7 +13,9 @@
 //                                       doesn't take), tint-fable, tint-extra, tint-max, tint-fablemax, hover-m0…m3 and
 //                                       hover-t0…t5 (the pointer on a bar), hover-mprev, hover-mnext, hover-tprev,
 //                                       hover-tnext (on a label's half), keys (the keys list open); the bar's usage:
-//                                       usage-5h, usage-wk, usage-full
+//                                       usage-5h, usage-wk, usage-full, usage-no5h, and the indicator alone at twice
+//                                       the size: indicator-5h, indicator-wk, indicator-no5h, indicator-full.
+//                                       QC_RENDER_BUSY=1 draws it over a busy page of text
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
 //                                       accounts-two, accounts-switching, accounts-wrong, accounts-timedout,
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
