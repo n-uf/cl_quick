@@ -1,5 +1,12 @@
 # cl_quick
 
+> [!CAUTION]
+> ## Not yet stable
+>
+> **cl_quick is young and still changing. Its settings, the few files it stores and the way it talks to Claude Code are not final.**
+>
+> Version numbers are dates (YY.M.R), not semantic versions, so any release may change them, and a newer Claude Code can stop parts of cl_quick working until it is updated. cl_quick stores nothing beyond its settings and a few small files in `~/Library/Application Support/cl_quick` (levels.json, models.json, profiles.json and settings.json) and the work folders Claude Code runs in, and it has no backups or exports. Read the [CHANGELOG](CHANGELOG.md) before you upgrade.
+
 A floating Claude chat for the Mac, on a shortcut. Press it over any app: a bar opens; the first message turns it into a
 chat window that stays floating, on every Space, until Esc hides it. It never brings another app forward.
 
@@ -14,7 +21,8 @@ window then says "This chat ended after 15 minutes idle. Nothing was saved." and
 
 ## Install
 
-Download the latest release, open the disk image and drag cl_quick to Applications. It needs an Apple silicon Mac,
+Once the first release is published, download it from [GitHub Releases](https://github.com/n-uf/cl_quick/releases),
+open the disk image and drag cl_quick to Applications. Until then, build it from source (below). It needs an Apple silicon Mac,
 macOS 13 or later and [Claude Code](https://code.claude.com/docs/en/setup), signed in. cl_quick isn't signed with an
 Apple Developer ID yet, so the first time macOS says it can't verify the app: open System Settings ▸ Privacy &
 Security and click **Open Anyway** (once).
@@ -185,12 +193,16 @@ appears under the folder's `projects/`.
 
 ## Versioning
 
-Calendar versions, `YY.M.R`: the year and month of the release, then a counter within that month.
+cl_quick uses calendar versions, `YY.M.R`, like the other n-uf projects:
 
-## Releases
+- `YY` is the year of the release date (`26` for 2026).
+- `M` is the month of the release date, without a leading zero: a release made in November 2026 is `26.11.x`.
+- `R` counts releases within that month and starts again at `0` in a new month.
 
-Downloads come from [GitHub Releases](https://github.com/n-uf/cl_quick/releases): `cl_quick.dmg` and `cl_quick.zip`,
-the same app. Notes go in CHANGELOG.md under "Unreleased" as changes land. To release, from a clean `main`:
+Releases are tagged `vX.Y.Z` (for example `v26.11.0`). The number lives in `VERSION`; no release has been made yet, and
+`26.11.0` is the number the first one will carry. Changes go into [CHANGELOG.md](CHANGELOG.md) under "Unreleased" as
+they land. Releases will be published on [GitHub Releases](https://github.com/n-uf/cl_quick/releases) as
+`cl_quick.dmg` and `cl_quick.zip`, the same app. To release, from a clean `main`:
 
 ```bash
 scripts/release.sh --dry-run   # the next version
@@ -199,6 +211,14 @@ scripts/release.sh --push      # the same, then build the zip and disk image, pu
 scripts/release.sh --local     # only build dist/cl_quick.zip and dist/cl_quick.dmg, to check them
 ```
 
+A version can't signal a breaking change, so read the notes before updating.
+
 ## License
 
-PolyForm Perimeter 1.0.1, as cl_audit. See LICENSE.
+[PolyForm Perimeter 1.0.1](LICENSE): source-available. You may use, change and share it, but not to build a product
+that competes with cl_quick.
+
+---
+
+cl_quick is an independent tool. It is not affiliated with, endorsed by or sponsored by Anthropic.
+"Claude" is a trademark of Anthropic.
