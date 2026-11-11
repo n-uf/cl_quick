@@ -122,6 +122,11 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
               && abs(l.width - r.width) < 0.6 && l.width > 6 && abs(l.height - whole.height) < 0.01 && abs(r.height - whole.height) < 0.01,
               "\(l) \(r) in \(whole), first bar \(first)")
     }
+    // from the bar's first width up the profile key keeps its name ("● Main ⌄"), whatever the families
+    if p.frame.width >= 440 {
+        // the dot alone is 23 pt (7 pt dot, 8 pt padding each side): a name adds at least 20
+        check("\(name): the profile key shows its name", (targets.marks["profile"]?.width ?? 0) >= 43, "\(targets.marks["profile"].map { "\($0)" } ?? "-")")
+    }
     // the bars never overlap Send
     if let s = base["send"], let t = base["t"] {
         check("\(name): the bars end before Send", t.maxX <= s.minX, "\(t.maxX) vs \(s.minX)")
@@ -159,8 +164,8 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
         }
     }
     if let k = base["keys"] {
-        // past the outline (2 pt after the keys button) and the row's 2 pt spacing: the spacer, the window's to move
-        check("\(name): the gap after the controls moves the window", QCDragView.surface(at: inWindow(CGPoint(x: k.maxX + 6, y: k.midY)), in: p) != nil)
+        // past the outline (1 pt after the keys button) and the row's 2 pt spacing: the spacer, the window's to move
+        check("\(name): the gap after the controls moves the window", QCDragView.surface(at: inWindow(CGPoint(x: k.maxX + 3.5, y: k.midY)), in: p) != nil)
     }
     // the limits changing (the bar's usage indicator) moves nothing (a full limit is another matter: its notice opens
     // above the field and the row moves down with the field, as it always has)
@@ -295,8 +300,10 @@ for fams in sets {
 }
 
 // the bar's usage indicator: the limit closest to full, its label and share on that window's row, one width whatever
-// it says; the profile's dot in the same colour
+// it says; the profile's dot in the same colour. With all four families, the widest row.
+ModelCatalog.shared.set(fullList, profile: t.profileID, account: t.accountUUID)
 m.turns = []
+m.choose(QuickChatModelChoice.fable); m.choose(QuickChatThinking.max)
 spin(0.6)
 for w in [CGFloat(320), 440, 640] {
     width(w)
@@ -309,17 +316,27 @@ for w in [CGFloat(320), 440, 640] {
         let row = targets.marks["usage-\(higher)"] ?? .zero
         let rows = (five: targets.marks["usage-5h"] ?? .zero, week: targets.marks["usage-wk"] ?? .zero)
         let name = "usage at \(Int(w)), 5h \(five) wk \(week)"
-        // a narrow row keeps the two bars alone (the share on hover)
-        let barsOnly = abs(ui.width - QCUsageView.width(numbers: false)) < 0.5
-        check("\(name): shown", ui != .zero, "\(ui)")
-        if w >= 440 { check("\(name): with room, its label and share are shown", !barsOnly, "\(ui)") }
+        // short of room the share goes first (the label stays), a narrow row keeps the two bars alone (both on hover)
+        let says: QCUsageView.Says? = [.all, .label, .bars].first { abs(ui.width - QCUsageView.width($0)) < 0.5 }
+        check("\(name): shown", ui != .zero && says != nil, "\(ui)")
+        // from the bar's first width up, the profile keeps its name ("● Main ⌄"); what gives way there is the share
+        if w >= 440 {
+            let profile = targets.marks["profile"] ?? .zero
+            check("\(name): the profile key shows its name", profile.width >= 43, "\(profile)")
+            check("\(name): with room, its label is shown", says == .all || says == .label, "\(ui)")
+        }
+        if w >= 640 { check("\(name): with more room, its share too", says == .all, "\(ui)") }
         check("\(name): \(higher) is the higher one", higher == (five >= week || l.full()?.id == "5h" ? "5h" : "wk") || (l.full()?.id == "wk" && higher == "wk"))
-        if !barsOnly {
+        if says != .bars {
             // the label, then the bars, then the share, the label and share on the higher window's row
             check("\(name): its label sits on the \(higher) row", label != .zero && abs(label.midY - row.midY) <= 1.5, "\(label.midY) vs \(row.midY)")
+            check("\(name): the label comes before the bars", label.maxX <= row.minX + 0.01, "label \(label), bar \(row)")
+        }
+        if says == .all {
             check("\(name): its share sits on the \(higher) row", share != .zero && abs(share.midY - row.midY) <= 1.5, "\(share.midY) vs \(row.midY)")
-            check("\(name): the label comes before the bars, the share after", label.maxX <= row.minX + 0.01 && share.minX >= row.maxX - 0.01,
-                  "label \(label), bar \(row), share \(share)")
+            check("\(name): the share comes after the bars", share.minX >= row.maxX - 0.01, "bar \(row), share \(share)")
+        } else {
+            check("\(name): no share drawn", targets.marks["usage-share"] == nil)
         }
         if let s = targets.marks["send"] { check("\(name): it ends before Send", ui.maxX <= s.minX, "\(ui.maxX) vs \(s.minX)") }
         // across the row: a full limit opens its notice above the field and the whole row moves down with the field
@@ -331,6 +348,7 @@ for w in [CGFloat(320), 440, 640] {
     }
 }
 
+// (still four families with Fable and Max from the usage loop: the widest row, the hardest to fit)
 // narrower than the panel ever is (a row of its own in the panel, made narrower step by step): the labels shorten and
 // the usage indicator keeps its bars alone, but never goes, and nothing reaches Send; its card then gives both shares
 do {
@@ -344,9 +362,9 @@ do {
     for w in stride(from: CGFloat(320), through: 160, by: -4) {
         probe.frame = NSRect(x: 0, y: 0, width: w, height: QCSpace.row); spin()
         let ui = targets.marks["usage"] ?? .zero, mw = targets.controls["m"]?.frame.width ?? 0
-        check("narrow row at \(Int(w)): the usage indicator is shown", ui != .zero && (abs(ui.width - QCUsageView.width(numbers: true)) < 0.5
-              || abs(ui.width - QCUsageView.width(numbers: false)) < 0.5), "\(ui)")
-        if abs(ui.width - QCUsageView.width(numbers: false)) < 0.5 {
+        check("narrow row at \(Int(w)): the usage indicator is shown",
+              ui != .zero && [.all, .label, .bars].contains { abs(ui.width - QCUsageView.width($0)) < 0.5 }, "\(ui)")
+        if abs(ui.width - QCUsageView.width(.bars)) < 0.5 {
             barsAt = w
             let t = targets.controls["t"]?.frame ?? .zero, s = targets.marks["send"] ?? .zero
             check("narrow row at \(Int(w)): the bars, then the usage bars, then Send, none over another", t.maxX <= ui.minX && ui.maxX <= s.minX,

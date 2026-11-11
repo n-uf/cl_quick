@@ -988,48 +988,49 @@ struct QCControls: View {
     @ObservedObject var model: QuickChatModel
     var inBar: Bool
 
-    /// How much the bar's usage indicator says: its label, two bars and share ("5h ▬ 78%"), or its two bars alone (the
-    /// shares on hover). The window has none (its header has the limits).
-    enum Usage { case full, bars }
-
-    /// The row on one line, whatever the width (ViewThatFits, richest first): the profile key keeps just its dot, then
-    /// the model and thinking labels shorten to a letter ("O", "H"), then the usage indicator keeps its bars alone. The
-    /// model and thinking bars and the usage indicator are always there (the last row fits from well under the panel's
-    /// least width), and every part is as wide for every value it can show, so which row is drawn depends on the width
-    /// alone: picking a model or a level, or the limits changing, never moves anything.
+    /// The row on one line, whatever the width (ViewThatFits, richest first). The profile's name stays from the bar's
+    /// first width (440) up: short of room there, the usage indicator gives up its share first ("5h ▬"). Narrower, the
+    /// profile key keeps just its dot, then the model and thinking labels shorten to a letter ("O", "H"), then the usage
+    /// indicator keeps its bars alone. The model and thinking bars and the usage indicator are always there (the last
+    /// row fits from well under the panel's least width), and every part is as wide for every value it can show, so
+    /// which row is drawn depends on the width alone: picking a model or a level, or the limits changing, never moves
+    /// anything. (The window has no usage indicator: its header has the limits.)
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(usage: .full, profileWords: true, letters: false)
-            row(usage: .full, profileWords: false, letters: false)
-            row(usage: .full, profileWords: false, letters: true)
+            row(usage: .all, profileWords: true, letters: false)
+            row(usage: .label, profileWords: true, letters: false)
+            row(usage: .all, profileWords: false, letters: false)
+            row(usage: .all, profileWords: false, letters: true)
             row(usage: .bars, profileWords: false, letters: true)
         }
     }
 
-    private func row(usage: Usage, profileWords: Bool, letters: Bool) -> some View {
+    private func row(usage: QCUsageView.Says, profileWords: Bool, letters: Bool) -> some View {
         HStack(spacing: 2) {
             if let t = model.target {
                 // the dot takes the colour of the limit closest to full, as the usage indicator and the header do
                 QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.binding()?.p),
                        help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
+                    .qcMark("profile")
             }
-            // the model and thinking bars, always shown, in one outline, and at its end the keys button
-            HStack(spacing: 4) {
+            // the model and thinking bars, always shown, in one outline, and at its end the keys button (tight: each
+            // control's label has its own small padding)
+            HStack(spacing: 3) {
                 modelSteps(letters)
                 Rectangle().fill(QCColor.line).frame(width: 1, height: 18)
                 thinkingSteps(letters)
                 QCKeysButton().padding(.leading, -2)
             }
-            .padding(.leading, 4).padding(.trailing, 2)
+            .padding(.leading, 2).padding(.trailing, 1)
             .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner + 2, style: .continuous).fill(QCColor.hex(0x2B2B29)))
             .overlay(RoundedRectangle(cornerRadius: QCSpace.keyCorner + 2, style: .continuous).strokeBorder(QCColor.line))
             .padding(.leading, 2)
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             if inBar {
                 if let l = model.level, l.binding() != nil {
-                    QCUsageView(level: l, numbers: usage == .full).padding(.trailing, 6)
+                    QCUsageView(level: l, says: usage).padding(.trailing, 4)
                 } else {
-                    Color.clear.frame(width: QCUsageView.width(numbers: usage == .full), height: 4).padding(.trailing, 6)
+                    Color.clear.frame(width: QCUsageView.width(usage), height: 4).padding(.trailing, 4)
                 }
             }
             if model.busy {
@@ -1208,7 +1209,7 @@ struct QCStepControl: View {
                 .font(.system(size: 13, weight: .medium)).lineLimit(1)
                 .foregroundColor(h == nil ? fg : !h!.takes ? QCColor.muted : QCColor.text)
                 .frame(width: labelWidth, alignment: .leading)
-                .padding(.leading, QCSpace.keyPadding).padding(.trailing, 3)
+                .padding(.leading, 6).padding(.trailing, 2)
                 .frame(height: QCSpace.row)
                 // the pointer on a half lights that half; the label itself never changes for it
                 .background(HStack(spacing: 0) {
@@ -1407,7 +1408,7 @@ struct QCKeysButton: View {
     @State private var hover = false
     @Environment(\.qcRendering) private var rendering
     @Environment(\.qcStepHover) private var pictureHover
-    static let width: CGFloat = 22
+    static let width: CGFloat = 20
 
     var body: some View {
         let open = keys.shown || pictureHover == "keys"

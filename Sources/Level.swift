@@ -130,12 +130,14 @@ struct QuickChatLevel: Codable, Equatable {
 /// The account's limits in the bar's row, small: two thin bars, the 5-hour window over the week, each in its level's
 /// colour, and on the row of the higher one its label before the bars and its share after them, both in that level's
 /// colour ("5h ▬ 78%", "wk ▬ 85%", "5h ▬ full"). The label and share each keep one width, so a change never shifts
-/// anything; a narrow row keeps the bars alone (`numbers` false). The pointer on it shows both windows with their resets
-/// above it (QCFloat, a window of its own), only what the row doesn't say. (The chat's header has both with their reset
-/// times.)
+/// anything. A row short of room drops the share first (`says` .label: "5h ▬"), a narrow one keeps the bars alone
+/// (.bars). The pointer on it shows both windows with their resets above it (QCFloat, a window of its own), only what
+/// the row doesn't say. (The chat's header has both with their reset times.)
 struct QCUsageView: View {
+    /// What it says beside its bars: the label and share, the label alone, or nothing.
+    enum Says { case all, label, bars }
     let level: QuickChatLevel
-    var numbers = true
+    var says = Says.all
     @State private var frame: CGRect = .zero
     @State private var hovering = false
     @Environment(\.qcRendering) private var rendering
@@ -146,8 +148,14 @@ struct QCUsageView: View {
     }
     /// As wide whatever they say: the label ("5h", "wk") and the share ("9%", "100%", "full").
     static let labelWidth = widest(["5h", "wk"]), shareWidth = widest(["100%", "full"])
-    static let bar: CGFloat = 24, rowHeight: CGFloat = 12, gap: CGFloat = 4
-    static func width(numbers: Bool) -> CGFloat { numbers ? labelWidth + gap + bar + gap + shareWidth : bar }
+    static let bar: CGFloat = 24, rowHeight: CGFloat = 12, gap: CGFloat = 3
+    static func width(_ says: Says) -> CGFloat {
+        switch says {
+        case .all: return labelWidth + gap + bar + gap + shareWidth
+        case .label: return labelWidth + gap + bar
+        case .bars: return bar
+        }
+    }
 
     var body: some View {
         let b = level.binding()
@@ -155,7 +163,7 @@ struct QCUsageView: View {
             row("5h", level.full()?.id == "5h" ? 100 : level.fiveHourNow(), b)
             row("wk", level.full()?.id == "wk" ? 100 : level.weekNow(), b)
         }
-        .frame(width: Self.width(numbers: numbers), height: 2 * Self.rowHeight)
+        .frame(width: Self.width(says), height: 2 * Self.rowHeight)
         .frame(height: QCSpace.row)
         .contentShape(Rectangle())
         .qcControl()
@@ -167,10 +175,10 @@ struct QCUsageView: View {
         .qcMark("usage")
         .onHover { inside in
             hovering = inside
-            if inside { QCFloat.shared.show(AnyView(QCUsageCard(level: level, rowShowsShare: numbers)), above: frame, align: .trailing) } else { QCFloat.shared.hide() }
+            if inside { QCFloat.shared.show(AnyView(QCUsageCard(level: level, rowShowsShare: says == .all)), above: frame, align: .trailing) } else { QCFloat.shared.hide() }
         }
         // new numbers while the card is up: the card says them
-        .onChange(of: level) { l in if hovering { QCFloat.shared.show(AnyView(QCUsageCard(level: l, rowShowsShare: numbers)), above: frame, align: .trailing) } }
+        .onChange(of: level) { l in if hovering { QCFloat.shared.show(AnyView(QCUsageCard(level: l, rowShowsShare: says == .all)), above: frame, align: .trailing) } }
         .onDisappear { if hovering { hovering = false; QCFloat.shared.hide() } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QCHeaderLine.tooltip(level).replacingOccurrences(of: "\n", with: ". "))
@@ -181,7 +189,7 @@ struct QCUsageView: View {
     @ViewBuilder private func row(_ id: String, _ p: Double?, _ b: (id: String, p: Double)?) -> some View {
         let higher = b.flatMap { $0.id == id ? $0.p : nil }
         HStack(spacing: Self.gap) {
-            if numbers {
+            if says != .bars {
                 slot(higher.map { _ in id }, width: Self.labelWidth, align: .trailing, colour: higher, mark: "usage-label")
             }
             ZStack(alignment: .leading) {
@@ -190,7 +198,7 @@ struct QCUsageView: View {
             }
             .frame(width: Self.bar, height: 3)
             .qcMark("usage-\(id)")
-            if numbers {
+            if says == .all {
                 slot(higher.map { $0.rounded() >= 100 && level.full() != nil ? "full" : QuickChatLevel.pct($0) },
                      width: Self.shareWidth, align: .leading, colour: higher, mark: "usage-share")
             }
@@ -212,7 +220,7 @@ struct QCUsageView: View {
 }
 
 /// Both windows under the pointer, in the header's words: each with its bar, share and reset; the share the row
-/// already shows is left out (with the row's bars alone, both shares are given).
+/// already shows is left out (with no share on the row, both shares are given).
 struct QCUsageCard: View {
     let level: QuickChatLevel
     var rowShowsShare = true
