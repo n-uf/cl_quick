@@ -9,6 +9,7 @@
 
 import AppKit
 import Carbon.HIToolbox
+import SwiftUI
 
 Files.readOnly = true
 let app = NSApplication.shared
@@ -1793,6 +1794,99 @@ do {
     let end3 = Date().addingTimeInterval(8)
     while !landed3, Date() < end3 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     check("clear: a new chat that keeps the field also keeps pictures being read", m.images.count == 2, "\(m.images.count)")
+    m.shutdown()
+    try? FileManager.default.removeItem(at: c.dir)
+}
+
+// the ✕ on an attached picture's thumbnail removes it, and neither it nor the tile moves the window. The bar's own views
+// are hosted in a window of their own (titled like the panel, far off every screen, never key): the real panel is
+// click-through in the checks, so a press is delivered to this one, through NSWindow.sendEvent as a click is.
+final class OffscreenWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }   // stays off every screen
+    override var canBecomeKey: Bool { false }
+}
+for chatWindow in [false, true] {
+    let mode = chatWindow ? "chat window" : "bar"
+    let c = imageFixChat("images-x\(chatWindow)"), m = c.m
+    if chatWindow { m.turns = [oneTurn()] }           // a chat on screen: the field box with its picture row, under the answer
+    c.attach([.data(noisyPNG(40, 40)), .data(noisyPNG(48, 48))])
+    let ids = m.images.map(\.id)
+    let win = OffscreenWindow(contentRect: NSRect(x: -30000, y: -30000, width: 760, height: chatWindow ? 580 : 262), styleMask: QuickChatPanel.style, backing: .buffered, defer: false)
+    win.titleVisibility = .hidden
+    win.titlebarAppearsTransparent = true
+    win.contentView = QuickChatHostingView(rootView: QuickChatRoot(model: m))
+    win.alphaValue = 0.01
+    win.orderFrontRegardless()
+    win.setFrameOrigin(NSPoint(x: -30000, y: -30000))      // a titled window is put on a screen when ordered in: moved off at once
+    spin(0.8)
+    func marks(_ v: NSView, _ out: inout [NSView]) { if v is QCControlMarkView { out.append(v) }; v.subviews.forEach { marks($0, &out) } }
+    var ms: [NSView] = []
+    marks(win.contentView!, &ms)
+    func targets() -> [NSView] {
+        var all: [NSView] = []
+        marks(win.contentView!, &all)
+        // (a chat's answer has 24 pt action buttons too: the ✕ are those lowest in the window, the field box being at the bottom)
+        let small = all.filter { let r = $0.convert($0.bounds, to: nil); return r.width == 24 && r.height == 24 }
+        let low = small.map { $0.convert($0.bounds, to: nil).minY }.min() ?? 0
+        return small.filter { abs($0.convert($0.bounds, to: nil).minY - low) < 1 }.sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+    }
+    func click(_ pt: NSPoint) {
+        func ev(_ t: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: t, location: pt, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: win.windowNumber, context: nil, eventNumber: 7, clickCount: 1, pressure: 1)!
+        }
+        win.sendEvent(ev(.leftMouseDown)); spin(0.05); win.sendEvent(ev(.leftMouseUp)); spin(0.3)
+    }
+    var xs = targets()
+    check("✕ (\(mode)): one 24 pt target for each attached picture", xs.count == 2, "\(xs.count)")
+    var moves = 0
+    let oldDrag = QCDragView.drag
+    QCDragView.drag = { _, _ in moves += 1 }          // a press that reached a drag surface would start a move
+    if let first = xs.first {
+        let r = first.convert(first.bounds, to: nil)
+        // a click near the corner of the target, not only its middle
+        click(NSPoint(x: r.minX + 2, y: r.minY + 2))
+        check("✕ (\(mode)): a click near the corner of its 24 pt target removes that picture (the first)", m.images.map(\.id) == Array(ids.dropFirst()), "\(m.images.count)")
+    }
+    xs = targets()
+    if let only = xs.first {
+        let r = only.convert(only.bounds, to: nil)
+        click(NSPoint(x: r.midX, y: r.midY))
+        check("✕ (\(mode)): a click in the middle of the other removes it too", m.images.isEmpty, "\(m.images.count)")
+    }
+    QCDragView.drag = oldDrag
+    check("✕ (\(mode)): neither click started a window move", moves == 0, "\(moves)")
+    win.orderOut(nil)
+    // the same, on the real panel (it is click-through here, so only where a press would land is looked at): every point of
+    // the ✕'s 24 pt target, and of its whole tile, is the hosting view's, never a drag surface
+    if !chatWindow, let pw = panel() {
+        let cm = chat.model
+        chat.open(); spin(0.3)
+        cm.newChat(); spin(0.2)
+        var landed = false
+        cm.attach(QCImages.Found(sources: [.data(noisyPNG(40, 40)), .data(noisyPNG(44, 44))])) { landed = true }
+        while !landed { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        spin(0.6)
+        var rm: [NSView] = []
+        marks(pw.contentView!, &rm)
+        let rx = rm.filter { let r = $0.convert($0.bounds, to: nil); return r.width == 24 && r.height == 24 }
+        check("✕ (panel): one 24 pt target for each picture", rx.count == 2, "\(rx.count)")
+        if let first = rx.first {
+            let r = first.convert(first.bounds, to: nil)
+            func wrong(_ rect: NSRect, step: CGFloat) -> Int {
+                var n = 0
+                for x in stride(from: rect.minX + 0.5, to: rect.maxX, by: step) { for y in stride(from: rect.minY + 0.5, to: rect.maxY, by: step) {
+                    let h = QCDragView.hit(at: NSPoint(x: x, y: y), in: pw)
+                    if h == nil || h is QCDragView { n += 1 }
+                } }
+                return n
+            }
+            check("✕ (panel): no point of its 24 pt target is a drag surface or outside the card", wrong(r, step: 1) == 0, "\(wrong(r, step: 1))")
+            // the tile is 44 pt, the ✕ in its top-right corner
+            check("✕ (panel): no point of the 44 pt tile moves the window", wrong(NSRect(x: r.maxX - 44, y: r.maxY - 44, width: 44, height: 44), step: 2) == 0)
+        }
+        cm.newChat()
+    }
     m.shutdown()
     try? FileManager.default.removeItem(at: c.dir)
 }

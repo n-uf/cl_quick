@@ -43,17 +43,25 @@ struct QCAttachRow: View {
     }
 
     /// The ✕ in a tile's corner: a 24 pt target (the whole of it takes the press, never the window's drag), a small dark
-    /// disc with the cross, and the pointing hand.
-    private func remove(_ img: QCImage) -> some View {
-        Button { model.removeImage(img.id) } label: {
+    /// disc with the cross, and the pointing hand. Built like the other icon buttons (QCIconButton: the control marker in
+    /// the label, the hand and the hover on the button).
+    private func remove(_ img: QCImage) -> some View { QCRemoveImageButton { model.removeImage(img.id) } }
+}
+
+struct QCRemoveImageButton: View {
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
             Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundColor(.white)
                 .frame(width: 16, height: 16)
-                .background(Circle().fill(Color.black.opacity(0.72)))
+                .background(Circle().fill(Color.black.opacity(hover ? 0.9 : 0.72)))
                 .frame(width: 24, height: 24)
                 .qcControl()
         }
         .buttonStyle(.plain)
         .qcPointingHand()
+        .onHover { hover = $0 }
         .help("Remove")
         .accessibilityLabel("Remove image")
     }
