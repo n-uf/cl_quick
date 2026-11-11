@@ -229,6 +229,8 @@ final class QuickChatModel: ObservableObject {
     @Published var images: [QCImage] = []
     /// Images being read and scaled down (a placeholder tile each); a message waits for them.
     @Published var preparing = 0
+    /// Counts the times the attachments were cleared (a new chat): images still being read for an earlier count are dropped.
+    private var attachGeneration = 0
     /// One line over the field when something was left out (a file that isn't an image, more than five); goes after a while.
     @Published var imageNote: String?
     /// A drag with images is over the panel: its card is outlined.
@@ -434,11 +436,14 @@ final class QuickChatModel: ObservableObject {
         }
         preparing += take.count
         let notImages = f.notImages
+        let generation = attachGeneration
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let results = take.map { QCImages.prepare($0) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.preparing -= take.count
+                // the attachments were cleared meanwhile (⌘N, the chat removed): what was being read has no field to land in
+                guard generation == self.attachGeneration else { done(); return }
                 var failures: [QCImages.Failure] = []
                 var held = self.sentImageBytes + self.images.reduce(0) { $0 + $1.base64Size }
                 var chatFull = false
@@ -565,7 +570,7 @@ final class QuickChatModel: ObservableObject {
         turns = []
         returnHeld = false
         if dictating || dictationNoticed { dictate(false) }
-        if !keepField { field = ""; images = []; imageNote = nil }
+        if !keepField { field = ""; images = []; imageNote = nil; attachGeneration += 1 }
         barProblem = nil
         accountNote = nil
         if dropsSwitch { dropSwitch() }

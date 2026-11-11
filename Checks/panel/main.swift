@@ -1762,6 +1762,41 @@ do {
     try? FileManager.default.removeItem(at: c.dir); try? FileManager.default.removeItem(at: r.dir)
 }
 
+// an image still being read when the chat is cleared (⌘N, the chat removed) does not land in the emptied field
+do {
+    let slowPNG = noisyPNG(3000, 3000)       // a second or so to read, scale and encode
+    let c = imageFixChat("images-clear"), m = c.m
+    var landed = false
+    m.field = "kept?"
+    m.attach(QCImages.Found(sources: [.data(slowPNG)])) { landed = true }
+    check("clear: the picture is being prepared", m.preparing == 1 && m.images.isEmpty)
+    m.newChat()
+    let end = Date().addingTimeInterval(20)
+    while !landed, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    check("clear: ⌘N while preparing leaves the field empty (no picture, no note), nothing preparing", landed && m.images.isEmpty && m.field.isEmpty && m.imageNote == nil && m.preparing == 0,
+          "\(landed) \(m.images.count) \(m.preparing) \(String(describing: m.imageNote))")
+    // the chat removed (Remove cl_quick data…) clears the same way: on the shared bar's model
+    let cm = chat.model
+    landed = false
+    cm.attach(QCImages.Found(sources: [.data(slowPNG)])) { landed = true }
+    chat.closeForRemoval()
+    let end2 = Date().addingTimeInterval(20)
+    while !landed, Date() < end2 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    check("clear: the chat removed while preparing leaves no picture", landed && cm.images.isEmpty && cm.preparing == 0, "\(landed) \(cm.images.count)")
+    // a picture attached after the clear does land
+    c.attach([.data(noisyPNG(40, 40))])
+    check("clear: a picture attached after it lands", m.images.count == 1, "\(m.images.count)")
+    // keepField (another profile picked) keeps what is there and what is being read
+    var landed3 = false
+    m.attach(QCImages.Found(sources: [.data(noisyPNG(60, 60))])) { landed3 = true }
+    m.newChat(keepField: true)
+    let end3 = Date().addingTimeInterval(8)
+    while !landed3, Date() < end3 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    check("clear: a new chat that keeps the field also keeps pictures being read", m.images.count == 2, "\(m.images.count)")
+    m.shutdown()
+    try? FileManager.default.removeItem(at: c.dir)
+}
+
 // the update notice's setting (Settings ▸ General ▸ Updates): a missing key is on; off is read; a wrong type is on
 do {
     func read(_ json: String) -> Bool? { (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(json.utf8)))?.checkForUpdates }
