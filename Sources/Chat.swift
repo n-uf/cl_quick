@@ -209,6 +209,8 @@ final class QuickChatModel: ObservableObject {
     // set by QuickChat
     var resolveClaude: (@escaping (String?) -> Void) -> Void = { $0(nil) }
     var hide: () -> Void = {}
+    /// Esc: the keys list closes if it is open, else the panel hides.
+    var escape: () -> Void = {}
     var openSettings: (String?) -> Void = { _ in }
     var defaults: () -> QuickChatSettings = { .init() }
     /// The profiles the picker offers, with their levels.
@@ -803,6 +805,7 @@ final class QuickChat {
         model.thinking = settings.thinking
         model.resolveClaude = { [weak self] done in self?.resolveClaude(done) ?? done(nil) }
         model.hide = { [weak self] in self?.hide() }
+        model.escape = { [weak self] in self?.escape() }
         model.openSettings = { [weak self] id in self?.openSettings(id) }
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
@@ -976,6 +979,8 @@ final class QuickChat {
     }
 
     func hide() { panel?.orderOut(nil) }
+    /// Esc: the keys list closes if it is open, else the panel hides.
+    func escape() { if QCKeys.shared.shown { QCKeys.shared.close() } else { hide() } }
 
     func shutdown() { hotKey.unregister(); model.shutdown() }
 
@@ -984,7 +989,7 @@ final class QuickChat {
 
     private func makePanel() -> QuickChatPanel {
         let p = QuickChatPanel()
-        p.onEscape = { [weak self] in self?.hide() }
+        p.onEscape = { [weak self] in self?.escape() }
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onStep = { [weak self] model, by in
@@ -1262,7 +1267,8 @@ final class QuickChatPanel: NSPanel {
     /// Hidden (Esc, ⌘W, ✕, the shortcut) with the pointer over an empty area: its open hand goes with it, at once (the
     /// occlusion notice the drag surfaces also act on comes later).
     override func orderOut(_ sender: Any?) {
-        QCFloat.shared.hide()            // a tip or card goes with the panel (hidden under the pointer gets no mouse-exit)
+        QCFloat.shared.hide()            // the usage card goes with the panel (hidden under the pointer gets no mouse-exit)
+        QCKeys.shared.close()            // and the keys list
         super.orderOut(sender)
         quietKey = false
         QCDragView.dropHand()

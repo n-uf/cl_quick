@@ -63,7 +63,9 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
 - Answers stream in as Markdown; code blocks have Copy; under each answer Copy and a line like "answered by Haiku 5.5 ·
   2.4 s"; under the last one also Ask again.
 - Under the field: the profile (its dot in the week's colour), the model (Haiku by default) and thinking (off by
-  default). A pick holds for that chat; a new chat goes back to the defaults.
+  default). A pick holds for that chat; a new chat goes back to the defaults. Click a bar to pick it, or the right half
+  of a control's label for the next value and the left half for the one before (round past either end); the scroll
+  wheel and ⌥⌘ arrows step too. The keyboard button at the end of the controls lists every key.
 - The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from the
   chat's own Claude Code: it starts as the bar opens (the same `claude` the chat then uses; with nothing asked it ends
   after 3 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again (at most
@@ -129,8 +131,9 @@ On its first run it copies cl_audit's old quick chat settings (the shortcut, mod
 `Checks/run.sh` checks the engine and the Markdown against a stand-in `claude` (no account, no network).
 `Checks/bars.sh` checks the model and thinking controls in the real panel, with four, three and two families, at 320,
 440 and 640: a bar for every family, always shown and ending before Send, picking any value moves nothing, a click on
-each bar's centre picks that bar, the scroll wheel steps, and the bar's usage indicator shows the limit closest to
-full with its label on that window's row.
+each bar's centre picks that bar, a click on a label's right or left half goes round forward or back, the scroll wheel
+steps, the keys button opens and closes its list (a click elsewhere or Esc closes it), and the bar's usage indicator
+shows the limit closest to full with its label before the bars on that window's row.
 `Checks/real.sh` asks one real question on a throwaway, signed-out folder; with `QC_CONFIG=<folder>` it uses that
 folder's account (a little of its usage) and checks the incognito chat end to end: a multi-turn conversation in one
 `claude` still remembers, Stop keeps the conversation, the model changes in the running chat, and no transcript

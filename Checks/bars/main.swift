@@ -7,8 +7,10 @@
 //   - picking every model and every thinking level leaves every control, every bar and Send exactly where they were;
 //   - a click on each bar's centre (the action of the bar found at that point) picks that bar's value; a level the
 //     model doesn't take does nothing;
+//   - a click on a label's right half goes round forward over what the model takes, on its left half back;
 //   - the scroll wheel over a control steps it (a notch a step, a trackpad's deltas add up, momentum not), and
 //     scrolling elsewhere is left alone;
+//   - the keys button opens its list above the row and closes it again, as do a press elsewhere and Esc;
 //   - the bar's usage indicator shows the limit closest to full, its label on that window's row (or, in a row too
 //     narrow, the bars alone), never moving sideways or changing width, and ending before Send; ⌘W hides.
 //   Checks/bars.sh
@@ -55,6 +57,7 @@ func frames() -> [String: CGRect] {
     for (k, v) in targets.bars { f[k] = v.frame }
     for (k, v) in targets.halves { f[k] = v.frame }
     if let s = targets.marks["send"] { f["send"] = s }
+    if let k = targets.marks["keys"] { f["keys"] = k }
     return f
 }
 /// A click on a label's half ("m>", "t<"): the half found at its centre must be exactly that one, and no bar; its
@@ -110,7 +113,8 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     check("\(name): a bar for every family", m.modelChoices.map(\.choice) == families, "\(m.modelChoices.map(\.choice))")
     let keys = ["m", "t"] + families.indices.map { "m\($0)" } + levels.indices.map { "t\($0)" }
     let halves = ["m<", "m>", "t<", "t>"]
-    check("\(name): every control, bar and label half is laid out, and no other", Set(base.keys).subtracting(["send"]) == Set(keys + halves), "\(base.keys.sorted())")
+    check("\(name): every control, bar, label half and the keys button is laid out, and no other",
+          Set(base.keys).subtracting(["send"]) == Set(keys + halves + ["keys"]), "\(base.keys.sorted())")
     // each label splits in two halves side by side, the left one from the control's edge, the right one up to the bars
     for c in ["m", "t"] {
         let l = base["\(c)<"] ?? .zero, r = base["\(c)>"] ?? .zero, whole = base[c] ?? .zero, first = base["\(c)0"] ?? .zero
@@ -147,16 +151,16 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     }
     // the window's own hit test, at the real coordinates: a press on any bar or label never starts a move, and the
     // empty gap after the controls does (so the frames are where the window sees them)
-    for k in keys + halves {
+    for k in keys + halves + ["keys"] {
         let f = base[k] ?? .zero
         let pts = k.count == 1 ? [CGPoint(x: f.minX + 3, y: f.midY), CGPoint(x: f.midX, y: f.midY)] : [CGPoint(x: f.midX, y: f.midY), CGPoint(x: f.midX, y: f.minY + 2)]
         for q in pts {
             check("\(name): a press at \(k) (\(Int(q.x)), \(Int(q.y))) is not a move", QCDragView.surface(at: inWindow(q), in: p) == nil)
         }
     }
-    if let t = base["t"] {
-        // past the outline (4 pt) and the row's 2 pt spacing: the spacer, the window's to move
-        check("\(name): the gap after the bars moves the window", QCDragView.surface(at: inWindow(CGPoint(x: t.maxX + 7, y: t.midY)), in: p) != nil)
+    if let k = base["keys"] {
+        // past the outline (2 pt after the keys button) and the row's 2 pt spacing: the spacer, the window's to move
+        check("\(name): the gap after the controls moves the window", QCDragView.surface(at: inWindow(CGPoint(x: k.maxX + 6, y: k.midY)), in: p) != nil)
     }
     // the limits changing (the bar's usage indicator) moves nothing (a full limit is another matter: its notice opens
     // above the field and the row moves down with the field, as it always has)
@@ -214,6 +218,37 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
         seen = round("t<", steps.count, lvl)
         check("\(name): \(f.rawValue), thinking's left half goes round back over what it takes", seen == ["off"] + steps.reversed(), "\(seen)")
     }
+    // the keys button, at the end of the controls before Send: a click opens the keys list above the row and another
+    // closes it; a press elsewhere or Esc closes it too (the panel stays); nothing in the row moves
+    let kb = base["keys"] ?? .zero, keysList = QCKeys.shared
+    check("\(name): the keys button comes after thinking, before Send", kb != .zero && kb.minX >= (base["t"]?.maxX ?? .infinity) - 0.01
+          && kb.maxX <= (base["send"]?.minX ?? 0), "\(kb)")
+    let buttonTop = p.convertPoint(toScreen: inWindow(CGPoint(x: kb.midX, y: kb.minY))).y
+    keysList.toggle(); spin()
+    let list = QCFloat.keys.shownFrame
+    check("\(name): a click on the keys button opens the list", keysList.shown && list != nil)
+    check("\(name): the list is above the row", (list?.minY ?? 0) >= buttonTop - 0.5, "\(list.map { "\($0)" } ?? "-") vs top \(buttonTop)")
+    check("\(name): the list open moves nothing", same(frames(), base), moved(base, frames()))
+    // a press goes through the list's mouse-down monitor as an event at the window's point, then (on the button) to
+    // the button's tap, which toggles
+    func mouseDown(at q: CGPoint, window: Int) -> NSEvent? {
+        NSEvent.mouseEvent(with: .leftMouseDown, location: window == p.windowNumber ? inWindow(q) : .zero, modifierFlags: [],
+                           timestamp: 0, windowNumber: window, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+    }
+    if let e = mouseDown(at: CGPoint(x: kb.midX, y: kb.midY), window: p.windowNumber) { keysList.mouseDown(e) }; spin()
+    check("\(name): a press on the button is the button's, not a close", keysList.shown)
+    keysList.toggle(); spin()
+    check("\(name): another click closes it", !keysList.shown && QCFloat.keys.shownFrame == nil)
+    keysList.open(); spin()
+    if let e = mouseDown(at: centre("m"), window: p.windowNumber) { keysList.mouseDown(e) }; spin()
+    check("\(name): a press elsewhere in the panel closes it", !keysList.shown && QCFloat.keys.shownFrame == nil)
+    keysList.open(); spin()
+    if let e = mouseDown(at: .zero, window: 0) { keysList.mouseDown(e) }; spin()
+    check("\(name): a press outside the panel closes it", !keysList.shown && QCFloat.keys.shownFrame == nil)
+    keysList.open(); spin()
+    chat.escape(); spin()
+    check("\(name): Esc closes the list and leaves the panel", !keysList.shown && QCFloat.keys.shownFrame == nil && p.isVisible)
+    check("\(name): the list closed moves nothing", same(frames(), base), moved(base, frames()))
     // the scroll wheel
     m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()
     targets.scroll(at: centre("t"), by: 1, precise: false, began: true); spin()
@@ -277,6 +312,7 @@ for w in [CGFloat(320), 440, 640] {
         // a narrow row keeps the two bars alone (the share on hover)
         let barsOnly = abs(ui.width - QCUsageView.width(numbers: false)) < 0.5
         check("\(name): shown", ui != .zero, "\(ui)")
+        if w >= 440 { check("\(name): with room, its label and share are shown", !barsOnly, "\(ui)") }
         check("\(name): \(higher) is the higher one", higher == (five >= week || l.full()?.id == "5h" ? "5h" : "wk") || (l.full()?.id == "wk" && higher == "wk"))
         if !barsOnly {
             // the label, then the bars, then the share, the label and share on the higher window's row
@@ -323,6 +359,10 @@ do {
     check("with the bars alone the card gives both shares, else the one the row lacks",
           QCUsageCard.leftOut(l, rowShowsShare: false) == nil && QCUsageCard.leftOut(l, rowShowsShare: true) == "5h")
     probe.removeFromSuperview(); spin()
+    // the probe took the row's names: the panel's own row lays out again and has them back
+    width(440); width(320)
+    check("after the narrow row, the panel's row is back", targets.controls["m"] != nil && targets.controls["t"] != nil
+          && targets.marks["send"] != nil && targets.marks["keys"] != nil && targets.halves["m>"] != nil)
 }
 
 // ⌘W hides at once
