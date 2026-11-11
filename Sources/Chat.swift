@@ -582,8 +582,13 @@ final class QuickChatModel: ObservableObject {
     /// (--strict-mcp-config, no setting sources); a `claude` that can't start says so only when a message is sent.
     func warm() {
         if let p = process, p.isRunning {
-            if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() { usageAsked = Date() }
-            return
+            // one still on the account the folder had before (it was answering when the switch landed): its numbers
+            // aren't this account's, so it goes and a new one starts below (the chat couldn't go on there anyway)
+            if !busy, let t = target, trail.reportAccount != t.accountUUID { closeProcess() }
+            else {
+                if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() { usageAsked = Date() }
+                return
+            }
         }
         guard process == nil, !busy, target != nil else { return }
         let gen = generation

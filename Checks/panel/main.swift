@@ -872,7 +872,7 @@ do {
     var old = QuickChatLevel(); old.week = 53; old.weekResets = Date().addingTimeInterval(3 * 86400); old.at = Date().addingTimeInterval(-86400)
     m.level = old
     var drawn = 0
-    let watch = m.objectWillChange.sink { drawn += 1 }
+    let watch = m.$level.dropFirst().sink { _ in drawn += 1 }       // the level itself published anew, nothing else
     m.warm()            // as the bar opens: the stand-in starts and is asked get_usage
     let end = Date().addingTimeInterval(8)
     while m.level?.fiveHour == nil, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
