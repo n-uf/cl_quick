@@ -671,9 +671,8 @@ struct QCProblemView: View {
         case .refused(let text): return text
         case .noProfile: return "There's no profile to chat on yet."
         case .limitFull:
-            let f = model.level?.full()
-            let who = model.target?.name ?? "This profile"
-            return "\(who)'s \(f?.name ?? "week") is full" + (f?.resets.map { ", resets " + TimeWords.when($0) } ?? "") + "."
+            // the window that is full, as the header shows it (never "week" by default)
+            return QuickChatLevel.fullSentence(model.level, who: model.target?.name ?? "This profile")
         }
     }
 
@@ -685,12 +684,12 @@ struct QCProblemView: View {
         case .refused: return ""
         case .noProfile: return "Pick a Claude Code folder in Settings."
         case .limitFull:
-            func room(_ who: String, _ week: Double?) -> String {
-                week.map { "\(who) has room (\(Int($0.rounded()))% at its last answer)." } ?? "\(who) has no numbers yet."
+            func room(_ who: String, _ used: Double?) -> String {
+                used.map { "\(who) has room (\(Int($0.rounded()))% at its last answer)." } ?? "\(who) has no numbers yet."
             }
             var parts: [String] = []
-            if let o = model.offer { parts.append(room(o.name, o.week)) }
-            if let s = model.switchOffer { parts.append(room("Standby " + maskEmail(s.email), s.week)) }
+            if let o = model.offer { parts.append(room(o.name, o.used)) }
+            if let s = model.switchOffer { parts.append(room("Standby " + maskEmail(s.email), s.used)) }
             return parts.joined(separator: " ")
         }
     }
@@ -2086,13 +2085,23 @@ enum QuickChatRender {
         case "full":
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
-            m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
+            m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
+        case "full-5h":
+            // the 5-hour window full, the week with room (53%): the notice names the 5-hour limit, as the header does
+            level.week = 53; level.weekResets = Date().addingTimeInterval(3 * 86400)
+            level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level
+            var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull; m.turns = [t]
+            m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
+        case "full-wk":
+            level.week = 100; level.weekResets = Date().addingTimeInterval(3 * 86400)
+            level.fiveHour = 12; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level
+            var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull; m.turns = [t]
         case "switch", "switching", "wrong", "timedout":
             // a full week, with the profile's standby account offered besides Ask on …
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
-            m.offer = QuickChatOffer(profileID: "work", name: "Work", week: 18)
-            m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com", week: nil)
+            m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
+            m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com", used: nil)
             if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
             if state == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
             if state == "timedout" { m.switchNotice = .timedOut(wanted: "ultra-2@example.com") }

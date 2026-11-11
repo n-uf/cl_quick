@@ -149,8 +149,9 @@ enum QuickChatEnd: Equatable {
 struct QuickChatOffer: Equatable {
     var profileID: String
     var name: String
-    /// Its week at its last answer; nil: it hasn't answered anything yet.
-    var week: Double?
+    /// The share of its fuller window (5-hour or week, QuickChatLevel.binding) at its last answer; nil: it hasn't
+    /// answered anything yet. (A week of 18% says nothing of a 5-hour window at 95%.)
+    var used: Double?
 }
 
 /// Another account of the chat's own profile, on standby, offered while a limit is full: signing in again as it moves the
@@ -158,8 +159,8 @@ struct QuickChatOffer: Equatable {
 struct QuickChatSwitchOffer: Equatable {
     var uuid: String
     var email: String
-    /// Its week at its last answer; nil: it hasn't answered anything yet.
-    var week: Double?
+    /// The share of its fuller window at its last answer, as for QuickChatOffer; nil: no numbers yet.
+    var used: Double?
 }
 
 /// A switch of the chat's profile to another account, shown where the limit notice would be.
@@ -897,20 +898,20 @@ final class QuickChat {
         // the most room first; one that hasn't answered anything yet comes after, as it may have room too
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in
-                guard let l = store.level(of: o) else { return QuickChatOffer(profileID: o.id, name: o.name, week: nil) }
+                guard let l = store.level(of: o) else { return QuickChatOffer(profileID: o.id, name: o.name, used: nil) }
                 guard l.full() == nil else { return nil }
-                return QuickChatOffer(profileID: o.id, name: o.name, week: l.weekNow())
+                return QuickChatOffer(profileID: o.id, name: o.name, used: l.binding()?.p)     // its fuller window
             }
-            .sorted { ($0.week ?? 101) < ($1.week ?? 101) }
+            .sorted { ($0.used ?? 101) < ($1.used ?? 101) }
         // the same for the profile's own standby accounts (the most recently seen first among equals)
         let standby = store.standby(p).enumerated()
             .compactMap { i, a -> (Int, QuickChatSwitchOffer)? in
                 let l = store.level(of: p, account: a.uuid)
                 guard l?.full() == nil else { return nil }
-                return (i, QuickChatSwitchOffer(uuid: a.uuid, email: a.email, week: l?.weekNow()))
+                return (i, QuickChatSwitchOffer(uuid: a.uuid, email: a.email, used: l?.binding()?.p))
             }
             .sorted { a, b in
-                let x = a.1.week ?? 101, y = b.1.week ?? 101
+                let x = a.1.used ?? 101, y = b.1.used ?? 101
                 return x != y ? x < y : a.0 < b.0
             }
         let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }

@@ -89,10 +89,28 @@ struct QuickChatLevel: Codable, Equatable {
         if wk { return FullLimit(id: "wk", resets: weekResets) }
         if five { return FullLimit(id: "5h", resets: fiveHourResets) }
         if let until = refusedUntil, until > now {
-            let isFive = (fiveHour ?? 0) > (week ?? 0)
+            // refused with neither window reported full: name the one that can be. A window known to have room isn't
+            // it (a week at 53% never is); with both known, the fuller; with neither, the 5-hour one, which fills far
+            // more often. (The old guess compared an unknown 5-hour share as 0 and named the week.)
+            let five = fiveHourNow(now), wk = weekNow(now)
+            let isFive: Bool
+            switch (five, wk) {
+            case let (f?, w?): isFive = f >= w
+            case (nil, _?): isFive = true
+            case let (f?, nil): isFive = f.rounded() >= 100
+            case (nil, nil): isFive = true
+            }
             return FullLimit(id: isFive ? "5h" : "wk", resets: until)
         }
         return nil
+    }
+
+    /// The notice for a full limit, naming the window that is full as the header shows it, and when it resets:
+    /// "Main's 5-hour limit is full, resets 23:20." / "Main's week is full, resets Thu 19:00.". With no numbers at all it
+    /// names no window ("Main's limit is full.") rather than guess one.
+    static func fullSentence(_ level: QuickChatLevel?, who: String, now: Date = Date()) -> String {
+        guard let f = level?.full(now) else { return "\(who)'s limit is full." }
+        return "\(who)'s \(f.name) is full" + (f.resets.map { ", resets " + TimeWords.when($0) } ?? "") + "."
     }
 
     /// The week as last reported, unless it has reset since (then unknown until the next answer).

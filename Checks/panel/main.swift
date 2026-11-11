@@ -649,6 +649,36 @@ do {
     try? FileManager.default.removeItem(at: dir)
 }
 
+// ── a full limit is named by the window that is full (the operator's "Main's week is full." with the week at 53%) ─────
+do {
+    let now = Date()
+    var five = QuickChatLevel()          // the 5-hour window full, the week with room
+    five.fiveHour = 100; five.fiveHourResets = now.addingTimeInterval(2 * 3600)
+    five.week = 53; five.weekResets = now.addingTimeInterval(3 * 86400)
+    check("limit: a full 5-hour window is the full one", five.full(now)?.id == "5h", "\(String(describing: five.full(now)))")
+    let s5 = QuickChatLevel.fullSentence(five, who: "Main", now: now)
+    check("limit: the notice names the 5-hour limit and its reset", s5.hasPrefix("Main's 5-hour limit is full, resets ") && !s5.contains("week"), s5)
+    var wk = QuickChatLevel()            // the week full, the 5-hour window with room
+    wk.fiveHour = 12; wk.fiveHourResets = now.addingTimeInterval(2 * 3600)
+    wk.week = 100; wk.weekResets = now.addingTimeInterval(3 * 86400)
+    let sw = QuickChatLevel.fullSentence(wk, who: "Main", now: now)
+    check("limit: the notice names the week when the week is full", wk.full(now)?.id == "wk" && sw.hasPrefix("Main's week is full, resets "), sw)
+    // Claude Code refused before any 5-hour number came, the week known at 53%: the 5-hour window, not the week
+    var refused = QuickChatLevel()
+    refused.week = 53; refused.weekResets = now.addingTimeInterval(3 * 86400)
+    refused.refusedUntil = now.addingTimeInterval(3600)
+    check("limit: a refusal with the week at 53% names the 5-hour window", refused.full(now)?.id == "5h", "\(String(describing: refused.full(now)))")
+    var refusedWk = QuickChatLevel()     // the 5-hour window known to have room: the week
+    refusedWk.fiveHour = 20; refusedWk.fiveHourResets = now.addingTimeInterval(3600); refusedWk.refusedUntil = now.addingTimeInterval(3600)
+    check("limit: a refusal with the 5-hour window at 20% names the week", refusedWk.full(now)?.id == "wk")
+    check("limit: with no numbers the notice names no window", QuickChatLevel.fullSentence(nil, who: "Main", now: now) == "Main's limit is full.")
+    // the header and the notice agree, and the dot (binding) points at the same window
+    check("limit: the dot's window is the full one", five.binding(now)?.id == "5h" && wk.binding(now)?.id == "wk")
+    // the offer shows the other profile's fuller window, not its week alone
+    var other = QuickChatLevel(); other.fiveHour = 95; other.fiveHourResets = now.addingTimeInterval(3600); other.week = 18
+    check("limit: an offer's share is its fuller window (95, not the week's 18)", other.binding(now)?.p == 95)
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)
