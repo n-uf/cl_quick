@@ -199,6 +199,14 @@ final class QuickChatModel: ObservableObject {
     @Published var accountNote: String?
     /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
     @Published var ended: QuickChatEnd?
+    /// The model and thinking bars are open over the row (a click on the "Opus · High" pill); a click outside them, Esc
+    /// or hiding the panel closes them.
+    @Published var controlsOpen = false
+
+    /// Esc: the open bars close first; else the panel hides.
+    func escape() {
+        if controlsOpen { controlsOpen = false } else { hide() }
+    }
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
@@ -963,7 +971,7 @@ final class QuickChat {
         if isOpen { model.warm() }          // that profile's `claude`, and its limits
     }
 
-    func hide() { panel?.orderOut(nil) }
+    func hide() { model.controlsOpen = false; panel?.orderOut(nil) }
 
     func shutdown() { hotKey.unregister(); model.shutdown() }
 
@@ -972,7 +980,7 @@ final class QuickChat {
 
     private func makePanel() -> QuickChatPanel {
         let p = QuickChatPanel()
-        p.onEscape = { [weak self] in self?.hide() }
+        p.onEscape = { [weak self] in self?.model.escape() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onStep = { [weak self] model, by in
             guard let m = self?.model else { return }

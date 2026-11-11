@@ -11,7 +11,9 @@
 //                                       ended-failed, ended-closed (the line under a chat that ended)); the model and
 //                                       thinking controls: models3, models2 (three or two families), haiku (levels it
 //                                       doesn't take), tint-fable, tint-extra, tint-max, tint-fablemax, hover-m0…m3 and
-//                                       hover-t0…t5 (the pointer on a bar)
+//                                       hover-t0…t5 (open, the pointer on a bar); any state with -open (the bars open over
+//                                       the row: bar-open, tint-fablemax-open); the bar's usage: usage-5h, usage-wk,
+//                                       usage-full
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
 //                                       accounts-two, accounts-switching, accounts-wrong, accounts-timedout,
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,

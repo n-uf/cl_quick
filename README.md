@@ -127,8 +127,10 @@ On its first run it copies cl_audit's old quick chat settings (the shortcut, mod
 ## Checks
 
 `Checks/run.sh` checks the engine and the Markdown against a stand-in `claude` (no account, no network).
-`Checks/bars.sh` checks the model and thinking controls in the real panel, with four, three and two families: a bar
-for every family, picking any value moves nothing, a click on each bar's centre picks that bar, the scroll wheel steps.
+`Checks/bars.sh` checks the model and thinking controls in the real panel, with four, three and two families: the
+"Opus · High" pill never wobbles, a click opens the bars and a click outside or Esc closes them, a bar for every
+family, picking any value moves nothing, a click on each bar's centre picks that bar, the scroll wheel steps, and the
+bar's usage indicator shows the limit closest to full with its label on that window's row.
 `Checks/real.sh` asks one real question on a throwaway, signed-out folder; with `QC_CONFIG=<folder>` it uses that
 folder's account (a little of its usage) and checks the incognito chat end to end: a multi-turn conversation in one
 `claude` still remembers, Stop keeps the conversation, the model changes in the running chat, and no transcript

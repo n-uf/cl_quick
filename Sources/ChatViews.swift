@@ -989,30 +989,32 @@ struct QCControls: View {
     var inBar: Bool
 
     /// The row on one line, whatever the width (ViewThatFits, richest first): the profile key keeps just its dot, then
-    /// the bar's usage indicator goes, then the controls' short labels go (the profile's name back). Every control is as
-    /// wide for every value it can take, and the usage indicator keeps its room before anything is known, so which row
-    /// is drawn depends on the width alone: picking a model or a level, or the limits changing, never moves anything.
+    /// the bar's usage indicator goes. The pill and the usage indicator are as wide for every value they can show, so
+    /// which row is drawn depends on the width alone: picking a model or a level, or the limits changing, never moves
+    /// anything.
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(usage: true, labelled: true, profileWords: true)
-            row(usage: true, labelled: true, profileWords: false)
-            row(usage: false, labelled: true, profileWords: true)
-            row(usage: false, labelled: true, profileWords: false)
-            row(usage: false, labelled: false, profileWords: true)
-            row(usage: false, labelled: false, profileWords: false)
+            row(usage: true, profileWords: true)
+            row(usage: true, profileWords: false)
+            row(usage: false, profileWords: true)
+            row(usage: false, profileWords: false)
         }
     }
 
     /// `usage`: the bar's usage indicator (in the window the header has the limits).
-    private func row(usage: Bool, labelled: Bool, profileWords: Bool) -> some View {
+    private func row(usage: Bool, profileWords: Bool) -> some View {
         HStack(spacing: 2) {
             if let t = model.target {
                 // the dot takes the colour of the limit closest to full, as the usage indicator and the header do
                 QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.binding()?.p),
                        help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
             }
-            modelSteps(labelled)
-            thinkingSteps(labelled)
+            QCStepsPill(model: model, bars: { AnyView(HStack(spacing: 4) {
+                modelSteps()
+                Rectangle().fill(QCColor.line).frame(width: 1, height: 18)
+                thinkingSteps()
+            }) })
+            .zIndex(1)          // its bars, when open, are drawn over the rest of the row
             Spacer(minLength: 4)
             if inBar, usage {
                 if let l = model.level, l.binding() != nil {
@@ -1054,14 +1056,14 @@ struct QCControls: View {
 
     /// The model: a bar per family the account has, Haiku → Sonnet → Opus → Fable; a click on one picks it. The label is
     /// the family ("Opus"); the hover tip has the version ("Opus 5.5").
-    private func modelSteps(_ labelled: Bool) -> some View {
+    private func modelSteps() -> some View {
         let now = model.resolvedModel.family
         let choices = model.modelChoices
         let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
         return QCStepControl(
             what: "Model", key: "m", keys: "⌥⌘← ⌥⌘→",
             steps: choices.map { .init(title: $0.title, label: $0.choice.title, costly: QuickChatModels.costly($0.choice)) },
-            index: choices.firstIndex { $0.choice == now }, offSlot: false, labelled: labelled,
+            index: choices.firstIndex { $0.choice == now }, offSlot: false,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(now), other: thinkingCostly),
             pick: { [weak model] j in
                 guard let model, model.modelChoices.indices.contains(j) else { return }
@@ -1073,7 +1075,7 @@ struct QCControls: View {
     /// Thinking: Off (a dash), then a bar per level Low … Max. The levels the model doesn't take stay in their place,
     /// faint and inert, so changing the model never changes the control's width. Short labels ("Med"); the hover tip has
     /// the full name.
-    private func thinkingSteps(_ labelled: Bool) -> some View {
+    private func thinkingSteps() -> some View {
         let all = QuickChatThinking.allCases
         let takes = model.thinkingSteps
         let now = model.effectiveThinking
@@ -1085,13 +1087,91 @@ struct QCControls: View {
                       costly: QuickChatModels.costly(effort: t.effort), takes: takes.contains(t),
                       why: takes.contains(t) ? nil : "\(modelName) doesn't take \(t.title)")
             },
-            index: all.firstIndex(of: now), offSlot: true, labelled: labelled,
+            index: all.firstIndex(of: now), offSlot: true,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(effort: now.effort), other: QuickChatModels.costly(model.resolvedModel.family)),
             pick: { [weak model] j in
                 guard let model, all.indices.contains(j), model.thinkingSteps.contains(all[j]) else { return }
                 model.choose(all[j])
             },
             step: { [weak model] in model?.stepThinking($0) ?? false })
+    }
+}
+
+/// The model and thinking in the row, small: "Opus · High" in one fixed width (the longest pair it can show, so a
+/// change never makes it wobble), warm while either costs more. A click opens the bars over the row, anchored at the
+/// pill and drawn above the rest of the row (no part of its layout); a click on a bar picks it, and they stay open for
+/// another pick; a click outside them, Esc, a click on the pill again or hiding the panel closes them. Nothing in the row
+/// moves, open or not.
+struct QCStepsPill: View {
+    @ObservedObject var model: QuickChatModel
+    /// The model and thinking bars, as they open.
+    let bars: () -> AnyView
+    @State private var hover = false
+    @Environment(\.qcRendering) private var rendering
+
+    static let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+    static func short(_ t: QuickChatThinking) -> String { t == .medium ? "Med" : t.title }
+    static func words(_ f: QuickChatModelChoice, _ t: QuickChatThinking) -> String { "\(f.title) · \(short(t))" }
+    /// As wide as the longest pair of any family and level ("Sonnet · Extra").
+    static let textWidth: CGFloat = ceil(QuickChatModelChoice.allCases.flatMap { f in
+        QuickChatThinking.allCases.map { (words(f, $0) as NSString).size(withAttributes: [.font: font]).width }
+    }.max() ?? 0) + 1
+
+    var body: some View {
+        let open = model.controlsOpen
+        let f = model.resolvedModel.family, t = model.effectiveThinking
+        let mc = QuickChatModels.costly(f), tc = QuickChatModels.costly(effort: t.effort)
+        let tint = mc && tc ? 2 : (mc || tc ? 1 : 0)
+        Button { model.controlsOpen.toggle() } label: {
+            HStack(spacing: 5) {
+                Text(Self.words(f, t)).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    .frame(width: Self.textWidth, alignment: .leading)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.7)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+            }
+            .foregroundColor(tint == 2 ? QCColor.hex(0xFFDCCB) : tint == 1 ? QCColor.hex(0xF1C3AE) : hover || open ? QCColor.text : QCColor.soft)
+            .padding(.horizontal, QCSpace.keyPadding).frame(height: QCSpace.row)
+            .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous)
+                .fill(tint > 0 ? QCColor.accent.opacity(tint == 2 ? 0.27 : 0.13) : hover || open ? QCColor.hover : .clear))
+            .overlay(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).strokeBorder(tint == 2 ? QCColor.ember.opacity(0.4) : .clear))
+            .qcControl()
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .qcPointingHand()
+        .help("\(model.modelTitle), thinking \(t == .off ? "off" : t.title.lowercased()): click to change (⌥⌘ arrows step them)")
+        .background(rendering ? nil : GeometryReader { g in
+            Color.clear
+                .onAppear { register(g.frame(in: .global)) }
+                .onChange(of: g.frame(in: .global)) { register($0) }
+        })
+        .overlay(alignment: .leading) {
+            if open {
+                bars()
+                    .padding(.horizontal, 4).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(QCColor.hex(0x2B2B29)))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(QCColor.line))
+                    .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                    .fixedSize()
+                    .offset(x: -4)
+                    .background(rendering ? nil : GeometryReader { g in
+                        Color.clear
+                            .onAppear { QCStepTargets.shared.mark("open", g.frame(in: .global)) }
+                            .onChange(of: g.frame(in: .global)) { QCStepTargets.shared.mark("open", $0) }
+                            .onDisappear { QCStepTargets.shared.mark("open", .zero) }
+                    })
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Model and thinking")
+        .accessibilityValue("\(model.modelTitle), thinking \(t.title)")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Where the pill is and what it does, for a click outside (and the checks); the model held weakly.
+    private func register(_ frame: CGRect) {
+        let m = model
+        QCStepTargets.shared.pill(frame, toggle: { [weak m] in m?.controlsOpen.toggle() }, close: { [weak m] in m?.controlsOpen = false })
     }
 }
 
@@ -1125,7 +1205,6 @@ struct QCStepControl: View {
     let index: Int?
     /// The first step is Off, drawn as a dash rather than a bar.
     let offSlot: Bool
-    let labelled: Bool
     /// 0 plain, 1 warm, 2 warmer.
     let tint: Int
     let pick: (Int) -> Void
@@ -1157,21 +1236,19 @@ struct QCStepControl: View {
         let lit = inUse?.costly == true ? QCColor.ember : QCColor.text
         let fg = tint == 2 ? QCColor.hex(0xFFDCCB) : tint == 1 ? QCColor.hex(0xF1C3AE) : QCColor.soft
         HStack(spacing: 0) {
-            if labelled {
-                let h = hovered.flatMap { steps.indices.contains($0) ? steps[$0] : nil }
-                Text((h ?? inUse)?.label ?? "")
-                    .font(.system(size: 13, weight: .medium)).lineLimit(1)
-                    .foregroundColor(h == nil ? fg : !h!.takes ? QCColor.muted : QCColor.text)
-                    .frame(width: labelWidth, alignment: .leading)
-                    .padding(.leading, QCSpace.keyPadding).padding(.trailing, 3)
-            }
+            let h = hovered.flatMap { steps.indices.contains($0) ? steps[$0] : nil }
+            Text((h ?? inUse)?.label ?? "")
+                .font(.system(size: 13, weight: .medium)).lineLimit(1)
+                .foregroundColor(h == nil ? fg : !h!.takes ? QCColor.muted : QCColor.text)
+                .frame(width: labelWidth, alignment: .leading)
+                .padding(.leading, QCSpace.keyPadding).padding(.trailing, 3)
             ForEach(steps.indices, id: \.self) { j in column(j, lit: lit) }
         }
         .frame(height: QCSpace.row)
         // a picture can't show the tip's own window: it draws the tip where the window would be
         .overlay(alignment: .topLeading) {
             if rendering, let j = hovered, steps.indices.contains(j) {
-                let x = (labelled ? QCSpace.keyPadding + labelWidth + 3 : 0) + Self.column * (CGFloat(j) + 0.5)
+                let x = QCSpace.keyPadding + labelWidth + 3 + Self.column * (CGFloat(j) + 0.5)
                 QCStepTipView(text: steps[j].why ?? steps[j].title, costly: steps[j].costly && steps[j].takes, muted: !steps[j].takes, keys: keys)
                     .fixedSize().frame(width: 0, height: 0, alignment: .bottom).offset(x: x, y: -4)
             }
@@ -1331,9 +1408,33 @@ final class QCStepTargets {
         for k in bars.keys where k.hasPrefix(key) && (Int(k.dropFirst(key.count)) ?? 0) >= count { bars[k] = nil }
         if monitor == nil { watchScrolls() }
     }
-    /// Other parts of the row the checks look at (the usage indicator and its rows), by name.
+    /// Other parts of the row the checks look at (the usage indicator and its rows, the open bars), by name.
     private(set) var marks: [String: CGRect] = [:]
     func mark(_ key: String, _ frame: CGRect) { marks[key] = frame }
+
+    /// The "Opus · High" pill: where it is, what a click on it does, and how the open bars close.
+    private(set) var pill: (frame: CGRect, toggle: () -> Void, close: () -> Void)?
+    private var presses: Any?
+    func pill(_ frame: CGRect, toggle: @escaping () -> Void, close: @escaping () -> Void) {
+        pill = (frame, toggle, close)
+        if presses == nil {
+            // a click anywhere else in the panel closes the open bars, and still does what it does there (one local
+            // monitor, an event handler: nothing is polled)
+            presses = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
+                guard let self, let w = e.window as? QuickChatPanel, let cv = w.contentView else { return e }
+                var p = cv.convert(e.locationInWindow, from: nil)
+                if !cv.isFlipped { p.y = cv.bounds.height - p.y }
+                self.pressed(at: p)
+                return e
+            }
+        }
+    }
+
+    /// A press at a point of the hosting view: while the bars are open, one outside them and the pill closes them.
+    func pressed(at p: CGPoint) {
+        guard let pill, let open = marks["open"], open != .zero else { return }
+        if !open.contains(p) && !pill.frame.contains(p) { pill.close() }
+    }
 
     func bar(_ control: String, _ j: Int, _ frame: CGRect, token: UUID, pick: @escaping () -> Void) {
         guard owners[control] == nil || owners[control] == token else { return }
@@ -1586,7 +1687,7 @@ struct QCField: View {
                 .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
         } else {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
-                        onSubmit: { model.send() }, onEscape: { model.hide() }, onCaps: { caps = $0 })
+                        onSubmit: { model.send() }, onEscape: { model.escape() }, onCaps: { caps = $0 })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
                 .background(QCFieldArea().padding(EdgeInsets(top: -area.top, leading: -area.leading, bottom: -area.bottom, trailing: -area.trailing)))
                 .onChange(of: height) { _ in model.fieldChanged() }
@@ -1871,7 +1972,10 @@ enum QuickChatRender {
         let q1 = "How do I find which process is using port 3000 on macOS?"
         let a1 = "Use `lsof`:\n```zsh\nlsof -nP -iTCP:3000 -sTCP:LISTEN\n```\nThe **PID** column is the process. Stop it with `kill <PID>`.\n- `-nP` keeps addresses and ports as numbers, which is faster.\n- `-sTCP:LISTEN` shows only the server, not its clients."
         var t1 = QuickChatTurn(question: q1, answer: a1, model: "Haiku 5.5"); t1.phase = .done; t1.seconds = 2.4
-        switch state {
+        // any state with -open: the model and thinking bars open over the row ("bar-open", "tint-fablemax-open")
+        let base = state.hasSuffix("-open") ? String(state.dropLast("-open".count)) : state
+        m.controlsOpen = base != state
+        switch base {
         case "typing": m.field = q1
         // the bar's usage indicator: the 5-hour window higher, the week higher, the 5-hour window full
         case "usage-5h": level.fiveHour = 78; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 20; m.level = level
@@ -1884,21 +1988,22 @@ enum QuickChatRender {
             t.problem = .stopped(detail: "claude exited with code 1: API Error: Connection error."); m.turns = [t]
         case "notsigned": var t = QuickChatTurn(question: q1); t.phase = .failed; t.problem = .notSignedIn(profile: "Main", id: "main"); m.turns = [t]
         case "thinking", "short", "haiku", "tint-fable", "tint-extra", "tint-max", "tint-fablemax", "models3", "models2",
-             _ where state.hasPrefix("hover-"):
+             _ where base.hasPrefix("hover-"):
             var t2 = QuickChatTurn(question: "And only the PID, for a script?",
                                    answer: "Add `-t`, which prints bare PIDs:\n```zsh\nkill $(lsof -t -iTCP:3000 -sTCP:LISTEN)\n```",
                                    thinking: "They want only the PIDs.", model: "Sonnet 5.5", thinkingTitle: "High")
             t2.phase = .done; t2.seconds = 7.8; t2.thinkingSeconds = 5
             m.choice = .sonnet; m.knownModels[.sonnet] = "Sonnet 5.5"; m.thinking = .high; m.turns = [t1, t2]
-            // the model and thinking controls: which family and level each picture shows
-            switch state {
+            // the model and thinking controls: which family and level each picture shows (hover-…: open, the pointer on a bar)
+            if state.hasPrefix("hover-") { m.controlsOpen = true }
+            switch base {
             case "haiku": m.choice = .haiku; m.thinking = .medium       // Haiku takes Low to High: Extra and Max are faint
             case "tint-fable": m.choice = .fable; m.thinking = .high
             case "tint-extra", "models3": m.choice = .opus; m.thinking = .xhigh
             case "tint-max": m.choice = .opus; m.thinking = .max
             case "tint-fablemax": m.choice = .fable; m.thinking = .max
             case "models2": m.choice = .sonnet; m.thinking = .medium
-            case _ where state.hasPrefix("hover-"): m.choice = .opus; m.thinking = .high
+            case _ where base.hasPrefix("hover-"): m.choice = .opus; m.thinking = .high
             default: break
             }
         case "full":

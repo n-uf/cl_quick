@@ -3,12 +3,17 @@
 // panel is opened (read-only: nothing is written under the user's folders) and laid out by SwiftUI, on a model list in
 // the shape Claude Code gives it (each family by name alone, the version in its description), with four, three and two
 // families; as the bar and as the chat window, at the first width and at the least (320):
+//   - at rest the "Opus · High" pill keeps one width and place through every value ("must not wobble"); a click on it
+//     opens the bars over the row and nothing in the row moves; a press inside keeps them open, one outside closes
+//     them, as do the pill again and Esc;
 //   - the model control has a bar for every family the account has;
 //   - picking every model and every thinking level leaves every control and every bar exactly where it was;
 //   - a click on each bar's centre (the action of the bar found at that point) picks that bar's value; a level the
 //     model doesn't take does nothing;
 //   - the scroll wheel over a control steps it (a notch a step, a trackpad's deltas add up, momentum not), and
-//     scrolling elsewhere is left alone.
+//     scrolling elsewhere is left alone;
+//   - the bar's usage indicator shows the limit closest to full, its label on that window's row, never moving sideways
+//     or changing width.
 //   Checks/bars.sh
 
 import AppKit
@@ -45,13 +50,17 @@ let fullList: [QuickChatModelEntry] = [
 ]
 let levels = QuickChatThinking.allCases
 
-/// Every control's and bar's frame, as SwiftUI laid them out.
+/// Every control's and bar's frame, as SwiftUI laid them out, with the pill and the open bars' panel.
 func frames() -> [String: CGRect] {
     var f: [String: CGRect] = [:]
     for (k, v) in targets.controls { f[k] = v.frame }
     for (k, v) in targets.bars { f[k] = v.frame }
+    if let pill = targets.pill { f["pill"] = pill.frame }
+    if let o = targets.marks["open"], o != .zero { f["open"] = o }
     return f
 }
+/// The pill's frame alone (the row at rest).
+func pillFrame() -> [String: CGRect] { targets.pill.map { ["pill": $0.frame] } ?? [:] }
 func same(_ a: [String: CGRect], _ b: [String: CGRect]) -> Bool {
     a.keys.sorted() == b.keys.sorted() && a.allSatisfy { k, r in
         guard let s = b[k] else { return false }
@@ -87,13 +96,35 @@ func width(_ w: CGFloat) {
 
 func scenario(_ name: String, families: [QuickChatModelChoice]) {
     let top = families.last!
+    m.controlsOpen = false
     m.choose(top); m.choose(QuickChatThinking.high)
     spin(0.4)
+    // at rest: the "Opus · High" pill keeps one width and place through every value ("must not wobble"), and the gap
+    // after it is still the window's to move
+    let rest = pillFrame()
+    check("\(name): the pill is laid out", rest["pill"] != nil, "\(rest)")
+    check("\(name): at rest the bars are closed", targets.controls.isEmpty && targets.bars.isEmpty, "\(targets.controls.keys.sorted())")
+    for f in families {
+        for l in levels {
+            m.choose(f); m.choose(l); spin(0.06)
+            check("\(name): at rest, \(f.rawValue) / \(l.rawValue) moves nothing", same(pillFrame(), rest), moved(rest, pillFrame()))
+        }
+    }
+    if let pf = rest["pill"] {
+        check("\(name): a press on the pill is not a move", QCDragView.surface(at: inWindow(CGPoint(x: pf.midX, y: pf.midY)), in: p) == nil)
+        check("\(name): the gap after the pill moves the window", QCDragView.surface(at: inWindow(CGPoint(x: pf.maxX + 3, y: pf.midY)), in: p) != nil)
+    }
+    // a click on the pill opens the bars over the row; nothing in the row moves for it
+    m.choose(top); m.choose(QuickChatThinking.high); spin()
+    targets.pill?.toggle(); spin(0.3)
+    check("\(name): a click on the pill opens the bars", m.controlsOpen && targets.controls["m"] != nil && targets.controls["t"] != nil)
+    check("\(name): opening moves nothing in the row", same(pillFrame(), rest), moved(rest, pillFrame()))
     let base = frames()
     // the operator couldn't manage the model at all: one bar per family, each its own target
     check("\(name): a bar for every family", m.modelChoices.map(\.choice) == families, "\(m.modelChoices.map(\.choice))")
     let keys = ["m", "t"] + families.indices.map { "m\($0)" } + levels.indices.map { "t\($0)" }
-    check("\(name): every control and bar is laid out, and no other", Set(base.keys) == Set(keys), "\(base.keys.sorted())")
+    check("\(name): every control and bar is laid out, and no other", Set(base.keys).subtracting(["pill", "open"]) == Set(keys), "\(base.keys.sorted())")
+    check("\(name): the open bars are drawn over the pill, not beside it", (base["open"] ?? .zero).intersects(rest["pill"] ?? .zero))
     for k in keys.dropFirst(2) {
         let r = base[k] ?? .zero
         check("\(name): \(k) is an 8 × 28 target", abs(r.width - 8) < 0.01 && abs(r.height - 28) < 0.01, "\(r)")
@@ -126,10 +157,7 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
             check("\(name): a press at \(k) (\(Int(q.x)), \(Int(q.y))) is not a move", QCDragView.surface(at: inWindow(q), in: p) == nil)
         }
     }
-    if let tf = base["t"] {
-        check("\(name): the gap after the controls moves the window", QCDragView.surface(at: inWindow(CGPoint(x: tf.maxX + 2, y: tf.midY)), in: p) != nil)
-    }
-    // the week arriving or going (the bar's meter) moves nothing (a full week is another matter: its notice opens
+    // the limits changing (the bar's usage indicator) moves nothing (a full limit is another matter: its notice opens
     // above the field and the row moves down with the field, as it always has)
     let week = m.level
     m.level = nil; spin()
@@ -183,6 +211,19 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     spin()
     check("\(name): and steps nothing", m.effectiveThinking == was, "\(m.effectiveThinking)")
     check("\(name): after it all, nothing moved", same(frames(), base), moved(base, frames()))
+    // a press inside the open bars keeps them open; one outside closes them (and the press still does its own thing)
+    if let b0 = base["t0"] { targets.pressed(at: CGPoint(x: b0.midX, y: b0.midY)) }
+    check("\(name): a press on a bar keeps them open", m.controlsOpen)
+    targets.pressed(at: CGPoint(x: 4, y: 4)); spin()
+    check("\(name): a click outside closes them", !m.controlsOpen && targets.controls.isEmpty)
+    check("\(name): closing moves nothing in the row", same(pillFrame(), rest), moved(rest, pillFrame()))
+    // the pill again, and Esc
+    targets.pill?.toggle(); spin(0.3)
+    targets.pill?.toggle(); spin(0.3)
+    check("\(name): a second click on the pill closes them", !m.controlsOpen)
+    targets.pill?.toggle(); spin(0.3)
+    m.escape(); spin()
+    check("\(name): Esc closes them, and the panel stays", !m.controlsOpen && p.isVisible)
 }
 
 let sets: [[QuickChatModelChoice]] = [[.haiku, .sonnet, .opus, .fable], [.haiku, .sonnet, .opus], [.haiku, .sonnet]]
