@@ -988,36 +988,31 @@ struct QCControls: View {
     @ObservedObject var model: QuickChatModel
     var inBar: Bool
 
-    /// How much a control's label says: the model's name and version ("Sonnet 5.5"), its family ("Sonnet"), or no
-    /// label (the bars alone; each bar's tooltip names it).
-    enum Labels { case full, family, none }
-
     /// The row on one line, whatever the width (ViewThatFits, richest first): the bar's week meter drops its number,
-    /// then the model's label keeps its family only, then the meter goes, then the profile key keeps just its dot, then
-    /// the labels go (the profile's name back). Every control is as wide for every value it can take, and the bar's
-    /// meter keeps its room before the week is known, so which row is drawn depends on the width alone: picking a model
-    /// or a level, or the week arriving, never moves anything.
+    /// then the meter goes, then the profile key keeps just its dot, then the controls' short labels go (the profile's
+    /// name back). Every control is as wide for every value it can take, and the bar's meter keeps its room before the
+    /// week is known, so which row is drawn depends on the width alone: picking a model or a level, or the week
+    /// arriving, never moves anything.
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(level: 2, labels: .full, profileWords: true)
-            row(level: 1, labels: .full, profileWords: true)
-            row(level: 1, labels: .family, profileWords: true)
-            row(level: 0, labels: .family, profileWords: true)
-            row(level: 0, labels: .family, profileWords: false)
-            row(level: 0, labels: .none, profileWords: true)
-            row(level: 0, labels: .none, profileWords: false)
+            row(level: 2, labelled: true, profileWords: true)
+            row(level: 1, labelled: true, profileWords: true)
+            row(level: 0, labelled: true, profileWords: true)
+            row(level: 0, labelled: true, profileWords: false)
+            row(level: 0, labelled: false, profileWords: true)
+            row(level: 0, labelled: false, profileWords: false)
         }
     }
 
     /// `level`: the bar's week meter with its number (2), the meter alone (1), none (0).
-    private func row(level showLevel: Int, labels: Labels, profileWords: Bool) -> some View {
+    private func row(level showLevel: Int, labelled: Bool, profileWords: Bool) -> some View {
         HStack(spacing: 2) {
             if let t = model.target {
                 QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.weekNow()),
                        help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
             }
-            modelSteps(labels)
-            thinkingSteps(labels)
+            modelSteps(labelled)
+            thinkingSteps(labelled)
             Spacer(minLength: 4)
             if inBar, showLevel > 0 {
                 if let l = model.level, l.weekNow() != nil || l.full() != nil {
@@ -1057,16 +1052,16 @@ struct QCControls: View {
         }))
     }
 
-    /// The model: a bar per family the account has, Haiku → Sonnet → Opus → Fable; a click on one picks it.
-    private func modelSteps(_ labels: Labels) -> some View {
+    /// The model: a bar per family the account has, Haiku → Sonnet → Opus → Fable; a click on one picks it. The label is
+    /// the family ("Opus"); the hover tip has the version ("Opus 5.5").
+    private func modelSteps(_ labelled: Bool) -> some View {
         let now = model.resolvedModel.family
         let choices = model.modelChoices
         let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
         return QCStepControl(
             what: "Model", key: "m", keys: "⌥⌘← ⌥⌘→",
-            steps: choices.map { .init(title: $0.title, label: labels == .full ? $0.title : $0.choice.title,
-                                       costly: QuickChatModels.costly($0.choice)) },
-            index: choices.firstIndex { $0.choice == now }, offSlot: false, labelled: labels != .none,
+            steps: choices.map { .init(title: $0.title, label: $0.choice.title, costly: QuickChatModels.costly($0.choice)) },
+            index: choices.firstIndex { $0.choice == now }, offSlot: false, labelled: labelled,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(now), other: thinkingCostly),
             pick: { [weak model] j in
                 guard let model, model.modelChoices.indices.contains(j) else { return }
@@ -1076,8 +1071,9 @@ struct QCControls: View {
     }
 
     /// Thinking: Off (a dash), then a bar per level Low … Max. The levels the model doesn't take stay in their place,
-    /// faint and inert, so changing the model never changes the control's width.
-    private func thinkingSteps(_ labels: Labels) -> some View {
+    /// faint and inert, so changing the model never changes the control's width. Short labels ("Med"); the hover tip has
+    /// the full name.
+    private func thinkingSteps(_ labelled: Bool) -> some View {
         let all = QuickChatThinking.allCases
         let takes = model.thinkingSteps
         let now = model.effectiveThinking
@@ -1085,11 +1081,11 @@ struct QCControls: View {
         return QCStepControl(
             what: "Thinking", key: "t", keys: "⌥⌘↓ ⌥⌘↑",
             steps: all.map { t in
-                .init(title: t == .off ? "Thinking off" : t.title, label: t.title,
+                .init(title: t == .off ? "Thinking off" : t.title, label: t == .medium ? "Med" : t.title,
                       costly: QuickChatModels.costly(effort: t.effort), takes: takes.contains(t),
                       why: takes.contains(t) ? nil : "\(modelName) doesn't take \(t.title)")
             },
-            index: all.firstIndex(of: now), offSlot: true, labelled: labels != .none,
+            index: all.firstIndex(of: now), offSlot: true, labelled: labelled,
             tint: QuickChatModels.tint(own: QuickChatModels.costly(effort: now.effort), other: QuickChatModels.costly(model.resolvedModel.family)),
             pick: { [weak model] j in
                 guard let model, all.indices.contains(j), model.thinkingSteps.contains(all[j]) else { return }
@@ -1099,14 +1095,15 @@ struct QCControls: View {
     }
 }
 
-/// A step control (the model, thinking): a label and a bar per step, rising, filled up to the one in use. Each bar is a
-/// target of its own (a 10 × 28 pt column, a control: a press there never moves the window): a click picks that step.
-/// Thinking's Off is a dash before the bars. The pointer on a bar lights it and the label says that step's name (with no
-/// label, the bar's tooltip does: anything drawn above the row would sit under the field, an AppKit view); the scroll
-/// wheel and the ⌥⌘ arrows step it. The control is as wide
-/// for every step: its label is sized for the longest one, so nothing in it or the row moves when the value changes. A
-/// step that uses the limits faster (Fable, Extra, Max) has an ember bar, and the control is warm while on one (warmer
-/// when both controls are).
+/// A step control (the model, thinking): a short label and a bar per step, rising. The bars up to and including the one
+/// in use are filled bright (the text colour, or ember when the step in use costs more) and a dot sits under the one in
+/// use; the bars above it are a faint fill, never tinted, so only what is in use looks lit. Each bar is a target of its
+/// own (5 pt drawn in an 8 × 28 pt column; the columns touch, a control: a press there never moves the window): a click
+/// picks that step. Thinking's Off is a dash before the bars. The pointer on a bar lights it, the label shows its short
+/// name and a tip just above (a small window of its own, so it draws over the field and is no part of the row) its full
+/// name; the scroll wheel and the ⌥⌘ arrows step it. The control is as wide for every step: its label is sized for the
+/// longest short name, so nothing in it or the row moves when the value changes. While the step in use costs more
+/// (Fable, Extra, Max) the control is warm (warmer when both controls are).
 struct QCStepControl: View {
     struct Step {
         /// The full name (the tooltip, VoiceOver) and the label's words.
@@ -1121,7 +1118,7 @@ struct QCStepControl: View {
     let what: String
     /// "m" or "t": its name in QCStepTargets and in a picture's hover (`--render-quick-chat hover-m2`).
     let key: String
-    /// The keys that step it, for the bars' tooltips.
+    /// The keys that step it, for the hover tip.
     let keys: String
     let steps: [Step]
     /// The step in use (nil: none of them).
@@ -1140,7 +1137,9 @@ struct QCStepControl: View {
     @Environment(\.qcStepHover) private var pictureHover
     @Environment(\.qcRendering) private var rendering
 
-    static let column: CGFloat = 10
+    /// A bar's target (the columns touch, so the targets tile) and the bar drawn in it.
+    static let column: CGFloat = 8
+    static let bar: CGFloat = 5
     static let labelFont = NSFont.systemFont(ofSize: 13, weight: .medium)
 
     private var hovered: Int? {
@@ -1153,23 +1152,32 @@ struct QCStepControl: View {
     }
 
     var body: some View {
-        let ember = QCColor.ember
+        let inUse = index.flatMap { steps.indices.contains($0) ? steps[$0] : nil }
+        // what is in use: bright, or ember when it costs more; only the bars up to it take this colour
+        let lit = inUse?.costly == true ? QCColor.ember : QCColor.text
         let fg = tint == 2 ? QCColor.hex(0xFFDCCB) : tint == 1 ? QCColor.hex(0xF1C3AE) : QCColor.soft
         HStack(spacing: 0) {
             if labelled {
                 let h = hovered.flatMap { steps.indices.contains($0) ? steps[$0] : nil }
-                let shown = h ?? index.flatMap { steps.indices.contains($0) ? steps[$0] : nil }
-                Text(shown?.label ?? "")
+                Text((h ?? inUse)?.label ?? "")
                     .font(.system(size: 13, weight: .medium)).lineLimit(1)
-                    .foregroundColor(h == nil ? fg : !h!.takes ? QCColor.muted : h!.costly ? QCColor.hex(0xF1B59B) : QCColor.text)
+                    .foregroundColor(h == nil ? fg : !h!.takes ? QCColor.muted : QCColor.text)
                     .frame(width: labelWidth, alignment: .leading)
-                    .padding(.leading, QCSpace.keyPadding).padding(.trailing, 2)
+                    .padding(.leading, QCSpace.keyPadding).padding(.trailing, 3)
             }
-            ForEach(steps.indices, id: \.self) { j in column(j, fg: fg, ember: ember) }
+            ForEach(steps.indices, id: \.self) { j in column(j, lit: lit) }
         }
         .frame(height: QCSpace.row)
+        // a picture can't show the tip's own window: it draws the tip where the window would be
+        .overlay(alignment: .topLeading) {
+            if rendering, let j = hovered, steps.indices.contains(j) {
+                let x = (labelled ? QCSpace.keyPadding + labelWidth + 3 : 0) + Self.column * (CGFloat(j) + 0.5)
+                QCStepTipView(text: steps[j].why ?? steps[j].title, costly: steps[j].costly && steps[j].takes, muted: !steps[j].takes, keys: keys)
+                    .fixedSize().frame(width: 0, height: 0, alignment: .bottom).offset(x: x, y: -4)
+            }
+        }
         .background(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).fill(fill))
-        .overlay(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).strokeBorder(tint == 2 ? ember.opacity(0.4) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: QCSpace.keyCorner, style: .continuous).strokeBorder(tint == 2 ? QCColor.ember.opacity(0.4) : .clear))
         .qcControl()      // the label too: a press anywhere on the control never moves the window
         .background(rendering ? nil : GeometryReader { g in
             Color.clear
@@ -1184,31 +1192,39 @@ struct QCStepControl: View {
         .accessibilityAdjustableAction { d in _ = step(d == .increment ? 1 : -1) }
     }
 
-    /// One step's target: a 10 × 28 column with its bar (or Off's dash) at the bottom.
-    @ViewBuilder private func column(_ j: Int, fg: Color, ember: Color) -> some View {
+    /// One step's target: an 8 × 28 column with its bar (or Off's dash) at the bottom, and under the one in use a dot.
+    @ViewBuilder private func column(_ j: Int, lit litColour: Color) -> some View {
         let s = steps[j]
         let isOff = offSlot && j == 0
         let bars = steps.count - (offSlot ? 1 : 0)
         let nth = j - (offSlot ? 1 : 0)
-        let height: CGFloat = isOff ? 2 : bars <= 1 ? 16 : 7 + 9 * CGFloat(nth) / CGFloat(bars - 1)
+        let height: CGFloat = isOff ? 2 : bars <= 1 ? 15 : 6 + 9 * CGFloat(nth) / CGFloat(bars - 1)
+        // filled: Off when it is in use; a bar when it is at or below the one in use (and the one in use isn't Off)
         let on = index.map { isOff ? $0 == 0 : (j <= $0 && !(offSlot && $0 == 0)) } ?? false
-        let lit = hovered == j && s.takes
-        let color: Color = !s.takes ? QCColor.text.opacity(0.07)
-            : s.costly ? (on || lit ? ember : ember.opacity(0.38))
-            : on ? (lit ? QCColor.text : fg) : QCColor.text.opacity(lit ? 0.55 : 0.17)
+        let pointed = hovered == j && s.takes
+        let color: Color = !s.takes ? QCColor.text.opacity(0.06)
+            : on ? litColour
+            : QCColor.text.opacity(pointed ? 0.45 : 0.16)
         ZStack(alignment: .bottom) {
-            if lit { RoundedRectangle(cornerRadius: 4, style: .continuous).fill(QCColor.hover).frame(width: Self.column, height: 22).padding(.bottom, 3) }
+            if pointed { RoundedRectangle(cornerRadius: 3, style: .continuous).fill(QCColor.hover).frame(width: Self.column, height: 24).padding(.bottom, 2) }
             RoundedRectangle(cornerRadius: 1).fill(color)
-                .frame(width: isOff ? 8 : 4, height: height)
-                .padding(.bottom, 7)
+                .frame(width: isOff ? 6 : Self.bar, height: height)
+                .padding(.bottom, 8)
+            if index == j { Circle().fill(litColour).frame(width: 3, height: 3).padding(.bottom, 3) }
         }
         .frame(width: Self.column, height: QCSpace.row, alignment: .bottom)
         .qcControl()
         .onTapGesture { if s.takes { pick(j) } }
         .onHover { inside in
-            if inside { hover = j } else if hover == j { hover = nil }
+            if inside {
+                hover = j
+                QCStepTip.shared.show(s.why ?? s.title, costly: s.costly && s.takes, muted: !s.takes, keys: keys, over: "\(key)\(j)")
+            } else if hover == j {
+                hover = nil
+                QCStepTip.shared.hide()
+            }
         }
-        .help((s.why ?? (s.costly ? "\(s.title): uses your limits faster" : s.title)) + " (\(keys))")
+        .onDisappear { if hover == j { QCStepTip.shared.hide() } }
         .modifier(QCHandIf(on: s.takes))      // a level the model doesn't take does nothing: no pointing hand
         .background(rendering ? nil : GeometryReader { g in
             Color.clear
@@ -1220,6 +1236,66 @@ struct QCStepControl: View {
     private var fill: Color {
         let warm = tint == 2 ? 0.27 : tint == 1 ? 0.13 : 0
         return warm > 0 ? QCColor.accent.opacity(warm) : .clear
+    }
+}
+
+/// The hover tip's look: the step's full name ("Sonnet 5.5", "Medium"), "uses limits faster" for a costly one, and the
+/// keys that step the control.
+struct QCStepTipView: View {
+    let text: String
+    let costly: Bool
+    let muted: Bool
+    let keys: String
+    var body: some View {
+        (Text(text).fontWeight(.semibold).foregroundColor(muted ? QCColor.muted : QCColor.text)
+            + Text(costly ? " · uses limits faster" : "").foregroundColor(QCColor.hex(0xF1B59B))
+            + Text("  " + keys).foregroundColor(QCColor.muted))
+            .font(.system(size: 11.5)).lineLimit(1).fixedSize()
+            .padding(.horizontal, 8).frame(height: 22)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(QCColor.hex(0x1C1C1B)))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(QCColor.line))
+            .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The hover tip, in a small window of its own just above the bar: it draws over the field (an AppKit view that anything
+/// drawn in the row's own view would sit under) and takes no part in the row's layout or the mouse. One window, made the
+/// first time; a child of the panel, so it moves with it, and taken away when the pointer leaves the bar or the panel
+/// hides.
+final class QCStepTip {
+    static let shared = QCStepTip()
+    private var window: NSPanel?
+    private var host: NSHostingView<QCStepTipView>?
+
+    /// Shows the tip centred over a bar (its key in QCStepTargets), inside the panel's width.
+    func show(_ text: String, costly: Bool, muted: Bool, keys: String, over bar: String) {
+        guard let frame = QCStepTargets.shared.bars[bar]?.frame,
+              let panel = NSApp.windows.first(where: { $0 is QuickChatPanel && $0.isVisible }), let cv = panel.contentView else { return }
+        let view = QCStepTipView(text: text, costly: costly, muted: muted, keys: keys)
+        let w: NSPanel
+        if let window, let host { host.rootView = view; w = window } else {
+            w = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+            w.isOpaque = false; w.backgroundColor = .clear; w.hasShadow = true
+            w.ignoresMouseEvents = true; w.isReleasedWhenClosed = false
+            let h = NSHostingView(rootView: view)
+            w.contentView = h
+            window = w; host = h
+        }
+        let size = host!.fittingSize
+        // the bar's top centre, from the hosting view's top-left space to the screen
+        let top = cv.convert(NSPoint(x: frame.midX, y: cv.isFlipped ? frame.minY : cv.bounds.height - frame.minY), to: nil)
+        let onScreen = panel.convertPoint(toScreen: top)
+        var x = onScreen.x - size.width / 2
+        x = min(max(x, panel.frame.minX + 4), panel.frame.maxX - 4 - size.width)
+        w.setFrame(NSRect(x: x, y: onScreen.y + 2, width: size.width, height: size.height), display: true)
+        if w.parent !== panel { w.parent?.removeChildWindow(w); panel.addChildWindow(w, ordered: .above) }
+        w.orderFront(nil)
+    }
+
+    func hide() {
+        guard let w = window else { return }
+        w.parent?.removeChildWindow(w)
+        w.orderOut(nil)
     }
 }
 

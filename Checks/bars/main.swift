@@ -96,7 +96,17 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     check("\(name): every control and bar is laid out, and no other", Set(base.keys) == Set(keys), "\(base.keys.sorted())")
     for k in keys.dropFirst(2) {
         let r = base[k] ?? .zero
-        check("\(name): \(k) is a 10 × 28 target", abs(r.width - 10) < 0.01 && abs(r.height - 28) < 0.01, "\(r)")
+        check("\(name): \(k) is an 8 × 28 target", abs(r.width - 8) < 0.01 && abs(r.height - 28) < 0.01, "\(r)")
+    }
+    // compact, and the targets still easy: each control at most 95 pt, its bars' targets touching edge to edge
+    for c in ["m", "t"] {
+        let w = base[c]?.width ?? 0
+        check("\(name): the \(c == "m" ? "model" : "thinking") control is compact (\(Int(w)) pt)", w > 0 && w <= 95, "\(w)")
+        let n = c == "m" ? families.count : levels.count
+        for j in 1..<n {
+            let a = base["\(c)\(j - 1)"] ?? .zero, b = base["\(c)\(j)"] ?? .zero
+            check("\(name): \(c)\(j - 1) and \(c)\(j) touch", abs(a.maxX - b.minX) < 0.01, "\(a.maxX) / \(b.minX)")
+        }
     }
     // the control changed its size and escaped from the mouse: every value, every family, nothing moves
     for f in families {

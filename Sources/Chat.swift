@@ -1247,6 +1247,7 @@ final class QuickChatPanel: NSPanel {
     /// Hidden (Esc, ⌘W, ✕, the shortcut) with the pointer over an empty area: its open hand goes with it, at once (the
     /// occlusion notice the drag surfaces also act on comes later).
     override func orderOut(_ sender: Any?) {
+        QCStepTip.shared.hide()          // a bar's tip goes with the panel (hidden under the pointer gets no mouse-exit)
         super.orderOut(sender)
         quietKey = false
         QCDragView.dropHand()
