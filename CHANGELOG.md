@@ -33,7 +33,8 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **A rich menu bar menu.** Each profile's block shows its name with a dot in its level's colour, the account in use
   with a green lamp (address blurred until the pointer is on it), the 5-hour and week bars with their share and time
   to reset, and how old the numbers are; only the account in use shows usage. Old numbers are asked for again in the
-  background when the menu opens (`get_usage` only, one `claude` at a time), nothing else is sent or read.
+  background when the menu opens (`get_usage` only, one `claude` at a time), nothing else is sent or read. A profile
+  with standby accounts has **Switch account ›** under its block (masked addresses, the usual switch question).
 - **A quiet chat header.** Once the bar has become a chat window, its header shows only the usage meters ("5h" and
   "wk", with reset times when there's room) and a darker capsule with **+** (new chat) and **✕** (hide). No profile
   name and no address. The window resizes from its edges and moves from any empty area.

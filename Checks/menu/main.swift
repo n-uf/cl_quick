@@ -111,6 +111,21 @@ check("the menu: the blocks are all as wide as the widest", Set(blocks.map(\.fra
 blocks.last?.press(); spin(0.1)
 check("the menu: a click picks that profile", chosen == ["work"])
 
+// ── Switch account ›, for a profile with standby accounts, through the switch path that exists ─────────
+var switched: [String] = []
+let withSwitch = QCStatusMenu.items(infos, now: now, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") }) { _ in }
+let subs = withSwitch.filter { $0.submenu != nil }
+check("switch: one Switch account › item, for the profile with a standby account only, right under its block",
+      withSwitch.count == 4 && subs.count == 1 && subs.first?.title == "Switch account" && withSwitch.firstIndex(of: subs[0]) == 1 && withSwitch[2].isSeparatorItem,
+      "\(withSwitch.map { $0.title })")
+let lines = subs.first?.submenu?.items ?? []
+check("switch: its line names the standby account masked, never in full", lines.map(\.title) == ["Switch to \(maskEmail("zed@example.com"))…"] && !lines.map(\.title).joined().contains("zed"), "\(lines.map(\.title))")
+if let line = lines.first, let t = line.target, let a = line.action { _ = t.perform(a, with: line) }
+check("switch: picking it goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")
+let waitingItems = QCStatusMenu.items(infos, now: now, switching: { $0.id == "main" }, switchTo: { _, _ in }) { _ in }
+check("switch: while a sign-in is waited for, its lines are off", waitingItems.first { $0.submenu != nil }?.submenu?.items.allSatisfy { !$0.isEnabled } == true)
+check("switch: without a switch path there is no such item", items.allSatisfy { $0.submenu == nil })
+
 // ── from the store: a standby account's week never shows, the account in use's does ────────────────
 let home = work + "/../menu-home"
 func folder(_ name: String, email: String, uuid: String) -> String {

@@ -377,9 +377,39 @@ enum QCStatusMenu {
              standby: store.standby(p))
     }
 
+    /// A menu item's action: a closure.
+    private final class Handler: NSObject {
+        let run: () -> Void
+        init(_ run: @escaping () -> Void) { self.run = run }
+        @objc func fire() { run() }
+    }
+
+    /// "Switch account ›" for a profile with standby accounts: each one a line, by its masked address, that asks the
+    /// switch question (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing
+    /// new happens here: it is the path the chat's and Settings' Switch… take. Lines are off while a sign-in for the
+    /// profile is waited for.
+    static func switchItem(_ i: Info, waiting: Bool, switchTo: @escaping (Profile, KnownAccount) -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: "Switch account", action: nil, keyEquivalent: "")
+        let sub = NSMenu(title: "Switch account")
+        sub.autoenablesItems = false
+        for a in i.standby {
+            let h = Handler { switchTo(i.profile, a) }
+            let line = NSMenuItem(title: "Switch to \(maskEmail(a.email))…", action: #selector(Handler.fire), keyEquivalent: "")
+            line.target = h
+            line.representedObject = h          // the menu item keeps its handler alive
+            line.isEnabled = !waiting
+            sub.addItem(line)
+        }
+        item.submenu = sub
+        return item
+    }
+
     /// The menu's items for the profiles: a block each (its numbers follow the store while the menu is open when `live`),
-    /// a line between them. `pick` opens the quick chat on a profile.
-    static func items(_ infos: [Info], now: Date = Date(), live: ((Profile) -> Info)? = nil, pick: @escaping (String) -> Void) -> [NSMenuItem] {
+    /// under a profile with standby accounts its Switch account › (when `switchTo` is given), a line between profiles.
+    /// `pick` opens the quick chat on a profile.
+    static func items(_ infos: [Info], now: Date = Date(), live: ((Profile) -> Info)? = nil,
+                      switching: (Profile) -> Bool = { _ in false }, switchTo: ((Profile, KnownAccount) -> Void)? = nil,
+                      pick: @escaping (String) -> Void) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         var blocks: [QCMenuUsageBlock] = []
         for (n, i) in infos.enumerated() {
@@ -397,6 +427,7 @@ enum QCStatusMenu {
             item.view = block
             item.representedObject = p.id
             items.append(item)
+            if let switchTo, !i.standby.isEmpty { items.append(switchItem(i, waiting: switching(p), switchTo: switchTo)) }
         }
         // all as wide as the widest (the menu then widens them with itself)
         let w = blocks.map(\.frame.width).max() ?? 0

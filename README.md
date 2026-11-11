@@ -93,7 +93,8 @@ draws it: the profile's name with a dot in the colour of its fuller limit, the a
 (`<address> · in use`, the address blurred until the pointer is on it), two bars, **5-hour** and **Week**, in green,
 amber and red by level, each with its share and the time to its reset ("13% in 1h 5m"), and how old the numbers are
 ("Updated just now"). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
-a profile with no numbers yet says "No usage yet". The numbers are the ones Claude Code last gave cl_quick, shown at
+a profile with no numbers yet says "No usage yet". A profile with standby accounts also has **Switch account ›**,
+listing them by their masked addresses and asking the same question as Switch… in Settings. The numbers are the ones Claude Code last gave cl_quick, shown at
 once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a
 time is sent `get_usage` and nothing else (no message to a model, no Keychain, no token), at most once every 3
 minutes for a profile.

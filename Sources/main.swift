@@ -106,7 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         store.noteAccounts()
         store.reload()          // off the main thread; the next look at the menu has what changed
         // each profile: its name, the account in use, and that account's two limits (MenuUsage.swift); a click opens the chat on it
-        QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) }, pick: { [chat = self.chat] id in chat.open(profile: id) })
+        // (a profile with standby accounts also has Switch account ›: the same question and sign-in as Settings' Switch…)
+        QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) },
+                           switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
+                           switchTo: { p, a in AccountSwitcher.shared.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .settings) },
+                           pick: { [chat = self.chat] id in chat.open(profile: id) })
             .forEach(menu.addItem)
         if !store.profiles.isEmpty { menu.addItem(.separator()) }
         QCMenuUsageRefresher.shared.refresh(store: store)      // numbers older than a few minutes are asked for, in the background
