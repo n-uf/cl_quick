@@ -26,6 +26,8 @@
 //                                       add-empty) and General (general, general-clash, general-off,
 //                                       general-recording, general-taken, general-fable, general-haiku,
 //                                       general-nolist)
+//   --render-menu OUT.png STATE [dark]  the menu bar menu's profile blocks in a drawn menu, light or dark (STATE: menu,
+//                                       address (the pointer on the first profile's address), full, one, signedout)
 //   --version
 
 import AppKit
@@ -47,6 +49,12 @@ if args.count >= 4, args[1] == "--render-quick-chat" {
 if args.count >= 4, args[1] == "--render-settings" {
     Files.readOnly = true
     if #available(macOS 14, *) { MainActor.assumeIsolated { SettingsRender.write(to: args[2], page: args[3]) } }
+    exit(0)
+}
+
+if args.count >= 4, args[1] == "--render-menu" {
+    Files.readOnly = true
+    QCMenuRender.write(to: args[2], state: args[3], dark: args.count >= 5 && args[4] == "dark")
     exit(0)
 }
 
@@ -97,14 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let store = ProfileStore.shared
         store.noteAccounts()
         store.reload()          // off the main thread; the next look at the menu has what changed
-        for p in store.profiles {
-            let l = store.level(of: p)
-            let words = l?.full() != nil ? "full" : l?.weekNow().map { "week \(Int($0.rounded()))%" } ?? "no numbers yet"
-            let i = NSMenuItem(title: "\(p.name)   \(words)", action: #selector(openProfile(_:)), keyEquivalent: "")
-            i.target = self; i.representedObject = p.id
-            menu.addItem(i)
-        }
+        // each profile: its name, the account in use, and that account's two limits (MenuUsage.swift); a click opens the chat on it
+        QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) }, pick: { [chat = self.chat] id in chat.open(profile: id) })
+            .forEach(menu.addItem)
         if !store.profiles.isEmpty { menu.addItem(.separator()) }
+        QCMenuUsageRefresher.shared.refresh(store: store)      // numbers older than a few minutes are asked for, in the background
         if let u = UpdateChecker.shared.available {
             let up = NSMenuItem(title: "Update available: \(u.version)", action: #selector(openUpdate(_:)), keyEquivalent: "")
             up.target = self; up.representedObject = u.page
@@ -117,7 +122,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openChat() { chat.open() }
-    @objc private func openProfile(_ sender: NSMenuItem) { chat.open(profile: sender.representedObject as? String) }
     @objc private func openUpdate(_ sender: NSMenuItem) { if let u = sender.representedObject as? URL { NSWorkspace.shared.open(u) } }
     @objc private func openSettings() { SettingsWindow.shared.show(profile: nil) }
 }

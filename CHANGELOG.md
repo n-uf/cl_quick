@@ -30,6 +30,10 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   Code last reported it and the address of its account in use, blurred until the pointer is on it, with a copy button.
   The menu also has **Settings for <profile>…** and **Add a profile…**. A full limit's notice names the window that is
   full (5-hour limit or week) and offers the profile with the most room: Ask on Work.
+- **A rich menu bar menu.** Each profile's block shows its name with a dot in its level's colour, the account in use
+  with a green lamp (address blurred until the pointer is on it), the 5-hour and week bars with their share and time
+  to reset, and how old the numbers are; only the account in use shows usage. Old numbers are asked for again in the
+  background when the menu opens (`get_usage` only, one `claude` at a time), nothing else is sent or read.
 - **A quiet chat header.** Once the bar has become a chat window, its header shows only the usage meters ("5h" and
   "wk", with reset times when there's room) and a darker capsule with **+** (new chat) and **✕** (hide). No profile
   name and no address. The window resizes from its edges and moves from any empty area.

@@ -86,6 +86,18 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   the profile menu only: each profile's row has the address of its account in use (never a standby one's), blurred
   until the pointer is on it; a copy button beside it copies it.
 
+## The menu bar menu
+
+Besides Quick chat, Settings… and Quit, the menu bar icon's menu has a block for each profile, drawn as cl_audit's menu
+draws it: the profile's name with a dot in the colour of its fuller limit, the account in use with a green lamp
+(`<address> · in use`, the address blurred until the pointer is on it), two bars, **5-hour** and **Week**, in green,
+amber and red by level, each with its share and the time to its reset ("13% in 1h 5m"), and how old the numbers are
+("Updated just now"). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
+a profile with no numbers yet says "No usage yet". The numbers are the ones Claude Code last gave cl_quick, shown at
+once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a
+time is sent `get_usage` and nothing else (no message to a model, no Keychain, no token), at most once every 3
+minutes for a profile.
+
 ## The chat
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
@@ -202,6 +214,9 @@ On its first run it copies cl_audit's old quick chat settings (the shortcut, mod
 each bar's centre picks that bar, a click on a label's right or left half goes round forward or back, the scroll wheel
 steps, the keys button opens and closes its list (a click elsewhere or Esc closes it), and the bar's usage indicator
 shows the limit closest to full with its label before the bars on that window's row.
+`Checks/menu.sh` checks the menu bar menu's profile blocks (their words, level colours, the address blurred until the
+pointer is on it, no usage for a standby account, "No usage yet") and the background refresh of old numbers against
+the stand-in `claude`: one at a time, throttled, only `get_usage` asked.
 `Checks/real.sh` asks one real question on a throwaway, signed-out folder; with `QC_CONFIG=<folder>` it uses that
 folder's account (a little of its usage) and checks the incognito chat end to end: a multi-turn conversation in one
 `claude` still remembers, Stop keeps the conversation, the model changes in the running chat, and no transcript
