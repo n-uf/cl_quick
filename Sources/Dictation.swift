@@ -13,10 +13,40 @@
 // running; sent after Dictation ended, it could start it again. Dictation is an input method (Ironwood) of the field's
 // text input context, so it is ended there, as switching apps ends it (`end`).
 //
-// macOS doesn't say whether Dictation is running, so the button keeps its own state: on after a start, off after a stop,
-// a send, a new chat or the panel hiding (each of which also stops Dictation).
+// macOS has no API that says whether Dictation is running, so the button keeps its own state: on after a start, off
+// after a stop, a send, a new chat or the panel hiding (each of which also stops Dictation), and off when Dictation's
+// input method says it left Dictation mode, whatever ended it (QCDictationWatch).
 
 import AppKit
+
+/// Dictation ending, whatever ended it: a click on its floating mic, Esc, the Dictation key, its own timeout. Dictation's
+/// input method (DictationIM) posts the distributed notification `DictationIMNotificationDidExitDictationMode` when it
+/// leaves Dictation mode; AppKit's NSDictationManager follows Dictation's state by the same notification. A never-active
+/// app gets distributed notifications only when it says so (AppKit suspends them while an app isn't active; that is
+/// also why NSDictationManager's state, and so NSApplication's stopDictation:, goes stale in cl_quick), so it is
+/// observed with `.deliverImmediately`. The notification is system-wide and says nothing about which text it ended in:
+/// it only ever turns the button's state off, never stops anything, so an exit from Dictation elsewhere costs at most a
+/// tinted button gone while Dictation runs on (the next click starts it again: still harmless).
+final class QCDictationWatch: NSObject {
+    static let exitName = Notification.Name("DictationIMNotificationDidExitDictationMode")
+    /// Called on the main thread when Dictation left Dictation mode.
+    var onExit: () -> Void = {}
+    private let listening: Bool
+
+    /// `listen`: false in the checks, which call `exited` themselves (a real Dictation elsewhere must not reach them).
+    init(listen: Bool) {
+        listening = listen
+        super.init()
+        guard listen else { return }
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(exited(_:)), name: Self.exitName,
+                                                            object: nil, suspensionBehavior: .deliverImmediately)
+    }
+    deinit { if listening { DistributedNotificationCenter.default().removeObserver(self) } }
+
+    @objc func exited(_ n: Notification) {
+        if Thread.isMainThread { onExit() } else { DispatchQueue.main.async { [weak self] in self?.onExit() } }
+    }
+}
 
 enum QCDictation {
     static let start = Selector(("startDictation:"))

@@ -683,6 +683,30 @@ do {
     m.dictate(true); spin(0.1)
     p.onKeyLost()
     check("mic: the panel losing the keyboard ends the dictating state", !m.dictating)
+    // Dictation ended by macOS (its floating mic clicked, Esc, the Dictation key, a timeout): DictationIM's exit notice
+    // turns the button off, and only that (nothing sent: a wrong notice must not stop a Dictation still running)
+    do {
+        let exit = Notification(name: QCDictationWatch.exitName)
+        let wasGrace = QuickChat.exitGrace
+        check("mic: the watch listens for DictationIM's exit notice (not in the checks: they post it themselves)",
+              QCDictationWatch.exitName.rawValue == "DictationIMNotificationDidExitDictationMode")
+        m.dictate(true); spin(0.1)
+        n = sent.count
+        chat.dictationWatch.exited(exit)
+        check("mic: an exit notice right after the button started it is an earlier Dictation's: the state stays on",
+              m.dictating && sent.count == n)
+        QuickChat.exitGrace = 0
+        chat.dictationWatch.exited(exit)
+        check("mic: Dictation ended by macOS turns the button off, sends nothing", !m.dictating && sent.count == n, steps(since: n))
+        chat.dictationWatch.exited(exit)
+        check("mic: an exit notice with the button off changes nothing", !m.dictating && sent.count == n)
+        var hops = 0
+        m.dictating = true
+        DispatchQueue.global().async { chat.dictationWatch.exited(exit) }
+        while m.dictating && hops < 50 { spin(0.02); hops += 1 }
+        check("mic: an exit notice off the main thread reaches the button on it", !m.dictating, "\(hops)")
+        QuickChat.exitGrace = wasGrace
+    }
     // a new chat or hiding stops it too
     m.dictate(true); spin(0.1); n = sent.count
     let chatField = p.firstResponder as? QCTextView

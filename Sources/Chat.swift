@@ -892,6 +892,7 @@ final class QuickChat {
         model.hide = { [weak self] in self?.hide() }
         model.escape = { [weak self] in self?.escape() }
         model.dictate = { [weak self] on in self?.dictate(on) }
+        dictationWatch.onExit = { [weak self] in self?.dictationExited() }
         model.openSettings = { [weak self] id in self?.openSettings(id) }
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
@@ -1100,6 +1101,7 @@ final class QuickChat {
         DispatchQueue.main.async { [weak self, weak p] in
             guard let self, let p, p.isVisible, p.isKeyWindow, let field = p.firstResponder as? QCTextView else { return }
             let started = QCDictation.begin(for: field)
+            if started { self.dictationStarted = Date() }
             self.model.dictating = started
             if !started { self.model.dictationNote = QCDictation.failedWords }
         }
@@ -1107,6 +1109,17 @@ final class QuickChat {
 
     /// The panel gave up the keyboard (another app, a click elsewhere): Dictation, which follows the keyboard, has ended.
     func keyLost() { model.dictating = false }
+
+    /// Dictation left Dictation mode (its floating mic clicked, Esc, the Dictation key, a timeout): the button goes off.
+    /// Only the state: nothing is stopped. Not in the first moments after the button started it, when the exit can still
+    /// be an earlier Dictation's (ours just stopped, or one elsewhere that ours replaced).
+    let dictationWatch = QCDictationWatch(listen: !QCQuiet.on)
+    static var exitGrace: TimeInterval = 0.5
+    private var dictationStarted = Date.distantPast
+    func dictationExited() {
+        guard model.dictating, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
+        model.dictating = false
+    }
     /// Esc: the keys list closes if it is open, else the panel hides.
     func escape() { if QCKeys.shared.shown { QCKeys.shared.close() } else { hide() } }
 
