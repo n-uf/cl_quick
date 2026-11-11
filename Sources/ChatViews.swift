@@ -178,40 +178,37 @@ struct QCWindow: View {
     }
 }
 
-/// The account line: the profile, its session and week, then New chat and Hide. (The address of the account in use is in
-/// the profile menu, under the row's profile key.)
+/// The chat's top line: the session and week meters, then New chat and Hide. The profile is only the field row's key
+/// ("● Main ⌄"), whose menu has the account's address and Settings for the profile.
 struct QCHeader: View {
     @ObservedObject var model: QuickChatModel
     /// The pointer is on the meters: their card shows what the line had to leave out.
     @State private var meterHover = false
-    @State private var nameHover = false
     @State private var line = QCLineState()
     @Environment(\.qcHover) private var pictureHover
 
     var body: some View {
         let on = meterHover || pictureHover
-        // the profile on the left, usage on the right next to New chat and Hide; 40 pt high, centred, the name on the
-        // window's 10 pt line and the ✕ glyph about as far in from the right
+        // the meters on the left, on the window's 10 pt line (where the answers and the field box start), the empty
+        // middle the window's to move, New chat and Hide on the right; 40 pt high, centred
         HStack(spacing: 8) {
-            QCHeaderInfo(target: model.target, level: model.level, openProfile: {
-                // Settings opens and the chat steps aside (hidden, not closed: the shortcut brings it back as it was)
-                if let id = model.target?.profileID { model.openSettings(id); model.hide() }
-            }, nameHover: $nameHover, meterHover: $meterHover, state: $line)
+            QCHeaderInfo(level: model.level, meterHover: $meterHover, state: $line)
             HStack(spacing: 0) {
                 QCIconButton(symbol: "square.and.pencil", help: "New chat (⌘N)", size: QCSpace.row) { model.newChat() }
                 QCIconButton(symbol: "xmark", help: "Hide (Esc)", size: QCSpace.row) { model.hide() }
             }
+            .qcMark("header-buttons")
         }
         .padding(.leading, QCSpace.gap).padding(.trailing, 3)
         .frame(height: QCSpace.header)
         .qcDraggable()
-        .overlay(alignment: .topTrailing) {
-            // a card under the meters, right-aligned to the 10 pt line, only for what the line had to leave out: while
-            // the pointer is on the meters, their dropped parts
+        .overlay(alignment: .topLeading) {
+            // a card under the meters, on the same 10 pt line, only for what the line had to leave out: while the
+            // pointer is on the meters, their dropped parts
             let rows = on ? QCHeaderCard.rows(model.level, shown: line.detail) : []
             if !rows.isEmpty {
                 QCHeaderCard(rows: rows)
-                    .padding(.trailing, QCSpace.gap).offset(y: QCSpace.header - 2).allowsHitTesting(false)
+                    .padding(.leading, QCSpace.gap).offset(y: QCSpace.header - 2).allowsHitTesting(false)
             }
         }
     }
@@ -284,7 +281,7 @@ extension EnvironmentValues {
 ///   1. both labels shorten together: "session" / "week" become "5h" / "wk";
 ///   2. the reset times go (labels full again, then short);
 ///   3. the percentages go (bars only; "full" stays), labels first full again, then short;
-///   4. the labels go, both (and a profile name too long for the window on its own is cut: the only ellipsis).
+///   4. the labels go, both.
 /// While the pointer is on the meters, a card under them shows only what the line dropped (a window's share, reset or
 /// label), nothing it already shows, and no card at all when it dropped nothing.
 struct QCHeaderDetail: Equatable {
@@ -310,13 +307,9 @@ struct QCLineState: Equatable {
     var detail = QCHeaderDetail.steps[0]
 }
 
-/// The profile and the session and week meters.
+/// The session and week meters.
 struct QCHeaderInfo: View {
-    let target: QuickChatTarget?
     let level: QuickChatLevel?
-    /// The profile's name was clicked.
-    let openProfile: () -> Void
-    @Binding var nameHover: Bool
     /// The pointer is on the meters. Kept by the header (the candidates replace each other).
     @Binding var meterHover: Bool
     /// What the line on screen shows: told by the step that is shown.
@@ -325,43 +318,25 @@ struct QCHeaderInfo: View {
     var body: some View {
         let steps = QCHeaderDetail.steps
         // each candidate is measured at its ideal width (its spacer at its least) and, once picked, spreads to the width
-        // the header gives it, so the meters sit on the right next to the buttons
+        // the header gives it, the meters on the left; the last (the bars alone) fits from well under the least width
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
-                QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover,
-                             meterHover: $meterHover)
+                QCHeaderLine(level: level, detail: steps[i], meterHover: $meterHover)
                     .onAppear { state = QCLineState(detail: steps[i]) }
             }
-            // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
-            // pushes the buttons off the panel
-            QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, nameHover: $nameHover,
-                         meterHover: $meterHover, flexible: true)
-                .onAppear { state = QCLineState(detail: steps[steps.count - 1]) }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(QCHeaderLine.spoken(target: target, level: level))
-        .accessibilityAction(named: "Open profile in Settings", openProfile)
+        .accessibilityLabel(QCHeaderLine.spoken(level: level))
     }
 }
 
 struct QCHeaderLine: View {
-    let target: QuickChatTarget?
     let level: QuickChatLevel?
     let detail: QCHeaderDetail
-    let openProfile: () -> Void
-    @Binding var nameHover: Bool
     @Binding var meterHover: Bool
-    /// The name may give way (be cut) to what the window has room for.
-    var flexible = false
 
     var body: some View {
         HStack(spacing: 8) {
-            if let t = target {
-                // the name's hover fill reaches 6 pt past its text, which sits on the 10 pt line
-                QCProfileName(name: t.name, hover: $nameHover, action: openProfile).padding(.leading, -6)
-                    .layoutPriority(flexible ? -1 : 0)
-            }
-            Spacer(minLength: 0)
             if let l = level {
                 let full = l.full()
                 HStack(spacing: 12) {
@@ -373,8 +348,10 @@ struct QCHeaderLine: View {
                 .fixedSize()
                 // a drag that starts on the meters moves the panel; the card shows what the line dropped, so no tooltip
                 .qcDraggable(hover: $meterHover)
+                .qcMark("header-meters")
                 .onDisappear { meterHover = false }
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -396,44 +373,9 @@ struct QCHeaderLine: View {
                 line("Week", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }.joined(separator: "\n")
     }
 
-    static func spoken(target: QuickChatTarget?, level: QuickChatLevel?) -> String {
-        var parts: [String] = []
-        if let t = target { parts.append(t.name) }
-        let words = tooltip(level)
-        if !words.isEmpty { parts.append(words.replacingOccurrences(of: "\n", with: ". ")) }
-        return parts.joined(separator: ", ")
-    }
-}
-
-/// The profile's name, a button to its page in Settings: a soft highlight and the pointing hand while the pointer is on it.
-struct QCProfileName: View {
-    let name: String
-    /// Kept by the header, not here: the line's candidates (ViewThatFits) replace each other while the pointer is on it.
-    @Binding var hover: Bool
-    let action: () -> Void
-    @Environment(\.qcNameHover) private var pictureHover
-
-    var body: some View {
-        Button(action: action) {
-            Text(name).font(.system(size: 13, weight: .semibold)).foregroundColor(QCColor.text).lineLimit(1)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hover || pictureHover ? QCColor.hover : .clear))
-                .qcControl()
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .onDisappear { hover = false }
-        .qcPointingHand()
-        .help("\(name) in Settings")
-    }
-}
-
-/// Set while drawing a picture: the profile's name as if the pointer were on it.
-private struct QCNameHoverKey: EnvironmentKey { static let defaultValue = false }
-extension EnvironmentValues {
-    var qcNameHover: Bool {
-        get { self[QCNameHoverKey.self] }
-        set { self[QCNameHoverKey.self] = newValue }
+    /// The header's words for VoiceOver: the meters' (no profile, no address: those are the profile key's).
+    static func spoken(level: QuickChatLevel?) -> String {
+        tooltip(level).replacingOccurrences(of: "\n", with: ". ")
     }
 }
 
@@ -932,12 +874,20 @@ struct QCControls: View {
         .padding(.leading, -QCSpace.keyPadding)
     }
 
-    /// The profiles with their weeks, then Add a profile… (so a single profile still has something to offer).
+    /// The profiles with their weeks and in-use addresses, then Settings for the chat's profile (Settings opens on it and
+    /// the chat steps aside: hidden, not closed, the shortcut brings it back as it was) and Add a profile… (so a single
+    /// profile still has something to offer).
     private func pickProfile() {
         QCMenu.pop(QCMenu.profiles(model.pickable(), on: model.target?.profileID,
-                                   address: { ProfileStore.shared.inUse($0)?.email }, pick: { model.pickProfile($0) }, add: {
+                                   address: { ProfileStore.shared.inUse($0)?.email }, settings: Self.settingsItem(model),
+                                   pick: { model.pickProfile($0) }, add: {
             model.openSettings(SettingsWindow.addPage); model.hide()
         }))
+    }
+
+    /// The menu's "Settings for Main…": Settings on the chat's profile, and the chat hidden. None without a profile.
+    static func settingsItem(_ model: QuickChatModel) -> (name: String, open: () -> Void)? {
+        model.target.map { t in (name: t.name, open: { [weak model] in model?.openSettings(t.profileID); model?.hide() }) }
     }
 
     /// The model: a bar per family the account has, Haiku → Sonnet → Opus → Fable; a click on one picks it. The label is
@@ -1516,13 +1466,18 @@ enum QCMenu {
     }
 
     /// The profile menu for the profiles the picker offers; `address` gives a profile's account in use (never a standby
-    /// one's).
+    /// one's). After the line: Settings for the chat's profile (`settings`: its name and what opens it), then Add a
+    /// profile….
     static func profiles(_ list: [(Profile, QuickChatLevel?)], on: String?, address: (Profile) -> String?,
+                         settings: (name: String, open: () -> Void)? = nil,
                          pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
-        build(header: "Profile", items: list.map { p, l in
+        var actions: [Item] = []
+        if let s = settings { actions.append(Item(title: "Settings for \(s.name)…", detail: "", action: s.open)) }
+        actions.append(Item(title: "Add a profile…", detail: "", action: add))
+        return build(header: "Profile", items: list.map { p, l in
             Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.binding()?.p)),
                  on: p.id == on, profileRow: true, address: address(p)) { pick(p.id) }
-        }, actions: [Item(title: "Add a profile…", detail: "", action: add)])
+        }, actions: actions)
     }
 
     /// "week 67%, resets Sun 13:00", "week full until Thu 09:00", "no numbers yet".
@@ -1952,7 +1907,7 @@ enum QuickChatRender {
             let list: [(Profile, QuickChatLevel?)] = [(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), main),
                                                      (Profile(id: "work", name: "Work", folder: "~/.claude-work"), work)]
             let mails = ["main": "ultra-1@example.com", "work": "kim.sample@example.org"]
-            let menu = QCMenu.profiles(list, on: "main", address: { mails[$0.id] }, pick: { _ in }, add: {})
+            let menu = QCMenu.profiles(list, on: "main", address: { mails[$0.id] }, settings: (name: "Main", open: {}), pick: { _ in }, add: {})
             final class Flipped: NSView { override var isFlipped: Bool { true } }
             // fresh rows like the menu's (a view an item holds stays the item's)
             let rows = menu.items.compactMap { $0.view as? QCProfileMenuRow }
@@ -2102,21 +2057,16 @@ enum QuickChatRender {
         case "level95": level.week = 96; m.level = level; m.turns = [t1]
         default: break
         }
-        // the chat's account line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
-        // reported), header-long (a long profile name), each also with -hover-meter (the pointer on the meters: their card)
+        // the chat's top line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
+        // reported), header-full, each also with -hover-meter (the pointer on the meters: their card)
         if state.hasPrefix("header") {
             var l = QuickChatLevel()
             l.week = 58; l.weekResets = Date().addingTimeInterval(3 * 86400)
             if !state.contains("nosession") { l.fiveHour = 41; l.fiveHourResets = Date().addingTimeInterval(2 * 3600 + 600) }
             if state.contains("full") { l.week = 100; l.weekResets = Date().addingTimeInterval(26 * 3600) }
             m.level = l
-            if state.contains("long") {
-                target.name = state.contains("verylong") ? "Work – client project, EU team" : "Personal-work"
-                m.target = target
-            }
             let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
             let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover-meter"))
-                .environment(\.qcNameHover, state.contains("namehover"))
                 .frame(width: width).background(QCColor.window).padding(.bottom, 80)       // room for the meters' card under it
                 .environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))
             let r = ImageRenderer(content: header)

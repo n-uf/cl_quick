@@ -75,9 +75,10 @@ final class QCProfileMenuRow: NSView {
                                        owner: self, userInfo: nil))
     }
 
-    override func mouseEntered(with e: NSEvent) { hover(at: convert(e.locationInWindow, from: nil)) }
+    // (entering and leaving also redraw: the menu's highlight follows the pointer)
+    override func mouseEntered(with e: NSEvent) { hover(at: convert(e.locationInWindow, from: nil)); needsDisplay = true }
     override func mouseMoved(with e: NSEvent) { hover(at: convert(e.locationInWindow, from: nil)) }
-    override func mouseExited(with e: NSEvent) { hover(at: nil) }
+    override func mouseExited(with e: NSEvent) { hover(at: nil); needsDisplay = true }
 
     /// The pointer at a point of the row (nil: it left): only on the address (with a 3 pt margin) is it readable.
     func hover(at p: NSPoint?) {
@@ -109,7 +110,17 @@ final class QCProfileMenuRow: NSView {
             return
         }
         enclosingMenuItem?.menu?.cancelTracking()
-        pick()
+        // once the menu has closed, not inside its tracking loop
+        let pick = self.pick
+        DispatchQueue.main.async { pick() }
+    }
+
+    /// VoiceOver's press picks the profile, as a click does.
+    override func accessibilityPerformPress() -> Bool {
+        enclosingMenuItem?.menu?.cancelTracking()
+        let pick = self.pick
+        DispatchQueue.main.async { pick() }
+        return true
     }
 
     /// For pictures: "Copied" in the address's place, without touching the pasteboard.
@@ -160,7 +171,7 @@ final class QCProfileMenuRow: NSView {
         if revealed {
             let s = (address as NSString).size(withAttributes: [.font: Self.addressFont])
             (address as NSString).draw(at: NSPoint(x: a.minX, y: a.midY - s.height / 2), withAttributes: [.font: Self.addressFont, .foregroundColor: sub])
-        } else if let img = Self.blurred(address, color: sub) {
+        } else if let img = blurredAddress(sub) {
             img.draw(in: NSRect(x: a.minX - Self.blurPad, y: a.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
         }
         if rowHover || lit, let copy = Self.symbol("doc.on.doc", size: 11, weight: .regular, color: copyHover ? fg : sub) {
@@ -171,6 +182,16 @@ final class QCProfileMenuRow: NSView {
     private static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight, color: NSColor) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: weight).applying(.init(paletteColors: [color])))
+    }
+
+    /// The blurred address, made once per colour (lit or not), not on every draw.
+    private var blurCache: [NSColor: NSImage] = [:]
+    private func blurredAddress(_ color: NSColor) -> NSImage? {
+        guard let address else { return nil }
+        if let img = blurCache[color] { return img }
+        let img = Self.blurred(address, color: color)
+        blurCache[color] = img
+        return img
     }
 
     static let blurPad: CGFloat = 6

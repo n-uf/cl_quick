@@ -68,6 +68,9 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   default). A pick holds for that chat; a new chat goes back to the defaults. Click a bar to pick it, or the right half
   of a control's label for the next value and the left half for the one before (round past either end); the scroll
   wheel and ⌥⌘ arrows step too. The keyboard button at the end of the controls lists every key.
+- The profile lives only in that row: its menu has each profile with its week and the address of its account in use,
+  Settings for the chat's profile, and Add a profile…. The chat's top line has just the session and week meters, New
+  chat and Hide.
 - The week shows in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from the
   chat's own Claude Code: it starts as the bar opens (the same `claude` the chat then uses; with nothing asked it ends
   after 3 minutes) and is asked for the account's limits then, after each answer, and when the bar opens again (at most

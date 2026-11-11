@@ -22,6 +22,13 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
 func spin(_ s: TimeInterval = 0.4) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
 func panel() -> QuickChatPanel? { NSApp.windows.compactMap { $0 as? QuickChatPanel }.first }
 func note(_ name: String) -> Notification { Notification(name: Notification.Name(name)) }
+/// The middle of the header's empty gap, between the meters and the buttons as drawn (the window's middle without
+/// meters).
+func headerGapX(_ W: CGFloat) -> CGFloat {
+    let mk = QCStepTargets.shared.marks
+    if let m = mk["header-meters"], let b = mk["header-buttons"], b.minX - m.maxX > 8 { return (m.maxX + b.minX) / 2 }
+    return W * 0.5
+}
 func oneTurn() -> QuickChatTurn { var t = QuickChatTurn(question: "q", answer: "a", model: "Haiku 5.5"); t.phase = .done; return t }
 
 chat.open()
@@ -179,9 +186,9 @@ func movesFromEmptyOnly(_ label: String) {
     // the card's empty areas move it: the bar's padding, or the chat's header row and empty chat
     var empty: [(String, NSPoint)] = [("top padding", NSPoint(x: W / 2, y: H - 6)), ("left padding", NSPoint(x: 6, y: H / 2))]
     if chat.model.isWindow {
-        // the header's empty space under the hidden title bar: the gap between the name and the meters, at the title
+        // the header's empty space under the hidden title bar: the gap between the meters and the buttons, at the title
         // bar's heights (4 to 28 pt from the top)
-        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: W * 0.2, y: H - d))) }
+        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: headerGapX(W), y: H - d))) }
         empty.append(("empty chat", NSPoint(x: W / 2, y: H / 2)))
     }
     let notSurfaces = empty.filter { QCDragView.surface(at: $0.1, in: p) == nil }
@@ -416,7 +423,7 @@ check("chat: it can grow both ways", p.contentMaxSize.width > p.frame.width + 10
 // ── the cursor: the open hand only where a press moves the window, never fighting the pointing hand, never left behind ─
 do {
     let W = p.frame.width, H = p.frame.height
-    let gap = NSPoint(x: W * 0.2, y: H - 16)           // the header's empty gap
+    let gap = NSPoint(x: headerGapX(W), y: H - 16)     // the header's empty gap
     check("cursor: the open hand over an empty area", QCDragView.cursor(at: gap, in: p) === NSCursor.openHand)
     check("cursor: nothing set by the drag surfaces in the resize region (the system's resize cursor)",
           QCDragView.cursor(at: NSPoint(x: 1, y: H / 2), in: p) == nil && QCDragView.cursor(at: NSPoint(x: 2, y: 2), in: p) == nil)
@@ -475,15 +482,39 @@ do {
     let headerBand = NSRect(x: 0, y: p.frame.height - QCSpace.header, width: p.frame.width, height: QCSpace.header)
     func walk(_ v: NSView) { if v is QCCursorView, headerBand.intersects(v.convert(v.bounds, to: nil)) { hands += 1 }; v.subviews.forEach(walk) }
     walk(cv)
-    check("address: the header has no address zone (\(hands) pointing-hand zones: the name's at most)", hands <= 1)
-    check("address: the header's words have no address",
-          !QCHeaderLine.spoken(target: t, level: nil).contains("@") && !QCHeaderLine.spoken(target: t, level: nil).contains(maskEmail("ultra-1@example.com")))
+    check("header: no profile name or address zone in it (\(hands) pointing-hand zones)", hands == 0)
+    var wk = QuickChatLevel(); wk.week = 40
+    let words = QCHeaderLine.spoken(level: wk)
+    check("header: its words are the meters' alone, no profile name or address",
+          !words.isEmpty && !words.contains("@") && !words.contains(maskEmail("ultra-1@example.com")) && !words.contains(t.name), words)
 
-    // the profile menu: each profile a row of its own with its account in use's address (none when none is known)
-    var picked: [String] = []
+    // the profile menu: each profile a row of its own with its account in use's address (none when none is known), then
+    // Settings for the chat's profile and Add a profile…
+    var picked: [String] = [], settingsOpened = 0
     let menu = QCMenu.profiles([(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), nil),
                                 (Profile(id: "work", name: "Work", folder: "~/.claude-work"), nil)], on: "main",
-                               address: { $0.id == "main" ? "ultra-1@example.com" : nil }, pick: { picked.append($0) }, add: {})
+                               address: { $0.id == "main" ? "ultra-1@example.com" : nil }, settings: (name: "Main", open: { settingsOpened += 1 }),
+                               pick: { picked.append($0) }, add: {})
+    let titles = menu.items.map(\.title)
+    check("menu: Settings for Main… after the line, just above Add a profile…",
+          titles.firstIndex(of: "Settings for Main…").map { titles.indices.contains($0 + 1) && titles[$0 + 1] == "Add a profile…"
+              && menu.items[$0 - 1].isSeparatorItem } == true, "\(titles)")
+    if let s = menu.items.first(where: { $0.title == "Settings for Main…" }), let a = s.action {
+        NSApp.sendAction(a, to: s.target, from: s)
+        check("menu: Settings for Main… opens Settings", settingsOpened == 1)
+    } else { check("menu: Settings for Main… has an action", false) }
+    // the chat's own item: Settings on the chat's profile, and the chat steps aside (hidden; Settings itself not opened
+    // here, the check's openSettings stands in)
+    var openedFor: [String?] = []
+    let wasOpen = chat.model.openSettings, wasHide = chat.model.hide
+    var hid = 0
+    chat.model.openSettings = { openedFor.append($0) }
+    chat.model.hide = { hid += 1 }
+    let item = QCControls.settingsItem(chat.model)
+    item?.open()
+    chat.model.openSettings = wasOpen; chat.model.hide = wasHide
+    check("menu: the chat's item is Settings for its profile, opens Settings on it and hides the chat",
+          item?.name == t.name && openedFor == [t.profileID] && hid == 1, "\(String(describing: item?.name)) \(openedFor) \(hid)")
     let rows = menu.items.compactMap { $0.view as? QCProfileMenuRow }
     check("menu: a row view for each profile, the in-use address on Main's, none on Work's",
           rows.count == 2 && rows[0].address == "ultra-1@example.com" && rows[1].address == nil && rows[0].on && !rows[1].on)
@@ -502,9 +533,14 @@ do {
         r.press(at: NSPoint(x: r.copyRect.midX, y: r.copyRect.midY))
         check("menu: a click on the copy glyph copies the address, says Copied and picks nothing",
               pb.string(forType: .string) == "ultra-1@example.com" && r.copiedUntil != nil && picked.isEmpty)
-        r.press(at: NSPoint(x: 50, y: 12))
-        check("menu: a click elsewhere on the row picks the profile", picked == ["main"])
+        r.press(at: NSPoint(x: 50, y: 12)); spin(0.1)
+        check("menu: a click elsewhere on the row picks the profile (after the menu closes)", picked == ["main"], "\(picked)")
     }
+    // Return on a highlighted row: the menu sends the item's own action
+    if let item = menu.items.first(where: { $0.view === rows.first }), let a = item.action {
+        NSApp.sendAction(a, to: item.target, from: item)
+        check("menu: the row's item action (Return) picks the profile", picked == ["main", "main"], "\(picked)")
+    } else { check("menu: the row's item has an action", false) }
     pb.releaseGlobally()
 }
 
@@ -514,7 +550,7 @@ do {
     let keep = cv.onIntrinsicChange
     cv.onIntrinsicChange = { retried += 1; keep() }
     var surface: QCDragView?
-    let gap = NSPoint(x: p.frame.width * 0.45, y: p.frame.height - 16)
+    let gap = NSPoint(x: headerGapX(p.frame.width), y: p.frame.height - 16)
     surface = QCDragView.surface(at: gap, in: p)
     QCDragView.drag = { w, _ in w.setFrameOrigin(NSPoint(x: w.frame.minX + 10, y: w.frame.minY)) }
     if let d = surface { press(d, at: gap) }
