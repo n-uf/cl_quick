@@ -60,6 +60,10 @@ final class AccountSwitcher {
     var onOutcome: (SwitchGoal, SwitchOutcome) -> Void = { _, _ in }
     private var timer: Timer?
 
+    /// Made once, as cl_quick starts (the chat holds it): no sign-in is under way yet, so a script an earlier run left
+    /// behind goes (not while only checking or drawing).
+    private init() { SignIn.removeScript() }
+
     /// "Switch to …": asks first, in plain words, then opens Claude Code's sign-in and watches the folder.
     func confirmAndSwitch(_ p: Profile, uuid: String?, email: String, origin: SwitchGoal.Origin) {
         NSApp.activate(ignoringOtherApps: true)
@@ -107,7 +111,7 @@ final class AccountSwitcher {
         guard waiting[id] != nil || ended[id] != nil || signedAgain[id] != nil else { return }
         waiting[id] = nil; ended[id] = nil; signedAgain[id] = nil
         SignIn.clearMarker(id)
-        if waiting.isEmpty { timer?.invalidate(); timer = nil }
+        if waiting.isEmpty { timer?.invalidate(); timer = nil; SignIn.removeScript() }    // a sign-in script left behind goes too
         changed()
     }
 
@@ -154,7 +158,9 @@ final class AccountSwitcher {
             ended[id] = nil
             if goal.again { signedAgain[id] = signedIn ?? goal.wantedEmail }
         }
-        if waiting.isEmpty { timer?.invalidate(); timer = nil }
+        // reached, another account or timed out: a sign-in script Terminal never started (and so never removed) goes,
+        // once no other sign-in is waited for (its own script may not have been started yet)
+        if waiting.isEmpty { timer?.invalidate(); timer = nil; SignIn.removeScript() }
         ProfileStore.shared.noteAccount(of: id)          // the account now signed in is remembered
         changed()
         onOutcome(goal, outcome)

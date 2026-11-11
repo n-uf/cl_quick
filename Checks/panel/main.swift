@@ -529,6 +529,29 @@ do {
     keyed("when it becomes key again")
 }
 
+// the sign-in script (SignIn): it holds the address, so its first command removes it; a leftover is removed too. Run here
+// under build/ with a stand-in for claude (/usr/bin/true): nothing outside build/ is written
+do {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("signin-check")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let text = SignIn.script(folder: dir.appendingPathComponent("folder").path, email: "kim@example.org", marker: nil, claude: "/usr/bin/true")
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    check("sign-in script: its first command removes it", lines.count > 2 && lines[0] == "#!/bin/zsh" && lines[1] == #"rm -f -- "$0""#, text)
+    check("sign-in script: then the sign-in, as that address", text.contains("exec '/usr/bin/true' auth login --email 'kim@example.org'"), text)
+    let script = dir.appendingPathComponent("sign-in.command")
+    try? text.write(to: script, atomically: true, encoding: .utf8)
+    let run = Process()
+    run.executableURL = URL(fileURLWithPath: "/bin/zsh"); run.arguments = [script.path]
+    run.environment = ["PATH": "/usr/bin:/bin", "HOME": dir.path]
+    try? run.run(); run.waitUntilExit()
+    check("sign-in script: gone once it ran", run.terminationStatus == 0 && !FileManager.default.fileExists(atPath: script.path), "status \(run.terminationStatus)")
+    try? "leftover".write(to: script, atomically: true, encoding: .utf8)
+    SignIn.removeScript(at: script)
+    check("sign-in script: a leftover is removed", !FileManager.default.fileExists(atPath: script.path))
+    check("sign-in script: never the real one while checking", Files.readOnly)        // removeScript() leaves it alone then
+    try? FileManager.default.removeItem(at: dir)
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

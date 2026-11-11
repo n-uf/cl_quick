@@ -21,12 +21,19 @@ enum SignIn {
     static func finished(_ profile: String) -> Bool { FileManager.default.fileExists(atPath: marker(for: profile).path) }
     static func clearMarker(_ profile: String) { try? FileManager.default.removeItem(at: marker(for: profile)) }
 
-    private static func start(folder: String, email: String?, marker: URL?, claude: String?) -> String? {
-        guard let claude else { return ClaudeInstall.missing + "." }
-        let path = expand(folder)
-        do { try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) } catch {
-            return "\(tilde(path)) can't be made: \(error.localizedDescription)"
-        }
+    /// The script Terminal runs (0700, in cl_quick's folder). It holds the address, so it doesn't stay: its first command
+    /// removes it, as soon as Terminal has started it; removeScript() is the backstop.
+    static var scriptURL: URL { Files.folder.appendingPathComponent("sign-in.command") }
+
+    /// A sign-in script left behind (Terminal never started it, or an older version made it): removed. Not while only
+    /// checking or drawing (`Files.readOnly`). Where: the script, by default.
+    static func removeScript(at url: URL = scriptURL) {
+        guard !Files.readOnly || url != scriptURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// The script's text: it removes itself first, then runs Claude Code's sign-in on the folder (an expanded path).
+    static func script(folder path: String, email: String?, marker: URL?, claude: String) -> String {
         func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         var login = "\(q(claude)) auth login"
         if let email, !email.isEmpty { login += " --email \(q(email))" }
@@ -34,11 +41,23 @@ enum SignIn {
         let dir = ClaudeFolder.isDefault(path) ? "unset CLAUDE_CONFIG_DIR\n" : "export CLAUDE_CONFIG_DIR=\(q(path))\n"
         // with a marker the login isn't exec'd: the script says when it ended well (exit 0), and ends the same way
         let run = marker.map { "\(login)\ns=$?\nif [ $s -eq 0 ]; then : > \(q($0.path)); fi\nexit $s\n" } ?? "exec \(login)\n"
-        let text = "#!/bin/zsh\n# cl_quick: Claude Code's sign-in for \(tilde(path)). Close this window when it says you're signed in.\n"
+        return "#!/bin/zsh\n"
+            // it goes at once, with the address in it (zsh keeps reading the file it opened; unlinked, it stays readable)
+            + "rm -f -- \"$0\"\n"
+            + "# cl_quick: Claude Code's sign-in for \(tilde(path)). Close this window when it says you're signed in.\n"
             // a key or another provider from the shell's own settings would sign it in some other way: not here
             + "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY\n"
             + dir + run
-        let script = Files.folder.appendingPathComponent("sign-in.command")
+    }
+
+    private static func start(folder: String, email: String?, marker: URL?, claude: String?) -> String? {
+        guard let claude else { return ClaudeInstall.missing + "." }
+        let path = expand(folder)
+        do { try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) } catch {
+            return "\(tilde(path)) can't be made: \(error.localizedDescription)"
+        }
+        let text = Self.script(folder: path, email: email, marker: marker, claude: claude)
+        let script = scriptURL
         do {
             try FileManager.default.createDirectory(at: Files.folder, withIntermediateDirectories: true)
             try text.write(to: script, atomically: true, encoding: .utf8)
