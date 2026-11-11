@@ -349,6 +349,33 @@ liveResize(to: barFrame)
 spin(0.4)
 check("the bar is back at its own size after the tall bar", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.size)")
 
+/// What decides the bar's height, for a FAIL line (the runner's macOS differs from this Mac's): the frame, the content's
+/// ideal and least heights, the field's text, shown height and text view, and its laid-out text.
+func barState() -> String {
+    var tv: QCTextView?
+    func walk(_ v: NSView) { if let t = v as? QCTextView { tv = t }; v.subviews.forEach(walk) }
+    walk(cv)
+    var s = "frame \(p.frame.height) idle \(p.isIdle) ideal \(cv.intrinsicContentSize.height) fitting \(cv.fittingSize.height)"
+        + " contentMin \(p.contentMinSize.height) min \(p.minSize.height)"
+    guard let tv else { return s + " (no field)" }
+    s += " | text \(tv.string.debugDescription) field \(tv.enclosingScrollView?.frame.height ?? -1) tv \(tv.frame.height) tvMin \(tv.minSize.height)"
+    if let lm = tv.layoutManager, let tc = tv.textContainer {
+        let unlaid = lm.firstUnlaidCharacterIndex()
+        s += " used \(lm.usedRect(for: tc).height) laid \(unlaid >= (tv.string as NSString).length ? "all" : "to \(unlaid)")"
+    } else { s += " (no layout manager)" }
+    return s
+}
+/// barState() for a FAIL, then whether more time or a fit() brings the bar to `want` (time: a slow runner; fit: an event
+/// that never came).
+func barStuck(_ want: CGFloat) -> String {
+    let h = p.frame.height, now = barState()
+    spin(1.5)
+    let later = p.frame.height
+    chat.fit()
+    spin(0.3)
+    return "\(h) vs \(want) [\(now)] [1.5 s later: \(later); after fit(): \(p.frame.height) \(barState())]"
+}
+
 // a move as the window server does it: the origin changes, many times, the size never
 p.isMoving = true
 for i in 0..<500 {
@@ -372,7 +399,7 @@ spin(0.3)
 check("after the move the bar takes its content's height (grows, width alone)", p.frame.height > bar.height && p.frame.width == bar.width, "\(p.frame.size)")
 chat.model.field = ""
 spin(0.5)
-check("the bar returns to its height when the lines go", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.height) vs \(bar.height)")
+check("the bar returns to its height when the lines go", abs(p.frame.height - bar.height) < 0.5, barStuck(bar.height))
 // Dictation's provisional text is marked text (setMarkedText, replaced again and again, then committed): the field grows
 // and shrinks with it as it does with typed text, though the text view may not post a change for it
 do {
@@ -395,7 +422,7 @@ do {
         check("dictation: committing it keeps the height, and the model has the text", abs(p.frame.height - four) < 0.5 && chat.model.field == "one\ntwo\nthree\nfour", "\(p.frame.height) \(chat.model.field.debugDescription)")
         chat.model.field = ""
         spin(0.5)
-        check("dictation: the bar returns to its height when the text goes", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.height) vs \(bar.height)")
+        check("dictation: the bar returns to its height when the text goes", abs(p.frame.height - bar.height) < 0.5, barStuck(bar.height))
     } else { check("dictation: the field is found", false) }
 }
 
