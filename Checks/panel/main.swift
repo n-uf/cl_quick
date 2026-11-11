@@ -1835,6 +1835,24 @@ do {
           QCImages.note(notImages: [], failures: [.tooManyPixels], overCount: 0) == "An image has too many pixels to read (over 100 megapixels).")
 }
 
+// Paste in the field's context menu is enabled with only a picture on the pasteboard (the text view alone greys it out)
+do {
+    guard let root = panel()?.contentView, let tv = firstTextView(root) else { print("FAIL paste menu: the bar's text field"); exit(1) }
+    let pb = NSPasteboard(name: NSPasteboard.Name("n-uf.cl-quick.image-paste-menu-checks"))
+    let oldPB = tv.pasteboard
+    tv.pasteboard = pb
+    let item = NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    let other = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    pb.clearContents(); pb.setData(noisyPNG(20, 20), forType: .png)
+    check("paste menu: Paste is enabled with only a picture on the pasteboard (menu item)", tv.validateMenuItem(item))
+    check("paste menu: …and through validateUserInterfaceItem", tv.validateUserInterfaceItem(item))
+    // other items are the text view's own: Copy is greyed out with nothing selected, whatever is on the pasteboard
+    tv.string = ""
+    check("paste menu: Copy (nothing selected) stays disabled", !tv.validateMenuItem(other))
+    tv.pasteboard = oldPB
+    pb.clearContents()
+}
+
 // a file with several images is read at its primary image, not at index 0 (a HEIC with a small first picture and the
 // primary one second: 10 × 10 square first, 40 × 30 primary)
 do {

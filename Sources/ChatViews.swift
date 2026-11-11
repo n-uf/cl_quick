@@ -1996,6 +1996,17 @@ final class QCTextView: NSTextView {
         if pasteImages?(pasteboard) == true { return }
         super.paste(sender)
     }
+    /// Paste (the context menu's, Edit ▸ Paste) is available with only a picture (or image files) on the pasteboard: the
+    /// text view alone finds nothing to paste there and greys it out, though paste() would attach it.
+    private func picturePasteable(_ action: Selector?) -> Bool {
+        action == #selector(NSText.paste(_:)) && pasteImages != nil && QCImages.found(in: pasteboard, forPaste: true) != nil
+    }
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        picturePasteable(item.action) || super.validateUserInterfaceItem(item)
+    }
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        picturePasteable(item.action) || super.validateMenuItem(item)
+    }
     /// Whether the chat takes this drag as images: it carries pictures or image files, and isn't the field's own (text
     /// with a picture of it, or only non-image files, whose paths the field inserts). Decided once per drag: the files are
     /// looked at, which would be much for every move of the pointer.
