@@ -1764,6 +1764,7 @@ struct QCTextField: NSViewRepresentable {
         scroll.documentView = tv
         context.coordinator.textView = tv
         tv.onWidth = { [weak c = context.coordinator] in c?.measure() }     // the panel was resized: the lines wrap anew
+        tv.onEdited = { [weak c = context.coordinator] in c?.edited() }     // marked text (Dictation) changed: no textDidChange
         tv.onCaps = { [weak c = context.coordinator] on in DispatchQueue.main.async { c?.parent.onCaps(on) } }
         apply(tv)
         return scroll
@@ -1802,9 +1803,12 @@ struct QCTextField: NSViewRepresentable {
         var focusTick = -1
         init(_ p: QCTextField) { parent = p }
 
-        func textDidChange(_ n: Notification) {
+        func textDidChange(_ n: Notification) { edited() }
+
+        /// The text changed (typed, or marked text of Dictation): the model has it, the field measures it.
+        func edited() {
             guard let tv = textView else { return }
-            parent.text = tv.string
+            if parent.text != tv.string { parent.text = tv.string }
             measure()
         }
 
@@ -1919,12 +1923,27 @@ final class QCTextView: NSTextView {
     override func cursorUpdate(with event: NSEvent) { NSCursor.iBeam.set() }
     override func mouseEntered(with event: NSEvent) { NSCursor.iBeam.set() }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    /// Called when the width changes (the panel is resized).
+    /// Called when the width changes (the panel is resized), and when the laid-out text changes the view's height.
     var onWidth: (() -> Void)?
+    /// Called after an edit that the text view doesn't report with textDidChange: Dictation's provisional text is marked
+    /// text (set, replaced again and again, then committed), and AppKit posts no change for it while it is marked.
+    var onEdited: (() -> Void)?
     override func setFrameSize(_ s: NSSize) {
-        let was = frame.width
+        let was = frame.size
         super.setFrameSize(s)
-        if abs(was - s.width) > 0.5 { onWidth?() }
+        if abs(was.width - s.width) > 0.5 || abs(was.height - s.height) > 0.5 { onWidth?() }
+    }
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        onEdited?()
+    }
+    override func unmarkText() {
+        super.unmarkText()
+        onEdited?()
+    }
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        super.insertText(string, replacementRange: replacementRange)
+        onEdited?()
     }
     override func draw(_ r: NSRect) {
         super.draw(r)

@@ -355,6 +355,31 @@ check("after the move the bar takes its content's height (grows, width alone)", 
 chat.model.field = ""
 spin(0.5)
 check("the bar returns to its height when the lines go", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.height) vs \(bar.height)")
+// Dictation's provisional text is marked text (setMarkedText, replaced again and again, then committed): the field grows
+// and shrinks with it as it does with typed text, though the text view may not post a change for it
+do {
+    var dtv: QCTextView?
+    func findDictTV(_ v: NSView) { if let t = v as? QCTextView { dtv = t }; v.subviews.forEach(findDictTV) }
+    if let c = p.contentView { findDictTV(c) }
+    if let tv = dtv {
+        let none = NSRange(location: NSNotFound, length: 0)
+        tv.setMarkedText("one\ntwo\nthree\nfour", selectedRange: NSRange(location: 17, length: 0), replacementRange: none)
+        spin(0.5)
+        check("dictation: marked text of four lines grows the bar", p.frame.height > bar.height + 20, "\(p.frame.height) vs \(bar.height)")
+        let four = p.frame.height
+        tv.setMarkedText("one\ntwo", selectedRange: NSRange(location: 7, length: 0), replacementRange: none)
+        spin(0.5)
+        check("dictation: shorter marked text shrinks it (two lines between)", p.frame.height < four - 5 && p.frame.height > bar.height + 5, "\(p.frame.height) vs \(four)")
+        tv.setMarkedText("one\ntwo\nthree\nfour", selectedRange: NSRange(location: 17, length: 0), replacementRange: none)
+        spin(0.3)
+        tv.unmarkText()
+        spin(0.5)
+        check("dictation: committing it keeps the height, and the model has the text", abs(p.frame.height - four) < 0.5 && chat.model.field == "one\ntwo\nthree\nfour", "\(p.frame.height) \(chat.model.field.debugDescription)")
+        chat.model.field = ""
+        spin(0.5)
+        check("dictation: the bar returns to its height when the text goes", abs(p.frame.height - bar.height) < 0.5, "\(p.frame.height) vs \(bar.height)")
+    } else { check("dictation: the field is found", false) }
+}
 
 // a resize: while it is under way fit() stays out; when it ends the user's size is kept
 NotificationCenter.default.post(name: NSWindow.willStartLiveResizeNotification, object: p)
