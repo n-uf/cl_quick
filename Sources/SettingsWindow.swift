@@ -1027,6 +1027,18 @@ struct GeneralPage: View {
                         if let t = QuickChatThinking(rawValue: id) { state.settings.thinking = t; state.save() }
                     }
                 }
+                GridLine(label: "Dictation") {
+                    VStack(alignment: .leading, spacing: 7) {
+                        KeySegments(choices: [.init(id: QuickChatDictationReturn.showFirst.rawValue, title: "Shows text first"),
+                                              .init(id: QuickChatDictationReturn.sendAtOnce.rawValue, title: "Sends at once")],
+                                    selected: state.settings.dictationReturn.rawValue) { id in
+                            if let r = QuickChatDictationReturn(rawValue: id) { state.settings.dictationReturn = r; state.save() }
+                        }
+                        note(state.settings.dictationReturn == .showFirst
+                             ? "Return after dictation shows the text; Return again sends it."
+                             : "Return after dictation sends the text at once.", face.muted)
+                    }
+                }
                 GridLine(label: "Open at login") {
                     SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
                 }
