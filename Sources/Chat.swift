@@ -1406,9 +1406,9 @@ final class QuickChat {
     /// (Internal, not private, so Checks/panel can call it.)
     func fit() {
         guard let p = panel, let host, p.isIdle else { return }
-        let vis = visibleFrame(of: p)
         let chat = model.isWindow
-        if chat, sizedForChat { return }
+        if chat, sizedForChat { return }       // the frequent streaming calls end here, before anything is looked up
+        let vis = visibleFrame(of: p)
         if !chat { sizedForChat = false }
         host.layoutSubtreeIfNeeded()         // the content for the mode we are in now, before anything is read or set
         var h: CGFloat
