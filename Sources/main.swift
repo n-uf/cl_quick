@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var item: NSStatusItem?
     private let chat = QuickChat.shared
 
+    /// Before launch ends, so a Services request that launched the app finds its provider (Sources/Service.swift).
+    func applicationWillFinishLaunching(_ note: Notification) { QCServiceProvider.register() }
+
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.setActivationPolicy(.accessory)
         // the first run: the Claude Code folders found become profiles, and cl_audit's quick chat settings come along

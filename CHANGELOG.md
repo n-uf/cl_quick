@@ -41,6 +41,12 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **Live usage in the bar.** The bar's usage indicator is a label ("5h" or "wk", whichever is fuller), two thin
   stacked bars (5 hours over the week) and the share of the fuller window. The numbers come from Claude Code when the
   bar opens: no message is sent to a model, and nothing is read from the Keychain.
+- **Ask about the selected text in the app you're in.** Select text anywhere, then right-click ▸ Services ▸ **Ask
+  cl_quick** (also the app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard
+  Shortcuts ▸ Services). cl_quick's bar opens with the selection in the field as a quote, ready to edit and not sent,
+  and your question goes under it. Text already in the field stays above the quote; a selection over 20,000 characters
+  is cut there, with a line saying so. No Accessibility permission: macOS hands the selection over. Nothing about it is
+  kept.
 - **A mic button** next to Send starts macOS Dictation into the field.
 - **Any shortcut**: five Space shortcuts or Other… (any key held with ⌘, ⌃ or ⌥), with no Accessibility permission. It
   warns only about real clashes: macOS's own shortcuts, or a key another app holds (when macOS refuses it).

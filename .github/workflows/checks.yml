@@ -45,3 +45,6 @@ jobs:
 
       - name: Checks/bars.sh
         run: Checks/bars.sh
+
+      - name: Checks/service.sh
+        run: Checks/service.sh

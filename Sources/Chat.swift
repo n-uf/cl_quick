@@ -1111,6 +1111,16 @@ final class QuickChat {
         model.warm()            // its `claude` starts now (or is asked again): the account's limits come before any message
     }
 
+    /// The Services entry "Ask cl_quick" (Service.swift): opens the bar, or the chat as it is, with the selected text in
+    /// the field as a quote, ready to edit and not sent; text already in the field stays above it.
+    func openWith(text: String) {
+        open()          // (a chat that ended is gone by now, so the field read below is the one the quote goes into)
+        let r = QCServiceProvider.field(existing: model.field, selection: text)
+        model.field = r.text
+        if r.cut { model.dictationNote = QCServiceProvider.capNote }
+        else if model.dictationNote == QCServiceProvider.capNote { model.dictationNote = nil }
+    }
+
     /// The profile picker: a new chat on that profile; what you typed stays.
     private func move(to id: String) {
         guard let p = store.profile(id), p.id != model.target?.profileID else { return }

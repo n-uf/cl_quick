@@ -39,6 +39,16 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Ask cl_quick</string></dict>
+      <key>NSMessage</key><string>askAboutSelection</string>
+      <key>NSPortName</key><string>$name</string>
+      <key>NSSendTypes</key>
+      <array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
