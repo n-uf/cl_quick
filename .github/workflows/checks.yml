@@ -48,3 +48,6 @@ jobs:
 
       - name: Checks/service.sh
         run: Checks/service.sh
+
+      - name: Checks/menu.sh
+        run: Checks/menu.sh
