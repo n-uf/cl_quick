@@ -1047,6 +1047,95 @@ do {
     check("usage: not available keeps the last numbers", kept.fiveHour == 0 && kept.week == 62)
 }
 
+// ── ⌘V in the bar ──────────────────────────────────────────────────────────────────────────────────
+do {
+    chat.hide(); chat.model.newChat(); chat.open(); spin(0.5)
+    let pb = NSPasteboard.general
+    let saved = pb.pasteboardItems?.map { it -> [(NSPasteboard.PasteboardType, Data)] in it.types.compactMap { t in it.data(forType: t).map { (t, $0) } } }
+    func put(_ f: (NSPasteboard) -> Void) { pb.clearContents(); f(pb) }
+    /// A ⌘ key press as a layout makes it: the character the layout gives the key, and the key's physical code.
+    func cmdKey(_ ch: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = .command) -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                       context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
+    func cmdV() -> Bool { cmdKey("v", 9) }
+    for (label, fill) in [("plain text", { (b: NSPasteboard) in b.setString("pasted plain", forType: .string) }),
+                          ("rich text", { (b: NSPasteboard) in
+                              let a = NSAttributedString(string: "pasted rich", attributes: [.font: NSFont.boldSystemFont(ofSize: 20)])
+                              if let d = try? a.data(from: NSRange(location: 0, length: a.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) { b.setData(d, forType: .rtf) } }),
+                          ("html", { (b: NSPasteboard) in b.setData(Data("<b>pasted html</b>".utf8), forType: .html) })] as [(String, (NSPasteboard) -> Void)] {
+        chat.model.field = ""; spin(0.3)
+        put(fill)
+        check("bar paste (\(label)): the bar is up and the field has the keyboard", p.isVisible && !chat.model.isWindow && p.firstResponder is QCTextView, "\(String(describing: p.firstResponder))")
+        let taken = cmdV(); spin(0.3)
+        let tv = p.firstResponder as? QCTextView
+        print("  bar paste (\(label)): taken=\(taken) field=\(tv?.string.debugDescription ?? "nil") model=\(chat.model.field.debugDescription)")
+        check("bar paste (\(label)): ⌘V is taken", taken)
+        check("bar paste (\(label)): the field has the text", tv?.string.hasPrefix("pasted") == true, "\(tv?.string ?? "nil")")
+        check("bar paste (\(label)): the model has the text", chat.model.field.hasPrefix("pasted"), "\(chat.model.field)")
+    }
+    // the same key in other layouts. Cyrillic (the V key gives "м", C "с", X "ч", A "ф", Z "я"): the shortcut follows the key's
+    // place, as macOS's menus do; Dvorak and the like (Latin letters on other keys): it follows the letter; a Latin layout
+    // whose V key gives another letter: that letter's shortcut, not V's.
+    let layouts: [(String, String, UInt16, Bool)] = [
+        ("Cyrillic ⌘V (м on the V key)", "м", 9, true),
+        ("Cyrillic capital ⌘V (М on the V key)", "М", 9, true),
+        ("Dvorak ⌘V (v on the key QWERTY calls .)", "v", 47, true),
+        ("a Latin layout's k on the V key", "k", 9, false),
+        ("a Latin layout's Latin letter on the V key, not an edit key", "b", 9, false),
+    ]
+    for (label, ch, code, pastes) in layouts {
+        chat.model.field = ""; spin(0.3)
+        put { $0.setString("pasted layout", forType: .string) }
+        _ = cmdKey(ch, code); spin(0.3)
+        check("bar paste, \(label): \(pastes ? "pastes" : "does not paste")", (chat.model.field == "pasted layout") == pastes, "\(chat.model.field.debugDescription)")
+    }
+    // Cyrillic ⌘A selects all, ⌘Z undoes, ⌘X cuts, ⌘C copies; Cyrillic keys that are no edit key do nothing
+    chat.model.field = ""; spin(0.3)
+    put { $0.setString("pasted layout", forType: .string) }
+    _ = cmdKey("м", 9); spin(0.3)
+    check("Cyrillic ⌘V pastes first", chat.model.field == "pasted layout", "\(chat.model.field.debugDescription)")
+    put { $0.setString("other", forType: .string) }
+    _ = cmdKey("ф", 0); _ = cmdKey("с", 8); spin(0.3)
+    check("Cyrillic ⌘A then ⌘C copies the field (ф, с)", pb.string(forType: .string) == "pasted layout", "\(pb.string(forType: .string) ?? "nil")")
+    put { $0.setString("other", forType: .string) }
+    _ = cmdKey("ч", 7); spin(0.3)
+    check("Cyrillic ⌘X cuts the selection (ч)", chat.model.field.isEmpty && pb.string(forType: .string) == "pasted layout", "\(chat.model.field.debugDescription)")
+    _ = cmdKey("я", 6); spin(0.3)
+    check("Cyrillic ⌘Z undoes the cut (я)", chat.model.field == "pasted layout", "\(chat.model.field.debugDescription)")
+    // Caps Lock on (the key gives a capital, no Shift) and ⇧ (⌘⇧Z redoes) on the same key
+    chat.model.field = ""; spin(0.3)
+    put { $0.setString("pasted layout", forType: .string) }
+    _ = cmdKey("V", 9, [.command, .capsLock]); spin(0.3)
+    check("⌘V with Caps Lock on pastes", chat.model.field == "pasted layout", "\(chat.model.field.debugDescription)")
+    _ = cmdKey("М", 9, [.command, .capsLock]); spin(0.3)
+    check("Cyrillic ⌘V with Caps Lock on pastes again", chat.model.field == "pasted layoutpasted layout", "\(chat.model.field.debugDescription)")
+    _ = cmdKey("z", 6); spin(0.3)
+    let undone = chat.model.field
+    _ = cmdKey("Z", 6, [.command, .shift]); spin(0.3)
+    check("⌘Z undoes and ⌘⇧Z redoes", undone != "pasted layoutpasted layout" && chat.model.field == "pasted layoutpasted layout", "\(undone.debugDescription) -> \(chat.model.field.debugDescription)")
+    // the QWERTZ layout (Z and Y swapped): the key where Z sits on a US keyboard gives "y", and ⌘Z is on the key that gives "z"
+    chat.model.field = ""; spin(0.3)
+    put { $0.setString("pasted layout", forType: .string) }
+    _ = cmdKey("v", 9); spin(0.3)
+    _ = cmdKey("y", 6); spin(0.3)
+    check("QWERTZ: the key that gives y (US Z's place) is no undo", chat.model.field == "pasted layout", "\(chat.model.field.debugDescription)")
+    _ = cmdKey("z", 16); spin(0.3)
+    check("QWERTZ: the key that gives z (US Y's place) undoes", chat.model.field.isEmpty, "\(chat.model.field.debugDescription)")
+    // AZERTY: ⌘A is on the key that gives "a" (US Q's place, code 12), and the key at A's place gives "q"
+    chat.model.field = ""; spin(0.3)
+    put { $0.setString("pasted layout", forType: .string) }
+    _ = cmdKey("v", 9); spin(0.3)
+    let sel = { (p.firstResponder as? NSTextView)?.selectedRange().length ?? -1 }
+    _ = cmdKey("q", 0); spin(0.2)
+    check("AZERTY: the key at A's place gives q, no select-all", sel() == 0, "\(sel())")
+    _ = cmdKey("a", 12); spin(0.2)
+    check("AZERTY: the key that gives a selects all", sel() == ("pasted layout" as NSString).length, "\(sel())")
+    pb.clearContents()
+    if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

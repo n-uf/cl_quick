@@ -7,6 +7,7 @@
 // or account, quitting); the next message starts a new chat. The bar and the window are ChatViews.swift.
 
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
@@ -1324,6 +1325,20 @@ final class QuickChatPanel: NSPanel {
         onResized()
     }
 
+    /// The letter a ⌘ shortcut names, the way macOS's menus read a key. On a Latin layout it is the letter the layout
+    /// gives the key (so Dvorak's V sits where it sits, and a key that gives another letter is that letter's shortcut).
+    /// On a layout without Latin letters (Cyrillic: the V key gives "м") the shortcut stays on the key's place, which is
+    /// what the same key means on a US keyboard.
+    static func shortcutLetter(_ e: NSEvent) -> String? {
+        guard let c = e.charactersIgnoringModifiers?.lowercased(), !c.isEmpty else { return nil }
+        if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.isASCII { return c }
+        let place: [Int: String] = [kVK_ANSI_A: "a", kVK_ANSI_C: "c", kVK_ANSI_V: "v", kVK_ANSI_X: "x", kVK_ANSI_Z: "z",
+                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w"]
+        // only a letter of another script falls back to the key's place: a digit, a symbol or a dead key stays as it is
+        if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.properties.isAlphabetic, let l = place[Int(e.keyCode)] { return l }
+        return c
+    }
+
     /// cl_quick has no menu bar of its own, so the Edit keys are handled here: cut, copy, paste, select all, undo and
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
@@ -1341,7 +1356,7 @@ final class QuickChatPanel: NSPanel {
             }
         }
         guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
-              let key = e.charactersIgnoringModifiers?.lowercased() else { return super.performKeyEquivalent(with: e) }
+              let key = Self.shortcutLetter(e) else { return super.performKeyEquivalent(with: e) }
         let shift = flags.contains(.shift)
         var action: Selector?
         switch key {
@@ -1354,7 +1369,9 @@ final class QuickChatPanel: NSPanel {
         case "w" where !shift: onClose(); return true
         default: break
         }
-        if let action, NSApp.sendAction(action, to: nil, from: self) { return true }
+        // to the panel's own first responder (and up its chain), not NSApp's key window: the same thing in the app, where
+        // this panel is the key window, and a check's panel (QCQuiet) is never key
+        if let action, firstResponder?.tryToPerform(action, with: self) == true || NSApp.sendAction(action, to: nil, from: self) { return true }
         return super.performKeyEquivalent(with: e)
     }
 
