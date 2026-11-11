@@ -1750,13 +1750,13 @@ struct ImageFixChat {
         while !landed, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     }
 }
-func imageFixChat(_ name: String, conf: String = "") -> ImageFixChat {
+func imageFixChat(_ name: String, conf: String = "", mode: String = "ok") -> ImageFixChat {
     let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
     let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(name)
     try? FileManager.default.removeItem(at: dir)
     try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
     let argsFile = dir.appendingPathComponent("args.txt").path
-    try? "mode=ok\nargs=\(argsFile)\n\(conf)".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+    try? "mode=\(mode)\nargs=\(argsFile)\n\(conf)".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
     let m = QuickChatModel()
     var tg = QuickChatTarget(Profile(id: name, name: "Main", folder: dir.appendingPathComponent("folder").path))
     tg.workFolder = dir.appendingPathComponent("work").path
@@ -2086,6 +2086,28 @@ do {
     waitLanded { cm.preparing == 0 }
     check("ready: …and nothing was sent", cm.turns.isEmpty && cm.images.count == 1, "\(cm.turns.count) \(cm.images.count)")
     cm.newChat()
+    m.shutdown()
+    try? FileManager.default.removeItem(at: c.dir)
+}
+
+// a `claude` that dies at startup while a big line is being written: the write breaks (EPIPE) long before the exit is
+// reported, and the user must see claude's own reason (exit code and stderr), once, not the generic line
+do {
+    let c = imageFixChat("images-die", mode: "die"), m = c.m
+    m.field = String(repeating: "x", count: 3_000_000)
+    m.send()
+    let end = Date().addingTimeInterval(8)
+    func detail() -> String? {
+        if case .stopped(let d)? = m.turns.last?.problem { return d }
+        return nil
+    }
+    while detail() == nil, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    spin(0.3)       // anything late would replace it
+    let d = detail() ?? ""
+    check("die: the user sees claude's exit code and stderr, not the generic line",
+          d.contains("exited with code 5") && d.contains("sample startup failure"), d)
+    check("die: reported once, the answer ended", m.turns.count == 1 && m.turns[0].phase == .failed && detail() == d, "\(m.turns.count) \(String(describing: detail()))")
+    m.newChat()
     m.shutdown()
     try? FileManager.default.removeItem(at: c.dir)
 }

@@ -5,7 +5,9 @@
 #   mode=ok (default)  each message gets "Answer N", streamed, then a result
 #   mode=auth          "Not logged in", as Claude Code says it with no sign-in
 #   mode=crash         half an answer, a line on stderr, then exit 3
-#   mode=slow          half an answer, then it waits for 30 s and doesn't listen (a Claude Code that can't be interrupted)
+#   mode=die           reads nothing: after 0.4 s a line on stderr, then exit 5 (a Claude Code that dies at startup while
+#                      the chat is still writing its message to it)
+#   mode=slow        half an answer, then it waits for 30 s and doesn't listen (a Claude Code that can't be interrupted)
 #   mode=abort         half an answer, then it waits for an interrupt control request, ends that answer with an
 #                      aborted result, and answers the next message normally (its count of messages goes on)
 #   control requests   each one is answered with a control_response and written to args.ctl (subtype and what it sets);
@@ -34,6 +36,11 @@ echo '{"type":"system","subtype":"init","session_id":"'$sid'","model":"claude-ha
 n=0
 delay="$(sed -n 's/^delay=//p' "$conf" 2>/dev/null)"
 [ -n "$delay" ] && sleep "$delay"
+if [ "$mode" = die ]; then
+  sleep 0.4
+  echo "Error: sample startup failure for the checks" >&2
+  exit 5
+fi
 ctl() { [ -n "${QC_STUB_ARGS:-}" ] && printf '%s\n' "$1" >> "$QC_STUB_ARGS.ctl"; return 0; }
 while IFS= read -r line; do
   case "$line" in

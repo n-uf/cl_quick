@@ -319,6 +319,9 @@ final class QuickChatModel: ObservableObject {
     private var appliedModel = "", appliedEffort: String?
     /// The question being answered reached `claude` (not still waiting for the folder to be read or `claude` to be found).
     private var messageSent = false
+    /// A failed write waits this long for `claude`'s own exit report before the chat says it didn't take the message.
+    static let sendFailedWait: TimeInterval = 1
+    private var sendFailedWork: DispatchWorkItem?
     /// The images in the running `claude`'s conversation, in bytes of base64: every request carries all of them, and the
     /// API takes 32 MB a request, so past `imageCap` the chat takes no more (a new chat starts from nothing).
     private var sentImageBytes = 0
@@ -780,9 +783,18 @@ final class QuickChatModel: ObservableObject {
             self.exited(status, tail)
         }
         p.onSendFailed = { [weak self, weak p] in
-            guard let self, let p, p === self.process, self.messageSent else { return }
-            self.messageSent = false
-            self.fail(.stopped(detail: "Claude Code didn't take the message."))
+            guard let self, let p, p === self.process, self.messageSent, self.sendFailedWork == nil else { return }
+            // a write that breaks is usually a `claude` that is dying, and its own report (exit code, stderr) says why:
+            // that arrives a moment later (exited() takes this wait over), so the generic line comes only if it doesn't
+            let w = DispatchWorkItem { [weak self, weak p] in
+                guard let self, let p, p === self.process else { return }
+                self.sendFailedWork = nil
+                guard self.messageSent else { return }
+                self.messageSent = false
+                self.fail(.stopped(detail: "Claude Code didn't take the message."))
+            }
+            self.sendFailedWork = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.sendFailedWait, execute: w)
         }
         do { try p.start() } catch { return "Claude Code couldn't start: \(error.localizedDescription)" }
         process = p
@@ -1008,6 +1020,7 @@ final class QuickChatModel: ObservableObject {
     private func closeProcess() {
         idleTimer?.invalidate(); idleTimer = nil
         staleTimer?.invalidate(); staleTimer = nil
+        sendFailedWork?.cancel(); sendFailedWork = nil
         stale.reset()
         messageSent = false
         sentImageBytes = 0          // the conversation that held them is gone with its process
