@@ -1,0 +1,47 @@
+name: Checks
+
+# Builds cl_quick and runs the quiet check suites on every push to main and on every pull request.
+# Not run here: Checks/real.sh (it needs a real `claude` and an account). No secrets are used.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request replaces the run still going.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # Apple silicon (the build targets arm64-apple-macos13.0). macOS 26 is the newest stable hosted image; its
+    # default Xcode (26.x) is used as it comes, so no xcode-select is needed. The app is also built locally with
+    # Xcode 27.2; if the code ever needs that SDK, GitHub's preview label `xcode-27` has Xcode 27.2.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # build.sh counts commits for the build number
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swiftc --version
+          xcrun --show-sdk-version
+
+      - name: Build
+        run: ./build.sh --no-install
+
+      - name: Checks/run.sh
+        run: Checks/run.sh
+
+      - name: Checks/panel.sh
+        run: Checks/panel.sh
+
+      - name: Checks/bars.sh
+        run: Checks/bars.sh
