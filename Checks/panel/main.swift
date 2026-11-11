@@ -179,9 +179,9 @@ func movesFromEmptyOnly(_ label: String) {
     // the card's empty areas move it: the bar's padding, or the chat's header row and empty chat
     var empty: [(String, NSPoint)] = [("top padding", NSPoint(x: W / 2, y: H - 6)), ("left padding", NSPoint(x: 6, y: H / 2))]
     if chat.model.isWindow {
-        // the header's empty space under the hidden title bar: the gap between the address and the meters, at the title
+        // the header's empty space under the hidden title bar: the gap between the name and the meters, at the title
         // bar's heights (4 to 28 pt from the top)
-        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: W * 0.45, y: H - d))) }
+        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: W * 0.2, y: H - d))) }
         empty.append(("empty chat", NSPoint(x: W / 2, y: H / 2)))
     }
     let notSurfaces = empty.filter { QCDragView.surface(at: $0.1, in: p) == nil }
@@ -416,7 +416,7 @@ check("chat: it can grow both ways", p.contentMaxSize.width > p.frame.width + 10
 // ── the cursor: the open hand only where a press moves the window, never fighting the pointing hand, never left behind ─
 do {
     let W = p.frame.width, H = p.frame.height
-    let gap = NSPoint(x: W * 0.45, y: H - 16)          // the header's empty gap
+    let gap = NSPoint(x: W * 0.2, y: H - 16)           // the header's empty gap
     check("cursor: the open hand over an empty area", QCDragView.cursor(at: gap, in: p) === NSCursor.openHand)
     check("cursor: nothing set by the drag surfaces in the resize region (the system's resize cursor)",
           QCDragView.cursor(at: NSPoint(x: 1, y: H / 2), in: p) == nil && QCDragView.cursor(at: NSPoint(x: 2, y: 2), in: p) == nil)
@@ -453,29 +453,59 @@ do {
     check("cursor: leaving a drag surface for outside the panel drops the open hand", surface != nil && NSCursor.current !== NSCursor.openHand)
 }
 
-// ── a click on the address copies it (to a pasteboard of the check's own: the user's clipboard is never touched) ───────
+// ── the address: only in the profile menu, blurred until the pointer is on it; a copy glyph copies it (to a pasteboard
+// of the check's own: the user's clipboard is never touched) ──────────────────────────────────────────────────────────
 do {
     let pb = NSPasteboard(name: NSPasteboard.Name("local.n-uf.cl-quick.checks"))
     pb.clearContents(); pb.setString("before", forType: .string)
-    let wrote = QCBlurred.copy("ultra-1@example.com", to: pb)
-    check("address: a click's copy puts the whole address on the pasteboard, as plain text, and nothing else",
+    let wrote = QCProfileMenuRow.copy("ultra-1@example.com", to: pb)
+    check("address: a copy puts the whole address on the pasteboard, as plain text, and nothing else",
           wrote && pb.string(forType: .string) == "ultra-1@example.com" && (pb.types ?? []).allSatisfy { $0 == .string || $0.rawValue == "NSStringPboardType" },
           "\(String(describing: pb.string(forType: .string))) \(String(describing: pb.types))")
     pb.clearContents(); pb.setString("before", forType: .string)
     check("address: no address known, nothing copied and the pasteboard left alone",
-          !QCBlurred.copy("", to: pb) && !QCBlurred.copy("  ", to: pb) && pb.string(forType: .string) == "before")
-    pb.releaseGlobally()
-    // in the chat's header the address's hover zone is a control with the pointing hand: the name's hand and its own
-    // (wide enough that the header's line keeps the address: a narrow one drops it first)
+          !QCProfileMenuRow.copy("", to: pb) && !QCProfileMenuRow.copy("  ", to: pb) && pb.string(forType: .string) == "before")
+
+    // the header has no address any more: no hover zone of its own, and VoiceOver's words for it have none either
+    var t = chat.model.target ?? QuickChatTarget(Profile(id: "main", name: "Main", folder: "~/.claude-sample"))
+    t.email = "ultra-1@example.com"; chat.model.target = t
     chat.model.turns = [oneTurn()]
     p.setFrame(NSRect(x: p.frame.minX, y: p.frame.minY, width: 720, height: p.frame.height), display: true); spin(0.6)
     var hands = 0
     let headerBand = NSRect(x: 0, y: p.frame.height - QCSpace.header, width: p.frame.width, height: QCSpace.header)
     func walk(_ v: NSView) { if v is QCCursorView, headerBand.intersects(v.convert(v.bounds, to: nil)) { hands += 1 }; v.subviews.forEach(walk) }
     walk(cv)
-    if chat.model.target?.email != nil {
-        check("address: the pointing hand over the address's zone as over the name (\(hands) in the header)", hands >= 2)
+    check("address: the header has no address zone (\(hands) pointing-hand zones: the name's at most)", hands <= 1)
+    check("address: the header's words have no address",
+          !QCHeaderLine.spoken(target: t, level: nil).contains("@") && !QCHeaderLine.spoken(target: t, level: nil).contains(maskEmail("ultra-1@example.com")))
+
+    // the profile menu: each profile a row of its own with its account in use's address (none when none is known)
+    var picked: [String] = []
+    let menu = QCMenu.profiles([(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), nil),
+                                (Profile(id: "work", name: "Work", folder: "~/.claude-work"), nil)], on: "main",
+                               address: { $0.id == "main" ? "ultra-1@example.com" : nil }, pick: { picked.append($0) }, add: {})
+    let rows = menu.items.compactMap { $0.view as? QCProfileMenuRow }
+    check("menu: a row view for each profile, the in-use address on Main's, none on Work's",
+          rows.count == 2 && rows[0].address == "ultra-1@example.com" && rows[1].address == nil && rows[0].on && !rows[1].on)
+    check("menu: the rows are as wide, and the items keep their title and state", rows.count == 2 && rows[0].frame.width == rows[1].frame.width
+          && menu.items.contains { $0.view === rows.first && $0.title == "Main" && $0.state == .on && $0.action != nil })
+    if let r = rows.first {
+        r.pasteboard = pb
+        check("menu: at rest the address is blurred", !r.revealed)
+        r.hover(at: NSPoint(x: 50, y: 12))
+        check("menu: the pointer on the name leaves it blurred, and shows the copy glyph", !r.revealed && r.rowHover)
+        r.hover(at: NSPoint(x: r.addressRect.midX, y: r.addressRect.midY))
+        check("menu: the pointer on the address makes it readable", r.revealed)
+        r.hover(at: nil)
+        check("menu: the pointer gone, blurred again", !r.revealed && !r.rowHover)
+        pb.clearContents(); pb.setString("before", forType: .string)
+        r.press(at: NSPoint(x: r.copyRect.midX, y: r.copyRect.midY))
+        check("menu: a click on the copy glyph copies the address, says Copied and picks nothing",
+              pb.string(forType: .string) == "ultra-1@example.com" && r.copiedUntil != nil && picked.isEmpty)
+        r.press(at: NSPoint(x: 50, y: 12))
+        check("menu: a click elsewhere on the row picks the profile", picked == ["main"])
     }
+    pb.releaseGlobally()
 }
 
 // ── after a move, a content change fit() skipped is retried ───────────────────────────────────────────────────────────

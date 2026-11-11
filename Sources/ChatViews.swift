@@ -178,27 +178,25 @@ struct QCWindow: View {
     }
 }
 
-/// The account line: the profile and the address signed in to its folder (masked), its week, then New chat and Hide.
+/// The account line: the profile, its session and week, then New chat and Hide. (The address of the account in use is in
+/// the profile menu, under the row's profile key.)
 struct QCHeader: View {
     @ObservedObject var model: QuickChatModel
     /// The pointer is on the meters: their card shows what the line had to leave out.
     @State private var meterHover = false
     @State private var nameHover = false
-    /// The pointer is on the address capsule itself: the only thing that un-blurs the address.
-    @State private var addressHover = false
     @State private var line = QCLineState()
     @Environment(\.qcHover) private var pictureHover
 
     var body: some View {
         let on = meterHover || pictureHover
-        // identity on the left (name, address), usage on the right next to New chat and Hide; 40 pt high, centred, the
-        // name on the window's 10 pt line and the ✕ glyph about as far in from the right
+        // the profile on the left, usage on the right next to New chat and Hide; 40 pt high, centred, the name on the
+        // window's 10 pt line and the ✕ glyph about as far in from the right
         HStack(spacing: 8) {
             QCHeaderInfo(target: model.target, level: model.level, openProfile: {
                 // Settings opens and the chat steps aside (hidden, not closed: the shortcut brings it back as it was)
                 if let id = model.target?.profileID { model.openSettings(id); model.hide() }
-            }, nameHover: $nameHover, addressHover: $addressHover, meterHover: $meterHover, state: $line)
-            .zIndex(1)         // a grown address capsule is drawn over the buttons too
+            }, nameHover: $nameHover, meterHover: $meterHover, state: $line)
             HStack(spacing: 0) {
                 QCIconButton(symbol: "square.and.pencil", help: "New chat (⌘N)", size: QCSpace.row) { model.newChat() }
                 QCIconButton(symbol: "xmark", help: "Hide (Esc)", size: QCSpace.row) { model.hide() }
@@ -209,7 +207,7 @@ struct QCHeader: View {
         .qcDraggable()
         .overlay(alignment: .topTrailing) {
             // a card under the meters, right-aligned to the 10 pt line, only for what the line had to leave out: while
-            // the pointer is on the meters, their dropped parts. (The address has no card: the capsule itself grows.)
+            // the pointer is on the meters, their dropped parts
             let rows = on ? QCHeaderCard.rows(model.level, shown: line.detail) : []
             if !rows.isEmpty {
                 QCHeaderCard(rows: rows)
@@ -270,23 +268,12 @@ struct QCHeaderCard: View {
     }
 }
 
-/// Set while drawing a picture: the header as if the pointer were over it (the meters' card), or over the address capsule.
+/// Set while drawing a picture: the header as if the pointer were over it (the meters' card).
 private struct QCHoverKey: EnvironmentKey { static let defaultValue = false }
-private struct QCAddressHoverKey: EnvironmentKey { static let defaultValue = false }
-private struct QCAddressCopiedKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
-    /// Set while drawing a picture: the address capsule as just after a click copied it.
-    var qcAddressCopied: Bool {
-        get { self[QCAddressCopiedKey.self] }
-        set { self[QCAddressCopiedKey.self] = newValue }
-    }
     var qcHover: Bool {
         get { self[QCHoverKey.self] }
         set { self[QCHoverKey.self] = newValue }
-    }
-    var qcAddressHover: Bool {
-        get { self[QCAddressHoverKey.self] }
-        set { self[QCAddressHoverKey.self] = newValue }
     }
 }
 
@@ -295,32 +282,26 @@ extension EnvironmentValues {
 /// With room, the line shows everything: "week ▬ 58% · resets Fri 00:29", the session the same way. As the window
 /// narrows it drops parts in this order:
 ///   1. both labels shorten together: "session" / "week" become "5h" / "wk";
-///   2. the address leaves the line;
-///   3. the reset times go (labels full again, then short, the address back while it fits);
-///   4. the percentages go (bars only; "full" stays), labels first full again, then short;
-///   5. the labels go, both (and a profile name too long for the window on its own is cut: the only ellipsis).
-/// The address sits in a capsule at most 132 pt wide, blurred at rest; while the pointer is on the capsule (or the margin
-/// around it) the capsule grows to show it whole. While the pointer is on the meters, a card under them shows only
-/// what the line dropped (a window's share, reset or label), nothing it already shows, and no card at all when it
-/// dropped nothing.
+///   2. the reset times go (labels full again, then short);
+///   3. the percentages go (bars only; "full" stays), labels first full again, then short;
+///   4. the labels go, both (and a profile name too long for the window on its own is cut: the only ellipsis).
+/// While the pointer is on the meters, a card under them shows only what the line dropped (a window's share, reset or
+/// label), nothing it already shows, and no card at all when it dropped nothing.
 struct QCHeaderDetail: Equatable {
     enum Resets { case words, none }
     enum Labels { case full, short, none }
     var resets: Resets = .none
     var pct: Bool
     var labels: Labels
-    var address = true
 
     static let steps: [QCHeaderDetail] = [
         .init(resets: .words, pct: true, labels: .full),
         .init(resets: .words, pct: true, labels: .short),
-        .init(resets: .words, pct: true, labels: .short, address: false),
         .init(pct: true, labels: .full),
         .init(pct: true, labels: .short),
-        .init(pct: true, labels: .short, address: false),
-        .init(pct: false, labels: .full, address: false),
-        .init(pct: false, labels: .short, address: false),
-        .init(pct: false, labels: .none, address: false),
+        .init(pct: false, labels: .full),
+        .init(pct: false, labels: .short),
+        .init(pct: false, labels: .none),
     ]
 }
 
@@ -329,16 +310,14 @@ struct QCLineState: Equatable {
     var detail = QCHeaderDetail.steps[0]
 }
 
-/// The profile, its address (smudged) and the session and week meters.
+/// The profile and the session and week meters.
 struct QCHeaderInfo: View {
     let target: QuickChatTarget?
     let level: QuickChatLevel?
     /// The profile's name was clicked.
     let openProfile: () -> Void
     @Binding var nameHover: Bool
-    /// The pointer is on the address capsule: the address is un-blurred. Kept by the header (the candidates replace each other).
-    @Binding var addressHover: Bool
-    /// The pointer is on the meters. Kept by the header too.
+    /// The pointer is on the meters. Kept by the header (the candidates replace each other).
     @Binding var meterHover: Bool
     /// What the line on screen shows: told by the step that is shown.
     @Binding var state: QCLineState
@@ -350,13 +329,13 @@ struct QCHeaderInfo: View {
         ViewThatFits(in: .horizontal) {
             ForEach(steps.indices, id: \.self) { i in
                 QCHeaderLine(target: target, level: level, detail: steps[i], openProfile: openProfile, nameHover: $nameHover,
-                             addressHover: $addressHover, meterHover: $meterHover)
+                             meterHover: $meterHover)
                     .onAppear { state = QCLineState(detail: steps[i]) }
             }
             // a profile name too long for the window even on its own: the one case with an ellipsis, so the line never
             // pushes the buttons off the panel
             QCHeaderLine(target: target, level: level, detail: steps[steps.count - 1], openProfile: openProfile, nameHover: $nameHover,
-                         addressHover: $addressHover, meterHover: $meterHover, flexible: true)
+                         meterHover: $meterHover, flexible: true)
                 .onAppear { state = QCLineState(detail: steps[steps.count - 1]) }
         }
         .accessibilityElement(children: .ignore)
@@ -371,7 +350,6 @@ struct QCHeaderLine: View {
     let detail: QCHeaderDetail
     let openProfile: () -> Void
     @Binding var nameHover: Bool
-    @Binding var addressHover: Bool
     @Binding var meterHover: Bool
     /// The name may give way (be cut) to what the window has room for.
     var flexible = false
@@ -382,7 +360,6 @@ struct QCHeaderLine: View {
                 // the name's hover fill reaches 6 pt past its text, which sits on the 10 pt line
                 QCProfileName(name: t.name, hover: $nameHover, action: openProfile).padding(.leading, -6)
                     .layoutPriority(flexible ? -1 : 0)
-                if detail.address, let e = t.email { QCBlurred(text: e, hover: $addressHover) }
             }
             Spacer(minLength: 0)
             if let l = level {
@@ -421,7 +398,7 @@ struct QCHeaderLine: View {
 
     static func spoken(target: QuickChatTarget?, level: QuickChatLevel?) -> String {
         var parts: [String] = []
-        if let t = target { parts.append(t.name); if let e = t.email { parts.append(maskEmail(e)) } }
+        if let t = target { parts.append(t.name) }
         let words = tooltip(level)
         if !words.isEmpty { parts.append(words.replacingOccurrences(of: "\n", with: ". ")) }
         return parts.joined(separator: ", ")
@@ -457,115 +434,6 @@ extension EnvironmentValues {
     var qcNameHover: Bool {
         get { self[QCNameHoverKey.self] }
         set { self[QCNameHoverKey.self] = newValue }
-    }
-}
-
-/// The address in a capsule: the real text, cut to the capsule's at most 132 pt, blurred at rest. While the pointer is on
-/// the capsule or the margin around it (not the meters, the name or the buttons) the capsule grows to the whole address,
-/// readable, drawn above whatever is next to it with its own opaque background; it returns to its size when the pointer
-/// leaves. The blur stays inside the capsule, so it has a clear edge rather than a smear.
-/// A click anywhere in the hover zone copies the whole address (`copy`): the capsule says "Copied" with a tick for about
-/// a second, drawn over it like the grown one (nothing else moves), then is the address again. The zone is a control
-/// (never a move) with the pointing hand; VoiceOver has the same as its action "Copy address".
-struct QCBlurred: View {
-    let text: String
-    /// The pointer is in the hover zone: the capsule shows the whole address. Kept by the header (the line's candidates
-    /// replace each other while the pointer is on it).
-    @Binding var hover: Bool
-    @Environment(\.qcAddressHover) private var pictureHover
-    @Environment(\.qcAddressCopied) private var pictureCopied
-    private var reveal: Bool { hover || pictureHover }
-    /// The address was just copied: "Copied" shows until `copiedFor` has passed (a later click starts it again).
-    @State private var copiedAt: Int = 0
-    @State private var copied = false
-    private var showCopied: Bool { copied || pictureCopied }
-    static let copiedFor: TimeInterval = 1.1
-
-    /// Puts the whole address on the pasteboard, as plain text (the pasteboard cleared first). An empty one (no account
-    /// known) puts nothing there and says false. (`pasteboard`: the general one; a check passes its own.)
-    @discardableResult
-    static func copy(_ address: String, to pasteboard: NSPasteboard = .general) -> Bool {
-        let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !a.isEmpty else { return false }
-        pasteboard.clearContents()
-        return pasteboard.setString(a, forType: .string)
-    }
-
-    private func copyNow() {
-        guard Self.copy(text) else { return }
-        copiedAt += 1
-        let mine = copiedAt
-        withAnimation(.easeOut(duration: 0.12)) { copied = true }
-        // one shot: only the latest click's turns "Copied" back into the address
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.copiedFor) {
-            if copiedAt == mine { withAnimation(.easeOut(duration: 0.18)) { copied = false } }
-        }
-    }
-
-    /// "Copied" with a tick, in a capsule at least `width` wide, opaque over what it covers.
-    private func copiedBadge(_ width: CGFloat) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "checkmark").font(.system(size: 9.5, weight: .bold))
-            Text("Copied").font(.system(size: 12, weight: .medium))
-        }
-        .foregroundColor(QCColor.text).fixedSize()
-        .padding(.horizontal, Self.inset).frame(minWidth: width, minHeight: Self.height, maxHeight: Self.height)
-        .background(Capsule().fill(QCColor.text.opacity(0.1)))
-        .background(Capsule().fill(QCColor.window))
-        .overlay(Capsule().strokeBorder(QCColor.text.opacity(0.08)))
-    }
-
-    static let font = NSFont.systemFont(ofSize: 12)
-    static let maxWidth: CGFloat = 132, inset: CGFloat = 7, height: CGFloat = 18
-    /// The margin around the capsule that also counts as on it, so the pointer can rest beside the text: 8 pt on the
-    /// left (the gap to the name), 10 pt on the others. The zone grows with the capsule.
-    static let zoneLeading: CGFloat = 8, zoneOther: CGFloat = 10
-
-    /// The capsule's width when it shows the whole address.
-    private var fullWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: Self.font]).width) + 2 * Self.inset }
-    private var restWidth: CGFloat { min(fullWidth, Self.maxWidth) }
-    private var grown: Bool { reveal && fullWidth > restWidth }
-
-    /// A capsule `width` wide with the address in it, blurred or not.
-    private func capsule(_ width: CGFloat, blurred: Bool) -> some View {
-        Text(text).font(.system(size: 12)).foregroundColor(QCColor.soft).lineLimit(1).fixedSize()
-            .frame(width: width - 2 * Self.inset, alignment: .leading).clipped()
-            .blur(radius: blurred ? 3.4 : 0)
-            .padding(.horizontal, Self.inset).frame(height: Self.height)
-            .background(Capsule().fill(QCColor.text.opacity(0.06)))
-            .overlay(Capsule().strokeBorder(QCColor.text.opacity(0.05)))
-            .clipShape(Capsule())
-    }
-
-    var body: some View {
-        // the line lays out the resting capsule; the grown one and the hover zone are overlays, so nothing else moves
-        capsule(restWidth, blurred: !reveal)
-            .animation(.easeOut(duration: 0.18), value: reveal)
-            .overlay(alignment: .leading) {
-                if showCopied {
-                    copiedBadge(grown ? fullWidth : restWidth)
-                } else if grown {
-                    capsule(fullWidth, blurred: false)
-                        .background(Capsule().fill(QCColor.window))      // opaque: the meters under it don't show through
-                        .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
-                }
-            }
-            .overlay(alignment: .leading) {
-                Color.clear
-                    .frame(width: (grown ? fullWidth : restWidth) + Self.zoneLeading + Self.zoneOther, height: Self.height + 2 * Self.zoneOther)
-                    .qcControl()         // the hover zone: a press here is never a move
-                    .onHover { hover = $0 }
-                    .onTapGesture { copyNow() }
-                    .qcPointingHand()
-                    .help("Copy address")
-                    .offset(x: -Self.zoneLeading)
-            }
-            .fixedSize()
-            .zIndex(1)
-            .onDisappear { hover = false }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(showCopied ? "Address copied" : "Account address")
-            .accessibilityAction(named: "Copy address") { copyNow() }
     }
 }
 
@@ -1066,7 +934,8 @@ struct QCControls: View {
 
     /// The profiles with their weeks, then Add a profile… (so a single profile still has something to offer).
     private func pickProfile() {
-        QCMenu.pop(QCMenu.profiles(model.pickable(), on: model.target?.profileID, pick: { model.pickProfile($0) }, add: {
+        QCMenu.pop(QCMenu.profiles(model.pickable(), on: model.target?.profileID,
+                                   address: { ProfileStore.shared.inUse($0)?.email }, pick: { model.pickProfile($0) }, add: {
             model.openSettings(SettingsWindow.addPage); model.hide()
         }))
     }
@@ -1626,13 +1495,17 @@ struct QCChip: View {
 }
 
 /// The profile menu: macOS's own, at the pointer. A heading, the profiles (a dot in the level's colour, the week and its
-/// reset in grey under the name), a line, then Add a profile…. No footer: what it used to say is the picker's tooltip.
+/// reset in grey under the name, and the address of its account in use, blurred until the pointer is on it: a row of
+/// its own, QCProfileMenuRow), a line, then Add a profile…. No footer: what it used to say is the picker's tooltip.
 enum QCMenu {
     struct Item {
         let title: String
         let detail: String
         var dot: NSColor? = nil
         var on = false
+        /// A profile's row (QCProfileMenuRow), with the address of its account in use, if one is known.
+        var profileRow = false
+        var address: String? = nil
         let action: () -> Void
     }
 
@@ -1642,11 +1515,13 @@ enum QCMenu {
         @objc func fire() { run() }
     }
 
-    /// The profile menu for the profiles the picker offers.
-    static func profiles(_ list: [(Profile, QuickChatLevel?)], on: String?, pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
+    /// The profile menu for the profiles the picker offers; `address` gives a profile's account in use (never a standby
+    /// one's).
+    static func profiles(_ list: [(Profile, QuickChatLevel?)], on: String?, address: (Profile) -> String?,
+                         pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
         build(header: "Profile", items: list.map { p, l in
             Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.binding()?.p)),
-                 on: p.id == on) { pick(p.id) }
+                 on: p.id == on, profileRow: true, address: address(p)) { pick(p.id) }
         }, actions: [Item(title: "Add a profile…", detail: "", action: add)])
     }
 
@@ -1676,8 +1551,16 @@ enum QCMenu {
                     .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor]))
                 i.attributedTitle = s
             }
+            if it.profileRow {
+                // the row draws itself (the title, dot and state above stay for VoiceOver and the menu's type-ahead)
+                i.view = QCProfileMenuRow(title: it.title, detail: it.detail, dot: it.dot, on: it.on, address: it.address, pick: it.action)
+            }
             m.addItem(i)
         }
+        // the profile rows all as wide as the widest (the menu then widens them with itself)
+        let rows = m.items.compactMap { $0.view as? QCProfileMenuRow }
+        let w = rows.map(\.frame.width).max() ?? 0
+        for r in rows { r.setFrameSize(NSSize(width: w, height: QCProfileMenuRow.height)) }
         if !actions.isEmpty { m.addItem(.separator()) }
         for a in actions { m.addItem(item(a)) }
         return m
@@ -2048,7 +1931,7 @@ enum QuickChatRender {
                          (Profile(id: "spare", name: "Spare", folder: "~/.claude-spare"), spare),
                          (Profile(id: "lab", name: "Lab", folder: "~/.claude-lab"), nil)]
             }
-            let menu = QCMenu.profiles(list, on: "main", pick: { _ in }, add: {})
+            let menu = QCMenu.profiles(list, on: "main", address: { $0.id == "main" ? "ultra-1@example.com" : nil }, pick: { _ in }, add: {})
             let lines = menu.items.map { i -> String in
                 if i.isSeparatorItem { return "———" }
                 var sub = ""
@@ -2057,6 +1940,65 @@ enum QuickChatRender {
                 return (i.state == .on ? "✓ " : "  ") + (i.image != nil ? "● " : "") + title + sub + (i.isEnabled ? "" : "  (heading)")
             }
             try? (lines.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            return
+        }
+        // the profile menu as drawn by its rows (the menu's own window can't be drawn to a picture: its frame, heading,
+        // line and Add a profile… are drawn here like it): profilemenu (at rest, the addresses blurred),
+        // profilemenu-address (the pointer on Main's address: readable, the copy glyph beside it), profilemenu-copied
+        // (just after a click on the copy glyph), profilemenu-highlight (Main highlighted, the pointer elsewhere on it)
+        if state.hasPrefix("profilemenu") {
+            var main = QuickChatLevel(); main.week = 35; main.weekResets = Date().addingTimeInterval(3 * 86400)
+            var work = QuickChatLevel(); work.week = 12; work.weekResets = Date().addingTimeInterval(5 * 86400)
+            let list: [(Profile, QuickChatLevel?)] = [(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), main),
+                                                     (Profile(id: "work", name: "Work", folder: "~/.claude-work"), work)]
+            let mails = ["main": "ultra-1@example.com", "work": "kim.sample@example.org"]
+            let menu = QCMenu.profiles(list, on: "main", address: { mails[$0.id] }, pick: { _ in }, add: {})
+            final class Flipped: NSView { override var isFlipped: Bool { true } }
+            // fresh rows like the menu's (a view an item holds stays the item's)
+            let rows = menu.items.compactMap { $0.view as? QCProfileMenuRow }
+                .map { QCProfileMenuRow(title: $0.title, detail: $0.detail, dot: $0.dot, on: $0.on, address: $0.address, pick: {}) }
+            var nextRow = rows.makeIterator()
+            let w = max(220, rows.map(\.frame.width).max() ?? 0)
+            let page = Flipped(frame: NSRect(x: 0, y: 0, width: w + 40, height: 400))
+            page.appearance = NSAppearance(named: .darkAqua)
+            page.wantsLayer = true
+            page.layer?.backgroundColor = NSColor(white: 0.1, alpha: 1).cgColor
+            let box = Flipped(frame: NSRect(x: 20, y: 20, width: w, height: 0))
+            box.autoresizesSubviews = false; page.autoresizesSubviews = false      // sized after its rows are placed
+            box.wantsLayer = true
+            box.layer?.backgroundColor = NSColor(srgbRed: 0.2, green: 0.2, blue: 0.19, alpha: 1).cgColor
+            box.layer?.cornerRadius = 8
+            box.layer?.borderWidth = 0.5
+            box.layer?.borderColor = NSColor(white: 1, alpha: 0.15).cgColor
+            page.addSubview(box)
+            var y: CGFloat = 5
+            func words(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat) {
+                let l = NSTextField(labelWithString: s); l.font = font; l.textColor = color; l.sizeToFit()
+                l.frame.origin = NSPoint(x: x, y: y + (22 - l.frame.height) / 2); box.addSubview(l); y += 22
+            }
+            for it in menu.items {
+                if it.view is QCProfileMenuRow, let r = nextRow.next() {
+                    r.frame = NSRect(x: 0, y: y, width: w, height: QCProfileMenuRow.height); box.addSubview(r); y += QCProfileMenuRow.height
+                } else if it.isSeparatorItem {
+                    let line = NSBox(frame: NSRect(x: 14, y: y + 5, width: w - 28, height: 1)); line.boxType = .separator; box.addSubview(line); y += 11
+                } else if !it.isEnabled || it.title == "Profile" {
+                    words(it.title, .systemFont(ofSize: 11, weight: .semibold), .secondaryLabelColor, x: 14)
+                } else {
+                    words(it.title, NSFont.menuFont(ofSize: 0), .labelColor, x: QCProfileMenuRow.textX)
+                }
+            }
+            box.frame.size.height = y + 5
+            page.frame.size.height = y + 50
+            if let r = rows.first {
+                if state.contains("address") { r.hover(at: NSPoint(x: r.addressRect.midX, y: r.addressRect.midY)) }
+                if state.contains("copied") { r.hover(at: NSPoint(x: r.copyRect.midX, y: r.copyRect.midY)); r.showCopiedForPicture() }
+                if state.contains("highlight") { r.highlighted = true; r.hover(at: NSPoint(x: QCProfileMenuRow.textX + 4, y: 20)) }
+            }
+            page.layoutSubtreeIfNeeded()
+            if let rep = page.bitmapImageRepForCachingDisplay(in: page.bounds) {
+                page.cacheDisplay(in: page.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
             return
         }
         // the bar's usage indicator alone on the bar's fill, twice the size of the other pictures: indicator-5h (the
@@ -2161,25 +2103,19 @@ enum QuickChatRender {
         default: break
         }
         // the chat's account line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
-        // reported), header-long (a long profile name and address), header-longaddr (a long address only), each also with -hover-meter (the pointer on the
-        // meters: their card, the address still blurred) or -hover-address (the pointer on the address capsule), and
-        // -copied (the capsule just after a click copied the address; with -hover-address too, over the grown capsule)
+        // reported), header-long (a long profile name), each also with -hover-meter (the pointer on the meters: their card)
         if state.hasPrefix("header") {
             var l = QuickChatLevel()
             l.week = 58; l.weekResets = Date().addingTimeInterval(3 * 86400)
             if !state.contains("nosession") { l.fiveHour = 41; l.fiveHourResets = Date().addingTimeInterval(2 * 3600 + 600) }
             if state.contains("full") { l.week = 100; l.weekResets = Date().addingTimeInterval(26 * 3600) }
             m.level = l
-            if state.contains("longaddr") {
-                target.email = "alexandra.longname@example.com"; m.target = target
-            } else if state.contains("long") {
+            if state.contains("long") {
                 target.name = state.contains("verylong") ? "Work – client project, EU team" : "Personal-work"
-                target.email = "alexandra.longname@example.com"; m.target = target
+                m.target = target
             }
             let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
             let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover-meter"))
-                .environment(\.qcAddressHover, state.contains("hover-address"))
-                .environment(\.qcAddressCopied, state.contains("copied"))
                 .environment(\.qcNameHover, state.contains("namehover"))
                 .frame(width: width).background(QCColor.window).padding(.bottom, 80)       // room for the meters' card under it
                 .environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))

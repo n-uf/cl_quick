@@ -55,7 +55,9 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
 - Each account keeps its own week: after a switch the chat's new `claude` is asked for the new account's limits at once
   (until they come, its last-reported week, or "no numbers yet").
   Weeks are kept per account (its id in Claude Code's file), not per organization.
-- Addresses are masked everywhere in cl_quick (p•••@example.com).
+- Addresses are masked everywhere in cl_quick (p•••@example.com), except in the chat's profile menu: each profile's row
+  has the address of its account in use (never a standby one's), blurred until the pointer is on it; the copy glyph
+  beside it copies it.
 
 ## The chat
 

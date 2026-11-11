@@ -356,11 +356,13 @@ for w in [CGFloat(320), 440, 640] {
     var l = QuickChatLevel(); l.week = 21; l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin()
     let five = targets.marks["usage-5h"] ?? .zero, wk = targets.marks["usage-wk"] ?? .zero, ui = targets.marks["usage"] ?? .zero
     if let f = first {
-        check("usage at \(Int(w)), no 5h number: both tracks where they always are", five == f.five && wk == f.week && ui.minX == f.ui.minX,
-              "\(five) \(wk) vs \(f)")
+        check("usage at \(Int(w)), no 5h number: both tracks where they always are", five != .zero && wk != .zero
+              && five == f.five && wk == f.week && ui.minX == f.ui.minX, "\(five) \(wk) vs \(f)")
     }
-    if let label = targets.marks["usage-label"], abs(ui.width - QCUsageView.width(.bars)) > 0.5 {
-        check("usage at \(Int(w)), no 5h number: the label sits on the week's track", abs(label.midY - wk.midY) <= 1.5, "\(label) vs \(wk)")
+    if abs(ui.width - QCUsageView.width(.bars)) > 0.5 {
+        let label = targets.marks["usage-label"]
+        check("usage at \(Int(w)), no 5h number: the label sits on the week's track", label.map { abs($0.midY - wk.midY) <= 1.5 } == true,
+              "\(label.map { "\($0)" } ?? "none") vs \(wk)")
     }
 }
 
