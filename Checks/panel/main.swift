@@ -2062,6 +2062,20 @@ do {
     waitLanded { m.preparing == 0 }
     spin(0.3)
     check("ready: ⌘N while waiting forgets the send: nothing sent, field empty", c.lines.count == before && m.turns.isEmpty && m.images.isEmpty && m.field.isEmpty && !m.sendWhenReady, "\(c.lines.count) \(before)")
+    // an old batch that finishes after the new chat's batch must not lose the waiting send
+    let beforeOrder = c.lines.count
+    m.attach(QCImages.Found(sources: [.data(slow), .data(slow)]))
+    m.newChat()
+    m.field = "order"
+    m.attach(QCImages.Found(sources: [.data(noisyPNG(8, 8))]))
+    m.send()
+    check("ready: Return while an old and a new batch are preparing waits", m.turns.isEmpty && m.preparing == 3 && m.sendWhenReady, "\(m.turns.count) \(m.preparing) \(m.sendWhenReady)")
+    waitLanded { m.preparing == 0 }
+    waitLanded { m.turns.count == 1 && m.turns[0].phase == .done }
+    check("ready: the old batch finishing last still sends the message, once, with the new picture",
+          m.turns.count == 1 && m.turns[0].question == "order" && m.turns[0].images.count == 1 && !m.sendWhenReady && c.lines.count == beforeOrder + 1,
+          "\(m.turns.count) \(m.sendWhenReady) \(c.lines.count - beforeOrder)")
+    m.newChat()
     let cm = chat.model
     cm.field = "hidden"
     cm.attach(QCImages.Found(sources: [.data(slow)]))

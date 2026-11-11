@@ -451,7 +451,13 @@ final class QuickChatModel: ObservableObject {
                 guard let self else { return }
                 self.preparing -= take.count
                 // the attachments were cleared meanwhile (⌘N, the chat removed): what was being read has no field to land in
-                guard generation == self.attachGeneration else { done(); return }
+                // (a message typed after the clear may be waiting on a newer batch that finished first: this one was the
+                // last in the way, so it goes now)
+                guard generation == self.attachGeneration else {
+                    if self.preparing == 0, self.sendWhenReady { self.send() }
+                    done()
+                    return
+                }
                 var failures: [QCImages.Failure] = []
                 var held = self.sentImageBytes + self.images.reduce(0) { $0 + $1.base64Size }
                 var chatFull = false
