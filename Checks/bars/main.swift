@@ -343,7 +343,9 @@ for w in [CGFloat(320), 440, 640] {
               && abs(rows.five.width - QCUsageView.bar) < 0.5 && abs(rows.week.width - QCUsageView.bar) < 0.5 && abs(rows.five.minX - rows.week.minX) < 0.5,
               "\(rows)")
         check("\(name): the pair is centred on the indicator", abs((rows.five.minY + rows.week.maxY) / 2 - ui.midY) < 0.5, "\(rows) in \(ui)")
-        if let s = targets.marks["send"] { check("\(name): it ends before Send", ui.maxX <= s.minX, "\(ui.maxX) vs \(s.minX)") }
+        if let s = targets.marks["send"], let mic = targets.marks["mic"] {
+            check("\(name): it ends before the mic, the mic before Send", ui.maxX <= mic.minX && mic.maxX <= s.minX, "\(ui) / \(mic) / \(s)")
+        } else { check("\(name): the mic and Send are drawn", false) }
         // across the row: a full limit opens its notice above the field and the whole row moves down with the field
         if let f = first {
             check("\(name): the indicator never moves sideways or changes width", ui.minX == f.ui.minX && ui.width == f.ui.width, "\(ui) vs \(f.ui)")
@@ -384,9 +386,9 @@ do {
               ui != .zero && [.all, .label, .bars].contains { abs(ui.width - QCUsageView.width($0)) < 0.5 }, "\(ui)")
         if abs(ui.width - QCUsageView.width(.bars)) < 0.5 {
             barsAt = w
-            let t = targets.controls["t"]?.frame ?? .zero, s = targets.marks["send"] ?? .zero
-            check("narrow row at \(Int(w)): the bars, then the usage bars, then Send, none over another", t.maxX <= ui.minX && ui.maxX <= s.minX,
-                  "thinking \(t), usage \(ui), send \(s)")
+            let t = targets.controls["t"]?.frame ?? .zero, s = targets.marks["send"] ?? .zero, mic = targets.marks["mic"] ?? .zero
+            check("narrow row at \(Int(w)): the bars, the usage bars, the mic, then Send, none over another",
+                  t.maxX <= ui.minX && ui.maxX <= mic.minX && mic != .zero && mic.maxX <= s.minX, "thinking \(t), usage \(ui), mic \(mic), send \(s)")
             check("narrow row at \(Int(w)): the labels are letters", mw > 0 && mw < (wide ?? 0), "\(mw) vs \(wide ?? 0)")
             break
         }

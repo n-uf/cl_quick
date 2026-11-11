@@ -81,6 +81,7 @@ struct QCBar: View {
             }
             .padding(.bottom, 4)
             if let note = model.accountNote { QCNote(text: note) }
+            if let note = model.dictationNote { QCNote(text: note) }
             QCField(model: model, placeholder: "Ask anything", size: 15, grows: true)
             QCControls(model: model, inBar: true)
         }
@@ -130,6 +131,8 @@ struct QCWindow: View {
                 .overlay(alignment: .top) { fade }
                 .frame(minHeight: 44)         // a line of chat stays, whatever the window
             }
+            // Dictation off in macOS: its one line, over the field box
+            if let note = model.dictationNote { QCNote(text: note).padding(.horizontal, QCSpace.gap).padding(.bottom, 6) }
             // the field box: 10 pt from the window's sides and bottom, its text and controls 12 pt inside it
             VStack(alignment: .leading, spacing: 8) {
                 // the whole box above the picker row is the field: its padding and the gap to the row press into it
@@ -851,6 +854,7 @@ struct QCControls: View {
                     Color.clear.frame(width: QCUsageView.width(usage), height: 4).padding(.trailing, 4)
                 }
             }
+            QCMicButton(model: model).padding(.trailing, 4)
             if model.busy {
                 Button(action: model.stop) {
                     Image(systemName: "stop.fill").font(.system(size: 10, weight: .bold))
@@ -1580,6 +1584,31 @@ struct QCIconButton: View {
     }
 }
 
+/// The mic button just left of Send, Send's size: macOS Dictation into the field (QuickChat.dictate). At rest a soft
+/// `mic`; while dictating a `mic.fill` in Claude's clay on a warm fill, "Stop dictation". A control: a press never
+/// moves the window.
+struct QCMicButton: View {
+    @ObservedObject var model: QuickChatModel
+    @State private var hover = false
+
+    var body: some View {
+        let on = model.dictating
+        Button { model.dictate(!on) } label: {
+            Image(systemName: on ? "mic.fill" : "mic").font(.system(size: 13, weight: .medium))
+                .frame(width: QCSpace.row, height: QCSpace.row)
+                .foregroundColor(on ? QCColor.accent : hover ? QCColor.text : QCColor.muted)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(on ? QCColor.accent.opacity(0.18) : hover ? QCColor.hover : .clear))
+                .qcControl()
+        }
+        .buttonStyle(.plain)
+        .help(on ? "Stop dictation" : "Dictate")
+        .onHover { hover = $0 }
+        .qcMark("mic")
+        .accessibilityLabel(on ? "Stop dictation" : "Dictate")
+    }
+}
+
 /// A button in the header's corner capsule (New chat "+", Hide "✕"): 28 × 28, both glyphs at one size and weight, soft
 /// at rest, a lighter fill on hover and a darker one, slightly pressed in, while pressed. Its corners are the capsule's
 /// (concentric with the window's).
@@ -2093,6 +2122,9 @@ enum QuickChatRender {
         case "usage-wk": level.fiveHour = 30; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 85; m.level = level
         case "usage-full": level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 64; m.level = level
         case "usage-no5h": level.week = 21; m.level = level           // no 5-hour number yet: its track an outline
+        // the mic button: dictating (mic.fill in clay), dictation-off (macOS has Dictation off: the one line)
+        case "dictating": m.dictating = true; m.field = "How do I find which process"
+        case "dictation-off": m.dictationNote = QCDictation.offWords
         case "notinstalled": m.field = q1; m.barProblem = .notInstalled
         case "streaming": var t = t1; t.answer = String(a1.prefix(90)); t.phase = .streaming; m.turns = [t]
         case "answer": m.turns = [t1]

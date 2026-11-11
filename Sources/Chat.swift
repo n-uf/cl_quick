@@ -204,6 +204,10 @@ final class QuickChatModel: ObservableObject {
     @Published var accountNote: String?
     /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
     @Published var ended: QuickChatEnd?
+    /// macOS Dictation into the field is on (the mic button's own state: macOS doesn't say; QCDictation).
+    @Published var dictating = false
+    /// One line over the field when the mic button finds Dictation off in macOS (once a run); goes with the next send.
+    @Published var dictationNote: String?
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
@@ -216,6 +220,8 @@ final class QuickChatModel: ObservableObject {
     var hide: () -> Void = {}
     /// Esc: the keys list closes if it is open, else the panel hides.
     var escape: () -> Void = {}
+    /// The mic button: Dictation into the field on (true) or off.
+    var dictate: (Bool) -> Void = { _ in }
     var openSettings: (String?) -> Void = { _ in }
     var defaults: () -> QuickChatSettings = { .init() }
     /// The profiles the picker offers, with their levels.
@@ -279,9 +285,12 @@ final class QuickChatModel: ObservableObject {
     // MARK: keys
 
     func send() {
+        // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
+        if dictating, !busy, !blocked { dictate(false) }
         let q = field.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !busy, !blocked else { return }
         guard target != nil else { barProblem = .noProfile; return }
+        dictationNote = nil
         field = ""
         barProblem = nil
         // the chat on screen ended: this message starts a new one, with nothing from the old one
@@ -368,6 +377,7 @@ final class QuickChatModel: ObservableObject {
         closeProcess()
         ended = nil
         turns = []
+        if dictating { dictate(false) }
         if !keepField { field = "" }
         barProblem = nil
         accountNote = nil
@@ -845,6 +855,7 @@ final class QuickChat {
         model.resolveClaude = { [weak self] done in self?.resolveClaude(done) ?? done(nil) }
         model.hide = { [weak self] in self?.hide() }
         model.escape = { [weak self] in self?.escape() }
+        model.dictate = { [weak self] on in self?.dictate(on) }
         model.openSettings = { [weak self] id in self?.openSettings(id) }
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
@@ -1019,7 +1030,44 @@ final class QuickChat {
         if isOpen { model.warm() }          // that profile's `claude`, and its limits
     }
 
-    func hide() { panel?.orderOut(nil) }
+    func hide() {
+        if model.dictating { dictate(false) }     // Dictation doesn't go on into a hidden field
+        panel?.orderOut(nil)
+    }
+
+    /// Whether the mic button has told this run that Dictation is off (it says so once).
+    private var dictationOffSaid = false
+
+    /// The mic button. On: the panel takes the keyboard (key, without activating cl_quick), the field becomes its first
+    /// responder, and macOS's Dictation starts for it; Dictation turned off in macOS says where to turn it on, once.
+    /// Off: Dictation stops. The state is the button's own (QCDictation).
+    func dictate(_ on: Bool) {
+        guard on else {
+            if model.dictating, let p = panel {
+                QCDictation.end(for: p.firstResponder) { p.makeFirstResponder(nil); p.focusField() }
+            }
+            model.dictating = false
+            return
+        }
+        guard let p = panel, p.isVisible else { return }
+        if QCDictation.isOff() {
+            if !dictationOffSaid { model.dictationNote = QCDictation.offWords; dictationOffSaid = true }
+            return
+        }
+        if !p.isKeyWindow { p.makeKey() }
+        p.focusField()
+        // on the next turn of the run loop, once the keyboard (and the text input system with it) has moved to the
+        // panel, and only while the field still has it: Dictation binds to the text that has the keyboard
+        DispatchQueue.main.async { [weak self, weak p] in
+            guard let self, let p, p.isVisible, p.isKeyWindow, let field = p.firstResponder as? QCTextView else { return }
+            let started = QCDictation.begin(for: field)
+            self.model.dictating = started
+            if !started { self.model.dictationNote = QCDictation.failedWords }
+        }
+    }
+
+    /// The panel gave up the keyboard (another app, a click elsewhere): Dictation, which follows the keyboard, has ended.
+    func keyLost() { model.dictating = false }
     /// Esc: the keys list closes if it is open, else the panel hides.
     func escape() { if QCKeys.shared.shown { QCKeys.shared.close() } else { hide() } }
 
@@ -1033,6 +1081,7 @@ final class QuickChat {
         p.onEscape = { [weak self] in self?.escape() }
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
+        p.onKeyLost = { [weak self] in self?.keyLost() }
         p.onStep = { [weak self] model, by in
             guard let m = self?.model else { return }
             if model { m.stepModel(by) } else { m.stepThinking(by) }
@@ -1186,6 +1235,12 @@ enum QCQuiet {
 /// over full-screen apps.
 final class QuickChatPanel: NSPanel {
     var onEscape: () -> Void = {}
+    /// The panel gave up the keyboard.
+    var onKeyLost: () -> Void = {}
+    override func resignKey() {
+        super.resignKey()
+        onKeyLost()
+    }
     /// ⌘W: hide.
     var onClose: () -> Void = {}
     var onNewChat: () -> Void = {}

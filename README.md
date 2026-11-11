@@ -68,6 +68,9 @@ new folder and opens Claude Code's own sign-in for it in Terminal.
   default). A pick holds for that chat; a new chat goes back to the defaults. Click a bar to pick it, or the right half
   of a control's label for the next value and the left half for the one before (round past either end); the scroll
   wheel and ⌥⌘ arrows step too. The keyboard button at the end of the controls lists every key.
+- The mic button left of Send starts macOS Dictation into the field (cl_quick stays in the background: the panel takes
+  the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); a click again,
+  sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on.
 - The profile lives only in that row: its menu has each profile with its week and the address of its account in use,
   Settings for the chat's profile, and Add a profile…. The chat's top line has just the session and week meters, New
   chat and Hide.

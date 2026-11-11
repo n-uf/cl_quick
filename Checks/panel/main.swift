@@ -566,6 +566,87 @@ do {
     pb.releaseGlobally()
 }
 
+// ── the mic button: macOS Dictation into OUR field, cl_quick never activated (stand-ins for Dictation: no real one
+// starts here) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+do {
+    if !p.isVisible { chat.open(); spin() }
+    let keep = (send: QCDictation.send, handles: QCDictation.handles, isOff: QCDictation.isOff)
+    var sent: [(Selector, NSResponder?)] = []
+    var stopTaken = false, off = false
+    // the real routing first, without performing anything: the field doesn't take the actions, the app does (so a send
+    // to the field goes up the key window's chain to NSApplication)
+    p.focusField()
+    if let f = p.firstResponder as? QCTextView {
+        check("mic: the field passes startDictation: up the chain, the app takes it (and stopDictation:)",
+              !f.responds(to: QCDictation.start) && NSApp.responds(to: QCDictation.start) && NSApp.responds(to: QCDictation.stop)
+              && keep.handles(QCDictation.start, f) && keep.handles(QCDictation.stop, f))
+    } else { check("mic: the field has the keyboard", false) }
+    QCDictation.send = { sel, field in sent.append((sel, field)); return true }
+    QCDictation.handles = { sel, _ in sel == QCDictation.stop ? stopTaken : true }
+    QCDictation.isOff = { off }
+    defer { QCDictation.send = keep.send; QCDictation.handles = keep.handles; QCDictation.isOff = keep.isOff }
+    let m = chat.model
+
+    // a control: no press on it moves the window
+    if let mic = QCStepTargets.shared.marks["mic"] {
+        let H = p.frame.height
+        let pts = stride(from: mic.minX + 1, through: mic.maxX - 1, by: 3).flatMap { x in [NSPoint(x: x, y: H - mic.midY), NSPoint(x: x, y: H - mic.minY - 1)] }
+        check("mic: no press on it moves the window (\(pts.count) points)", pts.allSatisfy { QCDragView.surface(at: $0, in: p) == nil })
+        if let s = QCStepTargets.shared.marks["send"] { check("mic: just left of Send, as tall", mic.maxX <= s.minX && s.minX - mic.maxX <= 8 && abs(mic.height - s.height) < 0.5, "\(mic) \(s)") }
+    } else { check("mic: drawn", false) }
+
+    // a click: the panel takes the keyboard without activating cl_quick, the field is first responder, Dictation is
+    // started for that field
+    p.makeFirstResponder(nil)
+    m.dictate(true)
+    check("mic: Dictation starts on the next turn, once the panel has the keyboard (nothing at once)", sent.isEmpty)
+    spin(0.1)
+    let field = p.firstResponder as? QCTextView
+    check("mic: a click makes the panel key and the field its first responder", p.isKeyWindow && field != nil)
+    check("mic: and starts Dictation for that field", sent.count == 1 && sent[0].0 == QCDictation.start && sent[0].1 === field && m.dictating,
+          "\(sent.map { "\($0.0)" })")
+    // a click again: stopDictation: (taken by the app); never the start action again
+    stopTaken = true
+    m.dictate(false)
+    check("mic: a second click stops it with stopDictation:", sent.count == 2 && sent[1].0 == QCDictation.stop && !m.dictating)
+    // where nothing takes stopDictation:, the field gives up the keyboard and takes it back: nothing is sent
+    stopTaken = false
+    m.dictate(true); spin(0.1); m.dictate(false)
+    check("mic: without stopDictation:, nothing is sent to stop it (the start action would start it anew)",
+          sent.count == 3 && sent.allSatisfy { $0.0 != QCDictation.start || $0.1 is QCTextView } && !m.dictating
+          && p.firstResponder is QCTextView, "\(sent.map { "\($0.0)" })")
+    stopTaken = true
+    // a state gone stale (Dictation ended by Esc or the Dictation key) never starts it again: stopping sends a stop
+    m.dictating = true; m.dictate(false)
+    check("mic: a stale state stops with a stop, never a start", sent.last?.0 == QCDictation.stop && !m.dictating)
+    // the panel giving up the keyboard: Dictation has ended with it
+    m.dictate(true); spin(0.1)
+    p.onKeyLost()
+    check("mic: the panel losing the keyboard ends the dictating state", !m.dictating)
+    // a new chat or hiding stops it too
+    m.dictate(true); spin(0.1); m.newChat(keepField: true)
+    check("mic: a new chat stops Dictation", sent.last?.0 == QCDictation.stop && !m.dictating)
+    m.dictate(true); spin(0.1); chat.hide(); spin(0.1)
+    check("mic: hiding stops Dictation", sent.last?.0 == QCDictation.stop && !m.dictating && !p.isVisible)
+    chat.open(); spin()
+    // a start nothing takes: the button doesn't stay silent
+    let wasSend = QCDictation.send
+    QCDictation.send = { _, _ in false }
+    m.dictate(true); spin(0.1)
+    check("mic: a start nothing takes says so", !m.dictating && m.dictationNote == QCDictation.failedWords)
+    QCDictation.send = wasSend; m.dictationNote = nil
+    // Dictation off in macOS: one line saying where to turn it on, once a run; nothing is started
+    let before = sent.count
+    off = true
+    m.dictate(true)
+    check("mic: Dictation off says where to turn it on, starts nothing", m.dictationNote == QCDictation.offWords && !m.dictating && sent.count == before)
+    m.dictationNote = nil
+    m.dictate(true)
+    check("mic: and says it once a run", m.dictationNote == nil && sent.count == before)
+
+    m.turns = [oneTurn()]; spin(0.6)          // the chat again (the new chat above made it the bar), for what follows
+}
+
 // ── after a move, a content change fit() skipped is retried ───────────────────────────────────────────────────────────
 do {
     var retried = 0

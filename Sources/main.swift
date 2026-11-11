@@ -17,7 +17,8 @@
 //                                       the size: indicator-5h, indicator-wk, indicator-no5h, indicator-full.
 //                                       QC_RENDER_BUSY=1 draws it over a busy page of text; the profile menu:
 //                                       profilemenu (addresses blurred), profilemenu-address (the pointer on Main's),
-//                                       profilemenu-copied, profilemenu-highlight
+//                                       profilemenu-copied, profilemenu-highlight; the mic button: dictating,
+//                                       dictation-off
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
 //                                       accounts-two, accounts-switching, accounts-wrong, accounts-timedout,
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
