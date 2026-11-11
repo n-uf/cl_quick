@@ -2,21 +2,19 @@
 // at all"; the control "changes its size and escapes from the mouse"), without a mouse or any event posting. The real
 // panel is opened (read-only: nothing is written under the user's folders) and laid out by SwiftUI, on a model list in
 // the shape Claude Code gives it (each family by name alone, the version in its description), with four, three and two
-// families; as the bar and as the chat window, at the first width and at the least (320):
-//   - at rest the "Opus · High" pill keeps one width and place through every value ("must not wobble"); a click on it
-//     opens the bars over the row and nothing in the row moves; a press inside keeps them open, one outside closes
-//     them, as do the pill again and Esc;
-//   - the model control has a bar for every family the account has;
-//   - picking every model and every thinking level leaves every control and every bar exactly where it was;
+// families; as the bar and as the chat window, at 320, 440 and 640:
+//   - the model control has a bar for every family the account has, always shown, and the bars end before Send;
+//   - picking every model and every thinking level leaves every control, every bar and Send exactly where they were;
 //   - a click on each bar's centre (the action of the bar found at that point) picks that bar's value; a level the
 //     model doesn't take does nothing;
 //   - the scroll wheel over a control steps it (a notch a step, a trackpad's deltas add up, momentum not), and
 //     scrolling elsewhere is left alone;
-//   - the bar's usage indicator shows the limit closest to full, its label on that window's row, never moving sideways
-//     or changing width.
+//   - the bar's usage indicator shows the limit closest to full, its label on that window's row (or, in a row too
+//     narrow, the bars alone), never moving sideways or changing width, and ending before Send; ⌘W hides.
 //   Checks/bars.sh
 
 import AppKit
+import SwiftUI
 
 Files.readOnly = true
 let app = NSApplication.shared
@@ -50,27 +48,26 @@ let fullList: [QuickChatModelEntry] = [
 ]
 let levels = QuickChatThinking.allCases
 
-/// Every control's and bar's frame, as SwiftUI laid them out, with the pill and the open bars' panel.
+/// Every control's and bar's frame, as SwiftUI laid them out, and Send's.
 func frames() -> [String: CGRect] {
     var f: [String: CGRect] = [:]
     for (k, v) in targets.controls { f[k] = v.frame }
     for (k, v) in targets.bars { f[k] = v.frame }
-    if let pill = targets.pill { f["pill"] = pill.frame }
-    if let o = targets.openFrame { f["open"] = o }
+    for (k, v) in targets.halves { f[k] = v.frame }
+    if let s = targets.marks["send"] { f["send"] = s }
     return f
 }
-/// A mouse-down at a point of the hosting view, as the window would deliver it, handed to the press handler the local
-/// monitor uses (not posted: nothing reaches the screen).
-func press(_ q: CGPoint) {
-    guard let e = NSEvent.mouseEvent(with: .leftMouseDown, location: inWindow(q), modifierFlags: [], timestamp: 0,
-                                     windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
-        check("a mouse-down event can be made", false); return
-    }
-    targets.press(e)
+/// A click on a label's half ("m>", "t<"): the half found at its centre must be exactly that one, and no bar; its
+/// action is then called.
+func press(_ key: String) -> Bool {
+    guard let h = targets.halves[key] else { return false }
+    let c = CGPoint(x: h.frame.midX, y: h.frame.midY)
+    let hit = targets.halves.filter { $0.value.frame.contains(c) }
+    guard hit.count == 1, hit.first?.key == key, !targets.bars.contains(where: { $0.value.frame.contains(c) }) else { return false }
+    h.press()
     spin()
+    return true
 }
-/// The pill's frame alone (the row at rest).
-func pillFrame() -> [String: CGRect] { targets.pill.map { ["pill": $0.frame] } ?? [:] }
 func same(_ a: [String: CGRect], _ b: [String: CGRect]) -> Bool {
     a.keys.sorted() == b.keys.sorted() && a.allSatisfy { k, r in
         guard let s = b[k] else { return false }
@@ -106,39 +103,24 @@ func width(_ w: CGFloat) {
 
 func scenario(_ name: String, families: [QuickChatModelChoice]) {
     let top = families.last!
-    m.controlsOpen = false
     m.choose(top); m.choose(QuickChatThinking.high)
     spin(0.4)
-    // at rest: the "Opus · High" pill keeps one width and place through every value ("must not wobble"), and the gap
-    // after it is still the window's to move
-    let rest = pillFrame()
-    check("\(name): the pill is laid out", rest["pill"] != nil, "\(rest)")
-    check("\(name): at rest the bars are closed", targets.controls.isEmpty && targets.bars.isEmpty, "\(targets.controls.keys.sorted())")
-    for f in families {
-        for l in levels {
-            m.choose(f); m.choose(l); spin(0.06)
-            check("\(name): at rest, \(f.rawValue) / \(l.rawValue) moves nothing", same(pillFrame(), rest), moved(rest, pillFrame()))
-        }
-    }
-    if let pf = rest["pill"] {
-        check("\(name): a press on the pill is not a move", QCDragView.surface(at: inWindow(CGPoint(x: pf.midX, y: pf.midY)), in: p) == nil)
-        check("\(name): the gap after the pill moves the window", QCDragView.surface(at: inWindow(CGPoint(x: pf.maxX + 3, y: pf.midY)), in: p) != nil)
-    }
-    // a click on the pill opens the bars over the row; nothing in the row moves for it
-    m.choose(top); m.choose(QuickChatThinking.high); spin()
-    targets.pill?.toggle(); spin(0.3)
-    check("\(name): a click on the pill opens the bars", m.controlsOpen && targets.controls["m"] != nil && targets.controls["t"] != nil)
-    check("\(name): opening moves nothing in the row", same(pillFrame(), rest), moved(rest, pillFrame()))
     let base = frames()
-    // the operator couldn't manage the model at all: one bar per family, each its own target
+    // the operator couldn't manage the model at all: one bar per family, each its own target, always shown
     check("\(name): a bar for every family", m.modelChoices.map(\.choice) == families, "\(m.modelChoices.map(\.choice))")
     let keys = ["m", "t"] + families.indices.map { "m\($0)" } + levels.indices.map { "t\($0)" }
-    check("\(name): every control and bar is laid out, and no other", Set(base.keys).subtracting(["pill", "open"]) == Set(keys), "\(base.keys.sorted())")
-    check("\(name): the open bars are drawn over the pill, not beside it", (base["open"] ?? .zero).intersects(rest["pill"] ?? .zero))
-    if let o = base["open"], let pf = rest["pill"] {
-        check("\(name): the open bars keep to the row's height (nothing over the field or past the card)",
-              o.minY >= pf.minY - 0.5 && o.maxY <= pf.maxY + 0.5, "\(o) vs \(pf)")
-        check("\(name): the open bars start 4 pt left of the pill", abs(o.minX - (pf.minX - 4)) < 0.6, "\(o.minX) vs \(pf.minX)")
+    let halves = ["m<", "m>", "t<", "t>"]
+    check("\(name): every control, bar and label half is laid out, and no other", Set(base.keys).subtracting(["send"]) == Set(keys + halves), "\(base.keys.sorted())")
+    // each label splits in two halves side by side, the left one from the control's edge, the right one up to the bars
+    for c in ["m", "t"] {
+        let l = base["\(c)<"] ?? .zero, r = base["\(c)>"] ?? .zero, whole = base[c] ?? .zero, first = base["\(c)0"] ?? .zero
+        check("\(name): \(c)'s label halves split it", abs(l.minX - whole.minX) < 0.01 && abs(l.maxX - r.minX) < 0.01 && r.maxX <= first.minX + 0.01
+              && abs(l.width - r.width) < 0.6 && l.width > 6 && abs(l.height - whole.height) < 0.01 && abs(r.height - whole.height) < 0.01,
+              "\(l) \(r) in \(whole), first bar \(first)")
+    }
+    // the bars never overlap Send
+    if let s = base["send"], let t = base["t"] {
+        check("\(name): the bars end before Send", t.maxX <= s.minX, "\(t.maxX) vs \(s.minX)")
     }
     for k in keys.dropFirst(2) {
         let r = base[k] ?? .zero
@@ -165,12 +147,16 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     }
     // the window's own hit test, at the real coordinates: a press on any bar or label never starts a move, and the
     // empty gap after the controls does (so the frames are where the window sees them)
-    for k in keys {
+    for k in keys + halves {
         let f = base[k] ?? .zero
         let pts = k.count == 1 ? [CGPoint(x: f.minX + 3, y: f.midY), CGPoint(x: f.midX, y: f.midY)] : [CGPoint(x: f.midX, y: f.midY), CGPoint(x: f.midX, y: f.minY + 2)]
         for q in pts {
             check("\(name): a press at \(k) (\(Int(q.x)), \(Int(q.y))) is not a move", QCDragView.surface(at: inWindow(q), in: p) == nil)
         }
+    }
+    if let t = base["t"] {
+        // past the outline (4 pt) and the row's 2 pt spacing: the spacer, the window's to move
+        check("\(name): the gap after the bars moves the window", QCDragView.surface(at: inWindow(CGPoint(x: t.maxX + 7, y: t.midY)), in: p) != nil)
     }
     // the limits changing (the bar's usage indicator) moves nothing (a full limit is another matter: its notice opens
     // above the field and the row moves down with the field, as it always has)
@@ -202,6 +188,32 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
         }
     }
     check("\(name): the faint levels keep their place", same(frames(), base), moved(base, frames()))
+    // a click on the label's right half: the next value, round past the last; on its left half the one before, round
+    // past the first; only values the model takes; nothing moves on any of them
+    func round(_ k: String, _ n: Int, _ now: () -> String) -> [String] {
+        var seen = [now()]
+        for i in 0..<n {
+            check("\(name): the half at \(k)'s centre is \(k) (click \(i + 1))", press(k))
+            seen.append(now())
+            check("\(name): \(k) click \(i + 1) (\(now())) moves nothing", same(frames(), base), moved(base, frames()))
+        }
+        return seen
+    }
+    let fam = { m.resolvedModel.family.rawValue }, lvl = { m.effectiveThinking.rawValue }
+    m.choose(families[0]); spin()
+    let names = families.map(\.rawValue)
+    var seen = round("m>", families.count, fam)
+    check("\(name): the model's right half goes round forward", seen == names + [names[0]], "\(seen)")
+    seen = round("m<", families.count, fam)
+    check("\(name): the model's left half goes round back", seen == [names[0]] + names.reversed(), "\(seen)")
+    for f in families {
+        m.choose(f); m.choose(QuickChatThinking.off); spin()
+        let steps = takes[f]!.map(\.rawValue)
+        seen = round("t>", steps.count, lvl)
+        check("\(name): \(f.rawValue), thinking's right half goes round forward over what it takes", seen == steps + ["off"], "\(seen)")
+        seen = round("t<", steps.count, lvl)
+        check("\(name): \(f.rawValue), thinking's left half goes round back over what it takes", seen == ["off"] + steps.reversed(), "\(seen)")
+    }
     // the scroll wheel
     m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()
     targets.scroll(at: centre("t"), by: 1, precise: false, began: true); spin()
@@ -226,31 +238,6 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     spin()
     check("\(name): and steps nothing", m.effectiveThinking == was, "\(m.effectiveThinking)")
     check("\(name): after it all, nothing moved", same(frames(), base), moved(base, frames()))
-    // presses through the monitor's own handler: one inside the open bars keeps them open; one on the pill is the
-    // pill's (the handler leaves it, the button closes them: once, never closed and reopened); one outside closes them
-    if let b0 = base["t0"] { press(CGPoint(x: b0.midX, y: b0.midY)) }
-    check("\(name): a press on a bar keeps them open", m.controlsOpen)
-    if let pf = rest["pill"] { press(CGPoint(x: pf.midX, y: pf.midY)) }
-    check("\(name): a press on the pill leaves it to the pill", m.controlsOpen)
-    targets.pill?.toggle(); spin(0.3)
-    check("\(name): and the pill's click closes them, once", !m.controlsOpen)
-    targets.pill?.toggle(); spin(0.3)
-    press(CGPoint(x: 4, y: 4))
-    check("\(name): a click outside closes them", !m.controlsOpen && targets.controls.isEmpty && targets.openFrame == nil)
-    check("\(name): closing moves nothing in the row", same(pillFrame(), rest), moved(rest, pillFrame()))
-    // Esc (the panel's cancel, as the field's Esc and the menu key reach it): closes them, the panel stays
-    targets.pill?.toggle(); spin(0.3)
-    p.cancelOperation(nil); spin()
-    check("\(name): Esc closes them, and the panel stays", !m.controlsOpen && p.isVisible)
-    // at rest, the scroll wheel over the pill steps thinking, sideways the model
-    if let pf = rest["pill"] {
-        m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()
-        targets.scroll(at: CGPoint(x: pf.midX, y: pf.midY), by: 1, precise: false, began: true); spin()
-        check("\(name): a notch over the pill: thinking a step up", m.effectiveThinking == .medium && !m.controlsOpen, "\(m.effectiveThinking)")
-        targets.scroll(at: CGPoint(x: pf.midX, y: pf.midY), by: 1, precise: false, began: true, sideways: true); spin()
-        check("\(name): sideways over the pill: the model a step up", m.resolvedModel.family == top, "\(m.resolvedModel.family)")
-        check("\(name): and the pill didn't move", same(pillFrame(), rest), moved(rest, pillFrame()))
-    }
 }
 
 let sets: [[QuickChatModelChoice]] = [[.haiku, .sonnet, .opus, .fable], [.haiku, .sonnet, .opus], [.haiku, .sonnet]]
@@ -259,47 +246,91 @@ for fams in sets {
     ModelCatalog.shared.set(list, profile: t.profileID, account: t.accountUUID)
     m.turns = []
     spin(0.6)
-    width(QuickChatRoot.width)
-    scenario("\(fams.count) families, bar at the first width", families: fams)
-    width(QuickChatRoot.minWidth)
-    scenario("\(fams.count) families, bar at 320", families: fams)
+    for w in [CGFloat(320), 440, 640] {
+        width(w)
+        scenario("\(fams.count) families, bar at \(Int(w))", families: fams)
+    }
     var turn = QuickChatTurn(question: "q", answer: "a", model: "Opus 5.5"); turn.phase = .done
     m.turns = [turn]
     spin(0.6)
-    width(QuickChatRoot.width)
-    scenario("\(fams.count) families, window at the first width", families: fams)
-    width(QuickChatRoot.minWidth)
-    scenario("\(fams.count) families, window at 320", families: fams)
+    for w in [CGFloat(320), 440, 640] {
+        width(w)
+        scenario("\(fams.count) families, window at \(Int(w))", families: fams)
+    }
 }
 
 // the bar's usage indicator: the limit closest to full, its label and share on that window's row, one width whatever
 // it says; the profile's dot in the same colour
 m.turns = []
 spin(0.6)
-for w in [QuickChatRoot.width, CGFloat(440)] {
+for w in [CGFloat(320), 440, 640] {
     width(w)
-    var first: CGRect?
+    var first: (ui: CGRect, five: CGRect, week: CGRect)?
     for (five, week) in [(78.0, 20.0), (30.0, 85.0), (9.0, 9.5), (100.0, 64.0), (0.0, 100.0), (55.0, 54.9)] {
         var l = QuickChatLevel(); l.fiveHour = five; l.fiveHourResets = Date().addingTimeInterval(7200); l.week = week
         l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin()
         let higher = l.binding()?.id ?? "-"
-        let ui = targets.marks["usage"] ?? .zero, label = targets.marks["usage-label"] ?? .zero, row = targets.marks["usage-\(higher)"] ?? .zero
+        let ui = targets.marks["usage"] ?? .zero, label = targets.marks["usage-label"] ?? .zero, share = targets.marks["usage-share"] ?? .zero
+        let row = targets.marks["usage-\(higher)"] ?? .zero
+        let rows = (five: targets.marks["usage-5h"] ?? .zero, week: targets.marks["usage-wk"] ?? .zero)
         let name = "usage at \(Int(w)), 5h \(five) wk \(week)"
-        check("\(name): shown", ui != .zero && label != .zero, "\(ui) \(label)")
+        // a narrow row keeps the two bars alone (the share on hover)
+        let barsOnly = abs(ui.width - QCUsageView.width(numbers: false)) < 0.5
+        check("\(name): shown", ui != .zero, "\(ui)")
         check("\(name): \(higher) is the higher one", higher == (five >= week || l.full()?.id == "5h" ? "5h" : "wk") || (l.full()?.id == "wk" && higher == "wk"))
-        check("\(name): its label sits on the \(higher) row", abs(label.midY - row.midY) <= 1.5, "\(label.midY) vs \(row.midY)")
+        if !barsOnly {
+            // the label, then the bars, then the share, the label and share on the higher window's row
+            check("\(name): its label sits on the \(higher) row", label != .zero && abs(label.midY - row.midY) <= 1.5, "\(label.midY) vs \(row.midY)")
+            check("\(name): its share sits on the \(higher) row", share != .zero && abs(share.midY - row.midY) <= 1.5, "\(share.midY) vs \(row.midY)")
+            check("\(name): the label comes before the bars, the share after", label.maxX <= row.minX + 0.01 && share.minX >= row.maxX - 0.01,
+                  "label \(label), bar \(row), share \(share)")
+        }
+        if let s = targets.marks["send"] { check("\(name): it ends before Send", ui.maxX <= s.minX, "\(ui.maxX) vs \(s.minX)") }
         // across the row: a full limit opens its notice above the field and the whole row moves down with the field
-        if let f = first { check("\(name): the indicator never moves sideways or changes width", ui.minX == f.minX && ui.width == f.width, "\(ui) vs \(f)") } else { first = ui }
+        if let f = first {
+            check("\(name): the indicator never moves sideways or changes width", ui.minX == f.ui.minX && ui.width == f.ui.width, "\(ui) vs \(f.ui)")
+            check("\(name): its bars never move sideways", rows.five.minX == f.five.minX && rows.week.minX == f.week.minX && rows.five.width == f.five.width,
+                  "\(rows) vs \(f)")
+        } else { first = (ui, rows.five, rows.week) }
     }
 }
 
-// ⌘W hides at once, the bars open or not (Esc closes them first; ⌘W doesn't take two presses)
-m.controlsOpen = true; spin(0.3)
+// narrower than the panel ever is (a row of its own in the panel, made narrower step by step): the labels shorten and
+// the usage indicator keeps its bars alone, but never goes, and nothing reaches Send; its card then gives both shares
+do {
+    var l = QuickChatLevel(); l.fiveHour = 78; l.fiveHourResets = Date().addingTimeInterval(7200); l.week = 20
+    l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l
+    let probe = NSHostingView(rootView: QCControls(model: m, inBar: true))
+    p.contentView?.addSubview(probe)
+    probe.frame = NSRect(x: 0, y: 0, width: 640, height: QCSpace.row); spin()
+    let wide: CGFloat? = targets.controls["m"]?.frame.width
+    var barsAt: CGFloat?
+    for w in stride(from: CGFloat(320), through: 160, by: -4) {
+        probe.frame = NSRect(x: 0, y: 0, width: w, height: QCSpace.row); spin()
+        let ui = targets.marks["usage"] ?? .zero, mw = targets.controls["m"]?.frame.width ?? 0
+        check("narrow row at \(Int(w)): the usage indicator is shown", ui != .zero && (abs(ui.width - QCUsageView.width(numbers: true)) < 0.5
+              || abs(ui.width - QCUsageView.width(numbers: false)) < 0.5), "\(ui)")
+        if abs(ui.width - QCUsageView.width(numbers: false)) < 0.5 {
+            barsAt = w
+            let t = targets.controls["t"]?.frame ?? .zero, s = targets.marks["send"] ?? .zero
+            check("narrow row at \(Int(w)): the bars, then the usage bars, then Send, none over another", t.maxX <= ui.minX && ui.maxX <= s.minX,
+                  "thinking \(t), usage \(ui), send \(s)")
+            check("narrow row at \(Int(w)): the labels are letters", mw > 0 && mw < (wide ?? 0), "\(mw) vs \(wide ?? 0)")
+            break
+        }
+    }
+    check("a narrow enough row keeps the usage bars alone", barsAt != nil)
+    check("with the bars alone the card gives both shares, else the one the row lacks",
+          QCUsageCard.leftOut(l, rowShowsShare: false) == nil && QCUsageCard.leftOut(l, rowShowsShare: true) == "5h")
+    probe.removeFromSuperview(); spin()
+}
+
+// ⌘W hides at once
 if let w = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber,
                             context: nil, characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13) {
     check("⌘W is taken", p.performKeyEquivalent(with: w))
     spin()
-    check("⌘W hides the panel in one press, and the bars close with it", !p.isVisible && !m.controlsOpen, "visible \(p.isVisible), open \(m.controlsOpen)")
+    check("⌘W hides the panel", !p.isVisible)
 } else { check("a ⌘W event can be made", false) }
 
 CheckQuiet.verify("at the end")

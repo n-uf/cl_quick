@@ -163,6 +163,16 @@ enum QuickChatModels {
         return list.indices.contains(i) ? list[i] : nil
     }
 
+    /// The entry `by` steps from `now`, going round: past the end it starts again from the first, before the start from
+    /// the last (a click on a control's label). A `now` that isn't in the list: a step up is the first entry, a step
+    /// down the last. Nil only for an empty list.
+    static func cycle<T: Equatable>(_ list: [T], from now: T?, by: Int) -> T? {
+        guard !list.isEmpty else { return nil }
+        guard let i = now.flatMap({ list.firstIndex(of: $0) }) else { return by > 0 ? list.first : list.last }
+        let n = list.count
+        return list[((i + by) % n + n) % n]
+    }
+
     /// Whether a step uses the account's limits faster: Fable, and thinking at Extra or Max.
     static func costly(_ f: QuickChatModelChoice) -> Bool { f == .fable }
     static func costly(effort: String?) -> Bool { effort == "xhigh" || effort == "max" }

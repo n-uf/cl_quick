@@ -351,6 +351,17 @@ check("steps: an empty list has no step", QuickChatModels.step([QuickChatModelCh
 check("steps: thinking, Off to Low and Max as the top",
       QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "off", by: 1) == "low"
       && QuickChatModels.step(["off", "low", "medium", "high", "xhigh", "max"], from: "max", by: 1) == nil)
+// a click on a control's label goes round: right half the next, left half the one before
+check("cycle: up and down inside", QuickChatModels.cycle(fams, from: .sonnet, by: 1) == .opus && QuickChatModels.cycle(fams, from: .sonnet, by: -1) == .haiku)
+check("cycle: past the end the first, before the start the last",
+      QuickChatModels.cycle(fams, from: .opus, by: 1) == .haiku && QuickChatModels.cycle(fams, from: .haiku, by: -1) == .opus)
+check("cycle: from a value not in the list, up the first, down the last",
+      QuickChatModels.cycle(fams, from: .fable, by: 1) == .haiku && QuickChatModels.cycle(fams, from: .fable, by: -1) == .opus
+      && QuickChatModels.cycle(fams, from: nil, by: 1) == .haiku && QuickChatModels.cycle(fams, from: nil, by: -1) == .opus)
+check("cycle: one entry stays, none is nil", QuickChatModels.cycle([1], from: 1, by: 1) == 1 && QuickChatModels.cycle([1], from: 1, by: -1) == 1
+      && QuickChatModels.cycle([Int](), from: nil, by: 1) == nil)
+check("cycle: every step forward comes back round", (0..<6).reduce(Optional(0)) { a, _ in a.flatMap { QuickChatModels.cycle(Array(0..<6), from: $0, by: 1) } } == 0
+      && (0..<6).reduce(Optional(0)) { a, _ in a.flatMap { QuickChatModels.cycle(Array(0..<6), from: $0, by: -1) } } == 0)
 check("cost: Fable, Extra and Max", QuickChatModels.costly(.fable) && !QuickChatModels.costly(.opus)
       && QuickChatModels.costly(effort: "xhigh") && QuickChatModels.costly(effort: "max") && !QuickChatModels.costly(effort: "high")
       && !QuickChatModels.costly(effort: nil))

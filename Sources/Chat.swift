@@ -199,14 +199,6 @@ final class QuickChatModel: ObservableObject {
     @Published var accountNote: String?
     /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
     @Published var ended: QuickChatEnd?
-    /// The model and thinking bars are open over the row (a click on the "Opus · High" pill); a click outside them, Esc
-    /// or hiding the panel closes them.
-    @Published var controlsOpen = false
-
-    /// Esc: the open bars close first; else the panel hides.
-    func escape() {
-        if controlsOpen { controlsOpen = false } else { hide() }
-    }
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
@@ -333,7 +325,6 @@ final class QuickChatModel: ObservableObject {
     func newChat(keepField: Bool = false, dropsSwitch: Bool = true) {
         generation += 1
         closeProcess()
-        controlsOpen = false
         ended = nil
         turns = []
         if !keepField { field = "" }
@@ -361,6 +352,18 @@ final class QuickChatModel: ObservableObject {
     @discardableResult func stepThinking(_ by: Int) -> Bool {
         guard let t = QuickChatModels.step(thinkingSteps, from: effectiveThinking, by: by) else { return false }
         thinking = t
+        return true
+    }
+    /// A click on a control's label: its right half the next family (or level the model takes), its left half the one
+    /// before, going round past either end. Like a click on a bar, it hands the keyboard to the field.
+    @discardableResult func cycleModel(_ by: Int) -> Bool {
+        guard let c = QuickChatModels.cycle(modelChoices.map(\.choice), from: resolvedModel.family, by: by), c != resolvedModel.family else { return false }
+        choose(c)
+        return true
+    }
+    @discardableResult func cycleThinking(_ by: Int) -> Bool {
+        guard let t = QuickChatModels.cycle(thinkingSteps, from: effectiveThinking, by: by), t != effectiveThinking else { return false }
+        choose(t)
         return true
     }
 
@@ -972,7 +975,7 @@ final class QuickChat {
         if isOpen { model.warm() }          // that profile's `claude`, and its limits
     }
 
-    func hide() { model.controlsOpen = false; panel?.orderOut(nil) }
+    func hide() { panel?.orderOut(nil) }
 
     func shutdown() { hotKey.unregister(); model.shutdown() }
 
@@ -981,7 +984,7 @@ final class QuickChat {
 
     private func makePanel() -> QuickChatPanel {
         let p = QuickChatPanel()
-        p.onEscape = { [weak self] in self?.model.escape() }
+        p.onEscape = { [weak self] in self?.hide() }
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onStep = { [weak self] model, by in
@@ -1194,7 +1197,7 @@ final class QuickChatPanel: NSPanel {
         case "a": action = #selector(NSText.selectAll(_:))
         case "z": action = shift ? Selector(("redo:")) : Selector(("undo:"))
         case "n" where !shift: onNewChat(); return true
-        case "w" where !shift: onClose(); return true          // hides at once, open bars or not (Esc closes them first)
+        case "w" where !shift: onClose(); return true
         default: break
         }
         if let action, NSApp.sendAction(action, to: nil, from: self) { return true }
