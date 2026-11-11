@@ -22,12 +22,14 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
 func spin(_ s: TimeInterval = 0.4) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
 func panel() -> QuickChatPanel? { NSApp.windows.compactMap { $0 as? QuickChatPanel }.first }
 func note(_ name: String) -> Notification { Notification(name: Notification.Name(name)) }
-/// The middle of the header's empty gap, between the meters and the buttons as drawn (the window's middle without
-/// meters).
-func headerGapX(_ W: CGFloat) -> CGFloat {
+/// The middle of the header's empty gap, between the meters and the buttons as drawn; without meters (no numbers yet),
+/// between the window's 10 pt line and the buttons. Nil (and a failed check) when the header isn't drawn or has no gap.
+func headerGapX(_ W: CGFloat) -> CGFloat? {
     let mk = QCStepTargets.shared.marks
-    if let m = mk["header-meters"], let b = mk["header-buttons"], b.minX - m.maxX > 8 { return (m.maxX + b.minX) / 2 }
-    return W * 0.5
+    guard let b = mk["header-buttons"] else { check("header: its buttons are drawn, to find its gap", false); return nil }
+    let left = chat.model.level != nil ? mk["header-meters"]?.maxX : QCSpace.gap
+    guard let l = left, b.minX - l > 16 else { check("header: an empty gap between its meters and buttons", false, "\(String(describing: left)) \(b)"); return nil }
+    return (l + b.minX) / 2
 }
 func oneTurn() -> QuickChatTurn { var t = QuickChatTurn(question: "q", answer: "a", model: "Haiku 5.5"); t.phase = .done; return t }
 
@@ -188,7 +190,8 @@ func movesFromEmptyOnly(_ label: String) {
     if chat.model.isWindow {
         // the header's empty space under the hidden title bar: the gap between the meters and the buttons, at the title
         // bar's heights (4 to 28 pt from the top)
-        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: headerGapX(W), y: H - d))) }
+        let gx = headerGapX(W) ?? 0          // (none found: a failed check already, and x 0 is no surface)
+        for d in [4, 10, 16, 22, 28] as [CGFloat] { empty.append(("header gap \(Int(d)) pt from the top", NSPoint(x: gx, y: H - d))) }
         empty.append(("empty chat", NSPoint(x: W / 2, y: H / 2)))
     }
     let notSurfaces = empty.filter { QCDragView.surface(at: $0.1, in: p) == nil }
@@ -423,7 +426,7 @@ check("chat: it can grow both ways", p.contentMaxSize.width > p.frame.width + 10
 // ── the cursor: the open hand only where a press moves the window, never fighting the pointing hand, never left behind ─
 do {
     let W = p.frame.width, H = p.frame.height
-    let gap = NSPoint(x: headerGapX(W), y: H - 16)     // the header's empty gap
+    let gap = NSPoint(x: headerGapX(W) ?? 0, y: H - 16)     // the header's empty gap
     check("cursor: the open hand over an empty area", QCDragView.cursor(at: gap, in: p) === NSCursor.openHand)
     check("cursor: nothing set by the drag surfaces in the resize region (the system's resize cursor)",
           QCDragView.cursor(at: NSPoint(x: 1, y: H / 2), in: p) == nil && QCDragView.cursor(at: NSPoint(x: 2, y: 2), in: p) == nil)
@@ -482,7 +485,25 @@ do {
     let headerBand = NSRect(x: 0, y: p.frame.height - QCSpace.header, width: p.frame.width, height: QCSpace.header)
     func walk(_ v: NSView) { if v is QCCursorView, headerBand.intersects(v.convert(v.bounds, to: nil)) { hands += 1 }; v.subviews.forEach(walk) }
     walk(cv)
+    // (the header is drawn: its buttons' capsule is in that band)
+    let capsule = QCStepTargets.shared.marks["header-buttons"]
+    check("header: drawn, its buttons in the top band", capsule.map { $0.minY >= 0 && $0.maxY <= QCSpace.header } == true, "\(String(describing: capsule))")
     check("header: no profile name or address zone in it (\(hands) pointing-hand zones)", hands == 0)
+    // corner A: New chat and Hide in one capsule, 9 pt in from the top and the right, a row high, two 28 pt buttons 2 pt apart
+    if let c = capsule {
+        check("header: the buttons' capsule is 9 pt in from the top and the right", abs(c.minY - QCSpace.cornerInset) < 0.5
+              && abs(p.frame.width - c.maxX - QCSpace.cornerInset) < 0.5, "\(c) in \(p.frame.width)")
+        check("header: the capsule holds two 28 pt buttons 2 pt apart", abs(c.height - QCSpace.row) < 0.5 && abs(c.width - (2 * QCSpace.row + 2)) < 0.5, "\(c)")
+        check("header: the capsule's corners are concentric with the window's", QCCornerButton.radius == QCSpace.corner - QCSpace.cornerInset)
+        if let m = QCStepTargets.shared.marks["header-meters"] {
+            check("header: the meters are level with the capsule", abs(m.midY - c.midY) < 1, "\(m) vs \(c)")
+        }
+        // a press anywhere on the capsule, the gap between the buttons included, is never a move
+        let H = p.frame.height
+        let pts = stride(from: c.minX + 1, through: c.maxX - 1, by: 2).flatMap { x in [NSPoint(x: x, y: H - c.midY), NSPoint(x: x, y: H - c.minY - 1)] }
+        let moving = pts.filter { QCDragView.surface(at: $0, in: p) != nil }
+        check("header: no press on the capsule moves the window (\(pts.count) points)", moving.isEmpty, "\(moving.prefix(4))")
+    }
     var wk = QuickChatLevel(); wk.week = 40
     let words = QCHeaderLine.spoken(level: wk)
     check("header: its words are the meters' alone, no profile name or address",
@@ -550,7 +571,7 @@ do {
     let keep = cv.onIntrinsicChange
     cv.onIntrinsicChange = { retried += 1; keep() }
     var surface: QCDragView?
-    let gap = NSPoint(x: headerGapX(p.frame.width), y: p.frame.height - 16)
+    let gap = NSPoint(x: headerGapX(p.frame.width) ?? 0, y: p.frame.height - 16)
     surface = QCDragView.surface(at: gap, in: p)
     QCDragView.drag = { w, _ in w.setFrameOrigin(NSPoint(x: w.frame.minX + 10, y: w.frame.minY)) }
     if let d = surface { press(d, at: gap) }

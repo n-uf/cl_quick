@@ -190,16 +190,19 @@ struct QCHeader: View {
     var body: some View {
         let on = meterHover || pictureHover
         // the meters on the left, on the window's 10 pt line (where the answers and the field box start), the empty
-        // middle the window's to move, New chat and Hide on the right; 40 pt high, centred
+        // middle the window's to move, and in the corner New chat and Hide together in one darker capsule, 9 pt in from
+        // the top and the right, its corners following the window's; 46 pt high, all centred on one line
         HStack(spacing: 8) {
             QCHeaderInfo(level: model.level, meterHover: $meterHover, state: $line)
-            HStack(spacing: 0) {
-                QCIconButton(symbol: "square.and.pencil", help: "New chat (⌘N)", size: QCSpace.row) { model.newChat() }
-                QCIconButton(symbol: "xmark", help: "Hide (Esc)", size: QCSpace.row) { model.hide() }
+            HStack(spacing: 2) {
+                QCCornerButton(symbol: "plus", help: "New chat (⌘N)", key: "new") { model.newChat() }
+                QCCornerButton(symbol: "xmark", help: "Hide (Esc)", key: "close") { model.hide() }
             }
+            .background(RoundedRectangle(cornerRadius: QCCornerButton.radius, style: .continuous).fill(QCColor.hex(0x1C1C1A)))
+            .qcControl()          // the gap between the two as well: a press anywhere on the capsule never moves the window
             .qcMark("header-buttons")
         }
-        .padding(.leading, QCSpace.gap).padding(.trailing, 3)
+        .padding(.leading, QCSpace.gap).padding(.trailing, QCSpace.cornerInset)
         .frame(height: QCSpace.header)
         .qcDraggable()
         .overlay(alignment: .topLeading) {
@@ -1578,6 +1581,58 @@ struct QCIconButton: View {
     }
 }
 
+/// A button in the header's corner capsule (New chat "+", Hide "✕"): 28 × 28, both glyphs at one size and weight, soft
+/// at rest, a lighter fill on hover and a darker one, slightly pressed in, while pressed. Its corners are the capsule's
+/// (concentric with the window's).
+struct QCCornerButton: View {
+    let symbol: String
+    let help: String
+    /// "new" or "close": its name in a picture's hover ("header-hover-close", "header-press-new").
+    let key: String
+    let action: () -> Void
+    @State private var hover = false
+    @Environment(\.qcCornerHover) private var picture
+
+    static let radius = QCSpace.corner - QCSpace.cornerInset
+    static let hoverFill = QCColor.hex(0x4A4944), pressFill = QCColor.hex(0x3A3935)
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+                .frame(width: QCSpace.row, height: QCSpace.row)
+        }
+        .buttonStyle(Style(hover: hover || picture == "hover-" + key, pressed: picture == "press-" + key))
+        .help(help)
+        .onHover { hover = $0 }
+        .accessibilityLabel(help)
+    }
+
+    private struct Style: ButtonStyle {
+        let hover: Bool
+        let pressed: Bool
+        func makeBody(configuration: Configuration) -> some View {
+            let down = configuration.isPressed || pressed
+            configuration.label
+                .foregroundColor(down || hover ? QCColor.text : QCColor.soft)
+                .scaleEffect(down ? 0.92 : 1)
+                .background(RoundedRectangle(cornerRadius: QCCornerButton.radius, style: .continuous)
+                    .fill(down ? QCCornerButton.pressFill : hover ? QCCornerButton.hoverFill : .clear))
+                .contentShape(Rectangle())
+                .qcControl()
+        }
+    }
+}
+
+/// Set while drawing a picture: the pointer on a corner button ("hover-new", "hover-close") or pressing one
+/// ("press-new", "press-close").
+private struct QCCornerHoverKey: EnvironmentKey { static let defaultValue: String? = nil }
+extension EnvironmentValues {
+    var qcCornerHover: String? {
+        get { self[QCCornerHoverKey.self] }
+        set { self[QCCornerHoverKey.self] = newValue }
+    }
+}
+
 /// Copy under an answer and in a code block's top row: its icon turns into a tick for a moment.
 struct QCCopyIcon: View {
     let text: String
@@ -2058,7 +2113,8 @@ enum QuickChatRender {
         default: break
         }
         // the chat's top line alone, at a width (QC_RENDER_WIDTH, 520): header, header-nosession (no 5-hour number
-        // reported), header-full, each also with -hover-meter (the pointer on the meters: their card)
+        // reported), header-full, each also with -hover-meter (the pointer on the meters: their card), -hover-new,
+        // -hover-close (the pointer on a corner button) or -press-new, -press-close (pressing one)
         if state.hasPrefix("header") {
             var l = QuickChatLevel()
             l.week = 58; l.weekResets = Date().addingTimeInterval(3 * 86400)
@@ -2067,6 +2123,7 @@ enum QuickChatRender {
             m.level = l
             let width = ProcessInfo.processInfo.environment["QC_RENDER_WIDTH"].flatMap { Double($0) }.map { CGFloat($0) } ?? QuickChatRoot.width
             let header = QCHeader(model: m).environment(\.qcRendering, true).environment(\.qcHover, state.contains("hover-meter"))
+                .environment(\.qcCornerHover, ["hover-new", "hover-close", "press-new", "press-close"].first { state.contains($0) })
                 .frame(width: width).background(QCColor.window).padding(.bottom, 80)       // room for the meters' card under it
                 .environment(\.colorScheme, .dark).padding(20).background(Color(white: 0.1))
             let r = ImageRenderer(content: header)

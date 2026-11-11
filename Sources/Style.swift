@@ -158,7 +158,7 @@ struct PillPicker<Value: Hashable>: View {
 /// The quick chat's spacing (diagrams/cl-quick-chat-design.html in the design notes): one outer gap that the header's
 /// name, the answers and the field box all keep from the window's edges, and rows on a 4 pt grid.
 enum QCSpace {
-    /// The window's edge to the field box (left, right, bottom), to the header's name and to the answers.
+    /// The window's edge to the field box (left, right, bottom), to the header's meters and to the answers.
     static let gap: CGFloat = 10
     /// The window's corners, and the bar's (the bar is the field box on its own).
     static let corner: CGFloat = 20
@@ -166,8 +166,11 @@ enum QCSpace {
     static let boxCorner: CGFloat = 12
     static let boxPadding = EdgeInsets(top: 10, leading: 12, bottom: 8, trailing: 12)
     static let barPadding = EdgeInsets(top: 12, leading: 12, bottom: 10, trailing: 12)
-    /// The header's height; its content is centred in it.
-    static let header: CGFloat = 40
+    /// The header's height; its content is centred in it: its buttons' capsule (a row high) `cornerInset` from the top
+    /// and from the right, the meters level with it.
+    static let header: CGFloat = 46
+    /// The header buttons' capsule in from the window's top and right edges, its corners concentric with the window's.
+    static let cornerInset: CGFloat = 9
     /// A control (profile, model, thinking), Send, Stop and the header's buttons.
     static let row: CGFloat = 28
     /// A control's padding at either side; its text sits on the box's own padding, the hover fill reaches past it.

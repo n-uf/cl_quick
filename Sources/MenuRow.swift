@@ -171,7 +171,7 @@ final class QCProfileMenuRow: NSView {
         if revealed {
             let s = (address as NSString).size(withAttributes: [.font: Self.addressFont])
             (address as NSString).draw(at: NSPoint(x: a.minX, y: a.midY - s.height / 2), withAttributes: [.font: Self.addressFont, .foregroundColor: sub])
-        } else if let img = blurredAddress(sub) {
+        } else if let img = blurredAddress(sub, lit: lit) {
             img.draw(in: NSRect(x: a.minX - Self.blurPad, y: a.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
         }
         if rowHover || lit, let copy = Self.symbol("doc.on.doc", size: 11, weight: .regular, color: copyHover ? fg : sub) {
@@ -184,14 +184,20 @@ final class QCProfileMenuRow: NSView {
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: weight).applying(.init(paletteColors: [color])))
     }
 
-    /// The blurred address, made once per colour (lit or not), not on every draw.
-    private var blurCache: [NSColor: NSImage] = [:]
-    private func blurredAddress(_ color: NSColor) -> NSImage? {
+    /// The blurred address, made once for each look (lit or not), not on every draw; made again if the appearance
+    /// changes (its colours are the system's).
+    private var blurCache: [Bool: NSImage] = [:]
+    private func blurredAddress(_ color: NSColor, lit: Bool) -> NSImage? {
         guard let address else { return nil }
-        if let img = blurCache[color] { return img }
+        if let img = blurCache[lit] { return img }
         let img = Self.blurred(address, color: color)
-        blurCache[color] = img
+        blurCache[lit] = img
         return img
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        blurCache = [:]
+        needsDisplay = true
     }
 
     static let blurPad: CGFloat = 6
