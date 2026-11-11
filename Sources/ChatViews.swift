@@ -82,6 +82,8 @@ struct QCBar: View {
             .padding(.bottom, 4)
             if let note = model.accountNote { QCNote(text: note) }
             if let note = model.dictationNote { QCNote(text: note) }
+            if let note = model.imageNote { QCNote(text: note) }
+            QCAttachRow(model: model)
             QCField(model: model, placeholder: "Ask anything", size: 15, grows: true)
             QCControls(model: model, inBar: true)
         }
@@ -90,6 +92,7 @@ struct QCBar: View {
         .qcDraggable()
         .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(Self.fill))
         .overlay(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).strokeBorder(QCColor.line))
+        .qcDropOutline(model.dropTarget, corner: QCSpace.corner)
     }
 
     /// The card's fill: opaque (alpha 1), so nothing of the windows behind ever shows through.
@@ -133,11 +136,13 @@ struct QCWindow: View {
             }
             // Dictation off in macOS: its one line, over the field box
             if let note = model.dictationNote { QCNote(text: note).padding(.horizontal, QCSpace.gap).padding(.bottom, 6) }
+            if let note = model.imageNote { QCNote(text: note).padding(.horizontal, QCSpace.gap).padding(.bottom, 6) }
             // the field box: 10 pt from the window's sides and bottom, its text and controls 12 pt inside it
             VStack(alignment: .leading, spacing: 8) {
+                QCAttachRow(model: model)
                 // the whole box above the picker row is the field: its padding and the gap to the row press into it
                 QCField(model: model, placeholder: "Reply…", size: 15,
-                        area: EdgeInsets(top: QCSpace.boxPadding.top, leading: QCSpace.boxPadding.leading, bottom: 8, trailing: QCSpace.boxPadding.trailing))
+                        area: EdgeInsets(top: model.images.isEmpty && model.preparing == 0 ? QCSpace.boxPadding.top : 0, leading: QCSpace.boxPadding.leading, bottom: 8, trailing: QCSpace.boxPadding.trailing))
                 QCControls(model: model, inBar: false)
             }
             .padding(QCSpace.boxPadding)
@@ -151,6 +156,7 @@ struct QCWindow: View {
         .qcDraggable()
         .background(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).fill(Self.fill))
         .overlay(RoundedRectangle(cornerRadius: QCSpace.corner, style: .continuous).strokeBorder(QCColor.line))
+        .qcDropOutline(model.dropTarget, corner: QCSpace.corner)
     }
 
     /// The window's fill: opaque (alpha 1), so nothing of the windows behind ever shows through.
@@ -438,14 +444,19 @@ struct QCTurnView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Spacer(minLength: 56)        // a bubble is at most about 82% of the chat's width
-                Text(turn.question)
-                    .font(.system(size: 14))
-                    .lineSpacing(3)
-                    .foregroundColor(QCColor.text)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(QCColor.bubble))
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !turn.images.isEmpty { QCSentImages(images: turn.images) }
+                    if !turn.question.isEmpty {       // an image alone has no bubble
+                        Text(turn.question)
+                            .font(.system(size: 14))
+                            .lineSpacing(3)
+                            .foregroundColor(QCColor.text)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(QCColor.bubble))
+                    }
+                }
             }
             // after the previous turn's actions row: about 32 pt between an answer and the next question
             .padding(.top, first ? 0 : 4)
@@ -866,7 +877,9 @@ struct QCControls: View {
                 }
                 .buttonStyle(.plain).help("Stop")
             } else {
-                let empty = model.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.blocked
+                // images alone are a message; images still being read make it wait
+                let empty = (model.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.images.isEmpty)
+                    || model.preparing > 0 || model.blocked
                 Button(action: model.send) {
                     Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold))
                         .frame(width: QCSpace.row, height: QCSpace.row)
@@ -1708,7 +1721,9 @@ struct QCField: View {
                 .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
         } else {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
-                        onSubmit: { model.submit(marked: $0) }, onEscape: { model.escape() }, onCaps: { caps = $0 })
+                        onSubmit: { model.submit(marked: $0) }, onEscape: { model.escape() }, onCaps: { caps = $0 },
+                        onPasteImages: { model.attachFromPaste($0) }, onDropImages: { model.attachFromDrop($0) },
+                        onDragImages: { model.dropTarget = $0 }, onDeleteEmpty: { model.removeLastImage() })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
                 .background(QCFieldArea().padding(EdgeInsets(top: -area.top, leading: -area.leading, bottom: -area.bottom, trailing: -area.trailing)))
                 .onChange(of: height) { _ in model.fieldChanged() }
@@ -1733,6 +1748,14 @@ struct QCTextField: NSViewRepresentable {
     let onSubmit: (Bool) -> Void
     let onEscape: () -> Void
     var onCaps: (Bool) -> Void = { _ in }
+    /// ⌘V / Paste with images on the pasteboard: true when taken as attachments (else the field pastes text as ever).
+    var onPasteImages: (NSPasteboard) -> Bool = { _ in false }
+    /// A drop of images or files on the field: true when taken.
+    var onDropImages: (NSPasteboard) -> Bool = { _ in false }
+    /// A drag with images is over the field (true) or left it (false).
+    var onDragImages: (Bool) -> Void = { _ in }
+    /// Delete in an empty field: true when it took the last image away.
+    var onDeleteEmpty: () -> Bool = { false }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -1770,6 +1793,9 @@ struct QCTextField: NSViewRepresentable {
         tv.onWidth = { [weak c = context.coordinator] in c?.measure() }     // the panel was resized: the lines wrap anew
         tv.onEdited = { [weak c = context.coordinator] in c?.edited() }     // marked text (Dictation) changed: no textDidChange
         tv.onCaps = { [weak c = context.coordinator] on in DispatchQueue.main.async { c?.parent.onCaps(on) } }
+        tv.pasteImages = { [weak c = context.coordinator] in c?.parent.onPasteImages($0) ?? false }
+        tv.dropImages = { [weak c = context.coordinator] in c?.parent.onDropImages($0) ?? false }
+        tv.dragImages = { [weak c = context.coordinator] on in c?.parent.onDragImages(on) }
         apply(tv)
         return scroll
     }
@@ -1825,6 +1851,9 @@ struct QCTextField: NSViewRepresentable {
             case #selector(NSResponder.cancelOperation(_:)):
                 parent.onEscape()
                 return true
+            case #selector(NSResponder.deleteBackward(_:)):
+                // Delete in an empty field takes the last attached image away (the field has nothing left to delete)
+                return tv.string.isEmpty && !tv.hasMarkedText() && parent.onDeleteEmpty()
             default:
                 return false
             }
@@ -1952,6 +1981,43 @@ final class QCTextView: NSTextView {
     override func draw(_ r: NSRect) {
         super.draw(r)
         if string.isEmpty, let p = placeholder { p.draw(at: NSPoint(x: textContainerOrigin.x, y: textContainerOrigin.y)) }
+    }
+    // Images (Images.swift): ⌘V with a picture on the pasteboard, and pictures or image files dropped on the field, are
+    // attachments, not text. Anything else is the text view's own, so text paste and drops of text work as ever.
+    /// The pasteboard a paste reads (the general one; a check passes its own).
+    var pasteboard: NSPasteboard = .general
+    /// Takes the pasteboard's images (true) or leaves it to the text paste (false).
+    var pasteImages: ((NSPasteboard) -> Bool)?
+    var dropImages: ((NSPasteboard) -> Bool)?
+    /// A drag with images came over the field (true) or left (false).
+    var dragImages: ((Bool) -> Void)?
+    override func paste(_ sender: Any?) {
+        if pasteImages?(pasteboard) == true { return }
+        super.paste(sender)
+    }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard QCImages.isImageDrag(sender.draggingPasteboard) else { return super.draggingEntered(sender) }
+        dragImages?(true)
+        return .copy
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        QCImages.isImageDrag(sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
+    }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dragImages?(false)
+        super.draggingExited(sender)
+    }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        QCImages.isImageDrag(sender.draggingPasteboard) ? true : super.prepareForDragOperation(sender)
+    }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard QCImages.isImageDrag(sender.draggingPasteboard) else { return super.performDragOperation(sender) }
+        dragImages?(false)
+        return dropImages?(sender.draggingPasteboard) ?? false
+    }
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        dragImages?(false)
+        super.draggingEnded(sender)
     }
     /// Called with whether Caps Lock is on, when it changes and when the field takes the keyboard.
     var onCaps: ((Bool) -> Void)?
@@ -2140,6 +2206,34 @@ enum QuickChatRender {
         var t1 = QuickChatTurn(question: q1, answer: a1, model: "Haiku 5.5"); t1.phase = .done; t1.seconds = 2.4
         switch state {
         case "typing": m.field = q1
+        // attached images: two thumbnails over the field (images, images-note: with a line about what was left out),
+        // one alone with no text (images-one), and a sent message with its images in the chat (images-chat, images-chat-alone)
+        case "images", "images-note", "images-one", "images-chat", "images-chat-alone":
+            func sample(_ r: Double, _ g: Double, _ b: Double, _ w: Int, _ h: Int) -> QCImage? {
+                guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: 4,
+                                                 hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                      let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+                NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = ctx
+                NSGradient(colors: [NSColor(deviceRed: r, green: g, blue: b, alpha: 1), NSColor(deviceRed: b, green: r, blue: g, alpha: 1)])?
+                    .draw(in: NSRect(x: 0, y: 0, width: w, height: h), angle: 35)
+                NSColor.white.withAlphaComponent(0.85).setFill()
+                NSBezierPath(roundedRect: NSRect(x: w / 8, y: h / 2, width: w * 3 / 4, height: h / 6), xRadius: 6, yRadius: 6).fill()
+                NSGraphicsContext.restoreGraphicsState()
+                guard let png = rep.representation(using: .png, properties: [:]), case .success(let img) = QCImages.prepare(png) else { return nil }
+                return img
+            }
+            let shots = [sample(0.85, 0.45, 0.30, 1600, 1000), sample(0.25, 0.55, 0.85, 900, 900)].compactMap { $0 }
+            switch state {
+            case "images": m.images = shots; m.field = "What is different between these two?"
+            case "images-note": m.images = shots; m.imageNote = QCImages.note(notImages: ["notes.pdf"], failures: [], overCount: 0)
+            case "images-one": m.images = Array(shots.prefix(1))
+            case "images-chat":
+                var t = QuickChatTurn(question: "What is different between these two?", images: shots, answer: "The second one is cooler: its blues replace the first one's oranges. The layout is the same.", model: "Haiku 5.5")
+                t.phase = .done; t.seconds = 2.1; m.turns = [t]; m.images = Array(shots.prefix(1))
+            default:
+                var t = QuickChatTurn(question: "", images: shots, answer: "Two gradients, one warm and one cool, each with a white label bar.", model: "Haiku 5.5")
+                t.phase = .done; t.seconds = 1.8; m.turns = [t]
+            }
         // the bar's usage indicator: the 5-hour window higher, the week higher, the 5-hour window full
         case "usage-5h": level.fiveHour = 78; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 20; m.level = level
         case "usage-wk": level.fiveHour = 30; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 85; m.level = level

@@ -114,6 +114,13 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
 - The mic button left of Send starts macOS Dictation into the field (cl_quick stays in the background: the panel takes
   the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); a click again,
   sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on.
+- **Images.** ⌘V with a screenshot or picture on the clipboard (⌃⇧⌘4 copies one), or with image files copied in Finder,
+  attaches it; so does dropping image files or a picture from a page on the bar or the chat window. Each shows as a
+  small thumbnail over the field with a ✕ (Delete in an empty field removes the last one); up to 5 go with a message,
+  and a sixth is left out with a line saying so. Files that aren't images are refused with a line. Text on the
+  clipboard always pastes as text. An image alone is a message too. Each is scaled down in memory to 1568 px on its
+  long side and sent as PNG (JPEG for a large photo) in the same connection as the text, so it stays incognito: no
+  file is made for it, and the chat shows it only as a thumbnail until it ends. A file you drop is read, never copied.
 - The window resizes from its edges and corners, and moves from any empty area of it (the header, the gaps around
   and between answers); the field, the buttons and the controls never move it.
 - The limits show in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from

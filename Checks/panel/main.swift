@@ -1311,6 +1311,283 @@ do {
     try? FileManager.default.removeItem(at: dir)
 }
 
+// ── images: ⌘V with a picture, thumbnails over the field, the message line, nothing on disk ────────────────────────
+// A pasteboard of the checks' own (the operator's clipboard is never touched), the bar's field reading it, and a chat model
+// of its own on the stand-in `claude` for what is sent. Fixtures (two image files and a text file, for the file cases) are
+// made under build/ only.
+do {
+    let passedBefore = passed, failedBefore = failed
+    func png(_ w: Int, _ h: Int, noise: Bool = false, alpha: Bool = true, _ c: (UInt8, UInt8, UInt8) = (220, 40, 40)) -> Data {
+        let spp = alpha ? 4 : 3
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: spp,
+                                         hasAlpha: alpha, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let base = rep.bitmapData else { return Data() }
+        for y in 0..<h {
+            let row = base + y * rep.bytesPerRow
+            if noise { arc4random_buf(row, w * spp) }
+            for x in 0..<w where !noise {
+                row[x * spp] = c.0; row[x * spp + 1] = c.1; row[x * spp + 2] = UInt8((x * 255 / max(1, w - 1)) & 0xFF)
+                if alpha { row[x * spp + 3] = 255 }
+            }
+            if noise && alpha { for x in 0..<w { row[x * spp + 3] = 255 } }
+        }
+        return rep.representation(using: .png, properties: [:]) ?? Data()
+    }
+    func pixels(_ i: QCImage) -> Int { Int(max(i.pixels.width, i.pixels.height)) }
+    func b64(_ i: QCImage) -> Int { (i.payload.data.count + 2) / 3 * 4 }
+    func prepared(_ d: Data) -> QCImage? { if case .success(let i) = QCImages.prepare(d) { return i }; return nil }
+    func ls(_ url: URL) -> [String] {
+        (FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])?.allObjects as? [URL] ?? [])
+            .map { u in let v = try? u.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]); return "\(u.path) \(v?.fileSize ?? -1) \(v?.contentModificationDate?.timeIntervalSince1970 ?? 0)" }
+            .sorted()
+    }
+
+    // the scaling and encoding, on their own
+    let small = prepared(png(2, 2))
+    check("images: a 2×2 picture stays 2×2 (never enlarged) and goes as PNG", small.map { pixels($0) == 2 && $0.payload.mediaType == "image/png" } == true, "\(String(describing: small?.pixels))")
+    let big = prepared(png(4000, 2500))
+    check("images: a 4000×2500 picture is scaled to 1568 on its long side, keeping its shape",
+          big.map { pixels($0) == 1568 && abs($0.pixels.height - 980) <= 1 } == true, "\(String(describing: big?.pixels))")
+    let tall = prepared(png(1000, 3000))
+    check("images: a tall one is capped on its height", tall.map { Int($0.pixels.height) == 1568 && Int($0.pixels.width) == 523 } == true, "\(String(describing: tall?.pixels))")
+    let noisyPhoto = prepared(png(2400, 1800, noise: true, alpha: false))
+    check("images: a large photo (no transparency) goes as a JPEG under 3.75 MB of base64, at most 1568 px",
+          noisyPhoto.map { $0.payload.mediaType == "image/jpeg" && b64($0) <= QCImages.maxBase64 && pixels($0) <= 1568 } == true,
+          "\(String(describing: noisyPhoto?.payload.mediaType)) \(noisyPhoto.map(b64) ?? -1) \(String(describing: noisyPhoto?.pixels))")
+    let noisyAlpha = prepared(png(2400, 1800, noise: true, alpha: true))
+    check("images: a large picture with an alpha channel stays PNG and is scaled down under 3.75 MB of base64",
+          noisyAlpha.map { $0.payload.mediaType == "image/png" && b64($0) <= QCImages.maxBase64 && pixels($0) <= 1568 } == true,
+          "\(String(describing: noisyAlpha?.payload.mediaType)) \(noisyAlpha.map(b64) ?? -1) \(String(describing: noisyAlpha?.pixels))")
+    if case .failure(let why) = QCImages.prepare(Data("not an image".utf8)) { check("images: text is no image", why == .notAnImage) } else { check("images: text is no image", false) }
+    check("images: the bytes sent are PNG or JPEG", [small, big, noisyPhoto, noisyAlpha].compactMap { $0 }.allSatisfy {
+        $0.payload.mediaType == "image/png" ? $0.payload.data.starts(with: [0x89, 0x50, 0x4E, 0x47]) : $0.payload.data.starts(with: [0xFF, 0xD8, 0xFF]) })
+    // a TIFF and a JPEG (what Preview and a camera give) come out as pictures too
+    let rep = NSBitmapImageRep(data: png(30, 20))
+    check("images: TIFF data is taken", rep?.tiffRepresentation.flatMap(prepared) != nil)
+    check("images: JPEG data is taken", rep?.representation(using: .jpeg, properties: [.compressionFactor: 0.9]).flatMap(prepared) != nil)
+
+    // what a pasteboard holds
+    let ipb = NSPasteboard(name: NSPasteboard.Name("n-uf.cl-quick.image-checks"))
+    func putI(_ f: (NSPasteboard) -> Void) { ipb.clearContents(); f(ipb) }
+    let fixtures = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("image-fixtures")
+    try? FileManager.default.createDirectory(at: fixtures, withIntermediateDirectories: true)
+    let fileA = fixtures.appendingPathComponent("shot-a.png"), fileB = fixtures.appendingPathComponent("shot-b.png"), fileT = fixtures.appendingPathComponent("notes.txt")
+    try? png(40, 30).write(to: fileA); try? png(30, 40, (20, 200, 40)).write(to: fileB); try? Data("notes".utf8).write(to: fileT)
+    putI { $0.setData(png(10, 10), forType: .png) }
+    check("images: a picture alone is for the chat (paste and drop)", QCImages.found(in: ipb, forPaste: true) != nil && QCImages.found(in: ipb, forPaste: false) != nil)
+    putI { $0.setString("cells", forType: .string); $0.setData(png(10, 10), forType: .png) }
+    check("images: text with a picture of it (a spreadsheet's cells) is a text paste", QCImages.found(in: ipb, forPaste: true) == nil)
+    check("images: …but a drop of it is a picture", QCImages.found(in: ipb, forPaste: false) != nil)
+    putI { $0.setString("shot-a.png", forType: .string); $0.writeObjects([fileA as NSURL]) }
+    check("images: a copied image file (Finder gives its name as text too) is an image paste", QCImages.found(in: ipb, forPaste: true)?.sources.count == 1)
+    putI { _ = $0.writeObjects([fileT as NSURL]) }
+    check("images: a copied text file is left to the field (it pastes the name)", QCImages.found(in: ipb, forPaste: true) == nil)
+    check("images: …and a drop of it says it isn't an image", QCImages.found(in: ipb, forPaste: false)?.notImages == ["notes.txt"])
+    putI { $0.setString("plain words", forType: .string) }
+    check("images: plain text is no image", QCImages.found(in: ipb, forPaste: true) == nil && QCImages.found(in: ipb, forPaste: false) == nil)
+    check("images: a drag of text alone is not an image drag", !QCImages.isImageDrag(ipb))
+    putI { $0.setData(png(10, 10), forType: .png) }
+    check("images: a drag with picture data is an image drag", QCImages.isImageDrag(ipb))
+
+    // the bar: ⌘V with a picture adds a thumbnail and inserts no text
+    chat.hide(); chat.model.newChat(); chat.open(); spin(0.5)
+    guard let tv = p.firstResponder as? QCTextView else { print("FAIL images: the bar's field has the keyboard"); exit(1) }
+    tv.pasteboard = ipb
+    func cmdV() -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber,
+                                       context: nil, characters: "v", charactersIgnoringModifiers: "v", isARepeat: false, keyCode: 9) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
+    func waitImages(_ n: Int, _ secs: TimeInterval = 6) {
+        let end = Date().addingTimeInterval(secs)
+        while (chat.model.images.count != n || chat.model.preparing != 0), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    let m0 = chat.model
+    let tall0 = p.frame.height
+    putI { $0.setData(png(300, 200), forType: .png) }
+    check("images: ⌘V with a picture is taken", cmdV())
+    waitImages(1); spin(0.4)
+    check("images: ⌘V with PNG data adds one thumbnail", m0.images.count == 1 && m0.preparing == 0, "\(m0.images.count)")
+    check("images: …and inserts no text", tv.string.isEmpty && m0.field.isEmpty, "\(tv.string.debugDescription)")
+    check("images: the thumbnail is a real picture", m0.images.first.map { $0.thumbnail.size.width > 0 && $0.thumbnail.size.height > 0 } == true)
+    let tall1 = p.frame.height
+    check("images: the bar grew to hold the thumbnail row, by a tile and its gap", tall1 > tall0 + 40 && tall1 < tall0 + 60, "\(tall0) → \(tall1)")
+    putI { $0.setData(NSBitmapImageRep(data: png(100, 100))?.tiffRepresentation ?? Data(), forType: .tiff) }
+    _ = cmdV(); waitImages(2); spin(0.4)
+    check("images: ⌘V with TIFF data adds a second", m0.images.count == 2, "\(m0.images.count)")
+    check("images: the bar did not change height for the second one (no wobble)", abs(p.frame.height - tall1) < 0.5, "\(tall1) → \(p.frame.height)")
+    putI { _ = $0.writeObjects([fileA as NSURL, fileB as NSURL]) }
+    _ = cmdV(); waitImages(4); spin(0.4)
+    check("images: ⌘V with two image files adds both", m0.images.count == 4, "\(m0.images.count)")
+    check("images: the bar still the same height with four", abs(p.frame.height - tall1) < 0.5, "\(tall1) → \(p.frame.height)")
+    putI { $0.setData(png(20, 20), forType: .png) }
+    _ = cmdV(); waitImages(5); spin(0.3)
+    check("images: a fifth is taken", m0.images.count == 5)
+    check("images: no note while all fit", m0.imageNote == nil, "\(String(describing: m0.imageNote))")
+    putI { $0.setData(png(20, 20), forType: .png) }
+    _ = cmdV(); waitImages(5); spin(0.3)
+    check("images: a sixth is left out", m0.images.count == 5, "\(m0.images.count)")
+    check("images: and the note says so, in one line", m0.imageNote == "Up to 5 images go with a message; one was left out.", "\(String(describing: m0.imageNote))")
+    check("images: the bar did not grow for the note beyond one note line", p.frame.height < tall1 + 30, "\(tall1) → \(p.frame.height)")
+    // removal: ✕ (removeImage) and Delete in an empty field
+    let first = m0.images[0].id
+    m0.removeImage(first); spin(0.2)
+    check("images: ✕ removes that picture", m0.images.count == 4 && !m0.images.contains { $0.id == first } && m0.imageNote == nil)
+    let handled = tv.delegate?.textView?(tv, doCommandBy: #selector(NSResponder.deleteBackward(_:))) ?? false
+    check("images: Delete in an empty field removes the last picture", handled && m0.images.count == 3, "\(handled) \(m0.images.count)")
+    tv.string = "x"
+    let kept = tv.delegate?.textView?(tv, doCommandBy: #selector(NSResponder.deleteBackward(_:))) ?? false
+    check("images: Delete in a field with text is the text view's own", !kept && m0.images.count == 3)
+    tv.string = ""
+    while m0.removeLastImage() {}
+    spin(0.4)
+    check("images: all removed, the bar is its old height again", m0.images.isEmpty && abs(p.frame.height - tall0) < 0.5, "\(tall0) → \(p.frame.height)")
+    // text paste is the text view's own: a picture is not taken when the paste is text (here on the general pasteboard, saved and put back)
+    let gen = NSPasteboard.general
+    let savedGen = gen.pasteboardItems?.map { it -> [(NSPasteboard.PasteboardType, Data)] in it.types.compactMap { t in it.data(forType: t).map { (t, $0) } } }
+    tv.pasteboard = gen
+    gen.clearContents(); gen.setString("pasted words", forType: .string); gen.setData(png(10, 10), forType: .png)
+    _ = cmdV(); spin(0.3)
+    check("images: ⌘V with text and a picture on it pastes the text and attaches nothing", tv.string == "pasted words" && m0.images.isEmpty, "\(tv.string.debugDescription) \(m0.images.count)")
+    tv.string = ""; m0.field = ""
+    gen.clearContents()
+    if let savedGen { for it in savedGen { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; gen.writeObjects([n]) } }
+    tv.pasteboard = ipb
+    // a drop of files: images attach, others are said; a drop of nothing the chat takes is left alone
+    putI { _ = $0.writeObjects([fileA as NSURL, fileT as NSURL]) }
+    check("images: a drop of an image and a text file is taken", m0.attachFromDrop(ipb))
+    waitImages(1); spin(0.3)
+    check("images: the image attached, the other named", m0.images.count == 1 && m0.imageNote == "Only images can be attached; notes.txt isn't one.", "\(m0.images.count) \(String(describing: m0.imageNote))")
+    putI { _ = $0.writeObjects([fileT as NSURL]) }
+    check("images: a drop of only a text file attaches nothing and says why", m0.attachFromDrop(ipb) && m0.images.count == 1 && m0.imageNote == "Only images can be attached; notes.txt isn't one.")
+    putI { $0.setString("words", forType: .string) }
+    check("images: a drop of text is not taken (the field's own)", !m0.attachFromDrop(ipb))
+    // the drag lands on the panel: its hosting view takes it as a drop, not a press; no drag surface is registered for drags
+    check("images: the panel's view is a drag destination for files and pictures", cv.registeredDraggedTypes.contains(.fileURL) && cv.registeredDraggedTypes.contains(.png))
+    var surfaces = 0, registered = 0
+    func walkDrag(_ v: NSView) { if v is QCDragView { surfaces += 1; if !v.registeredDraggedTypes.isEmpty { registered += 1 } }; v.subviews.forEach(walkDrag) }
+    walkDrag(cv)
+    check("images: drag surfaces exist and none takes a drag itself (a drop reaches the panel's view, never a window move)", surfaces > 0 && registered == 0, "\(surfaces) \(registered)")
+    final class FakeDrag: NSObject, NSDraggingInfo {
+        let pb: NSPasteboard
+        init(_ pb: NSPasteboard) { self.pb = pb }
+        var draggingDestinationWindow: NSWindow? { nil }
+        var draggingSourceOperationMask: NSDragOperation { .every }
+        var draggingLocation: NSPoint { .zero }
+        var draggedImageLocation: NSPoint { .zero }
+        var draggedImage: NSImage? { nil }
+        var draggingPasteboard: NSPasteboard { pb }
+        var draggingSource: Any? { nil }
+        var draggingSequenceNumber: Int { 1 }
+        var draggingFormation: NSDraggingFormation = .default
+        var animatesToDestination = false
+        var numberOfValidItemsForDrop = 1
+        var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+        func slideDraggedImage(to screenPoint: NSPoint) {}
+        func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass],
+                                    searchOptions: [NSPasteboard.ReadingOptionKey: Any], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+        func resetSpringLoading() {}
+    }
+    putI { _ = $0.writeObjects([fileB as NSURL]) }
+    let fake = FakeDrag(ipb)
+    check("images: a drag of an image file over the panel is a copy", cv.draggingEntered(fake) == .copy && m0.dropTarget)
+    check("images: dropping it attaches the image and ends the outline", cv.performDragOperation(fake) && !m0.dropTarget)
+    waitImages(2); spin(0.3)
+    check("images: the dropped image is a thumbnail", m0.images.count == 2, "\(m0.images.count)")
+    cv.draggingExited(fake)
+    putI { $0.setString("words", forType: .string) }
+    check("images: a text drag is not taken by the panel's view as images", cv.draggingEntered(FakeDrag(ipb)) != .copy || !m0.dropTarget)
+    while m0.removeLastImage() {}; m0.imageNote = nil
+    tv.pasteboard = .general
+    m0.newChat()
+    spin(0.3)
+
+    // sent: a chat model of its own on the stand-in `claude`; the message line the stand-in reads, and nothing written
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("images-check")
+    try? FileManager.default.removeItem(at: dir)
+    try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+    let argsFile = dir.appendingPathComponent("args.txt").path
+    try? "mode=ok\nargs=\(argsFile)\n".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+    let m = QuickChatModel()
+    var tg = QuickChatTarget(Profile(id: "images-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
+    tg.workFolder = dir.appendingPathComponent("work").path
+    tg.accountUUID = "u-images"; tg.email = "alex@example.com"
+    m.target = tg
+    m.resolveClaude = { $0(stub) }
+    m.freshTarget = { _, done in done(tg) }
+    let support = ls(Files.folder), work = ls(dir.appendingPathComponent("work"))
+    let tmp = Set((try? FileManager.default.contentsOfDirectory(atPath: NSTemporaryDirectory())) ?? [])
+    func attach(_ srcs: [QCImages.Source], _ n: Int) {
+        var landed = false
+        m.attach(QCImages.Found(sources: srcs)) { landed = true }
+        let end = Date().addingTimeInterval(6)
+        while (!landed || m.images.count != n), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    func answered(_ n: Int) {
+        let end = Date().addingTimeInterval(8)
+        while !(m.turns.count == n && m.turns.last?.phase == .done), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    // an image alone
+    attach([.data(png(64, 48))], 1)
+    let sentImage = m.images.first
+    m.send()
+    check("images: an image alone is a message (a turn with no text and the image)", m.turns.count == 1 && m.turns[0].question.isEmpty && m.turns[0].images.count == 1, "\(m.turns.count)")
+    check("images: sending empties the attachments", m.images.isEmpty && m.preparing == 0)
+    answered(1)
+    check("images: the image-only message was answered", m.turns.last?.phase == .done, "\(String(describing: m.turns.last?.phase))")
+    // text and two images
+    attach([.data(png(120, 80, (10, 10, 200))), .file(fileB)], 2)
+    let two = m.images
+    m.field = "What changed?"
+    m.send()
+    answered(2)
+    check("images: text and two images was answered", m.turns.last?.phase == .done && m.turns.last?.images.count == 2, "\(String(describing: m.turns.last?.phase))")
+    // a plain message
+    m.field = "thanks"; m.send(); answered(3)
+    // a retry sends the same images again
+    m.again(); answered(3)
+    let lines = ((try? String(contentsOfFile: argsFile + ".in", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    check("images: the stand-in got four message lines (image alone, text with two images, plain, the retry)", lines.count == 4, "\(lines.count)")
+    func blocks(_ i: Int) -> [[String: Any]]? {
+        guard i < lines.count, let o = (try? JSONSerialization.jsonObject(with: Data(lines[i].utf8))) as? [String: Any] else { return nil }
+        return (o["message"] as? [String: Any])?["content"] as? [[String: Any]]
+    }
+    func plain(_ i: Int) -> String? {
+        guard i < lines.count, let o = (try? JSONSerialization.jsonObject(with: Data(lines[i].utf8))) as? [String: Any] else { return nil }
+        return (o["message"] as? [String: Any])?["content"] as? String
+    }
+    check("images: line 1 is one image block and no text block", blocks(0)?.map { $0["type"] as? String } == ["image"], "\(String(describing: blocks(0)?.map { $0["type"] as Any }))")
+    let src0 = blocks(0)?.first?["source"] as? [String: Any]
+    check("images: line 1's image is the base64 of what was attached",
+          src0?["type"] as? String == "base64" && src0?["media_type"] as? String == "image/png"
+          && Data(base64Encoded: src0?["data"] as? String ?? "") == sentImage?.payload.data)
+    check("images: line 2 is image, image, then the text", blocks(1)?.map { $0["type"] as? String } == ["image", "image", "text"], "\(String(describing: blocks(1)?.map { $0["type"] as Any }))")
+    check("images: line 2's text is the question", blocks(1)?.last?["text"] as? String == "What changed?")
+    check("images: line 2's images are the two attached, in order",
+          (blocks(1) ?? []).prefix(2).enumerated().allSatisfy { i, b in
+              Data(base64Encoded: ((b["source"] as? [String: Any])?["data"] as? String) ?? "") == two[i].payload.data })
+    check("images: line 3 is a plain string message", plain(2) == "thanks", "\(String(describing: plain(2)))")
+    check("images: the retry of the plain message is plain too", plain(3) == "thanks", "\(String(describing: plain(3)))")
+    m.turns.removeAll()
+    m.images = []
+    // retry of an image message keeps its images
+    attach([.data(png(32, 32))], 1)
+    m.field = "again please"; m.send(); answered(1); m.again(); answered(1)
+    let lines2 = ((try? String(contentsOfFile: argsFile + ".in", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    check("images: Ask again sends the same images again", lines2.count == 6 && lines2[4].contains("\"image\"") && lines2[5].contains("\"image\""), "\(lines2.count)")
+    m.shutdown()
+    // nothing written: the app's folder, the work folder and the temp folder (no picture files) are as they were
+    check("images: nothing was written to the app's support folder", ls(Files.folder) == support, "\(ls(Files.folder).count) vs \(support.count)")
+    check("images: nothing was written to the work folder", ls(dir.appendingPathComponent("work")) == work, "\(ls(dir.appendingPathComponent("work")))")
+    let newTmp = Set((try? FileManager.default.contentsOfDirectory(atPath: NSTemporaryDirectory())) ?? []).subtracting(tmp)
+        .filter { ["png", "jpg", "jpeg", "tiff", "tif", "heic"].contains(($0 as NSString).pathExtension.lowercased()) }
+    check("images: no picture file was made in the temp folder", newTmp.isEmpty, "\(newTmp)")
+    ipb.clearContents()
+    try? FileManager.default.removeItem(at: fixtures)
+    print("  images: \(passed - passedBefore) of \(passed + failed - passedBefore - failedBefore) checks passed")
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

@@ -118,6 +118,8 @@ struct QuickChatTurn: Identifiable, Equatable {
     enum Phase: Equatable { case waiting, streaming, done, stopped, failed }
     let id = UUID()
     var question: String
+    /// The images that went with the question (in memory only; Retry sends them again).
+    var images: [QCImage] = []
     var answer = ""
     var thinking = ""
     /// The model that answered ("Haiku 5.5"), from Claude Code.
@@ -220,6 +222,14 @@ final class QuickChatModel: ObservableObject {
     @Published var dictating = false
     /// One line over the field when the mic button finds Dictation off in macOS (once a run); goes with the next send.
     @Published var dictationNote: String?
+    /// The images attached to the message being written (thumbnails over the field), up to QCImages.maxCount, in memory only.
+    @Published var images: [QCImage] = []
+    /// Images being read and scaled down (a placeholder tile each); a message waits for them.
+    @Published var preparing = 0
+    /// One line over the field when something was left out (a file that isn't an image, more than five); goes after a while.
+    @Published var imageNote: String?
+    /// A drag with images is over the panel: its card is outlined.
+    @Published var dropTarget = false
 
     var isWindow: Bool { !turns.isEmpty }
     var busy: Bool { turns.last?.busy ?? false }
@@ -368,16 +378,90 @@ final class QuickChatModel: ObservableObject {
         // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
         if dictating || dictationNoticed, !busy, !blocked { dictate(false) }
         let q = field.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty, !busy, !blocked else { return }
+        // images alone are a message too; images still being read wait (a moment) for the next Return
+        guard !q.isEmpty || !images.isEmpty, preparing == 0, !busy, !blocked else { return }
         guard target != nil else { barProblem = .noProfile; return }
         dictationNote = nil
+        let sent = images
         field = ""
+        images = []; imageNote = nil
         barProblem = nil
         // the chat on screen ended: this message starts a new one, with nothing from the old one
         if ended != nil { turns = []; ended = nil; accountNote = nil }
-        turns.append(QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
+        turns.append(QuickChatTurn(question: q, images: sent, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
         scrollTick += 1
-        ask(q)
+        ask(q, images: sent)
+    }
+
+    // MARK: images
+
+    /// ⌘V: takes the pasteboard when it holds images (or image files) and no text; false leaves the paste to the field.
+    @discardableResult func attachFromPaste(_ pb: NSPasteboard) -> Bool {
+        guard let f = QCImages.found(in: pb, forPaste: true) else { return false }
+        attach(f)
+        return true
+    }
+
+    /// A drop of images, or of files (the ones that aren't images are said): false when it holds neither.
+    @discardableResult func attachFromDrop(_ pb: NSPasteboard) -> Bool {
+        guard let f = QCImages.found(in: pb, forPaste: false) else { return false }
+        attach(f)
+        return true
+    }
+
+    /// Reads and scales the images down off the main thread (a placeholder tile each meanwhile), then adds them in the
+    /// order they came. `done` (checks): called on the main thread when they are in.
+    func attach(_ f: QCImages.Found, done: @escaping () -> Void = {}) {
+        let room = max(0, QCImages.maxCount - images.count - preparing)
+        let take = Array(f.sources.prefix(room))
+        let over = f.sources.count - take.count
+        guard !take.isEmpty else {
+            say(QCImages.note(notImages: f.notImages, failures: [], overCount: over))
+            done()
+            return
+        }
+        preparing += take.count
+        let notImages = f.notImages
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let results = take.map { QCImages.prepare($0) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.preparing -= take.count
+                var failures: [QCImages.Failure] = []
+                for r in results {
+                    switch r {
+                    case .success(let img): self.images.append(img)
+                    case .failure(let why): failures.append(why)
+                    }
+                }
+                self.say(QCImages.note(notImages: notImages, failures: failures, overCount: over))
+                done()
+            }
+        }
+    }
+
+    func removeImage(_ id: UUID) {
+        images.removeAll { $0.id == id }
+        imageNote = nil
+        focusTick += 1
+    }
+
+    /// The last attached image goes (Delete in an empty field).
+    @discardableResult func removeLastImage() -> Bool {
+        guard let last = images.last else { return false }
+        removeImage(last.id)
+        return true
+    }
+
+    private var noteWork: DispatchWorkItem?
+    /// A line over the field (nil: none); it goes by itself after a few seconds.
+    private func say(_ line: String?) {
+        noteWork?.cancel()
+        imageNote = line
+        guard line != nil else { return }
+        let w = DispatchWorkItem { [weak self] in self?.imageNote = nil }
+        noteWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7, execute: w)
     }
 
     /// Stop: the answer ends where it is and the chat goes on, the conversation staying in the same `claude` (an
@@ -401,18 +485,18 @@ final class QuickChatModel: ObservableObject {
     func again() {
         guard !busy, let i = turns.indices.last else { return }
         if ended != nil {
-            let q = turns[i].question
-            turns = [QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
+            let q = turns[i].question, imgs = turns[i].images
+            turns = [QuickChatTurn(question: q, images: imgs, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
             ended = nil; accountNote = nil
             scrollTick += 1
-            ask(q)
+            ask(q, images: imgs)
             return
         }
         turns[i].answer = ""; turns[i].thinking = ""; turns[i].problem = nil; turns[i].phase = .waiting
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
-        ask(turns[i].question)
+        ask(turns[i].question, images: turns[i].images)
     }
 
     /// A chat that ended (idle, a crash, Stop that ended it, the account changed) leaves nothing behind: its turns, its
@@ -423,11 +507,12 @@ final class QuickChatModel: ObservableObject {
         // a switch of account waiting to resend the question a full limit stopped (continueSwitched reads it from the
         // last turn or the field): the question moves to the field, so the switch still sends it, and it can be seen
         let waitingQuestion: String? = {
-            if case .waiting? = switchNotice, field.isEmpty, turns.last?.problem == .limitFull { return turns.last?.question }
+            if case .waiting? = switchNotice, field.isEmpty, images.isEmpty, turns.last?.problem == .limitFull { return turns.last?.question }
             return nil
         }()
+        let waitingImages: [QCImage] = waitingQuestion == nil ? [] : turns.last?.images ?? []
         ended = nil
-        if let q = waitingQuestion { field = q }
+        if let q = waitingQuestion { field = q; images = waitingImages }
         turns = []
         accountNote = nil
         barProblem = nil
@@ -459,7 +544,7 @@ final class QuickChatModel: ObservableObject {
         turns = []
         returnHeld = false
         if dictating || dictationNoticed { dictate(false) }
-        if !keepField { field = "" }
+        if !keepField { field = ""; images = []; imageNote = nil }
         barProblem = nil
         accountNote = nil
         if dropsSwitch { dropSwitch() }
@@ -502,24 +587,29 @@ final class QuickChatModel: ObservableObject {
     /// Ask on …: the chat moves to the profile offered and sends the question there. The full one isn't changed.
     func askOnOffer() {
         guard let o = offer else { return }
-        let q = pendingQuestion()
+        let q = pendingQuestion(), imgs = pendingImages()
         pickProfile(o.profileID)
-        field = q
+        field = q; images = imgs
         send()
     }
 
     /// What would be asked again on another profile or account: what's typed, else the question a full limit stopped.
     func pendingQuestion() -> String {
-        field.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
+        field.isEmpty && images.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
+    }
+
+    /// The images that go with pendingQuestion().
+    func pendingImages() -> [QCImage] {
+        field.isEmpty && images.isEmpty && turns.last?.problem == .limitFull ? turns.last?.images ?? [] : images
     }
 
     /// The profile is on another account now: a new chat on the same profile (a chat may not go on across accounts),
     /// what was typed (or the question the full limit stopped) is sent, and one line says where it is.
     /// The caller has set the new target.
     func continueSwitched(note: String) {
-        let q = pendingQuestion()
+        let q = pendingQuestion(), imgs = pendingImages()
         newChat(keepField: true)
-        field = q
+        field = q; images = imgs
         accountNote = note
         send()
     }
@@ -528,9 +618,9 @@ final class QuickChatModel: ObservableObject {
     /// starts on the same profile; what was typed (or the question a full limit stopped) stays in the field, and one
     /// line says where it is. Not while an answer is on its way: the next message meets the same rule in ask().
     func accountChanged(to t: QuickChatTarget) {
-        let q = pendingQuestion()
+        let q = pendingQuestion(), imgs = pendingImages()
         newChat(keepField: true, dropsSwitch: false)
-        field = q
+        field = q; images = imgs
         forgetAccount()
         target = t
         accountNote = "\(t.name) is on \(maskEmail(t.email ?? "another account")) now."
@@ -540,9 +630,9 @@ final class QuickChatModel: ObservableObject {
     /// `claude` was started on the old one, and the conversation lives only in it, so the chat ends and a new one starts
     /// on the same profile. What was typed stays.
     func folderChanged(to t: QuickChatTarget) {
-        let q = pendingQuestion()
+        let q = pendingQuestion(), imgs = pendingImages()
         newChat(keepField: true, dropsSwitch: false)
-        field = q
+        field = q; images = imgs
         forgetAccount()
         target = t
         accountNote = "\(t.name) uses another folder now. New chat."
@@ -575,7 +665,7 @@ final class QuickChatModel: ObservableObject {
 
     // MARK: talking to Claude Code
 
-    private func ask(_ q: String) {
+    private func ask(_ q: String, images: [QCImage] = []) {
         guard let first = target else { fail(.noProfile); return }
         let gen = generation
         messageSent = false
@@ -597,12 +687,12 @@ final class QuickChatModel: ObservableObject {
                     }
                 }
                 guard let target = self.target else { self.fail(.noProfile); return }
-                self.start(q, path: path, target: target)
+                self.start(q, images: images, path: path, target: target)
             }
         }
     }
 
-    private func start(_ q: String, path: String, target: QuickChatTarget) {
+    private func start(_ q: String, images: [QCImage], path: String, target: QuickChatTarget) {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
                                    workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort)
         let key = keyFor(path, target)
@@ -624,7 +714,7 @@ final class QuickChatModel: ObservableObject {
             if let why = launch(cmd, key: key, target: target) { fail(.stopped(detail: why)); return }
         }
         idleTimer?.invalidate()
-        messageSent = process?.send(q) == true
+        messageSent = process?.send(q, images: images.map(\.payload)) == true
         if !messageSent { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
@@ -849,6 +939,7 @@ final class QuickChatModel: ObservableObject {
         // nothing asked yet and Claude Code isn't there: the bar says so and keeps the question
         if p == .notInstalled || p == .noProfile, turns.count == 1, turns[i].answer.isEmpty {
             field = turns[i].question
+            images = turns[i].images
             turns = []
             barProblem = p
             return
@@ -1567,8 +1658,37 @@ final class QuickChatHostingView: NSHostingView<QuickChatRoot> {
         super.init(rootView: rootView)
         // the transparent title bar is no safe area: the card starts at the window's top edge (QuickChatRoot also ignores it)
         if #available(macOS 13.3, *) { safeAreaRegions = [] }
+        // Pictures and image files dropped anywhere on the panel (the bar, the chat, the header) are attached to the
+        // message. A drag is no press: the drag surfaces (QCDragView, which move the window from a mouse-down) aren't
+        // registered for it, so AppKit goes up to this view, and a drop never starts a move.
+        registerForDraggedTypes([.fileURL] + QCImages.dataTypes)
     }
     @MainActor required dynamic init?(coder: NSCoder) { nil }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard QCImages.isImageDrag(sender.draggingPasteboard) else { return super.draggingEntered(sender) }
+        rootView.model.dropTarget = true
+        return .copy
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        QCImages.isImageDrag(sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
+    }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        rootView.model.dropTarget = false
+        super.draggingExited(sender)
+    }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        QCImages.isImageDrag(sender.draggingPasteboard) ? true : super.prepareForDragOperation(sender)
+    }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard QCImages.isImageDrag(sender.draggingPasteboard) else { return super.performDragOperation(sender) }
+        rootView.model.dropTarget = false
+        return rootView.model.attachFromDrop(sender.draggingPasteboard)
+    }
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        rootView.model.dropTarget = false
+        super.draggingEnded(sender)
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     // This view covers the whole panel: nothing here may let the window server start a move.
