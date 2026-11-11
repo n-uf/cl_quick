@@ -360,6 +360,9 @@ final class QuickChatModel: ObservableObject {
     /// Chinese, Vietnamese…) composes in marked text too.
     var isDictationActive: Bool { dictating || dictationNoticed || inputSourceIsDictation() }
 
+    /// ⌘D: the mic button's other way in. Off when Dictation actually runs (also one macOS's shortcut started), else on.
+    func toggleDictation() { dictate(!isDictationActive) }
+
     /// Return in the field; `marked`: the field has marked text (Dictation's provisional words, or an input method's
     /// composition: only Dictation running makes it Dictation's, see `isDictationActive`). While Dictation runs and the
     /// setting says to show first, the Return ends Dictation and sends nothing (nothing is eaten twice: the next Return
@@ -1231,7 +1234,7 @@ final class QuickChat {
     }
 
     /// Whether the mic button has told this run that Dictation is off (it says so once).
-    private var dictationOffSaid = false
+    var dictationOffSaid = false
 
     /// The mic button. On: the panel takes the keyboard (key, without activating cl_quick), the field becomes its first
     /// responder, and macOS's Dictation starts for it; Dictation turned off in macOS says where to turn it on, once.
@@ -1302,6 +1305,7 @@ final class QuickChat {
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onCopyAnswer = { [weak self] in _ = self?.model.copyLatestAnswer() }
+        p.onDictate = { [weak self] in self?.model.toggleDictation() }
         p.onKeyLost = { [weak self] in self?.keyLost() }
         p.onStep = { [weak self] model, by in
             guard let m = self?.model else { return }
@@ -1468,6 +1472,8 @@ final class QuickChatPanel: NSPanel {
     var onNewChat: () -> Void = {}
     /// ⌘⇧C: copy the latest complete answer (nothing if there is none). The key is taken either way.
     var onCopyAnswer: () -> Void = {}
+    /// ⌘D: Dictation on or off, as the mic button does.
+    var onDictate: () -> Void = {}
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
 
@@ -1503,7 +1509,7 @@ final class QuickChatPanel: NSPanel {
         guard let c = e.charactersIgnoringModifiers?.lowercased(), !c.isEmpty else { return nil }
         if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.isASCII { return c }
         let place: [Int: String] = [kVK_ANSI_A: "a", kVK_ANSI_C: "c", kVK_ANSI_V: "v", kVK_ANSI_X: "x", kVK_ANSI_Z: "z",
-                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w"]
+                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w", kVK_ANSI_D: "d"]
         // only a letter of another script falls back to the key's place: a digit, a symbol or a dead key stays as it is
         if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.properties.isAlphabetic, let l = place[Int(e.keyCode)] { return l }
         return c
@@ -1536,6 +1542,7 @@ final class QuickChatPanel: NSPanel {
         case "v": action = #selector(NSText.paste(_:))
         case "a": action = #selector(NSText.selectAll(_:))
         case "z": action = shift ? Selector(("redo:")) : Selector(("undo:"))
+        case "d" where !shift: onDictate(); return true
         case "n" where !shift: onNewChat(); return true
         case "w" where !shift: onClose(); return true
         default: break

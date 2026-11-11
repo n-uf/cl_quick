@@ -735,6 +735,64 @@ do {
     m.dictationNote = nil
     m.dictate(true)
     check("mic: and says it once a run", m.dictationNote == nil && sent.count == before)
+    off = false
+
+    // ⌘D: the mic button from the keyboard, on and off (the same QCDictation seams; no real Dictation starts)
+    do {
+        func cmdD(_ ch: String = "d", _ code: UInt16 = 2, _ flags: NSEvent.ModifierFlags = .command) -> Bool {
+            guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                           context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
+            return p.performKeyEquivalent(with: e)
+        }
+        m.dictationNote = nil; m.field = ""
+        p.makeKey(); p.focusField(); spin(0.1)
+        var n = sent.count
+        let taken = cmdD()
+        spin(0.1)
+        check("⌘D: starts Dictation like the mic button (the key is taken, begin sent to the field, the button on)",
+              taken && sent.count == n + 1 && sent[n].0 == QCDictation.start && sent[n].1 is QCTextView && m.dictating, steps(since: n))
+        n = sent.count
+        let field = p.firstResponder as? QCTextView
+        let takenOff = cmdD()
+        check("⌘D: again stops it through the same steps, the button off, nothing toggled",
+              takenOff && stopped(since: n, field: field) && !m.dictating && neverToggled(), steps(since: n))
+
+        // a Cyrillic layout: the D key gives "в", the shortcut stays on the key's place
+        p.makeKey(); p.focusField(); spin(0.1)
+        n = sent.count
+        let cyr = cmdD("в")
+        spin(0.1)
+        check("⌘D: on a Cyrillic layout (в on kVK_ANSI_D) starts Dictation",
+              cyr && sent.count == n + 1 && sent[n].0 == QCDictation.start && m.dictating, steps(since: n))
+        n = sent.count
+        let cyrOff = cmdD("в")
+        check("⌘D: and stops it", cyrOff && stopped(since: n, field: p.firstResponder as? QCTextView) && !m.dictating, steps(since: n))
+
+        // not ⌘⇧D, ⌥⌘D, ⌃⌘D
+        n = sent.count
+        _ = cmdD("d", 2, [.command, .shift]); _ = cmdD("d", 2, [.command, .option]); _ = cmdD("d", 2, [.command, .control])
+        spin(0.1)
+        check("⌘D: ⌘⇧D, ⌥⌘D and ⌃⌘D are left alone", sent.count == n && !m.dictating, steps(since: n))
+
+        // Dictation started with macOS's own shortcut (an enter notice, the button off): ⌘D stops it
+        p.makeKey(); p.focusField(); spin(0.1)
+        m.dictating = false
+        chat.dictationWatch.entered(Notification(name: QCDictationWatch.enterName))
+        n = sent.count
+        let noticed = cmdD()
+        check("⌘D: with a dictation enter notice set stops it (the button was off), starts nothing",
+              noticed && stopped(since: n, field: p.firstResponder as? QCTextView) && !m.dictationNoticed && !m.dictating, steps(since: n))
+
+        // Dictation off in System Settings: the mic button's one line, nothing started
+        off = true
+        chat.dictationOffSaid = false; m.dictationNote = nil
+        n = sent.count
+        let offKey = cmdD()
+        spin(0.1)
+        check("⌘D: with Dictation off in System Settings shows the note and starts nothing",
+              offKey && m.dictationNote == QCDictation.offWords && !m.dictating && sent.count == n, steps(since: n))
+        off = true; m.dictationNote = nil; chat.dictationOffSaid = true     // as the checks after this one found it
+    }
 
     // Return while Dictation runs: by default the first Return ends it and shows the transcript (nothing sent), the next
     // sends; "sends at once" is the old behaviour; typing always sends at once

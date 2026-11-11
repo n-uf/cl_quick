@@ -102,8 +102,8 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
     do ⌥⌘↑ and ⌥⌘↓ (thinking) and ⌥⌘→ and ⌥⌘← (model).
   - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
   - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
-  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, Return, ⇧Return, ⌘N, Esc and
-    ⌘W, and the shortcut that opens cl_quick. A click elsewhere or Esc closes it.
+  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, Return, ⇧Return, ⌘N, ⌘D
+    (Dictation on/off), Esc and ⌘W, and the shortcut that opens cl_quick. A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
     fuller), two thin stacked bars (the 5-hour window over the week) and the share of the fuller window, such as
     "5h ▬ 78%" ("full" when a limit is full). On a narrow bar it drops the share, then the label.
@@ -112,7 +112,8 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   button beside it (the copy shows "Copied" for a moment); below, **Settings for <profile>…** and **Add a profile…**.
   The address is nowhere else in the chat.
 - The mic button left of Send starts macOS Dictation into the field (cl_quick stays in the background: the panel takes
-  the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); a click again,
+  the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); ⌘D does the same
+  as a click, on and off (also for a Dictation macOS's own shortcut started); a click again,
   sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on.
 - **Images.** ⌘V with a screenshot or picture on the clipboard (⌃⇧⌘4 copies one), or with image files copied in Finder,
   attaches it; so does dropping image files or a picture from a page on the bar or the chat window. Each shows as a

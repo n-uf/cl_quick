@@ -50,7 +50,7 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **Images in the chat.** Paste a screenshot or picture (⌘V) or drop image files on the bar or the chat window: they
   show as thumbnails over the field (up to 5, each with a ✕) and go with the message, scaled down in memory to 1568 px.
   Nothing is saved, so chats stay incognito. An image alone is a message too.
-- **A mic button** next to Send starts macOS Dictation into the field.
+- **A mic button** next to Send starts macOS Dictation into the field; ⌘D turns it on and off from the keyboard.
 - **Any shortcut**: five Space shortcuts or Other… (any key held with ⌘, ⌃ or ⌥), with no Accessibility permission. It
   warns only about real clashes: macOS's own shortcuts, or a key another app holds (when macOS refuses it).
 - **Incognito chats.** Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under

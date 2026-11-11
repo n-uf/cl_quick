@@ -1294,6 +1294,7 @@ struct QCKeysView: View {
             ("⇧Return", "New line"),
             ("⌘N", "New chat"),
             ("⌘⇧C", "Copy the last answer"),
+            ("⌘D", "Dictation on/off"),
             ("Esc  ⌘W", "Hide"),
             (opener, "Open cl_quick"),
         ]
@@ -1618,7 +1619,7 @@ struct QCMicButton: View {
                 .qcControl()
         }
         .buttonStyle(.plain)
-        .help(on ? "Stop dictation" : "Dictate")
+        .help(on ? "Stop dictation (⌘D)" : "Dictate (⌘D)")
         .onHover { hover = $0 }
         .qcMark("mic")
         .accessibilityLabel(on ? "Stop dictation" : "Dictate")
