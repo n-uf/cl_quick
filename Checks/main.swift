@@ -54,6 +54,28 @@ let back = (try? JSONSerialization.jsonObject(with: ul.dropLast())) as? [String:
 check("user line reads back", (back?["message"] as? [String: Any])?["content"] as? String == tricky, back as Any)
 check("user line is one line", !ul.dropLast().contains(0x0A))
 
+// a message with images: the image blocks first (base64), then the text block; an image alone has no text block
+let png1 = QuickChatImageData(mediaType: "image/png", data: Data([0x89, 0x50, 0x4E, 0x47, 0xFB, 0xFF, 0xFE, 0x01]))     // base64 holds "/" and "+"
+let jpg1 = QuickChatImageData(mediaType: "image/jpeg", data: Data([0xFF, 0xD8, 0xFF, 0xE0]))
+let withImages = QuickChatParse.userLine("What is this?\nTwo of them.", images: [png1, jpg1])
+check("image line ends in a newline and is one line", withImages.last == 0x0A && !withImages.dropLast().contains(0x0A))
+let imgObj = (try? JSONSerialization.jsonObject(with: withImages.dropLast())) as? [String: Any]
+let imgMsg = imgObj?["message"] as? [String: Any]
+let blocks = imgMsg?["content"] as? [[String: Any]] ?? []
+check("image line: type user, role user", imgObj?["type"] as? String == "user" && imgMsg?["role"] as? String == "user")
+check("image line: two image blocks, then one text block", blocks.map { $0["type"] as? String } == ["image", "image", "text"], blocks)
+let src0 = blocks.first?["source"] as? [String: Any]
+check("image line: base64 source with the media type", src0?["type"] as? String == "base64" && src0?["media_type"] as? String == "image/png"
+      && Data(base64Encoded: src0?["data"] as? String ?? "") == png1.data, src0 as Any)
+check("image line: the second image keeps its own media type", (blocks[1]["source"] as? [String: Any])?["media_type"] as? String == "image/jpeg")
+check("image line: the text block carries the text", blocks.last?["text"] as? String == "What is this?\nTwo of them.")
+check("image line: base64 is not escaped", String(data: withImages, encoding: .utf8)?.contains("\\/") == false)
+let onlyImage = QuickChatParse.userLine("", images: [png1])
+let onlyBlocks = (((try? JSONSerialization.jsonObject(with: onlyImage.dropLast())) as? [String: Any])?["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+check("image line: an image alone is one image block and no text block", onlyBlocks.map { $0["type"] as? String } == ["image"], onlyBlocks)
+let plainObj = (try? JSONSerialization.jsonObject(with: QuickChatParse.userLine("hi", images: []).dropLast())) as? [String: Any]
+check("no images: the plain string form is kept", (plainObj?["message"] as? [String: Any])?["content"] as? String == "hi", plainObj as Any)
+
 // model names
 for (id, want) in [("claude-haiku-5-5", "Haiku 5.5"), ("claude-sonnet-5-5-20261001", "Sonnet 5.5"), ("claude-opus-5-5", "Opus 5.5"),
                    ("claude-fable-5-1", "Fable 5.1"), ("claude-haiku-4-5-20251001", "Haiku 4.5"), ("", ""), ("<synthetic>", "<synthetic>")] {
@@ -188,6 +210,7 @@ func run(_ mode: String, _ body: (QuickChatProcess, () -> [QuickChatEvent], () -
     try? "mode=\(mode)\nargs=\(argsFile)\n".write(toFile: (work as NSString).deletingLastPathComponent + "/stub.conf", atomically: true, encoding: .utf8)
     try? FileManager.default.removeItem(atPath: argsFile)
     try? FileManager.default.removeItem(atPath: argsFile + ".ctl")
+    try? FileManager.default.removeItem(atPath: argsFile + ".in")
     let p = QuickChatProcess(QuickChatCommand(claude: stub, configDir: "/Users/sample/.claude-work", isDefaultDir: false,
                                               workFolder: work, model: "haiku"))
     var events: [QuickChatEvent] = []
@@ -254,6 +277,29 @@ run("ok") { p, events, exit in
     check("ok: the models listed", listed.count == 7 && listed.map(\.value).contains("claude-fable-5-2"), listed)
     check("ok: newest Fable picked from the list", QuickChatModels.resolve(.fable, in: listed).value == "claude-fable-5-2")
     check("ok: the process still answers after it", p.send("fourth question") && { wait(5) { done(events()) == 4 }; return done(events()) == 4 }())
+}
+
+// a message with images reaches `claude` as one stream-json line with the image blocks, then the text block; an image alone
+// is a message too, and a plain one after them is still the plain string form
+run("ok") { p, events, _ in
+    check("images: sent with text", p.send("what colour?", images: [png1, jpg1]))
+    wait(5) { done(events()) == 1 }
+    check("images: sent alone", p.send("", images: [png1]))
+    wait(5) { done(events()) == 2 }
+    check("images: a plain message after them", p.send("thanks") && { wait(5) { done(events()) == 3 }; return done(events()) == 3 }())
+    let lines = ((try? String(contentsOfFile: argsFile + ".in", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    check("images: the stand-in got three message lines", lines.count == 3, lines.count)
+    func content(_ i: Int) -> Any? {
+        guard i < lines.count, let o = (try? JSONSerialization.jsonObject(with: Data(lines[i].utf8))) as? [String: Any] else { return nil }
+        return (o["message"] as? [String: Any])?["content"]
+    }
+    let first = content(0) as? [[String: Any]] ?? []
+    check("images: line 1 is image, image, text", first.map { $0["type"] as? String } == ["image", "image", "text"], first)
+    check("images: line 1's first image is what was sent",
+          Data(base64Encoded: ((first.first?["source"] as? [String: Any])?["data"] as? String) ?? "") == png1.data)
+    check("images: line 1's text", first.last?["text"] as? String == "what colour?")
+    check("images: line 2 is the image alone", (content(1) as? [[String: Any]])?.map { $0["type"] as? String } == ["image"], content(1) as Any)
+    check("images: line 3 is the plain string", content(2) as? String == "thanks", content(2) as Any)
 }
 
 // the account's limits before any message: `get_usage` on a `claude` that was only started (the bar opened)

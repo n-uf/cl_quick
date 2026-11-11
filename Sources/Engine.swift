@@ -39,6 +39,13 @@ enum QuickChatEvent: Equatable {
     case ignored
 }
 
+/// An image attached to a message, ready to send: PNG or JPEG bytes (Images.swift makes them), only ever in memory.
+struct QuickChatImageData: Equatable {
+    /// "image/png" or "image/jpeg".
+    var mediaType: String
+    var data: Data
+}
+
 /// What `get_usage` says about the account's limits: the 5-hour and weekly windows. Experimental in Claude Code, so
 /// `rate_limit_event` after each answer stays as well; when it says the limits aren't available, nothing changes.
 struct QuickChatUsage: Equatable {
@@ -275,10 +282,20 @@ enum QuickChatParse {
         return f.date(from: String(s[..<dot]) + String(s[end...]))
     }
 
-    /// One message for Claude Code's input (stream-json), ending in a newline.
-    static func userLine(_ text: String) -> Data {
-        let o: [String: Any] = ["type": "user", "message": ["role": "user", "content": text]]
-        var d = (try? JSONSerialization.data(withJSONObject: o)) ?? Data()
+    /// One message for Claude Code's input (stream-json), ending in a newline. Plain text goes as a string; with images the
+    /// content is a list of blocks, the images first (base64, as the API takes them), then the text block when there is
+    /// text (an image alone is a message too). Checked against Claude Code 2.1.318: it reads both.
+    static func userLine(_ text: String, images: [QuickChatImageData] = []) -> Data {
+        var content: Any = text
+        if !images.isEmpty {
+            var blocks: [[String: Any]] = images.map {
+                ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.data.base64EncodedString()]]
+            }
+            if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
+            content = blocks
+        }
+        let o: [String: Any] = ["type": "user", "message": ["role": "user", "content": content]]
+        var d = (try? JSONSerialization.data(withJSONObject: o, options: [.withoutEscapingSlashes])) ?? Data()
         d.append(0x0A)
         return d
     }
@@ -500,12 +517,12 @@ final class QuickChatProcess {
         }
     }
 
-    /// Sends one message. False when the process is gone (the pipe is closed).
+    /// Sends one message, with its images if it has any. False when the process is gone (the pipe is closed).
     @discardableResult
-    func send(_ text: String) -> Bool {
+    func send(_ text: String, images: [QuickChatImageData] = []) -> Bool {
         lock.lock(); let closed = stopping; lock.unlock()
         guard !closed, process.isRunning else { return false }
-        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.userLine(text)); return true }
+        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.userLine(text, images: images)); return true }
         catch { return false }
     }
 
