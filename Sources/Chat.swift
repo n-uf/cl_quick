@@ -720,6 +720,7 @@ final class QuickChatModel: ObservableObject {
             if let why = launch(cmd, key: key, target: target) { fail(.stopped(detail: why)); return }
         }
         idleTimer?.invalidate()
+        // queued: the line is written off the main thread; a write that then fails comes back through onSendFailed
         messageSent = process?.send(q, images: images.map(\.payload)) == true
         if !messageSent { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
@@ -739,6 +740,11 @@ final class QuickChatModel: ObservableObject {
         p.onExit = { [weak self, weak p] status, tail in
             guard let self, let p, p === self.process else { return }
             self.exited(status, tail)
+        }
+        p.onSendFailed = { [weak self, weak p] in
+            guard let self, let p, p === self.process, self.messageSent else { return }
+            self.messageSent = false
+            self.fail(.stopped(detail: "Claude Code didn't take the message."))
         }
         do { try p.start() } catch { return "Claude Code couldn't start: \(error.localizedDescription)" }
         process = p
@@ -970,6 +976,7 @@ final class QuickChatModel: ObservableObject {
         modelRequests = [:]
         process?.onEvent = { _ in }
         process?.onExit = { _, _ in }
+        process?.onSendFailed = {}
         process?.stop()
         process = nil
         processKey = ""

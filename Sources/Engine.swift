@@ -533,23 +533,46 @@ final class QuickChatProcess {
         }
     }
 
-    /// Sends one message, with its images if it has any. False when the process is gone (the pipe is closed).
+    /// Every write to `claude`'s stdin goes through this one serial queue, never the main thread: a message with images
+    /// is up to ~19 MB, and a `claude` that is slow to read (or stalled) would hold the writer. One queue for messages
+    /// and control requests, so the lines keep their order and a control line never lands inside an image line.
+    private let writes = DispatchQueue(label: "n-uf.cl-quick.stdin", qos: .userInitiated)
+
+    /// A message that couldn't be written (the pipe closed or broke), on the main thread. Not called after stop().
+    var onSendFailed: () -> Void = {}
+
+    private var isStopping: Bool { lock.lock(); defer { lock.unlock() }; return stopping }
+
+    /// One line to stdin (on the writes queue only); false when it didn't go.
+    private func write(_ line: Data) -> Bool {
+        guard !isStopping else { return false }
+        do { try input.fileHandleForWriting.write(contentsOf: line); return true } catch { return false }
+    }
+
+    /// Sends one message, with its images if it has any. It is queued and returns at once: the line is built and written
+    /// off the main thread, in the order sent, and a failed write comes back as `onSendFailed`. False when the process
+    /// is gone (the pipe is closed), nothing queued.
     @discardableResult
     func send(_ text: String, images: [QuickChatImageData] = []) -> Bool {
-        lock.lock(); let closed = stopping; lock.unlock()
-        guard !closed, process.isRunning else { return false }
-        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.userLine(text, images: images)); return true }
-        catch { return false }
+        guard !isStopping, process.isRunning else { return false }
+        writes.async { [self] in
+            if !write(QuickChatParse.userLine(text, images: images)) {
+                DispatchQueue.main.async { [self] in if !isStopping { onSendFailed() } }
+            }
+        }
+        return true
     }
 
     private var requests = 0
 
-    /// Sends a control request; its id (Claude Code's answer, a `.control` event, carries it), or nil when the pipe is closed.
+    /// Sends a control request (queued like a message); its id (Claude Code's answer, a `.control` event, carries it), or
+    /// nil when the pipe is closed. A request that then fails to write is lost quietly: a dead `claude` is reported by
+    /// its exit.
     private func control(_ subtype: String, _ fields: [String: Any] = [:]) -> String? {
         lock.lock(); let closed = stopping; requests += 1; let id = "qc-\(requests)"; lock.unlock()
         guard !closed, process.isRunning else { return nil }
-        do { try input.fileHandleForWriting.write(contentsOf: QuickChatParse.controlLine(id: id, subtype: subtype, fields)); return id }
-        catch { return nil }
+        writes.async { [self] in _ = write(QuickChatParse.controlLine(id: id, subtype: subtype, fields)) }
+        return id
     }
 
     /// Stops the answer under way; the conversation stays in the process. Claude Code then ends that turn with a result
@@ -582,8 +605,11 @@ final class QuickChatProcess {
     func stop() {
         lock.lock(); let already = stopping; stopping = true; lock.unlock()
         guard !already, process.isRunning else { return }
-        try? input.fileHandleForWriting.close()
+        // terminated first: a write blocked on a full pipe ends with the process; the input is closed on the writes queue
+        // after it, so the descriptor is never closed under a write
         process.terminate()
+        let pipe = input
+        writes.async { try? pipe.fileHandleForWriting.close() }
         // the fallback holds the process itself: the chat lets go of this object right after Stop
         let p = process
         DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {

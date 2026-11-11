@@ -204,10 +204,10 @@ let work = ProcessInfo.processInfo.environment["QC_WORK"] ?? NSTemporaryDirector
 let argsFile = work + "-args.txt"
 check("the stand-in is there", FileManager.default.isExecutableFile(atPath: stub), stub)
 
-func run(_ mode: String, _ body: (QuickChatProcess, () -> [QuickChatEvent], () -> (Int32, String)?) -> Void) {
+func run(_ mode: String, extra: String = "", _ body: (QuickChatProcess, () -> [QuickChatEvent], () -> (Int32, String)?) -> Void) {
     // the stand-in's settings: beside the work folder, since `claude` gets only an allowlisted environment
     try? FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-    try? "mode=\(mode)\nargs=\(argsFile)\n".write(toFile: (work as NSString).deletingLastPathComponent + "/stub.conf", atomically: true, encoding: .utf8)
+    try? "mode=\(mode)\nargs=\(argsFile)\n\(extra)".write(toFile: (work as NSString).deletingLastPathComponent + "/stub.conf", atomically: true, encoding: .utf8)
     try? FileManager.default.removeItem(atPath: argsFile)
     try? FileManager.default.removeItem(atPath: argsFile + ".ctl")
     try? FileManager.default.removeItem(atPath: argsFile + ".in")
@@ -300,6 +300,40 @@ run("ok") { p, events, _ in
     check("images: line 1's text", first.last?["text"] as? String == "what colour?")
     check("images: line 2 is the image alone", (content(1) as? [[String: Any]])?.map { $0["type"] as? String } == ["image"], content(1) as Any)
     check("images: line 3 is the plain string", content(2) as? String == "thanks", content(2) as Any)
+}
+
+// writes go through one queue, off the calling thread: a big line (3 MB of image) to a `claude` that doesn't read stdin for
+// 2 s returns to the caller at once; control requests sent meanwhile never land inside it; the order is the order sent
+do {
+    var raw = Data(count: 3_000_000)
+    raw.withUnsafeMutableBytes { if let b = $0.baseAddress { arc4random_buf(b, $0.count) } }
+    let big = QuickChatImageData(mediaType: "image/png", data: raw)
+    run("ok", extra: "delay=2\n") { p, events, _ in
+        let t0 = Date()
+        let a = p.send("first", images: [big])
+        let b = p.getUsage(), c = p.setModel("sonnet")
+        let d = p.send("second", images: [big])
+        let e = p.send("third")
+        let took = Date().timeIntervalSince(t0)
+        check("writes: send returns before a big line is written (a reader 2 s late)", a && b && c != nil && d && e && took < 0.5, took)
+        wait(40) { done(events()) == 3 }
+        check("writes: all three messages were answered", done(events()) == 3, done(events()))
+        let lines = ((try? String(contentsOfFile: argsFile + ".in", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        check("writes: the stand-in got three whole message lines (no control line inside an image line)", lines.count == 3
+              && lines.allSatisfy { ((try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any])?["type"] as? String == "user" }, lines.count)
+        let ctl = ((try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? "").split(separator: "\n").map { $0.split(separator: " ").prefix(2).joined(separator: " ") }
+        check("writes: messages and control requests arrive in the order sent", ctl == ["USER 1", "CTRL get_usage", "CTRL set_model", "USER 2", "USER 3"], ctl)
+    }
+    // a write that fails (the `claude` is killed before it reads) is reported on the main thread, once
+    run("ok", extra: "delay=3\n") { p, _, _ in
+        var failures = 0, onMain = true
+        p.onSendFailed = { failures += 1; onMain = onMain && Thread.isMainThread }
+        check("writes: a message to a `claude` that is still there is taken", p.send("lost", images: [big]))
+        usleep(300_000)
+        kill(p.pid, SIGKILL)
+        wait(10) { failures > 0 }
+        check("writes: a failed write is reported, on the main thread", failures == 1 && onMain, "\(failures) \(onMain)")
+    }
 }
 
 // the account's limits before any message: `get_usage` on a `claude` that was only started (the bar opened)
