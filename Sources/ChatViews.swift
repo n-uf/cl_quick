@@ -456,9 +456,12 @@ struct QCTurnView: View {
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
                 footer.padding(.top, 4).opacity(shown ? 1 : 0)
             }
-            if let p = model.shownProblem(turn) {      // a full limit only while it is still full
+            if let p = model.shownProblem(turn) {      // a full limit only while it is still full, on the latest turn
                 QCProblemView(problem: p, model: model, answered: !turn.answer.isEmpty, last: last)
                     .padding(.top, 12).padding(.bottom, 8)
+            } else if model.retryAfterLimit(turn) {
+                // refused on a limit that has room again: ask it again
+                QCButton(title: "Retry") { model.again() }.padding(.top, 10).padding(.bottom, 8)
             }
         }
         .onHover { hover = $0 }
@@ -1740,7 +1743,10 @@ struct QCTextField: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let tv = context.coordinator.textView else { return }
-        if tv.string != text { tv.string = text }
+        if tv.string != text {
+            tv.string = text
+            tv.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))     // the caret after what's there
+        }
         apply(tv)
         if context.coordinator.focusTick != focusTick {
             context.coordinator.focusTick = focusTick
@@ -1906,6 +1912,35 @@ final class QCTextView: NSTextView {
         let ok = super.becomeFirstResponder()
         onCaps?(NSEvent.modifierFlags.contains(.capsLock))
         return ok
+    }
+
+    // The keyboard follows the field when SwiftUI replaces it (chat ⇄ bar, e.g. the first keystroke after a chat ended):
+    // the field that goes, if it has the keyboard, leaves the window with nothing focused, and the field that comes takes
+    // it, with the caret after its text. So the next keystroke, however quick, lands in the new field.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let w = window, w.firstResponder === self {
+            // SwiftUI puts the new field in before it takes the old one out: hand the keyboard straight to it
+            var next: QCTextView?
+            func find(_ v: NSView) { if next == nil { if let t = v as? QCTextView, t !== self { next = t } else { v.subviews.forEach(find) } } }
+            if let content = w.contentView { find(content) }
+            if let next {
+                w.makeFirstResponder(next)
+                next.setSelectedRange(NSRange(location: (next.string as NSString).length, length: 0))
+            } else {
+                w.makeFirstResponder(nil)       // the field that comes takes it (viewDidMoveToWindow)
+            }
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let w = window else { return }
+        let fr = w.firstResponder
+        let free = fr == nil || fr === w || ((fr as? NSView).map { $0.window !== w } ?? false)
+        if free, w.isKeyWindow || w is QuickChatPanel && w.isVisible {
+            w.makeFirstResponder(self)
+            setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
+        }
     }
 }
 

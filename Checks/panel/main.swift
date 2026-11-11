@@ -669,6 +669,30 @@ do {
     m.field = "n"
     check("ended: the first keystroke leaves the dead chat (bar, the letter kept)", !m.isWindow && m.ended == nil && m.field == "n")
     m.field = ""
+    // two real keystrokes, quickly, right after a chat ended with the window open: through the window as AppKit delivers
+    // them (sendEvent → first responder), one run-loop turn apart. The first leaves the dead chat (the chat's field is
+    // replaced by the bar's); both letters land, in order, and the caret ends after them.
+    deadChat(); spin(0.4)
+    p.makeKey(); p.focusField(); spin(0.1)
+    func key(_ c: String, _ code: UInt16) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                         windowNumber: p.windowNumber, context: nil, characters: c, charactersIgnoringModifiers: c,
+                         isARepeat: false, keyCode: code)!
+    }
+    p.sendEvent(key("a", 0))
+    RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    p.sendEvent(key("b", 11))
+    spin(0.4)
+    var tvNow: QCTextView?
+    func findTV(_ v: NSView) { if let t = v as? QCTextView { tvNow = t }; v.subviews.forEach(findTV) }
+    findTV(cv)
+    check("typing after an end: both letters land in order", m.field == "ab" && tvNow?.string == "ab",
+          "field '\(m.field)', text view '\(tvNow?.string ?? "nil")'")
+    check("typing after an end: the dead chat is gone (the bar)", !m.isWindow && m.ended == nil)
+    check("typing after an end: the field keeps the keyboard, the caret after the letters",
+          p.firstResponder === tvNow && tvNow?.selectedRange() == NSRange(location: 2, length: 0),
+          "\(String(describing: p.firstResponder)) \(String(describing: tvNow?.selectedRange()))")
+    m.field = ""; spin(0.2)
     // a live chat is never cleared by typing or opening
     var live = QuickChatTurn(question: "q", answer: "a", model: "Haiku 5.5"); live.phase = .done
     m.turns = [live]; m.ended = nil
@@ -686,6 +710,20 @@ do {
     check("limit notice: gone as soon as the level shows room", m.shownProblem(m.turns[0]) == nil && !m.blocked)
     var other = QuickChatTurn(question: "q"); other.phase = .failed; other.problem = .stopped(detail: "x")
     check("limit notice: other problems stay", m.shownProblem(other) == .stopped(detail: "x"))
+    check("limit notice: with room again the refused turn offers Retry", m.retryAfterLimit(m.turns[0]))
+    // an older refused turn: when the limit fills again only the latest turn shows the notice (one Ask on …)
+    var later = QuickChatTurn(question: "next", answer: "ok", model: "Haiku 5.5"); later.phase = .done
+    m.turns = [refused, later]
+    m.update(target: m.target, level: full, offer: nil)
+    check("limit notice: an older refused turn doesn't show it again when the limit fills",
+          m.blocked && m.shownProblem(m.turns[0]) == nil && !m.retryAfterLimit(m.turns[0]))
+    // a switch waiting to resend the stopped question when the chat ends: the question moves to the field
+    m.turns = [refused]; m.field = ""; m.ended = .idle
+    m.switchNotice = .waiting(wanted: "ultra-2@example.com")
+    m.leaveEnded()
+    check("ended with a switch waiting: the stopped question stays to be sent (in the field)",
+          m.turns.isEmpty && m.field == "hi" && m.pendingQuestion() == "hi", "field '\(m.field)'")
+    m.switchNotice = nil; m.field = ""
     m.newChat(); spin(0.3)
 }
 
@@ -712,6 +750,19 @@ do {
     refusedWk.fiveHour = 20; refusedWk.fiveHourResets = now.addingTimeInterval(3600); refusedWk.refusedUntil = now.addingTimeInterval(3600)
     check("limit: a refusal with the 5-hour window at 20% names the week", refusedWk.full(now)?.id == "wk")
     check("limit: with no numbers the notice names no window", QuickChatLevel.fullSentence(nil, who: "Main", now: now) == "Main's limit is full.")
+    // refused while get_usage reports both windows with room (5h 20%, week 53%): neither is named, neither drawn full
+    var both = QuickChatLevel()
+    both.fiveHour = 20; both.fiveHourResets = now.addingTimeInterval(3600)
+    both.week = 53; both.weekResets = now.addingTimeInterval(3 * 86400)
+    both.refusedUntil = now.addingTimeInterval(1800)
+    let sb = QuickChatLevel.fullSentence(both, who: "Main", now: now)
+    check("limit: refused with 5h at 20% and the week at 53% names neither window", both.full(now)?.id == FullLimit.any
+          && sb.hasPrefix("Main's limit is full, resets ") && !sb.contains("week") && !sb.contains("5-hour"), sb)
+    check("limit: …and the dot marks neither full (the fuller share as it is)", both.binding(now)?.id == "wk" && both.binding(now)?.p == 53,
+          "\(String(describing: both.binding(now)))")
+    check("limit: …while the account is still held back", both.full(now) != nil)
+    var none = QuickChatLevel(); none.refusedUntil = now.addingTimeInterval(1800)
+    check("limit: refused with no numbers names no window", none.full(now)?.id == FullLimit.any && none.binding(now) == nil)
     // the header and the notice agree, and the dot (binding) points at the same window
     check("limit: the dot's window is the full one", five.binding(now)?.id == "5h" && wk.binding(now)?.id == "wk")
     // the offer shows the other profile's fuller window, not its week alone

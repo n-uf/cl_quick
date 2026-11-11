@@ -34,9 +34,12 @@ enum Painter {
 
 /// The limit that holds an account back, and when it resets.
 struct FullLimit: Equatable {
-    let id: String          // "5h" or "wk"
+    /// "5h" or "wk"; "any" when Claude Code refused but neither window is known to be the full one (both reported
+    /// below 100%, or no numbers): then no window is drawn full, only the account is held back.
+    let id: String
     let resets: Date?
-    var name: String { id == "5h" ? "5-hour limit" : "week" }
+    var name: String { id == "5h" ? "5-hour limit" : id == "wk" ? "week" : "limit" }
+    static let any = "any"
 }
 
 struct QuickChatLevel: Codable, Equatable {
@@ -89,25 +92,26 @@ struct QuickChatLevel: Codable, Equatable {
         if wk { return FullLimit(id: "wk", resets: weekResets) }
         if five { return FullLimit(id: "5h", resets: fiveHourResets) }
         if let until = refusedUntil, until > now {
-            // refused with neither window reported full: name the one that can be. A window known to have room isn't
-            // it (a week at 53% never is); with both known, the fuller; with neither, the 5-hour one, which fills far
-            // more often. (The old guess compared an unknown 5-hour share as 0 and named the week.)
-            let five = fiveHourNow(now), wk = weekNow(now)
-            let isFive: Bool
+            // refused with neither window reported full: name a window only when it is the one that can be. A window
+            // known to have room never is (a week at 53% isn't full), so with one window known below 100% it's the
+            // other, unknown one; with both known below 100% (get_usage refilled them while the refusal lasts) or
+            // none known, neither is named: the account is held back, no window is drawn full. (The old guess
+            // compared shares, an unknown one as 0, and named a window with room.)
+            let five = fiveHourNow(now).map { $0.rounded() < 100 }, wk = weekNow(now).map { $0.rounded() < 100 }
+            let id: String
             switch (five, wk) {
-            case let (f?, w?): isFive = f >= w
-            case (nil, _?): isFive = true
-            case let (f?, nil): isFive = f.rounded() >= 100
-            case (nil, nil): isFive = true
+            case (true?, false?), (true?, nil): id = "wk"
+            case (false?, true?), (nil, true?): id = "5h"
+            default: id = FullLimit.any
             }
-            return FullLimit(id: isFive ? "5h" : "wk", resets: until)
+            return FullLimit(id: id, resets: until)
         }
         return nil
     }
 
     /// The notice for a full limit, naming the window that is full as the header shows it, and when it resets:
-    /// "Main's 5-hour limit is full, resets 23:20." / "Main's week is full, resets Thu 19:00.". With no numbers at all it
-    /// names no window ("Main's limit is full.") rather than guess one.
+    /// "Main's 5-hour limit is full, resets 23:20." / "Main's week is full, resets Thu 19:00.". When no window can be
+    /// named it names none: "Main's limit is full, resets 23:20." (the refusal's end), or "Main's limit is full."
     static func fullSentence(_ level: QuickChatLevel?, who: String, now: Date = Date()) -> String {
         guard let f = level?.full(now) else { return "\(who)'s limit is full." }
         return "\(who)'s \(f.name) is full" + (f.resets.map { ", resets " + TimeWords.when($0) } ?? "") + "."
@@ -135,7 +139,8 @@ struct QuickChatLevel: Codable, Equatable {
     /// window on a tie; nil while neither is known. What the bar's indicator and the profile's dot show, so neither reads
     /// as "plenty left" while the other window is nearly full.
     func binding(_ now: Date = Date()) -> (id: String, p: Double)? {
-        if let f = full(now) { return (f.id, 100) }
+        // a full window; a refusal that names no window marks none full (the fuller share shows as it is)
+        if let f = full(now), f.id != FullLimit.any { return (f.id, 100) }
         switch (fiveHourNow(now), weekNow(now)) {
         case let (a?, b?): return a >= b ? ("5h", a) : ("wk", b)
         case let (a?, nil): return ("5h", a)

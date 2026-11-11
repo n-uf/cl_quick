@@ -331,7 +331,14 @@ final class QuickChatModel: ObservableObject {
     /// window is open when the chat ends: the next open or keystroke comes here.)
     func leaveEnded() {
         guard ended != nil else { return }
+        // a switch of account waiting to resend the question a full limit stopped (continueSwitched reads it from the
+        // last turn or the field): the question moves to the field, so the switch still sends it, and it can be seen
+        let waitingQuestion: String? = {
+            if case .waiting? = switchNotice, field.isEmpty, turns.last?.problem == .limitFull { return turns.last?.question }
+            return nil
+        }()
         ended = nil
+        if let q = waitingQuestion { field = q }
         turns = []
         accountNote = nil
         barProblem = nil
@@ -340,10 +347,17 @@ final class QuickChatModel: ObservableObject {
 
     /// The notice a turn shows now. A full limit is live state: once the level shows room again it is gone (the turn
     /// keeps its question; a new message or Ask again goes through).
+    /// Only the latest turn shows it: an older refused turn doesn't bring its notice (and a second Ask on …) back when
+    /// the limit fills again.
     func shownProblem(_ t: QuickChatTurn) -> QuickChatProblem? {
         guard t.phase == .failed, let p = t.problem else { return nil }
-        if p == .limitFull, !blocked { return nil }
+        if p == .limitFull, !blocked || t.id != turns.last?.id { return nil }
         return p
+    }
+
+    /// The latest turn was refused on a full limit and the level shows room now: it offers Retry (asks it again).
+    func retryAfterLimit(_ t: QuickChatTurn) -> Bool {
+        t.phase == .failed && t.problem == .limitFull && !blocked && t.id == turns.last?.id && ended == nil
     }
 
     /// A new chat: the process goes and the old chat with it (nothing was saved), the model and thinking go back to the defaults.
