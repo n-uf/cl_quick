@@ -35,8 +35,12 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
     /// "⌃⌥Space", in macOS's own order.
     var title: String {
         let h = has
-        return (h.control ? "⌃" : "") + (h.option ? "⌥" : "") + (h.shift ? "⇧" : "") + (h.command ? "⌘" : "") + key
+        return (h.control ? "⌃" : "") + (h.option ? "⌥" : "") + (h.shift ? "⇧" : "") + (h.command ? "⌘" : "") + shownKey
     }
+
+    /// The key as printed on the keyboard, without Shift, worked out again from the key code on this Mac's layout; the stored
+    /// name when that can't be (so a label kept by an older version, like "!" for ⌃⇧1, shows right too).
+    var shownKey: String { Self.keyName(keyCode: keyCode) ?? key }
 
     /// The same modifiers as macOS writes them in its own shortcuts' settings (NSEvent's flags).
     var cocoaModifiers: Int {
@@ -75,14 +79,50 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
          "controlSpace": .controlSpace, "commandSpace": .commandSpace][n]
     }
 
+    private static let special: [Int: String] = [kVK_Space: "Space", kVK_Return: "Return", kVK_Tab: "Tab", kVK_Delete: "Delete",
+        kVK_Escape: "Esc", kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+        kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
+        kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"]
+
     private static func name(_ e: NSEvent) -> String {
-        let special: [Int: String] = [kVK_Space: "Space", kVK_Return: "Return", kVK_Tab: "Tab", kVK_Delete: "Delete",
-            kVK_Escape: "Esc", kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
-            kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
-            kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"]
-        if let s = special[Int(e.keyCode)] { return s }
+        if let n = keyName(keyCode: UInt32(e.keyCode)) { return n }
         let c = (e.charactersIgnoringModifiers ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return c.count == 1 ? c : "Key \(e.keyCode)"     // a dead key or another layout: its code rather than "?"
+    }
+
+    /// The name of a key by its code: a special key by its name; any other as printed on the keyboard without Shift (⇧1 is
+    /// "1", not "!"), upper case, on the given layout (the current keyboard layout by default). Nil when it has none.
+    static func keyName(keyCode: UInt32, layout: CFData? = currentLayoutData()) -> String? {
+        if let s = special[Int(keyCode)] { return s }
+        guard let layout, let ptr = CFDataGetBytePtr(layout) else { return nil }
+        var dead: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let status = ptr.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) {
+            UCKeyTranslate($0, UInt16(truncatingIfNeeded: keyCode), UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()),
+                           OptionBits(kUCKeyTranslateNoDeadKeysMask), &dead, chars.count, &length, &chars)
+        }
+        guard status == noErr, length > 0 else { return nil }
+        let s = String(utf16CodeUnits: chars, count: length).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return s.count == 1 ? s : nil
+    }
+
+    /// The Unicode layout data of the current keyboard layout, or the ASCII-capable one when that has none.
+    static func currentLayoutData() -> CFData? {
+        for source in [TISCopyCurrentKeyboardLayoutInputSource(), TISCopyCurrentASCIICapableKeyboardLayoutInputSource()] {
+            if let p = source?.takeRetainedValue(), let d = TISGetInputSourceProperty(p, kTISPropertyUnicodeKeyLayoutData) {
+                return Unmanaged<CFData>.fromOpaque(d).takeUnretainedValue()
+            }
+        }
+        return nil
+    }
+
+    /// The layout data of a keyboard layout by its input source ID ("com.apple.keylayout.US"), or nil when this Mac has none.
+    static func layoutData(id: String) -> CFData? {
+        let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+        guard let list = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource], let s = list.first,
+              let d = TISGetInputSourceProperty(s, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        return Unmanaged<CFData>.fromOpaque(d).takeUnretainedValue()
     }
 
     /// Why it can't be the shortcut at all, or nil.

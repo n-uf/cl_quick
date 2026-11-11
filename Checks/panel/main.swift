@@ -8,6 +8,7 @@
 //   Checks/panel.sh
 
 import AppKit
+import Carbon.HIToolbox
 
 Files.readOnly = true
 let app = NSApplication.shared
@@ -1152,6 +1153,24 @@ do {
     check("⌥⌘← and ⌥⌘↑ still step the model and thinking", steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
     pb.clearContents()
     if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
+}
+
+// A recorded shortcut is named by its key as printed, never by the Shift character (⌃⇧1 is "⌃⇧1", not "⌃⇧!")
+do {
+    if let us = QuickChatShortcut.layoutData(id: "com.apple.keylayout.US") {
+        func n(_ code: Int) -> String? { QuickChatShortcut.keyName(keyCode: UInt32(code), layout: us) }
+        check("US layout: the 1 key is named 1", n(18) == "1", "\(String(describing: n(18)))")
+        check("US layout: a letter key is the capital (A, Z, K)", n(0) == "A" && n(6) == "Z" && n(40) == "K", "\(String(describing: n(0))) \(String(describing: n(6))) \(String(describing: n(40)))")
+        check("US layout: symbol keys are named without Shift (/ , ; =)", n(44) == "/" && n(43) == "," && n(41) == ";" && n(24) == "=", "\(String(describing: n(44))) \(String(describing: n(43))) \(String(describing: n(41)))")
+        check("special keys keep their names on any layout", n(kVK_Space) == "Space" && n(kVK_Return) == "Return" && n(kVK_LeftArrow) == "←" && n(kVK_F5) == "F5")
+        let hold = UInt32(controlKey | shiftKey)
+        let old = QuickChatShortcut(keyCode: 18, key: "!", carbonModifiers: hold)       // as an older version kept it
+        check("a stored shifted label shows as the key (⌃⇧! → ⌃⇧1)", old.shownKey == (QuickChatShortcut.keyName(keyCode: 18) ?? "!") && old.title.hasPrefix("⌃⇧"), old.title)
+        check("a letter with Shift keeps its capital, modifiers in macOS's order (⌥⇧A)", QuickChatShortcut(keyCode: 0, key: "A", carbonModifiers: UInt32(optionKey | shiftKey)).title == "⌥⇧" + (QuickChatShortcut.keyName(keyCode: 0) ?? "A"))
+    } else { print("skip: US layout checks (no com.apple.keylayout.US on this Mac)") }
+    // with no layout at all the stored name stands
+    check("no layout data: the key's code has no name, the stored one stays", QuickChatShortcut.keyName(keyCode: 18, layout: nil) == nil
+          && QuickChatShortcut.keyName(keyCode: UInt32(kVK_Space), layout: nil) == "Space")
 }
 
 CheckQuiet.verify("at the end")
