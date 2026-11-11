@@ -5,7 +5,8 @@
 // Incognito: an image lives only in memory, from the pasteboard to the process's pipe and the chat's turn: no temp
 // file, no cache, nothing for the app's folder. An image file that is dropped or copied is only read, never copied.
 // Each is scaled down in memory to at most 1568 px on its long side (what Claude reads anyway: bigger only costs time)
-// and encoded as PNG, or as JPEG at 0.85 when it is a photo and PNG would be large, to stay under 3.75 MB of base64.
+// and encoded as PNG, or as JPEG at 0.85 (transparency flattened onto white) when PNG is over about 1 MB of base64. The
+// pictures stay in the conversation, so a chat holds at most about 20 MB of them (the API takes 32 MB a request).
 
 import AppKit
 import ImageIO
@@ -19,6 +20,8 @@ final class QCImage: Identifiable, Equatable {
     let thumbnail: NSImage
     /// The size that is sent, in pixels.
     let pixels: CGSize
+    /// What it adds to a request: its bytes as base64.
+    var base64Size: Int { (payload.data.count + 2) / 3 * 4 }
 
     init(payload: QuickChatImageData, thumbnail: NSImage, pixels: CGSize) {
         self.payload = payload; self.thumbnail = thumbnail; self.pixels = pixels
@@ -31,10 +34,12 @@ enum QCImages {
     static let maxCount = 5
     /// The longest side sent, in pixels.
     static let maxSide = 1568
-    /// An image's base64 stays under this many bytes (the API's limit is 5 MB; this leaves room).
-    static let maxBase64 = 3_750_000
-    /// A PNG over this many bytes is tried as a JPEG too, when the picture has no transparency.
-    static let largePNG = 1_000_000
+    /// An image's base64 stays under this many bytes: Claude reduces a picture to about 1.15 MP anyway, and every image
+    /// stays in the conversation for the rest of the chat.
+    static let maxBase64 = 1_000_000
+    /// The images one chat holds (its process's conversation), in bytes of base64: the API refuses a request over 32 MB,
+    /// and the whole conversation is in every request.
+    static let chatCap = 20_000_000
     static let jpegQuality = 0.85
     static let thumbnailPixels = 168
 
@@ -124,11 +129,10 @@ enum QCImages {
         guard let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
               let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int, w > 0, h > 0
         else { return .failure(.unreadable) }
-        let hasAlpha = props[kCGImagePropertyHasAlpha] as? Bool ?? false
         var side = min(maxSide, max(w, h))          // never larger than it is
         for _ in 0..<7 {
             guard let cg = scaled(src, side) else { return .failure(.unreadable) }
-            if let e = encode(cg, hasAlpha: hasAlpha) {
+            if let e = encode(cg) {
                 let pixels = CGSize(width: cg.width, height: cg.height)
                 guard let thumb = scaled(src, min(thumbnailPixels, max(w, h))) else { return .failure(.unreadable) }
                 let img = NSImage(cgImage: thumb, size: NSSize(width: thumb.width, height: thumb.height))
@@ -147,16 +151,12 @@ enum QCImages {
         return CGImageSourceCreateThumbnailAtIndex(src, 0, o as CFDictionary)
     }
 
-    /// PNG when it is small enough; for a picture without transparency, JPEG at 0.85 when PNG is large (and smaller than
-    /// it). A picture with transparency stays PNG until it is scaled down far enough. nil: too big as either.
-    private static func encode(_ cg: CGImage, hasAlpha: Bool) -> QuickChatImageData? {
+    /// PNG when it fits the target; else JPEG at 0.85 (transparency flattened onto white) when that fits. nil: too big as
+    /// either, so the caller scales it down further.
+    private static func encode(_ cg: CGImage) -> QuickChatImageData? {
         func fits(_ d: Data) -> Bool { (d.count + 2) / 3 * 4 <= maxBase64 }
-        let png = encode(cg, type: .png, quality: nil)
-        if let png, png.count <= largePNG { return QuickChatImageData(mediaType: "image/png", data: png) }
-        if !hasAlpha, let jpeg = encode(cg, type: .jpeg, quality: jpegQuality), png == nil || jpeg.count < png!.count {
-            if fits(jpeg) { return QuickChatImageData(mediaType: "image/jpeg", data: jpeg) }
-        }
-        if let png, fits(png) { return QuickChatImageData(mediaType: "image/png", data: png) }
+        if let png = encode(cg, type: .png, quality: nil), fits(png) { return QuickChatImageData(mediaType: "image/png", data: png) }
+        if let jpeg = encode(cg, type: .jpeg, quality: jpegQuality), fits(jpeg) { return QuickChatImageData(mediaType: "image/jpeg", data: jpeg) }
         return nil
     }
 
@@ -184,7 +184,7 @@ enum QCImages {
     // MARK: what is said
 
     /// The one line that says what was left out (QCNote), or nil.
-    static func note(notImages: [String], failures: [Failure], overCount: Int) -> String? {
+    static func note(notImages: [String], failures: [Failure], overCount: Int, chatFull: Bool = false) -> String? {
         var parts: [String] = []
         if notImages.count == 1 { parts.append("Only images can be attached; \(notImages[0]) isn't one.") }
         else if notImages.count > 1 { parts.append("Only images can be attached; \(notImages.count) of those files aren't.") }
@@ -192,6 +192,7 @@ enum QCImages {
         if failures.contains(.unreadable) { parts.append("An image couldn't be read.") }
         if failures.contains(.tooLarge) { parts.append("An image was too large to send, even scaled down.") }
         if overCount > 0 { parts.append("Up to \(maxCount) images go with a message; \(overCount == 1 ? "one was" : "\(overCount) were") left out.") }
+        if chatFull { parts.append("This chat holds as many images as it can; start a new chat (⌘N) for more.") }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 }

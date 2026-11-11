@@ -1428,12 +1428,13 @@ do {
     let tall = prepared(png(1000, 3000))
     check("images: a tall one is capped on its height", tall.map { Int($0.pixels.height) == 1568 && Int($0.pixels.width) == 523 } == true, "\(String(describing: tall?.pixels))")
     let noisyPhoto = prepared(png(2400, 1800, noise: true, alpha: false))
-    check("images: a large photo (no transparency) goes as a JPEG under 3.75 MB of base64, at most 1568 px",
+    check("images: the per-image target is 1 MB of base64", QCImages.maxBase64 == 1_000_000)
+    check("images: a large photo (no transparency) goes as a JPEG under 1 MB of base64, at most 1568 px",
           noisyPhoto.map { $0.payload.mediaType == "image/jpeg" && b64($0) <= QCImages.maxBase64 && pixels($0) <= 1568 } == true,
           "\(String(describing: noisyPhoto?.payload.mediaType)) \(noisyPhoto.map(b64) ?? -1) \(String(describing: noisyPhoto?.pixels))")
     let noisyAlpha = prepared(png(2400, 1800, noise: true, alpha: true))
-    check("images: a large picture with an alpha channel stays PNG and is scaled down under 3.75 MB of base64",
-          noisyAlpha.map { $0.payload.mediaType == "image/png" && b64($0) <= QCImages.maxBase64 && pixels($0) <= 1568 } == true,
+    check("images: a large picture with an alpha channel falls back to JPEG (flattened on white) under 1 MB of base64",
+          noisyAlpha.map { $0.payload.mediaType == "image/jpeg" && b64($0) <= QCImages.maxBase64 && pixels($0) <= 1568 } == true,
           "\(String(describing: noisyAlpha?.payload.mediaType)) \(noisyAlpha.map(b64) ?? -1) \(String(describing: noisyAlpha?.pixels))")
     if case .failure(let why) = QCImages.prepare(Data("not an image".utf8)) { check("images: text is no image", why == .notAnImage) } else { check("images: text is no image", false) }
     check("images: the bytes sent are PNG or JPEG", [small, big, noisyPhoto, noisyAlpha].compactMap { $0 }.allSatisfy {
@@ -1663,6 +1664,102 @@ do {
     ipb.clearContents()
     try? FileManager.default.removeItem(at: fixtures)
     print("  images: \(passed - passedBefore) of \(passed + failed - passedBefore - failedBefore) checks passed")
+}
+
+// ── images, review fixes: shared set-up (a chat model of its own on the stand-in `claude`, under build/ only) ────────────────
+struct ImageFixChat {
+    let m: QuickChatModel
+    let dir: URL
+    let argsFile: String
+    /// The stand-in's process id (it writes it when it starts; a restarted chat has another).
+    var pid: String {
+        ((try? String(contentsOfFile: argsFile, encoding: .utf8)) ?? "").split(separator: "\n").first { $0.hasPrefix("PID ") }.map { String($0.dropFirst(4)) } ?? ""
+    }
+    /// The message lines the stand-in has read, from all its processes.
+    var lines: [String] { ((try? String(contentsOfFile: argsFile + ".in", encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
+    func imageBlocks(_ line: String) -> Int {
+        guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+              let c = (o["message"] as? [String: Any])?["content"] as? [[String: Any]] else { return 0 }
+        return c.filter { $0["type"] as? String == "image" }.count
+    }
+    func answered(_ n: Int) {
+        let end = Date().addingTimeInterval(8)
+        while !(m.turns.count == n && m.turns.last?.phase == .done), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    /// Attaches and waits until they are in (or refused): `done` is called either way.
+    func attach(_ srcs: [QCImages.Source], notImages: [String] = []) {
+        var landed = false
+        m.attach(QCImages.Found(sources: srcs, notImages: notImages)) { landed = true }
+        let end = Date().addingTimeInterval(8)
+        while !landed, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+}
+func imageFixChat(_ name: String, conf: String = "") -> ImageFixChat {
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(name)
+    try? FileManager.default.removeItem(at: dir)
+    try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+    let argsFile = dir.appendingPathComponent("args.txt").path
+    try? "mode=ok\nargs=\(argsFile)\n\(conf)".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+    let m = QuickChatModel()
+    var tg = QuickChatTarget(Profile(id: name, name: "Main", folder: dir.appendingPathComponent("folder").path))
+    tg.workFolder = dir.appendingPathComponent("work").path
+    tg.accountUUID = "u-\(name)"; tg.email = "alex@example.com"
+    m.target = tg
+    m.resolveClaude = { $0(stub) }
+    m.freshTarget = { _, done in done(tg) }
+    return ImageFixChat(m: m, dir: dir, argsFile: argsFile)
+}
+/// A picture that doesn't compress: random pixels.
+func noisyPNG(_ w: Int, _ h: Int) -> Data {
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: 3,
+                                     hasAlpha: false, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+          let base = rep.bitmapData else { return Data() }
+    for y in 0..<h { arc4random_buf(base + y * rep.bytesPerRow, w * 3) }
+    return rep.representation(using: .png, properties: [:]) ?? Data()
+}
+
+// a chat holds about 20 MB of pictures (the API takes 32 MB a request, the whole conversation each time): past the cap
+// further attachments are refused with one line; a new chat starts from nothing. A retry that carries images starts a new
+// `claude` (the running one holds the pictures already); a retry of a plain message stays in the running one.
+do {
+    let c = imageFixChat("images-cap"), m = c.m
+    check("image cap: a chat takes about 20 MB of base64", QCImages.chatCap == 20_000_000)
+    let noisy = noisyPNG(800, 800)
+    guard case .success(let one) = QCImages.prepare(noisy) else { print("FAIL image cap: the fixture prepares"); exit(1) }
+    let X = one.base64Size
+    m.imageCap = 2 * X + 100
+    let refusal = "This chat holds as many images as it can; start a new chat (⌘N) for more."
+    c.attach([.data(noisy)]); c.attach([.data(noisy)])
+    check("image cap: two fit", m.images.count == 2 && m.imageNote == nil, "\(m.images.count) \(String(describing: m.imageNote))")
+    c.attach([.data(noisy)])
+    check("image cap: a third is refused, with the one-line note", m.images.count == 2 && m.imageNote == refusal, "\(m.images.count) \(String(describing: m.imageNote))")
+    check("image cap: nothing is left preparing", m.preparing == 0)
+    m.field = "two"; m.send(); c.answered(1)
+    c.attach([.data(noisy)])
+    check("image cap: after sending them the chat is at its cap: a new one is refused, nothing is read", m.images.isEmpty && m.imageNote == refusal && m.preparing == 0, "\(m.images.count) \(String(describing: m.imageNote))")
+    m.newChat()
+    c.attach([.data(noisy)])
+    check("image cap: a new chat (⌘N) takes pictures again", m.images.count == 1 && m.imageNote == nil, "\(m.images.count) \(String(describing: m.imageNote))")
+    m.imageCap = QCImages.chatCap
+    m.newChat()
+
+    // retry on a live process
+    let r = imageFixChat("images-retry"), n = r.m
+    n.field = "plain"; n.send(); r.answered(1)
+    let pid1 = r.pid
+    n.again(); r.answered(1)
+    check("retry: a plain message is asked again in the same `claude`", !pid1.isEmpty && r.pid == pid1, "\(pid1) \(r.pid)")
+    r.attach([.data(noisyPNG(40, 40))])
+    n.field = "look"; n.send(); r.answered(2)
+    let pid2 = r.pid
+    n.again(); r.answered(1)
+    check("retry: a message with a picture starts a new `claude` (the old one holds the picture already)", !pid2.isEmpty && r.pid != pid2, "\(pid2) \(r.pid)")
+    check("retry: …with that message alone, and says it is a new chat", n.turns.count == 1 && n.turns[0].question == "look" && n.accountNote?.contains("New chat") == true, "\(n.turns.count) \(String(describing: n.accountNote))")
+    check("retry: the picture went once to each `claude`, none got it twice", r.lines.count == 4 && r.lines.map(r.imageBlocks) == [0, 0, 1, 1], "\(r.lines.map(r.imageBlocks))")
+    n.shutdown()
+    m.shutdown()
+    try? FileManager.default.removeItem(at: c.dir); try? FileManager.default.removeItem(at: r.dir)
 }
 
 // the update notice's setting (Settings ▸ General ▸ Updates): a missing key is on; off is read; a wrong type is on

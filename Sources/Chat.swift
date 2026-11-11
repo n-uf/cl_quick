@@ -313,6 +313,10 @@ final class QuickChatModel: ObservableObject {
     private var appliedModel = "", appliedEffort: String?
     /// The question being answered reached `claude` (not still waiting for the folder to be read or `claude` to be found).
     private var messageSent = false
+    /// The images in the running `claude`'s conversation, in bytes of base64: every request carries all of them, and the
+    /// API takes 32 MB a request, so past `imageCap` the chat takes no more (a new chat starts from nothing).
+    private var sentImageBytes = 0
+    var imageCap = QCImages.chatCap
     /// Answers Stop gave up on whose `done` is still to come (see StaleAnswers), and the wait's limit.
     private var stale = StaleAnswers()
     private var staleTimer: Timer?
@@ -421,8 +425,10 @@ final class QuickChatModel: ObservableObject {
         let room = max(0, QCImages.maxCount - images.count - preparing)
         let take = Array(f.sources.prefix(room))
         let over = f.sources.count - take.count
-        guard !take.isEmpty else {
-            say(QCImages.note(notImages: f.notImages, failures: [], overCount: over))
+        // the chat already holds what it can (the pictures sent plus those waiting): nothing is read
+        let full = sentImageBytes + images.reduce(0) { $0 + $1.base64Size } >= imageCap
+        guard !take.isEmpty, !full else {
+            say(QCImages.note(notImages: f.notImages, failures: [], overCount: over, chatFull: full && !f.sources.isEmpty))
             done()
             return
         }
@@ -434,13 +440,18 @@ final class QuickChatModel: ObservableObject {
                 guard let self else { return }
                 self.preparing -= take.count
                 var failures: [QCImages.Failure] = []
+                var held = self.sentImageBytes + self.images.reduce(0) { $0 + $1.base64Size }
+                var chatFull = false
                 for r in results {
                     switch r {
-                    case .success(let img): self.images.append(img)
+                    case .success(let img):
+                        if held + img.base64Size > self.imageCap { chatFull = true; continue }
+                        held += img.base64Size
+                        self.images.append(img)
                     case .failure(let why): failures.append(why)
                     }
                 }
-                self.say(QCImages.note(notImages: notImages, failures: failures, overCount: over))
+                self.say(QCImages.note(notImages: notImages, failures: failures, overCount: over, chatFull: chatFull))
                 done()
             }
         }
@@ -502,6 +513,10 @@ final class QuickChatModel: ObservableObject {
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
+        // a running `claude` already holds this message's pictures in its conversation, and sending them again would pile
+        // them up (a request over the API's limit fails every later message): a retry that carries images starts a new
+        // chat, with this message alone (start() says so when there was more before it)
+        if !turns[i].images.isEmpty, process != nil { closeProcess() }
         ask(turns[i].question, images: turns[i].images)
     }
 
@@ -722,7 +737,8 @@ final class QuickChatModel: ObservableObject {
         idleTimer?.invalidate()
         // queued: the line is written off the main thread; a write that then fails comes back through onSendFailed
         messageSent = process?.send(q, images: images.map(\.payload)) == true
-        if !messageSent { fail(.stopped(detail: "Claude Code didn't take the message.")) }
+        if messageSent { sentImageBytes += images.reduce(0) { $0 + $1.base64Size } }
+        else { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
     /// The same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
@@ -972,6 +988,7 @@ final class QuickChatModel: ObservableObject {
         staleTimer?.invalidate(); staleTimer = nil
         stale.reset()
         messageSent = false
+        sentImageBytes = 0          // the conversation that held them is gone with its process
         spoken = false; lastEvent = .distantPast
         modelRequests = [:]
         process?.onEvent = { _ in }
