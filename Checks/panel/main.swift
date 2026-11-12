@@ -1393,8 +1393,10 @@ do {
     check("truth: B's day-old full week draws nothing full and offers nothing", chat.model.level == nil && !chat.model.blocked && chat.model.switchOffer == nil)
     let menu = QCStatusMenu.info(truth, store)
     let block = QCMenuProfile.make(profile: truth, level: menu.level, address: menu.address, problem: menu.problem)
-    check("truth: the menu shows B in use with no numbers (none recent), no full note",
-          menu.address == "blake@example.com" && block.noUsage && block.fullNote == nil && block.lines.contains("No recent numbers"), "\(block.lines)")
+    // the menu alone keeps B's saved full week, grey and as last known, until its reset (no dot colour, nothing offered)
+    check("truth: the menu shows B in use with its saved full week grey, as last known",
+          menu.address == "blake@example.com" && block.fullNote == "Week full · last known" && block.fullNoteStale && block.dotP == nil
+            && block.lines.contains("Last known yesterday"), "\(block.lines)")
     // B's week, fresh and full: now it is the account's state, and the notice and the standby offer (no numbers) come
     var now = full; now.at = Date()
     store.record("truth", account: "u-b", now)
