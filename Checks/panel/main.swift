@@ -428,6 +428,46 @@ do {
     check("late least height: the bar returns to its height when the least height lets it", abs(p.frame.height - bar.height) < 0.5,
           barStuck(bar.height))
 }
+// The least height lowered INSIDE fit()'s own layout pass: fit() sets the smaller frame, the old least height takes it back
+// during that pass (the resize that says so is where the lowering is done here: synchronously, still inside fit()), and the
+// constraint update of the lowering is fit()'s own (ignored, the "fitting" flag). fit() tries once more on the next turn
+// (fitRetried), and the bar ends at its content's height. A guard, not proof of the retry: this Mac's AppKit also gets to
+// the content's height here without it (the check passes on the code before the retry), so the retry itself is argued,
+// not measured; what this does hold is that the retry and the remembered miss (below) never leave the frame short.
+do {
+    chat.model.field = "a\nb\nc"
+    spin(0.5)
+    let three = p.frame.height
+    check("least height lowered in the layout pass: the field's three lines grow the bar", three > bar.height + 20, "\(three) vs \(bar.height)")
+    let held = cv.heightAnchor.constraint(greaterThanOrEqualToConstant: three)
+    held.isActive = true
+    var lowered = 0
+    spin(0.2)
+    // The host may also tell of the change on its own account (invalidateIntrinsicContentSize); every notice is held back
+    // from the lowering on until the end of the wait, as the case under test is the one where nothing says the least
+    // height came down and only fit()'s own retry can end at the content's height.
+    let keepCB = cv.onIntrinsicChange
+    var swallow = false
+    cv.onIntrinsicChange = { if !swallow { keepCB() } }
+    // the frame taken back to the held height while fit() is changing it: the least height comes down right there, and its
+    // constraint update runs in that same pass too, the way SwiftUI's own does
+    let mark = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: p, queue: nil) { _ in
+        guard cv.fitting, lowered == 0, abs(p.frame.height - three) < 0.5 else { return }
+        held.isActive = false
+        cv.updateConstraintsForSubtreeIfNeeded()
+        swallow = true
+        lowered += 1
+    }
+    chat.model.field = ""
+    spin(0.8)
+    NotificationCenter.default.removeObserver(mark)
+    check("least height lowered in the layout pass: it was lowered inside fit()'s own pass", lowered == 1, "\(lowered)")
+    check("least height lowered in the layout pass: the bar returns to its height", abs(p.frame.height - bar.height) < 0.5,
+          "\(p.frame.height) vs \(bar.height)")
+    cv.onIntrinsicChange = keepCB
+    held.isActive = false
+    spin(0.2)
+}
 // A least height held above the target for good (the content streams, its constraints update again and again): fit() tries
 // once, AppKit takes the frame back, and the same start is not tried again on every update. The least height lifting is a
 // new start: the bar still ends at its content's height.

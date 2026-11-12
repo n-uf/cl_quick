@@ -1088,6 +1088,9 @@ final class QuickChat {
     private var barExtra: CGFloat = 0
     /// Whether the panel is already sized for the chat: from then on the size is the user's, and fit() leaves it alone.
     private var sizedForChat = false
+    /// Whether fit() already scheduled its one more try for a frame that stayed short of its target (set when it does,
+    /// reset when a fit reaches its target or the content changes): no loop.
+    private var fitRetried = false
     /// The start of the last fit() try that fell short of its target (nil: the last one reached it, or none yet).
     private var fitMiss: FitTry?
     private let hotKey = QuickChatHotKey()
@@ -1389,7 +1392,10 @@ final class QuickChat {
         // macOS does the sizing (a titled, resizable panel); the content's own frames (QuickChatRoot: from 320 wide, the
         // chat from 220 tall, the bar from its content's height) are the window's least size (the hosting view sets it)
         let host = QuickChatHostingView(rootView: QuickChatRoot(model: model))
-        host.onIntrinsicChange = { [weak self] in self?.fit() }
+        host.onIntrinsicChange = { [weak self] in
+            self?.fitRetried = false      // the content changed: a frame short of its target may try once more
+            self?.fit()
+        }
         p.contentView = host
         panel = p
         self.host = host
@@ -1426,7 +1432,8 @@ final class QuickChat {
             guard natural > 0 else { return }      // not measured yet (NSView.noIntrinsicMetric is -1)
             h = natural + barExtra
         }
-        if let vis { h = min(h, vis.height) }
+        var clamped = false                 // h is the screen's, not the content's or the user's: no retry for that
+        if let vis, h > vis.height { h = vis.height; clamped = true }
         var f = p.frame
         let top = topAnchor ?? f.maxY       // the top edge where the mode change found it
         topAnchor = nil
@@ -1449,8 +1456,15 @@ final class QuickChat {
             // start again would end the same (a height below the content's least one stays unreachable), so it isn't
             // made while the content streams; a changed least or ideal height, target or frame is a new start
             fitMiss = abs(p.frame.height - h) > 0.5 ? start : nil
+            // a least height that came down inside that very layout pass (SwiftUI lowering its constraints) was no news to
+            // updateConstraints (it ignores fit()'s own) and the frame was taken back to the old one: one more try on the
+            // next turn of the run loop, once (fitRetried), sees the lower least height
+            if abs(p.frame.height - h) > 0.5, !clamped, !fitRetried {
+                fitRetried = true
+                DispatchQueue.main.async { [weak self] in self?.fit() }
+            }
         }
-        if abs(p.frame.height - h) <= 0.5 { fitMiss = nil }
+        if abs(p.frame.height - h) <= 0.5 { fitRetried = false; fitMiss = nil }
         // the chat is the user's from here on, once it really has its height (else the next change tries again)
         if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
         p.invalidateShadow()
