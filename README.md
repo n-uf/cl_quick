@@ -143,7 +143,9 @@ minutes for a profile.
   most once a minute) (Claude Code's `get_usage`, which sends no message to a model and uses its own sign-in, and reads
   nothing from the Keychain). After each answer Claude Code also reports them on its own, which stays as the fallback.
 - When a profile's 5-hour limit or week is full, the chat's notice names the window that is full ("Main's 5-hour limit
-  is full, resets 23:20.") and offers the profile with the most room: **Ask on Work** sends your question there. If the profile has a standby account with room, it also offers
+  is full, resets 23:20.") and offers the profile with the most room: **Ask on Work** sends your question there. If the
+  profile has a standby account, it also offers the one seen most recently, with no numbers (a standby account shows no
+  usage: "p•••@example.com is on standby."), as
   **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a chat may not
   carry across accounts) and sends what you had typed, with a line saying "Main is on p•••@example.com now."
 - If a profile's Claude Code isn't signed in, the notice offers **Sign in…** (Claude Code's own sign-in, in Terminal)

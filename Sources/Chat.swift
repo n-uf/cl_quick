@@ -172,12 +172,10 @@ struct QuickChatOffer: Equatable {
 }
 
 /// Another account of the chat's own profile, on standby, offered while a limit is full: signing in again as it moves the
-/// profile (and every Claude Code session using its folder) to it.
+/// profile (and every Claude Code session using its folder) to it. No numbers: a standby account shows no usage.
 struct QuickChatSwitchOffer: Equatable {
     var uuid: String
     var email: String
-    /// The share of its fuller window at its last answer, as for QuickChatOffer; nil: no numbers yet.
-    var used: Double?
 }
 
 /// A switch of the chat's profile to another account, shown where the limit notice would be.
@@ -1208,23 +1206,16 @@ final class QuickChat {
                 return QuickChatOffer(profileID: o.id, name: o.name, used: l.binding()?.p)     // its fuller window
             }
             .sorted { ($0.used ?? 101) < ($1.used ?? 101) }
-        // the same for the profile's own standby accounts (the most recently seen first among equals)
-        let standby = store.standby(p).enumerated()
-            .compactMap { i, a -> (Int, QuickChatSwitchOffer)? in
-                let l = store.level(of: p, account: a.uuid)
-                guard l?.full() == nil else { return nil }
-                return (i, QuickChatSwitchOffer(uuid: a.uuid, email: a.email, used: l?.binding()?.p))
-            }
-            .sorted { a, b in
-                let x = a.1.used ?? 101, y = b.1.used ?? 101
-                return x != y ? x < y : a.0 < b.0
-            }
+        // the profile's own standby account seen most recently. A standby account shows no usage (one folder holds one
+        // sign-in, so its limits aren't known here), so none is picked or described by numbers kept from its last time
+        // in use
+        let standby = store.standby(p).first.map { QuickChatSwitchOffer(uuid: $0.uuid, email: $0.email) }
         let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }
             ?? switcher.ended[id].map { e in
                 e.signedIn.map { .wrong(signedIn: $0, wanted: e.goal.wantedEmail) } ?? .timedOut(wanted: e.goal.wantedEmail)
             }
         model.update(target: now, level: store.level(of: p), offer: others.first,
-                     switchOffer: standby.first?.1, notice: notice)
+                     switchOffer: standby, notice: notice)
         // a new account or folder (a switch landed, open or hidden): its `claude` starts, so its limits are there by the
         // time the bar shows (a cold start takes about 12 s); with nothing asked it ends after 3 minutes
         if restarted { model.warm() }

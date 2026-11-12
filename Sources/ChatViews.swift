@@ -708,7 +708,8 @@ struct QCProblemView: View {
             }
             var parts: [String] = []
             if let o = model.offer { parts.append(room(o.name, o.used)) }
-            if let s = model.switchOffer { parts.append(room("Standby " + maskEmail(s.email), s.used)) }
+            // a standby account shows no usage: it is offered, never described by numbers from its last time in use
+            if let s = model.switchOffer { parts.append("\(maskEmail(s.email)) is on standby.") }
             return parts.joined(separator: " ")
         }
     }
@@ -2315,7 +2316,7 @@ enum QuickChatRender {
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
             m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
-            m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com", used: nil)
+            m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com")
             if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
             if state == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
             if state == "timedout" { m.switchNotice = .timedOut(wanted: "ultra-2@example.com") }
