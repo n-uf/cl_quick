@@ -1062,6 +1062,11 @@ final class QuickChatModel: ObservableObject {
 
 // MARK: - The controller
 
+/// Where a fit() try starts from, to tell a repeat of a try that fell short from a new one.
+struct FitTry: Equatable {
+    var target, top, from, least, ideal: CGFloat
+}
+
 final class QuickChat {
     static let shared = QuickChat()
 
@@ -1083,6 +1088,8 @@ final class QuickChat {
     private var barExtra: CGFloat = 0
     /// Whether the panel is already sized for the chat: from then on the size is the user's, and fit() leaves it alone.
     private var sizedForChat = false
+    /// The start of the last fit() try that fell short of its target (nil: the last one reached it, or none yet).
+    private var fitMiss: FitTry?
     private let hotKey = QuickChatHotKey()
     /// The shortcut: "on", or why it isn't registered; nil while it's turned off. Shown in Settings.
     private(set) var shortcutState: String?
@@ -1423,7 +1430,11 @@ final class QuickChat {
         var f = p.frame
         let top = topAnchor ?? f.maxY       // the top edge where the mode change found it
         topAnchor = nil
-        if abs(f.height - h) > 0.5 || abs(f.maxY - top) > 0.5 {
+        // `start`: what this try starts from, with the content's least height (its fitting size: the window's own minimum
+        // lags a change of the constraints) and ideal height; only worked out when there is something to set
+        if abs(f.height - h) > 0.5 || abs(f.maxY - top) > 0.5,
+           case let start = FitTry(target: h, top: top, from: f.height, least: host.fittingSize.height, ideal: host.intrinsicContentSize.height),
+           start != fitMiss {
             f.size.height = h
             f.origin.y = top - h
             if let vis, f.minY < vis.minY { f.origin.y = vis.minY }
@@ -1434,7 +1445,12 @@ final class QuickChat {
             p.setFrame(f, display: true)
             p.layoutIfNeeded()
             host.fitting = false
+            // a try that fell short is remembered as it started (target, frame, least and ideal heights, top edge): the same
+            // start again would end the same (a height below the content's least one stays unreachable), so it isn't
+            // made while the content streams; a changed least or ideal height, target or frame is a new start
+            fitMiss = abs(p.frame.height - h) > 0.5 ? start : nil
         }
+        if abs(p.frame.height - h) <= 0.5 { fitMiss = nil }
         // the chat is the user's from here on, once it really has its height (else the next change tries again)
         if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
         p.invalidateShadow()

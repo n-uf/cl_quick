@@ -428,6 +428,30 @@ do {
     check("late least height: the bar returns to its height when the least height lets it", abs(p.frame.height - bar.height) < 0.5,
           barStuck(bar.height))
 }
+// A least height held above the target for good (the content streams, its constraints update again and again): fit() tries
+// once, AppKit takes the frame back, and the same start is not tried again on every update. The least height lifting is a
+// new start: the bar still ends at its content's height.
+do {
+    chat.model.field = "a\nb\nc"
+    spin(0.5)
+    let three = p.frame.height
+    let held = cv.heightAnchor.constraint(greaterThanOrEqualToConstant: three)
+    held.isActive = true
+    chat.model.field = ""
+    spin(0.5)
+    check("held least height: the bar stays at three lines while it holds", abs(p.frame.height - three) < 0.5, "\(p.frame.height) vs \(three)")
+    var resizes = 0
+    let watch = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: p, queue: nil) { _ in resizes += 1 }
+    for _ in 0..<40 { cv.needsUpdateConstraints = true; spin(0.02) }      // 40 updates, as a streaming answer brings
+    NotificationCenter.default.removeObserver(watch)
+    check("held least height: 40 constraint updates set the frame at most once", resizes <= 1, "\(resizes) resizes")
+    check("held least height: the frame is still the held one", abs(p.frame.height - three) < 0.5, "\(p.frame.height) vs \(three)")
+    held.isActive = false
+    cv.needsUpdateConstraints = true
+    spin(0.5)
+    check("held least height: the bar returns to its height when the least height lets it", abs(p.frame.height - bar.height) < 0.5,
+          barStuck(bar.height))
+}
 // Dictation's provisional text is marked text (setMarkedText, replaced again and again, then committed): the field grows
 // and shrinks with it as it does with typed text, though the text view may not post a change for it
 do {
