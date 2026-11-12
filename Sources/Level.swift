@@ -123,13 +123,15 @@ struct QuickChatLevel: Codable, Equatable {
         return true
     }
 
-    private static func holding(_ p: Double?, _ resets: Date?, _ now: Date) -> Bool {
-        (p.map { $0.rounded() >= 100 } ?? false) && (resets.map { $0 > now } ?? true)
+    private static func holding(_ p: Double?, _ resets: Date?, _ now: Date, dated: Bool) -> Bool {
+        (p.map { $0.rounded() >= 100 } ?? false) && (resets.map { $0 > now } ?? !dated)
     }
 
-    /// The full limit that holds the account back now, if any: of the full ones, the one that resets last.
-    func full(_ now: Date = Date()) -> FullLimit? {
-        let five = Self.holding(fiveHour, fiveHourResets, now), wk = Self.holding(week, weekResets, now)
+    /// The full limit that holds the account back now, if any: of the full ones, the one that resets last. With `dated`,
+    /// only a limit whose reset is known and still ahead counts (what the menu keeps from old numbers: a 100% with no
+    /// reset date says nothing about when it ends, and never hides one that has a date).
+    func full(_ now: Date = Date(), dated: Bool = false) -> FullLimit? {
+        let five = Self.holding(fiveHour, fiveHourResets, now, dated: dated), wk = Self.holding(week, weekResets, now, dated: dated)
         if five && wk { return (fiveHourResets ?? .distantFuture) > (weekResets ?? .distantFuture) ? FullLimit(id: "5h", resets: fiveHourResets) : FullLimit(id: "wk", resets: weekResets) }
         if wk { return FullLimit(id: "wk", resets: weekResets) }
         if five { return FullLimit(id: "5h", resets: fiveHourResets) }

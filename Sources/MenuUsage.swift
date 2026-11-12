@@ -6,9 +6,11 @@
 // The numbers are the ones cl_quick already keeps (levels.json, from Claude Code's `get_usage`); the menu shows them at
 // once when it opens: fresh ones in their colours (a full limit as a crimson note), ones over a few minutes old grey as
 // "Last known …", ones over an hour old not at all. One exception: a saved full limit (Week or 5-hour at 100%, or a
-// refusal) whose reset is still ahead stays, grey, until that reset, however old: "Week full · last known 3 h ago" in
-// the header and its row at 100% with "back …" (an old one shows only that row: the other window's number is over an hour
-// old and nothing bounds it, while a reset still ahead is what says the full one still stands), no dot colour. It is
+// refusal) whose reset is still ahead stays, grey, until that reset, however old: "Week full · last known" in the
+// header, its row at 100% with "back …" and "Last known 3 h ago" under the bars; when over an hour old the other
+// window's row is "–" (its number is old and nothing bounds it, while a reset still ahead is what says the full one
+// still stands). A refusal that names no window puts its end in the note. No dot colour; the block has the shape of a
+// fresh one, so a fresh answer replaces it live while the menu is open. It is
 // only the menu's: the chat, "Ask on …" and the switch offers never act on a number that isn't fresh (ProfileStore.shownLevel),
 // and a fresh answer replaces it at once. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
 // background: a short-lived `claude` per profile, one at a time, that is sent `get_usage` and nothing else (no message
@@ -115,8 +117,9 @@ struct QCMenuProfile: Equatable {
     /// The same words for VoiceOver.
     var spoken: String { lines.joined(separator: ". ") }
 
-    /// What changes the block's height: a live update that changes it waits for the next time the menu opens.
-    var shape: [Int] { [rows.count, noUsage ? 1 : 0, updated == nil ? 0 : 1, fullNote == nil ? 0 : 1] }
+    /// What sets the block's height (see QCMenuUsageBlock.height): a live update that changes it waits for the next time
+    /// the menu opens. The header note doesn't (but its width does: QCMenuUsageBlock.reload).
+    var shape: [Int] { [rows.count, noUsage ? 1 : 0, updated == nil ? 0 : 1] }
 
     /// The block for a profile: `address` is the account in use (nil: signed out), `problem` what is wrong with its sign-in,
     /// `level` its numbers as last reported (nil: none yet).
@@ -135,7 +138,7 @@ struct QCMenuProfile: Equatable {
         let age = level?.at.map { now.timeIntervalSince($0) } ?? .infinity
         let fresh = level?.isFresh(now) == true
         let old = level != nil && age >= lastKnownFor
-        let savedFull: FullLimit? = fresh ? nil : level?.full(now).flatMap { f in f.resets.map { $0 > now } == true ? f : nil }
+        let savedFull: FullLimit? = fresh ? nil : level?.full(now, dated: true)
         let shownLevel = old && savedFull == nil ? nil : level
         let full = fresh ? shownLevel?.full(now) : savedFull
         func row(_ id: String, _ label: String, _ p: Double?, _ resets: Date?) -> Row {
@@ -149,22 +152,23 @@ struct QCMenuProfile: Equatable {
         var rows: [Row] = []
         if let level = shownLevel {
             rows = [row("5h", "5-hour", level.fiveHourNow(now), level.fiveHourResets), row("wk", "Week", level.weekNow(now), level.weekResets)]
-            // an old saved full limit shows its own window only: the other one's number is over an hour old
-            if old { rows = rows.filter { $0.id == full?.id } }
+            // an old saved full limit keeps both rows (so the block has the shape of a fresh one and a fresh answer
+            // replaces it live), but the other window's number, over an hour old, is not shown: "–"
+            if old { rows = rows.map { $0.id == full?.id ? $0 : Row(id: $0.id, label: $0.label, p: nil, share: QuickChatLevel.pct(nil), resets: "", stale: true) } }
             if rows.allSatisfy({ $0.p == nil }) { rows = [] }
         }
-        let ago = shownLevel?.at.map { AccountBook.ago($0, now: now) }
+        let agoWords = shownLevel?.at.map { AccountBook.ago($0, now: now) }
         let name = full.map { $0.id == "5h" ? "5-hour" : $0.id == "wk" ? "Week" : "Limit" }
-        // fresh: "Week full · in 2d 3h", crimson; saved: "Week full · last known 3 h ago", grey (the age is in it, so no
-        // separate "Last known" line under the bars)
+        // fresh: "Week full · in 2d 3h", crimson. Saved: "Week full · last known", grey, with the age on the line under
+        // the bars as for any last known number; a refusal that names no window has no row to carry its end, so its
+        // note does: "Limit full · back at 15:28 · last known"
         let note: String? = full.flatMap { f in
             fresh ? name.map { $0 + " full" + (f.resets.map { " · in " + TimeWords.countdown($0, now: now) } ?? "") }
-                  : name.map { $0 + " full · last known " + (ago ?? "earlier") }
+                  : name.map { $0 + " full" + (f.id == FullLimit.any ? f.resets.map { " · " + TimeWords.back($0, now: now) } ?? "" : "") + " · last known" }
         }
-        let updated: String? = rows.isEmpty || savedFull != nil ? nil : shownLevel?.at.map { (fresh ? "Updated " : "Last known ") + AccountBook.ago($0, now: now) }
-        // a refusal that names no window has no row to carry its reset: the muted line says when it ends
-        var noUsageText = old && savedFull == nil ? noRecentWords : noUsageWords
-        if rows.isEmpty, !fresh, let f = savedFull, let r = f.resets { noUsageText = "Held back until " + TimeWords.when(r, now: now) }
+        let updated: String? = rows.isEmpty ? nil : agoWords.map { (fresh ? "Updated " : "Last known ") + $0 }
+        // no row to carry it (an old refusal that names no window): the muted line is the age, not "No recent numbers"
+        let noUsageText = savedFull != nil ? "Last known " + (agoWords ?? "earlier") : old ? noRecentWords : noUsageWords
         return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? shownLevel?.binding(now)?.p : nil, fullNote: note,
                              account: .inUse(address: address), rows: rows, noUsage: rows.isEmpty, updated: updated,
                              noUsageText: noUsageText, fullNoteStale: !fresh && note != nil)
@@ -292,9 +296,10 @@ final class QCMenuUsageBlock: NSView {
         }
     }
 
-    /// New numbers for the block, in place: only when its height stays (a menu doesn't take a row that changes size).
+    /// New numbers for the block, in place: only when its height stays (a menu doesn't take a row that changes size)
+    /// and it still fits the width the menu gave it (a header note that grew would be cut).
     func reload(_ m: QCMenuProfile) {
-        guard m != model, m.shape == model.shape else { return }
+        guard m != model, m.shape == model.shape, Self.width(m) <= frame.width else { return }
         model = m
         setAccessibilityLabel(m.spoken)
         needsDisplay = true

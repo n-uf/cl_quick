@@ -60,35 +60,50 @@ check("stale: 12 min old numbers are 'Last known', grey, with no dot colour",
       lastKnown.updated == "Last known 12 min ago" && lastKnown.rows.allSatisfy { $0.colour == Painter.grey } && lastKnown.dotP == nil,
       "\(lastKnown.lines)")
 let staleFull = make(level(five: nil, week: 100, ago: 12 * 60))
-check("stale: a full week 12 min old stays visible, grey: 'Week full · last known 12 min ago', both rows grey, no dot, no separate age line",
-      staleFull.fullNote == "Week full · last known 12 min ago" && staleFull.fullNoteStale && staleFull.dotP == nil && staleFull.updated == nil
+check("stale: a full week 12 min old stays visible, grey: 'Week full · last known', both rows grey, no dot, 'Last known 12 min ago' under the bars",
+      staleFull.fullNote == "Week full · last known" && staleFull.fullNoteStale && staleFull.dotP == nil && staleFull.updated == "Last known 12 min ago"
       && staleFull.rows.map(\.share) == ["–", "100%"] && staleFull.rows.allSatisfy { $0.colour == Painter.grey } && staleFull.rows[1].resets.hasPrefix("back"), "\(staleFull.lines)")
 // a saved full limit whose reset is still ahead stays, grey, however old
 let savedWeek = make(level(five: 40, week: 100, ago: 2 * 3600))
-check("saved full: a 2 h old full week with its reset ahead: grey 'Week full · last known 2 h ago', no dot colour",
-      savedWeek.fullNote == "Week full · last known 2 h ago" && savedWeek.fullNoteStale && savedWeek.dotP == nil && !savedWeek.noUsage, "\(savedWeek.lines)")
-check("saved full: only the full window's row (the other one's 40% is over an hour old), grey at 100% with when it is back, no age line",
-      savedWeek.rows.map(\.id) == ["wk"] && savedWeek.rows[0].share == "100%" && savedWeek.rows[0].colour == Painter.grey
-      && savedWeek.rows[0].resets == TimeWords.back(now.addingTimeInterval(29 * 3600), now: now) && savedWeek.updated == nil,
+check("saved full: a 2 h old full week with its reset ahead: grey 'Week full · last known', no dot colour, 'Last known 2 h ago' under the bars",
+      savedWeek.fullNote == "Week full · last known" && savedWeek.fullNoteStale && savedWeek.dotP == nil && !savedWeek.noUsage && savedWeek.updated == "Last known 2 h ago",
+      "\(savedWeek.lines)")
+check("saved full: the full window's row grey at 100% with when it is back; the other one's 40% (over an hour old) is not shown: '–'",
+      savedWeek.rows.map(\.id) == ["5h", "wk"] && savedWeek.rows.map(\.share) == ["–", "100%"] && savedWeek.rows[0].p == nil && savedWeek.rows[1].colour == Painter.grey
+      && savedWeek.rows[1].resets == TimeWords.back(now.addingTimeInterval(29 * 3600), now: now) && savedWeek.rows[0].resets == "",
       "\(savedWeek.lines)")
 check("saved full: the words never read as now ('last known', no 'Updated')", !savedWeek.lines.joined().contains("Updated") && savedWeek.spoken.contains("last known"))
 let savedFive = make(level(five: 100, week: 20, ago: 3 * 3600))
-check("saved full: a 3 h old full 5-hour window the same way: '5-hour full · last known 3 h ago', its row only",
-      savedFive.fullNote == "5-hour full · last known 3 h ago" && savedFive.fullNoteStale && savedFive.rows.map(\.id) == ["5h"] && savedFive.rows[0].resets.hasPrefix("back")
-      && savedFive.dotP == nil, "\(savedFive.lines)")
+check("saved full: a 3 h old full 5-hour window the same way: '5-hour full · last known', its row 100% back …, the week '–'",
+      savedFive.fullNote == "5-hour full · last known" && savedFive.fullNoteStale && savedFive.rows.map(\.share) == ["100%", "–"] && savedFive.rows[0].resets.hasPrefix("back")
+      && savedFive.updated == "Last known 3 h ago" && savedFive.dotP == nil, "\(savedFive.lines)")
 let savedDay = make(level(five: nil, week: 100, ago: 28 * 3600))
-check("saved full: a day-old full week with its reset still ahead: 'Week full · last known yesterday'",
-      savedDay.fullNote == "Week full · last known yesterday" && savedDay.rows.map(\.id) == ["wk"] && savedDay.dotP == nil, "\(savedDay.lines)")
-check("saved full: the block's height follows its one row and no age line", QCMenuUsageBlock.height(savedDay) < QCMenuUsageBlock.height(rich)
-      && QCMenuUsageBlock.width(savedDay) >= QCMenuUsageBlock.width(make(nil)))
+check("saved full: a day-old full week with its reset still ahead: 'Week full · last known', 'Last known yesterday'",
+      savedDay.fullNote == "Week full · last known" && savedDay.updated == "Last known yesterday" && savedDay.rows.map(\.share) == ["–", "100%"] && savedDay.dotP == nil, "\(savedDay.lines)")
+check("saved full: the block is as tall as a fresh one (so a fresh answer can replace it live)", QCMenuUsageBlock.height(savedDay) == QCMenuUsageBlock.height(rich)
+      && savedDay.shape == rich.shape && savedWeek.shape == rich.shape && staleFull.shape == rich.shape)
 var savedRefusal = QuickChatLevel()
 savedRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); savedRefusal.refusedAt = now.addingTimeInterval(-3 * 3600); savedRefusal.at = now.addingTimeInterval(-3 * 3600)
 let refusalBlock = make(savedRefusal)
-check("saved full: a refusal that names no window: 'Limit full · last known 3 h ago' and when it ends, no bars",
-      refusalBlock.fullNote == "Limit full · last known 3 h ago" && refusalBlock.rows.isEmpty && refusalBlock.noUsageText.hasPrefix("Held back until ")
-      && refusalBlock.dotP == nil, "\(refusalBlock.lines)")
+check("saved full: a refusal that names no window, 3 h old: 'Limit full · back at … · last known' (its end in the note), no bars, 'Last known 3 h ago'",
+      refusalBlock.fullNote == "Limit full · " + TimeWords.back(now.addingTimeInterval(2 * 3600), now: now) + " · last known" && refusalBlock.rows.isEmpty
+      && refusalBlock.noUsageText == "Last known 3 h ago" && refusalBlock.dotP == nil, "\(refusalBlock.lines)")
+var recentRefusal = level(five: 30, week: 40, ago: 12 * 60)
+recentRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); recentRefusal.refusedAt = now.addingTimeInterval(-12 * 60)
+let recentRefusalBlock = make(recentRefusal)
+check("saved full: the same refusal 12 min old (rows shown): its end is in the note too, on both sides of the hour",
+      recentRefusalBlock.fullNote == refusalBlock.fullNote && recentRefusalBlock.rows.map(\.share) == ["30%", "40%"] && recentRefusalBlock.updated == "Last known 12 min ago",
+      "\(recentRefusalBlock.lines)")
 var savedNoReset = level(five: nil, week: 100, ago: 2 * 3600); savedNoReset.weekResets = nil
 check("saved full: a 100% with no reset date is not kept (nothing says it still stands)", make(savedNoReset).noUsage && make(savedNoReset).fullNote == nil)
+var dateless = level(five: 100, week: 100, ago: 2 * 3600); dateless.weekResets = nil
+let datelessBlock = make(dateless)
+check("saved full: a week 100% with no date doesn't hide a 5-hour 100% that has one: '5-hour full · last known', its row 100% back …",
+      datelessBlock.fullNote == "5-hour full · last known" && datelessBlock.rows.map(\.share) == ["100%", "–"] && datelessBlock.rows[0].resets.hasPrefix("back"), "\(datelessBlock.lines)")
+var datelessRefused = level(five: nil, week: 100, ago: 2 * 3600); datelessRefused.weekResets = nil
+datelessRefused.refusedUntil = now.addingTimeInterval(3600); datelessRefused.refusedAt = now.addingTimeInterval(-2 * 3600)
+check("saved full: nor does it hide a refusal that is still ahead", make(datelessRefused).fullNote?.hasSuffix("last known") == true && make(datelessRefused).fullNote?.contains("full") == true,
+      "\(make(datelessRefused).lines)")
 let afterReset = make(level(five: nil, week: 100, weekIn: -60, ago: 2 * 3600))
 check("saved full: once its reset is past, normal rules: 'No recent numbers', no note",
       afterReset.lines == ["Claude Main", maskEmail(mainAddress) + " · in use", "No recent numbers"] && afterReset.fullNote == nil && !afterReset.fullNoteStale
@@ -144,6 +159,19 @@ block.reload(make(level(five: 44, week: 12)))
 check("new numbers (same height) are taken in place", block.model.rows.map(\.share) == ["44%", "12%"])
 block.reload(none)
 check("a block that would change height keeps its own until the menu opens again", block.model.rows.map(\.share) == ["44%", "12%"])
+// a saved full limit on the open menu is replaced live by a fresh answer (the refresh finishing), 12 min old or a day old
+for (name, saved) in [("12 min old", staleFull), ("2 h old", savedWeek), ("a day old", savedDay)] {
+    let open = QCMenuUsageBlock(saved) {}
+    open.reload(make(level(five: 5, week: 12)))
+    check("live: a saved full week (\(name)) is replaced by a fresh answer in the open menu",
+          open.model.fullNote == nil && !open.model.fullNoteStale && open.model.rows.map(\.share) == ["5%", "12%"] && open.model.updated == "Updated just now",
+          "\(open.model.lines)")
+}
+let narrow = QCMenuUsageBlock(make(level(five: 13, week: 88))) {}
+let wideNote = QCMenuProfile(id: "main", title: "Claude Main", dotP: nil, fullNote: String(repeating: "Week full · ", count: 8), account: .inUse(address: mainAddress),
+                             rows: rich.rows, noUsage: false, updated: rich.updated)
+narrow.reload(wideNote)
+check("live: a header note wider than the block was given is not taken in place (it would be cut)", narrow.model.fullNote == nil)
 
 // ── the menu's items ────────────────────────────────────────────────────────────────────────────────
 let work2 = Profile(id: "work", name: "Work", folder: "~/.claude-sample-work")
