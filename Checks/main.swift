@@ -272,7 +272,7 @@ run("ok") { p, events, exit in
     check("ok: initialize sent", p.initialize())
     wait(3) { events().contains { if case .models = $0 { return true }; return false } }
     let listed: [QuickChatModelEntry] = events().compactMap { e -> [QuickChatModelEntry]? in
-        if case .models(let l) = e { return l }; return nil
+        if case .models(let l, _) = e { return l }; return nil
     }.first ?? []
     check("ok: the models listed", listed.count == 7 && listed.map(\.value).contains("claude-fable-5-2"), listed)
     check("ok: newest Fable picked from the list", QuickChatModels.resolve(.fable, in: listed).value == "claude-fable-5-2")
@@ -375,8 +375,26 @@ check("usage: a stale answer's filter lets it through", { var s = StaleAnswers()
 // MARK: the account's models (Claude Code's `initialize`)
 
 let initLine = #"{"type":"control_response","response":{"subtype":"success","request_id":"qc-9","response":{"models":[{"value":"default","displayName":"Opus 5.5","supportedEffortLevels":["low","high"]},{"value":"opus","displayName":"Opus 5.5","description":"For the hardest work","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-fable-5-2","displayName":"Fable 5.2","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"fable","displayName":"Fable 5.1"},{"value":"claude-sonnet-5-5","displayName":"Sonnet 5.5","supportedEffortLevels":["low","medium","high","xhigh"]},{"value":"sonnet-old","displayName":"Sonnet 5","supportedEffortLevels":["low"]},{"value":"haiku","displayName":"Haiku 5.5","supportsEffort":false},{"value":"other","displayName":"Something else"},{"displayName":"No value"}]}}}"#
-let ml: [QuickChatModelEntry] = { if case .models(let l) = QuickChatParse.event(line(initLine)) { return l }; return [] }()
+let ml: [QuickChatModelEntry] = { if case .models(let l, _) = QuickChatParse.event(line(initLine)) { return l }; return [] }()
 check("models: parsed, entries without a value left out", ml.count == 8, ml)
+// who the process is: the `account` of the same answer, shaped as Claude Code 2.1.318 gives it (sample values)
+func identity(_ account: String) -> ProcessIdentity? {
+    let l = #"{"type":"control_response","response":{"subtype":"success","request_id":"qc-1","response":{"models":[]"# + account + "}}}"
+    if case .models(_, let who) = QuickChatParse.event(line(l)) { return who }; return nil
+}
+check("identity: initialize's account gives the address and organization",
+      identity(#","account":{"email":"ultra-1@example.com","organization":"ultra-1@example.com's Organization","subscriptionType":"Claude Ultra","apiProvider":"firstParty"}"#)
+      == ProcessIdentity(email: "ultra-1@example.com", organization: "ultra-1@example.com's Organization"))
+check("identity: no account (a key or a token) says no one", identity("") == ProcessIdentity(email: nil, organization: nil))
+check("identity: an empty address is no one", identity(#","account":{"email":""}"#) == ProcessIdentity(email: nil, organization: nil))
+// get_usage as 2.1.318 answers when its usage endpoint gave nothing (observed on a signed-in folder): no numbers
+check("usage: rate_limits null is available with no windows (nothing to take)",
+      usageEvent(#"{"session":{"total_cost_usd":0},"subscription_type":"max","rate_limits_available":true,"rate_limits":null,"behaviors":null}"#)
+      == .usage(QuickChatUsage(available: true, fiveHour: nil, week: nil)))
+// the per-model weeks get_usage also gives are left alone: the week is seven_day, all models (what Claude's app shows)
+check("usage: the week is seven_day (all models), not a per-model week",
+      usageEvent(#"{"rate_limits_available":true,"rate_limits":{"five_hour":null,"seven_day":{"utilization":11,"resets_at":"2026-11-15T21:00:00Z"},"seven_day_opus":{"utilization":100,"resets_at":"2026-11-15T21:00:00Z"},"seven_day_sonnet":{"utilization":3},"model_scoped":[{"display_name":"Fable","utilization":40,"resets_at":"2026-11-15T21:00:00Z"}]}}"#)
+      == .usage(QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: QuickChatParse.isoDate("2026-11-15T21:00:00Z"), locked: false))))
 check("models: efforts read", ml.first { $0.value == "opus" }?.efforts == ["low", "medium", "high", "xhigh", "max"] && ml.first { $0.value == "opus" }?.description == "For the hardest work")
 check("models: no effort said is nil, supportsEffort false is none", ml.first { $0.value == "fable" }?.efforts == nil && ml.first { $0.value == "haiku" }?.efforts == [])
 check("models: another control answer is still a control", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-2","response":{"model":"claude-sonnet-5-5"}}}"#))
@@ -562,22 +580,44 @@ do {
     check("folder: a file that went away names no account", FolderFiles.fresh(file).uuid == nil && FolderFiles.fresh(file).email == nil)
     try? FileManager.default.removeItem(atPath: dir)
 
-    // what a `claude` reports belongs to the account it started on, whatever the chat's target says later
+    // what a `claude` reports belongs to the account it is, and is recorded only while the folder is on that account
+    let a1 = (uuid: "u1", email: "ultra-1@example.com"), a2 = (uuid: "u2", email: "ultra-2@example.com")
     var trail = AccountTrail()
-    check("trail: nothing running, nothing to report on", trail.reportAccount == nil)
-    trail.processStarted(on: "u1")
-    let targetNow = "u2"        // the folder moved to another account while the answer was on its way
-    check("trail: a report goes to the account the process started on", trail.reportAccount == "u1" && trail.reportAccount != targetNow)
-    // incognito: the conversation lives only in the running process, so it goes on only on the account that process started on
-    check("trail: a chat goes on on the account its process started on", trail.canContinue(on: "u1"))
-    check("trail: it isn't gone on with on another account, or none", !trail.canContinue(on: "u2") && !trail.canContinue(on: nil))
+    check("trail: nothing running, nothing to report on", trail.owner(folder: a1) == nil)
+    trail.processStarted(on: a1.uuid, email: a1.email)
+    check("trail: before it says who it is, a report goes to the account it started on while the folder is still on it", trail.owner(folder: a1) == "u1")
+    // the folder moved to another account (claude auth login, /login, cl_audit) while the answer was on its way
+    check("trail: an answer that comes after the folder moved is dropped, never put on the new account", trail.owner(folder: a2) == nil)
+    check("trail: …nor on no account", trail.owner(folder: nil) == nil)
+    // incognito: the conversation lives only in the running process, so it goes on only while that is the folder's account
+    check("trail: a chat goes on while the process is the folder's account", trail.canContinue(folder: a1))
+    check("trail: it isn't gone on with on another account, or none", !trail.canContinue(folder: a2) && !trail.canContinue(folder: nil))
+    // the process's own word (initialize) wins over the file read before it started
+    trail.identified(ProcessIdentity(email: "ULTRA-1@example.com", organization: "Org A"))
+    check("trail: it said it is the folder's account (any case): its reports are that account's", trail.owner(folder: a1, organization: "Org A") == "u1")
+    check("trail: the same address in another organization isn't it", trail.owner(folder: a1, organization: "Org B") == nil)
+    check("trail: a file that names no organization goes by the address", trail.owner(folder: a1) == "u1")
+    var raced = AccountTrail()
+    raced.processStarted(on: a1.uuid, email: a1.email)       // cl_quick read u1 …
+    raced.identified(ProcessIdentity(email: a2.email))         // … but the sign-in landed before the process read the file
+    check("trail: a process that says it is the account the folder is on now reports on it, whatever was read before it",
+          raced.owner(folder: a2) == "u2" && raced.owner(folder: a1) == nil)
+    var keyed = AccountTrail()
+    keyed.processStarted(on: a1.uuid, email: a1.email)
+    keyed.identified(ProcessIdentity(email: nil))              // initialize named no account (a key, a token)
+    check("trail: a process that names no account goes by the account it started on", keyed.owner(folder: a1) == "u1" && keyed.owner(folder: a2) == nil)
+    var placeholder = AccountTrail()
+    placeholder.processStarted(on: "email:ultra-1@example.com", email: a1.email)     // a file that had no accountUuid yet
+    check("trail: a placeholder uuid that became a real one is the same account", placeholder.owner(folder: a1) == "u1")
     trail.processEnded()
     check("trail: the conversation ends with its process, a new chat can begin on any account",
-          trail.canContinue(on: "u2") && trail.canContinue(on: "u1") && trail.canContinue(on: nil))
-    check("trail: a process that ended reports nowhere", trail.reportAccount == nil)
+          trail.canContinue(folder: a2) && trail.canContinue(folder: a1) && trail.canContinue(folder: nil))
+    check("trail: a process that ended reports nowhere", trail.owner(folder: a1) == nil)
+    trail.identified(ProcessIdentity(email: a1.email))
+    check("trail: a word that comes after the process ended is ignored", trail.identity == nil)
     var noAccount = AccountTrail()
-    noAccount.processStarted(on: nil)       // a folder whose file names no account
-    check("trail: a chat begun with no account doesn't go on on one that appears", noAccount.canContinue(on: nil) && !noAccount.canContinue(on: "u1"))
+    noAccount.processStarted(on: nil, email: nil)       // a folder whose file names no account
+    check("trail: a chat begun with no account doesn't go on on one that appears", !noAccount.canContinue(folder: a1) && noAccount.owner(folder: a1) == nil)
 
     // an older levels.json, keyed by profile id (the values stand for weeks)
     let legacy: [String: Int] = ["main": 50, "work": 20, "gone": 7, "main|u9": 33]

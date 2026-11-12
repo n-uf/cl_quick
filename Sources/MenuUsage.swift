@@ -508,26 +508,36 @@ final class QCMenuUsageRefresher {
     private func pump(_ store: ProfileStore) {
         guard running == nil, let id = queue.first else { return }
         queue.removeFirst()
-        guard let p = store.profile(id), let account = ClaudeFolder.account(p.path) else { pump(store); return }
+        guard let p = store.profile(id), ClaudeFolder.account(p.path) != nil else { pump(store); return }
         running = id
         let start = { [weak self] (path: String?) in
             guard let self else { return }
             guard let path else { self.finish(id, store); return }
             self.claudePath = path
-            self.launch(p, account: account.uuid, claude: path, store)
+            self.launch(p, claude: path, store)
         }
         if let path = claudePath, ClaudeLocator.isExecutable(path) { start(path) } else { findClaude(start) }
     }
 
-    private func launch(_ p: Profile, account uuid: String, claude: String, _ store: ProfileStore) {
+    private func launch(_ p: Profile, claude: String, _ store: ProfileStore) {
         let process = QuickChatProcess(command(p, claude))
+        // the account the folder names as it starts (read now, not when the menu opened); the process's own word
+        // (initialize) then says who it is
+        let start = ClaudeFolder.account(p.path)
+        var trail = AccountTrail()
+        trail.processStarted(on: start?.uuid, email: start?.email)
         process.onEvent = { [weak self, weak process] e in
             guard let self, let process, process === self.current else { return }
             switch e {
+            case .models(_, let who):
+                trail.identified(who)
             case .usage(let u):
-                var l = store.levels[ProfileStore.levelKey(p.id, uuid)] ?? QuickChatLevel()
-                l.apply(usage: u)
-                store.record(p.id, account: uuid, l)
+                // recorded for the account the process is, only while the folder is still on it (AccountTrail.owner): an
+                // answer that comes after the folder moved to another account is dropped
+                if let owner = trail.owner(folder: ClaudeFolder.account(p.path), organization: ClaudeFolder.organization(p.path)) {
+                    var l = store.levels[ProfileStore.levelKey(p.id, owner)] ?? QuickChatLevel()
+                    if l.apply(usage: u) { store.record(p.id, account: owner, l) }
+                }
                 self.finish(p.id, store)
             case .control(let id, _, _):
                 // Claude Code answered `get_usage` with something that isn't limits (an error, say): nothing to keep, and

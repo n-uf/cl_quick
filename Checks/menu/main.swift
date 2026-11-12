@@ -154,7 +154,8 @@ let pb = Profile(id: "beta", name: "Beta", folder: folder("beta", email: "beta-1
 let store = ProfileStore.shared
 store.save([pa, pb])
 store.noteAccounts()
-store.record("alpha", account: "ua2", level(five: 97, week: 97, ago: 30))         // the standby account's numbers: never shown
+store.record("alpha", account: "ua2", level(five: 97, week: 97, ago: 30))         // the standby account's numbers: never kept
+check("the store: numbers for an account the folder isn't on are not recorded", store.levels[ProfileStore.levelKey("alpha", "ua2")] == nil)
 let fromStore = QCStatusMenu.infos(store)
 let alpha = fromStore.first { $0.profile.id == "alpha" }!
 check("the store: the account in use's address; the standby account is listed apart, with its own week left out", alpha.address == "alpha-1@example.com" && alpha.standby.map(\.uuid) == ["ua2"] && alpha.level == nil)
@@ -184,7 +185,7 @@ check("refresh: each profile asked once, one at a time", started == ["alpha", "b
 check("refresh: claude was looked for once", lookedFor == 1, "\(lookedFor)")
 let got = store.level(of: pa)
 check("refresh: the account in use's numbers are kept (5-hour 44%, week 12%)", got?.fiveHour == 44 && got?.week == 12 && got?.at != nil, "\(String(describing: got))")
-check("refresh: the standby account's numbers were not touched", store.levels[ProfileStore.levelKey("alpha", "ua2")]?.week == 97)
+check("refresh: nothing was recorded for the standby account", store.levels[ProfileStore.levelKey("alpha", "ua2")] == nil)
 let ctl = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
 check("refresh: Claude Code was asked for the usage, and no message went to a model", ctl.contains("CTRL get_usage") && !ctl.contains("USER "), ctl)
 check("refresh: the numbers are fresh, so the profile needs nothing more", !refresher.needs(pa, store: store))
@@ -236,6 +237,74 @@ do {
     while waitEnded.isEmpty, Date().timeIntervalSince(t0) < 6 { RunLoop.current.run(mode: .eventTracking, before: Date().addingTimeInterval(0.05)) }
     QCMenuUsageRefresher.giveUp = saved
     check("refresh: a claude that never answers is let go after the wait, also while a menu is open", waitEnded == ["alpha"], "\(waitEnded) after \(Date().timeIntervalSince(t0)) s")
+    try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+}
+
+// ── the account changed outside cl_quick (sample accounts, example.com) ────────────────────────────────
+// the folder went from A to B (claude auth login, /login, cl_audit), with A's full week recorded: the menu shows B, with
+// no numbers until B's own come, and the refresh asks for B's and keeps them under B
+do {
+    let dir = folder("gamma", email: "gamma-a@example.com", uuid: "ug-a")
+    let pg = Profile(id: "gamma", name: "Gamma", folder: dir,
+                     accounts: [KnownAccount(uuid: "ug-a", email: "gamma-a@example.com"), KnownAccount(uuid: "ug-b", email: "gamma-b@example.com")])
+    store.save([pg])
+    store.record("gamma", account: "ug-a", level(five: nil, week: 100, ago: 30))
+    check("switched: A's full week is recorded while A is in use", store.levels[ProfileStore.levelKey("gamma", "ug-a")]?.week == 100)
+    var writes = 0.0
+    func signIn(_ email: String, _ uuid: String) {
+        let json = #"{"oauthAccount":{"emailAddress":"\#(email)","accountUuid":"\#(uuid)"}}"#
+        try? json.write(toFile: dir + "/.claude.json", atomically: true, encoding: .utf8)
+        writes += 1           // each sign-in a time of its own
+        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(writes)], ofItemAtPath: dir + "/.claude.json")
+    }
+    signIn("gamma-b@example.com", "ug-b")                    // no reload asked: the menu's next look sees it
+    let info = QCStatusMenu.info(pg, store)
+    let b = QCMenuProfile.make(profile: pg, level: info.level, address: info.address, problem: info.problem)
+    check("switched: the menu shows B in use, with no numbers (A's week is A's), no full note",
+          info.address == "gamma-b@example.com" && info.level == nil && b.noUsage && b.fullNote == nil && !b.lines.joined().contains("100"), "\(b.lines)")
+    check("switched: A is on standby", info.standby.map(\.uuid) == ["ug-a"])
+    // the refresh asks B's numbers and keeps them under B
+    try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+    let r = QCMenuUsageRefresher()
+    r.findClaude = refresher.findClaude; r.command = refresher.command
+    var rEnded: [String] = []
+    r.onEnd = { rEnded.append($0) }
+    check("switched: B with no numbers needs them", r.needs(pg, store: store))
+    r.refresh(store: store)
+    spin(until: { !rEnded.isEmpty })
+    let got = QCStatusMenu.info(pg, store)
+    check("switched: B's own numbers come and are kept under B; A's stay A's",
+          got.level?.week == 12 && store.levels[ProfileStore.levelKey("gamma", "ug-b")]?.week == 12
+          && store.levels[ProfileStore.levelKey("gamma", "ug-a")]?.week == 100, "\(String(describing: got.level))")
+
+    // B's numbers 10 minutes old: the menu asks again (each ask below starts a `claude`, checked)
+    var oldB = store.levels[ProfileStore.levelKey("gamma", "ug-b")]!; oldB.at = Date().addingTimeInterval(-10 * 60)
+    store.record("gamma", account: "ug-b", oldB)
+    func ask(_ settings: String, during: (() -> Void)? = nil) -> Bool {
+        try? (settings + "args=\(argsFile)\n").write(toFile: conf, atomically: true, encoding: .utf8)
+        let q = QCMenuUsageRefresher()
+        q.findClaude = refresher.findClaude; q.command = refresher.command
+        var began = 0, ended: [String] = []
+        q.onStart = { _ in began += 1 }
+        q.onEnd = { ended.append($0) }
+        q.refresh(store: store)
+        if let during { spin(0.8); during() }
+        spin(until: { !ended.isEmpty })
+        return began == 1 && ended == ["gamma"]
+    }
+    // a get_usage answer that arrives after the folder moved again (back to A) is B's: dropped, not put on A
+    let aBefore = store.levels[ProfileStore.levelKey("gamma", "ug-a")]
+    let asked = ask("mode=ok\nusagedelay=2\n") { signIn("gamma-a@example.com", "ug-a") }
+    check("switched: an answer that comes after the folder moved is dropped (neither A's nor B's numbers change)",
+          asked && store.levels[ProfileStore.levelKey("gamma", "ug-a")] == aBefore && store.levels[ProfileStore.levelKey("gamma", "ug-b")] == oldB)
+    // a process that says it is another account than the folder's: its numbers are dropped
+    signIn("gamma-b@example.com", "ug-b")
+    let askedOther = ask("mode=ok\naccount=someone-else@example.com\n")
+    check("switched: a process that says it is someone else has its numbers dropped", askedOther && store.levels[ProfileStore.levelKey("gamma", "ug-b")] == oldB)
+    // rate_limits null (Claude Code's usage endpoint gave nothing): nothing kept, the numbers stay as old as they were
+    let askedNull = ask("mode=ok\nusage=null\n")
+    check("switched: rate_limits null keeps nothing and makes nothing fresh", askedNull && store.levels[ProfileStore.levelKey("gamma", "ug-b")] == oldB)
+    check("switched: so the menu asks again once the retry time has passed", QCMenuUsageRefresher().needs(pg, store: store))
     try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
 }
 

@@ -86,21 +86,60 @@ enum FolderFiles {
     }
 }
 
-/// The account a chat's `claude` started on. What the process reports (a week, a full limit) belongs to that account,
-/// whatever the chat's target says by then: the folder may have changed account while an answer was on its way. A chat
-/// is incognito, so its conversation lives only in that process: it goes on only on the account the process started on.
+/// Who a running `claude` says it is: the `account` of its `initialize` answer. Claude Code 2.1.318 gives `email`,
+/// `organization` (the organization's name), `subscriptionType` and `apiProvider` there, and no uuid; it is that
+/// process's own reading of the folder's oauthAccount, made as it started, so it can differ from the file cl_quick read
+/// just before (a sign-in landing in between). No email: a process on a key or a token, or a Claude Code that doesn't
+/// say. (`subscriptionType` isn't used: it has been seen out of date after a plan change.)
+struct ProcessIdentity: Equatable {
+    var email: String?
+    var organization: String?
+}
+
+/// The account a `claude` (the chat's, or the menu's short-lived one) runs on, and so whose numbers it reports. A chat
+/// is incognito, so its conversation lives only in that process: it goes on only while the process is the account the
+/// folder is on.
 struct AccountTrail {
     private(set) var running = false
-    private(set) var process: String?
+    /// The account the folder's file named just before the process started.
+    private(set) var launchedOn: (uuid: String, email: String)?
+    /// What the process said it is, once its `initialize` answer came (nil until then).
+    private(set) var identity: ProcessIdentity?
 
-    mutating func processStarted(on uuid: String?) { running = true; process = uuid }
+    mutating func processStarted(on uuid: String?, email: String?) {
+        running = true; identity = nil
+        launchedOn = uuid.map { ($0, email ?? "") }
+    }
+    /// The process's `initialize` answer said who it is.
+    mutating func identified(_ who: ProcessIdentity) { if running { identity = who } }
     /// The process ended, and the conversation with it.
-    mutating func processEnded() { running = false; process = nil }
+    mutating func processEnded() { running = false; launchedOn = nil; identity = nil }
 
-    /// The account a report from the running `claude` is recorded on.
-    var reportAccount: String? { process }
-    /// The conversation goes on only on the account its process started on (no process: nothing to carry across).
-    func canContinue(on uuid: String?) -> Bool { !running || process == uuid }
+    /// The account a report from the running process belongs to, given the folder's account NOW (ClaudeFolder.account,
+    /// and its organization): that account's uuid when the process is that account, else nil, and the report is
+    /// dropped. The process is that account when
+    /// - it said who it is: the same address, and the same organization when both name one. Its word wins over what
+    ///   cl_quick read before it started;
+    /// - it said nothing (no answer yet, or no account in it): the folder still names the account it named as the
+    ///   process started.
+    /// So a number is never recorded under an account the folder isn't on now: an answer that arrives after the folder
+    /// moved to another account (a sign-in elsewhere) is dropped, never put on the account now in use.
+    func owner(folder: (uuid: String, email: String)?, organization: String? = nil) -> String? {
+        guard running, let folder else { return nil }
+        if let said = identity?.email {
+            guard said.lowercased() == folder.email.lowercased() else { return nil }
+            if let a = identity?.organization, let b = organization, a != b { return nil }
+            return folder.uuid
+        }
+        guard let from = launchedOn, AccountBook.unchanged(from: from, now: folder) else { return nil }
+        return folder.uuid
+    }
+
+    /// The conversation goes on only while the process is the account the folder is on now (no process: nothing to carry
+    /// across).
+    func canContinue(folder: (uuid: String, email: String)?, organization: String? = nil) -> Bool {
+        !running || owner(folder: folder, organization: organization) != nil
+    }
 }
 
 /// Why a profile's sign-in needs doing again; none while it works.

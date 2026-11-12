@@ -40,6 +40,12 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
     if ok { passed += 1 } else { failed += 1; print("FAIL \(name) \(detail())") }
 }
 func spin(_ s: TimeInterval = 0.4) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
+/// A sample Claude Code folder signed in to a sample account: a chat's `claude` reports (and goes on) only while the folder
+/// is on the account it is (AccountTrail.owner), so a chat on the stand-in needs its folder signed in like a real one.
+func signedInFolder(_ folder: URL, uuid: String, email: String) {
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try? Data(#"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)"}}"#.utf8).write(to: folder.appendingPathComponent(".claude.json"))
+}
 func panel() -> QuickChatPanel? { NSApp.windows.compactMap { $0 as? QuickChatPanel }.first }
 func note(_ name: String) -> Notification { Notification(name: Notification.Name(name)) }
 /// The middle of the header's empty gap, between the meters and the buttons as drawn; without meters (no numbers yet),
@@ -1275,9 +1281,12 @@ do {
     let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("usage-check")
     try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
     let m = QuickChatModel()
-    var t = QuickChatTarget(Profile(id: "usage-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
+    // the folder signed in to the sample account: the stand-in says it is that account (initialize), as Claude Code does
+    let folder = dir.appendingPathComponent("folder")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try? Data(#"{"oauthAccount":{"accountUuid":"u-check","emailAddress":"alex@example.com"}}"#.utf8).write(to: folder.appendingPathComponent(".claude.json"))
+    var t = QuickChatTarget(Profile(id: "usage-check", name: "Main", folder: folder.path))
     t.workFolder = dir.appendingPathComponent("work").path
-    t.accountUUID = "u-check"; t.email = "alex@example.com"
     m.target = t
     m.resolveClaude = { $0(stub) }
     var recorded: (String, String, QuickChatLevel)?
@@ -1297,6 +1306,104 @@ do {
     check("live usage: kept for that profile and account", recorded?.0 == "usage-check" && recorded?.1 == "u-check" && recorded?.2.week == 12)
     watch.cancel()
     m.shutdown()
+    try? FileManager.default.removeItem(at: dir)
+}
+
+// the account changed outside cl_quick while a get_usage answer was on its way (sample accounts, example.com): the answer
+// is the old account's, so it is dropped, never put on the account the folder is on now; and a process that says it is
+// another account than the folder's has its numbers dropped too
+do {
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("switch-check")
+    try? FileManager.default.removeItem(at: dir)
+    let folder = dir.appendingPathComponent("folder")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+    func signIn(_ uuid: String, _ email: String) {
+        try? Data(#"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)"}}"#.utf8).write(to: folder.appendingPathComponent(".claude.json"))
+    }
+    func attempt(conf: String, switchMidway: Bool) -> (recorded: [(String, QuickChatLevel)], level: QuickChatLevel?) {
+        signIn("u-a", "alex@example.com")
+        try? conf.write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+        let m = QuickChatModel()
+        var t = QuickChatTarget(Profile(id: "switch-check", name: "Main", folder: folder.path))
+        t.workFolder = dir.appendingPathComponent("work").path
+        m.target = t
+        m.resolveClaude = { $0(stub) }
+        var recorded: [(String, QuickChatLevel)] = []
+        m.levelReported = { _, account, l in recorded.append((account, l)) }
+        m.warm()
+        if switchMidway {
+            spin(0.8)                                    // started, initialize answered, get_usage still on its way
+            signIn("u-b", "blake@example.com")           // `claude auth login` as another account, outside cl_quick
+        }
+        let end = Date().addingTimeInterval(5)
+        while recorded.isEmpty, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        let l = m.level
+        m.shutdown()
+        return (recorded, l)
+    }
+    let late = attempt(conf: "usagedelay=2\n", switchMidway: true)
+    check("switch: a get_usage answer that arrives after the folder moved to another account is dropped",
+          late.recorded.isEmpty && late.level == nil, "\(late.recorded.map(\.0))")
+    let same = attempt(conf: "usagedelay=1\n", switchMidway: false)
+    check("switch: the same wait with no switch is kept, for the account in use", same.recorded.map(\.0) == ["u-a"] && same.level?.week == 12,
+          "\(same.recorded.map(\.0))")
+    let other = attempt(conf: "account=casey@example.com\n", switchMidway: false)
+    check("switch: a process that says it is another account than the folder's has its numbers dropped", other.recorded.isEmpty && other.level == nil,
+          "\(other.recorded.map(\.0))")
+    let empty = attempt(conf: "usage=null\n", switchMidway: false)
+    check("switch: get_usage with rate_limits null records nothing", empty.recorded.isEmpty && empty.level == nil)
+    try? FileManager.default.removeItem(at: dir)
+}
+
+// the operator's case through the chat itself (sample profile and accounts, example.com): the folder went from account A
+// to account B outside cl_quick, and levels.json holds a full week; the bar must not say full for B
+do {
+    let store = ProfileStore.shared
+    let saved = store.profiles
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("truth-check")
+    try? FileManager.default.removeItem(at: dir)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent(".claude.json")
+    func signIn(_ uuid: String, _ email: String, ago: TimeInterval) {
+        try? Data(#"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)"}}"#.utf8).write(to: file)
+        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-ago)], ofItemAtPath: file.path)
+    }
+    let truth = Profile(id: "truth", name: "Truth", folder: dir.path,
+                        accounts: [KnownAccount(uuid: "u-a", email: "alex@example.com"), KnownAccount(uuid: "u-b", email: "blake@example.com")])
+    store.save(saved + [truth])
+    var full = QuickChatLevel(); full.week = 100; full.weekResets = Date().addingTimeInterval(4 * 86400); full.refusedUntil = full.weekResets
+    full.at = Date()
+    signIn("u-a", "alex@example.com", ago: 60)
+    store.record("truth", account: "u-a", full)                   // A's week, full, recorded while A was in use
+    check("truth: A's full week is recorded while A is in use", store.levels[ProfileStore.levelKey("truth", "u-a")]?.week == 100)
+    signIn("u-b", "blake@example.com", ago: 10)                     // outside cl_quick: no reload asked
+    chat.open(profile: "truth"); spin(0.3)
+    check("truth: the bar is on B, the account the folder is on now", chat.model.target?.accountUUID == "u-b" && chat.model.target?.email == "blake@example.com",
+          "\(String(describing: chat.model.target))")
+    check("truth: the bar has no numbers for B (A's week is A's), nothing full, no notice, no switch offer",
+          chat.model.level == nil && !chat.model.blocked && chat.model.switchOffer == nil && chat.model.offer == nil, "\(String(describing: chat.model.level))")
+    check("truth: a number for A isn't recorded while the folder is on B", {
+        var l = full; l.week = 50; store.record("truth", account: "u-a", l); return store.levels[ProfileStore.levelKey("truth", "u-a")]?.week == 100 }())
+    // B's own full week, but a day old (B's last time in use; a plan raised since): last known, not now
+    var old = full; old.at = Date().addingTimeInterval(-28 * 3600)
+    store.record("truth", account: "u-b", old)
+    chat.refresh(); spin(0.2)
+    check("truth: B's day-old full week draws nothing full and offers nothing", chat.model.level == nil && !chat.model.blocked && chat.model.switchOffer == nil)
+    let menu = QCStatusMenu.info(truth, store)
+    let block = QCMenuProfile.make(profile: truth, level: menu.level, address: menu.address, problem: menu.problem)
+    check("truth: the menu shows B in use with no numbers (none recent), no full note",
+          menu.address == "blake@example.com" && block.noUsage && block.fullNote == nil && block.lines.contains("No recent numbers"), "\(block.lines)")
+    // B's week, fresh and full: now it is the account's state, and the notice and the standby offer (no numbers) come
+    var now = full; now.at = Date()
+    store.record("truth", account: "u-b", now)
+    chat.refresh(); spin(0.2)
+    check("truth: B's fresh full week is drawn full, with A offered on standby", chat.model.blocked && chat.model.switchOffer?.uuid == "u-a",
+          "\(String(describing: chat.model.switchOffer))")
+    chat.hide(); chat.model.newChat()
+    store.remove("truth")                                           // its weeks go with it
+    chat.open(profile: saved.first?.id); spin(0.2); chat.hide()
     try? FileManager.default.removeItem(at: dir)
 }
 
@@ -1497,6 +1604,7 @@ do {
     var t = QuickChatTarget(Profile(id: "copy-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
     t.workFolder = dir.appendingPathComponent("work").path
     t.accountUUID = "u-copy"; t.email = "alex@example.com"
+    signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-copy", email: "alex@example.com")
     // (a chat model of its own talks to the stand-in; its finished turn is then put on the panel's model, which the keys reach)
     let s = QuickChatModel()
     s.target = t
@@ -1750,6 +1858,7 @@ do {
     var tg = QuickChatTarget(Profile(id: "images-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
     tg.workFolder = dir.appendingPathComponent("work").path
     tg.accountUUID = "u-images"; tg.email = "alex@example.com"
+    signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-images", email: "alex@example.com")
     m.target = tg
     m.resolveClaude = { $0(stub) }
     m.freshTarget = { _, done in done(tg) }
@@ -1864,6 +1973,7 @@ func imageFixChat(_ name: String, conf: String = "", mode: String = "ok") -> Ima
     var tg = QuickChatTarget(Profile(id: name, name: "Main", folder: dir.appendingPathComponent("folder").path))
     tg.workFolder = dir.appendingPathComponent("work").path
     tg.accountUUID = "u-\(name)"; tg.email = "alex@example.com"
+    signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-\(name)", email: "alex@example.com")
     m.target = tg
     m.resolveClaude = { $0(stub) }
     m.freshTarget = { _, done in done(tg) }

@@ -31,8 +31,8 @@ enum QuickChatEvent: Equatable {
     /// response to a `set_model` names the model now in effect ("claude-sonnet-5-5").
     case control(id: String, error: String?, model: String?)
     /// The models this account can use, from Claude Code's answer to `initialize` (sent when `claude` starts; nothing
-    /// goes to a model for it).
-    case models([QuickChatModelEntry])
+    /// goes to a model for it), and who the process says it is (the same answer's `account`).
+    case models([QuickChatModelEntry], account: ProcessIdentity)
     /// The account's limits now, from Claude Code's answer to `get_usage` (sent when `claude` starts, after each answer
     /// and when the panel opens again; nothing goes to a model).
     case usage(QuickChatUsage)
@@ -231,9 +231,11 @@ enum QuickChatParse {
         case "control_response":
             guard let r = o["response"] as? [String: Any], let id = r["request_id"] as? String else { return .ignored }
             let error = r["subtype"] as? String == "error" ? ((r["error"] as? String) ?? "refused") : nil
-            // the answer to `initialize`: the account's models
-            if error == nil, let list = (r["response"] as? [String: Any])?["models"] as? [[String: Any]] {
-                return .models(list.compactMap(modelEntry))
+            // the answer to `initialize`: the account's models, and who the process is (`account`: email, organization)
+            if error == nil, let answer = r["response"] as? [String: Any], let list = answer["models"] as? [[String: Any]] {
+                let a = answer["account"] as? [String: Any]
+                func word(_ k: String) -> String? { (a?[k] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+                return .models(list.compactMap(modelEntry), account: ProcessIdentity(email: word("email"), organization: word("organization")))
             }
             // the answer to `get_usage`: the account's limits (an error is just a control answer: nothing changes)
             if error == nil, let u = r["response"] as? [String: Any], u["rate_limits"] != nil || u["rate_limits_available"] != nil {

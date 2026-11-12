@@ -81,7 +81,10 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   on the profile's page in Settings), with a way to try again and Dismiss (OK in Settings).
 - Limits belong to the account: after a switch the chat's new `claude` is asked for the new account's limits at once,
   and the new account's own numbers show, never the old account's. They are kept per account (its id in Claude Code's
-  file), not per organization.
+  file), not per organization. The account in use is the folder's `.claude.json` as it is at that moment (read again
+  whenever it changed), so a sign-in made outside cl_quick (`claude auth login`, /login, another app) counts at once.
+  Numbers are kept only for the account the answering `claude` says it is (its `initialize` answer) and only while the
+  folder is still on that account: an answer that arrives after the folder moved to another account is dropped.
 - Addresses are in full in Settings. Prompts and dialogs may mask them (p•••@example.com). In the chat the address is in
   the profile menu only: each profile's row has the address of its account in use (never a standby one's), blurred
   until the pointer is on it; a copy button beside it copies it.

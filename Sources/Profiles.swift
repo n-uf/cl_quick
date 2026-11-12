@@ -153,8 +153,9 @@ final class ProfileStore: ObservableObject {
     }
 
     /// What was last recorded for one account of the profile (the one in use by default), however old; nil: nothing
-    /// reported on it yet. They may be from long ago (its last time in use, or a plan since changed): what is shown and
-    /// acted on goes through `shownLevel`.
+    /// reported on it yet. Numbers are recorded only for the account in use at the time, from a `claude` that was that
+    /// account (`record`, AccountTrail.owner), so these are its own, but they may be from long ago (its last time in use,
+    /// or a plan since changed): what is shown and acted on goes through `shownLevel`.
     func level(of p: Profile, account uuid: String? = nil) -> QuickChatLevel? {
         guard let uuid = uuid ?? ClaudeFolder.account(p.path)?.uuid else { return nil }
         return levels[Self.levelKey(p.id, uuid)]
@@ -298,10 +299,13 @@ final class ProfileStore: ObservableObject {
         return true
     }
 
-    /// What Claude Code said after an answer on this profile, on the account that answered.
+    /// What Claude Code said on this profile, on the account that answered. Recorded only while that is the account in
+    /// use (ClaudeFolder.account, the file as it is now): numbers are never kept under an account the folder has left,
+    /// nor put on the one it moved to (the callers check the process too: AccountTrail.owner).
     func record(_ id: String, account uuid: String, _ level: QuickChatLevel) {
         let key = Self.levelKey(id, uuid)
-        guard profile(id) != nil, levels[key] != level else { return }      // a profile removed meanwhile stays gone
+        guard let p = profile(id), levels[key] != level else { return }      // a profile removed meanwhile stays gone
+        guard ClaudeFolder.account(p.path)?.uuid == uuid else { return }
         levels[key] = level
         Files.write(levels, Files.levels)
     }

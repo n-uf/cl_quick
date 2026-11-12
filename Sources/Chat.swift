@@ -740,7 +740,8 @@ final class QuickChatModel: ObservableObject {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
                                    workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort)
         let key = keyFor(path, target)
-        let goesOn = process?.isRunning == true && key == processKey && trail.canContinue(on: target.accountUUID)
+        // (target is the folder as read just now, freshTarget: the process must still be its account)
+        let goesOn = process?.isRunning == true && key == processKey && (!trail.running || reportOwner == target.accountUUID)
         if goesOn {
             if cmd.model != appliedModel {
                 if let id = process?.setModel(cmd.model) { modelRequests[id] = cmd.model }
@@ -803,7 +804,7 @@ final class QuickChatModel: ObservableObject {
         appliedModel = cmd.model
         confirmedModel = cmd.model
         appliedEffort = cmd.effort
-        trail.processStarted(on: target.accountUUID)      // what it reports belongs to this account
+        trail.processStarted(on: target.accountUUID, email: target.email)      // until it says who it is (initialize)
         return nil
     }
 
@@ -815,7 +816,7 @@ final class QuickChatModel: ObservableObject {
         if let p = process, p.isRunning {
             // one still on the account the folder had before (it was answering when the switch landed): its numbers
             // aren't this account's, so it goes and a new one starts below (the chat couldn't go on there anyway)
-            if !busy, let t = target, trail.reportAccount != t.accountUUID { closeProcess() }
+            if !busy, let t = target, reportOwner != t.accountUUID { closeProcess() }
             else {
                 if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() != nil { usageAsked = Date() }
                 return
@@ -835,14 +836,17 @@ final class QuickChatModel: ObservableObject {
         lastEvent = Date(); spoken = true
         // about the account, not an answer: taken with or without a chat on screen (a `claude` started as the bar opened)
         switch e {
-        case .models(let list):
-            // the account this `claude` started on: its models (the next message asks for the newest of the family)
-            if let t = target { ModelCatalog.shared.set(list, profile: t.profileID, account: trail.reportAccount ?? t.accountUUID) }
+        case .models(let list, let who):
+            // who this `claude` is, in its own word: what it reports from now on is that account's
+            trail.identified(who)
+            // its models (the next message asks for the newest of the family)
+            if let t = target { ModelCatalog.shared.set(list, profile: t.profileID, account: reportOwner ?? trail.launchedOn?.uuid ?? t.accountUUID) }
             objectWillChange.send()
             return
         case .usage(let u):
-            // its limits now: kept like a report after an answer, for this account (an old level of another one isn't the base)
-            var l = (trail.reportAccount == target?.accountUUID ? level : nil) ?? QuickChatLevel()
+            // its limits now, for the account it is, only while the folder is on that account (else dropped)
+            guard let owner = reportOwner else { return }
+            var l = (owner == target?.accountUUID ? level : nil) ?? QuickChatLevel()
             // numbers given: kept even when they are the same, so they count as fresh again (an answer with no numbers,
             // `rate_limits` null, changes nothing and leaves the old ones as old as they were)
             if l.apply(usage: u) { reportLevel(l) }
@@ -878,7 +882,7 @@ final class QuickChatModel: ObservableObject {
             if !model.isEmpty, !model.hasPrefix("<") { setModel(model, turn: i) }
             if error == "authentication_failed", let target {
                 turns[i].problem = .notSignedIn(profile: target.name, id: target.profileID)
-                if let u = trail.reportAccount { authResult(target.profileID, u, true) }
+                if let u = reportOwner { authResult(target.profileID, u, true) }
             } else if QuickChatParse.isLimit(error: error, text: text) {
                 turns[i].problem = .limitFull
             } else if let error, turns[i].answer.isEmpty, pending.isEmpty {
@@ -908,7 +912,7 @@ final class QuickChatModel: ObservableObject {
             } else {
                 if turns[i].answer.isEmpty { turns[i].answer = text }
                 turns[i].phase = .done
-                if let t = target, let u = trail.reportAccount { authResult(t.profileID, u, false) }      // it signed in fine
+                if let t = target, let u = reportOwner { authResult(t.profileID, u, false) }      // it signed in fine
             }
             if process?.getUsage() != nil { usageAsked = Date() }    // the limits after this answer (rate_limit_event stays as the fallback)
             // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
@@ -927,11 +931,19 @@ final class QuickChatModel: ObservableObject {
         }
     }
 
-    /// What Claude Code said about its limits is the account the `claude` started on, not whatever the target says now
-    /// (the folder may have changed account while the answer was on its way). The account line shows it only while the
-    /// target is still that account.
+    /// The account the running `claude`'s reports belong to now: the folder's account as its file says now
+    /// (ClaudeFolder.account), when the process is that account (AccountTrail.owner: by its own `initialize` word, else
+    /// by the account it started on); nil, and the report is dropped, when the folder has moved to another account.
+    private var reportOwner: String? {
+        guard let t = target else { return nil }
+        return trail.owner(folder: ClaudeFolder.account(t.configDir), organization: ClaudeFolder.organization(t.configDir))
+    }
+
+    /// What Claude Code said about its limits is the account the `claude` is (reportOwner), recorded only while the
+    /// folder is still on it: an answer that arrives after the folder moved to another account is dropped. The account
+    /// line shows it while the target is that account.
     private func reportLevel(_ l: QuickChatLevel) {
-        guard let t = target, let u = trail.reportAccount else { return }
+        guard let t = target, let u = reportOwner else { return }
         if u == t.accountUUID { level = l }
         levelReported(t.profileID, u, l)
     }

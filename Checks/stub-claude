@@ -17,11 +17,25 @@
 #                      line, as it came, goes to FILE.in
 #   usage=none         `get_usage` gets no answer at all
 #   usage=error        `get_usage` gets an error answer
+#   usage=null         `get_usage` answers as 2.1.318 does when its usage endpoint gave nothing: rate_limits null
+#   usagedelay=SECONDS `get_usage` is answered that long after it was asked (an answer still on its way)
+#   account=EMAIL      who `initialize` says the process is (its `account`); `none` leaves it out (a key or a token).
+#                      By default the address in $CLAUDE_CONFIG_DIR/.claude.json as the stand-in started, as Claude Code
+#                      reads it (never the home folder's file: no CLAUDE_CONFIG_DIR, no account)
 #   delay=SECONDS    waits that long, after its first line, before it reads any stdin (a slow or stalled reader)
 conf="$(cd "$PWD/.." && pwd)/stub.conf"
 mode="$(sed -n 's/^mode=//p' "$conf" 2>/dev/null)"; mode="${mode:-ok}"
 QC_STUB_ARGS="$(sed -n 's/^args=//p' "$conf" 2>/dev/null)"
 usage="$(sed -n 's/^usage=//p' "$conf" 2>/dev/null)"
+usagedelay="$(sed -n 's/^usagedelay=//p' "$conf" 2>/dev/null)"
+account="$(sed -n 's/^account=//p' "$conf" 2>/dev/null)"
+org=""
+if [ -z "$account" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -f "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
+  account="$(sed -n 's/.*"emailAddress":"\([^"]*\)".*/\1/p' "$CLAUDE_CONFIG_DIR/.claude.json" | head -1)"
+  org="$(sed -n 's/.*"organizationName":"\([^"]*\)".*/\1/p' "$CLAUDE_CONFIG_DIR/.claude.json" | head -1)"
+fi
+if [ -z "$account" ] || [ "$account" = none ]; then acct_json=''
+else acct_json=',"account":{"email":"'"$account"'"'"${org:+,\"organization\":\"$org\"}"',"subscriptionType":"Claude Max","apiProvider":"firstParty"}'; fi
 if [ -n "${QC_STUB_ARGS:-}" ]; then
   {
     for a in "$@"; do printf 'ARG [%s]\n' "$a"; done
@@ -58,13 +72,17 @@ while IFS= read -r line; do
         :       # no answer at all
       elif [ "$sub" = get_usage ] && [ "$usage" = error ]; then
         echo '{"type":"control_response","response":{"subtype":"error","request_id":"'$rid'","error":"usage unavailable"}}'
+      elif [ "$sub" = get_usage ] && [ "$usage" = null ]; then
+        [ -n "$usagedelay" ] && sleep "$usagedelay"
+        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"session":{"total_cost_usd":0},"subscription_type":"max","rate_limits_available":true,"rate_limits":null,"behaviors":null}}}'
       elif [ "$sub" = get_usage ]; then
+        [ -n "$usagedelay" ] && sleep "$usagedelay"
         # the two windows (resets far ahead, so they're never past when a check reads them), plus keys cl_quick leaves
         # alone (spend, the per-model weeks, unknown ones)
         echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"subscription_type":"max","rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":44,"resets_at":"2036-11-10T18:00:00.123456+00:00","locked_reason":null,"used_dollars":1.5},"seven_day":{"utilization":12,"resets_at":"2036-11-14T09:00:00Z","locked_reason":null},"seven_day_opus":null,"spend":{"total":3},"cedar_ember":{"x":1}},"session":{"cost":0}}}}'
       elif [ "$sub" = initialize ]; then
         # "default", an alias that isn't the newest (fable is 5.1, 5.2 exists), an older version, a model with no efforts
-        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"commands":[],"models":[{"value":"default","displayName":"Opus 5.5","description":"Default","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"opus","displayName":"Opus 5.5","description":"For the hardest work","supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsEffort":true},{"value":"claude-fable-5-2","displayName":"Fable 5.2","description":"Newest Fable","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","displayName":"Sonnet 5.5","description":"Everyday","supportedEffortLevels":["low","medium","high","xhigh"]},{"value":"haiku","displayName":"Haiku 5.5","description":"Fastest","supportsEffort":false},{"value":"fable","displayName":"Fable 5.1","supportedEffortLevels":["low","medium","high"]},{"value":"claude-opus-4-8","displayName":"Opus 4.8","supportedEffortLevels":["low","medium","high"]}]}}}'
+        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"commands":[],"models":[{"value":"default","displayName":"Opus 5.5","description":"Default","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"opus","displayName":"Opus 5.5","description":"For the hardest work","supportedEffortLevels":["low","medium","high","xhigh","max"],"supportsEffort":true},{"value":"claude-fable-5-2","displayName":"Fable 5.2","description":"Newest Fable","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","displayName":"Sonnet 5.5","description":"Everyday","supportedEffortLevels":["low","medium","high","xhigh"]},{"value":"haiku","displayName":"Haiku 5.5","description":"Fastest","supportsEffort":false},{"value":"fable","displayName":"Fable 5.1","supportedEffortLevels":["low","medium","high"]},{"value":"claude-opus-4-8","displayName":"Opus 4.8","supportedEffortLevels":["low","medium","high"]}]'"$acct_json"'}}}'
       elif [ "$sub" = set_model ]; then
         echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"model":"claude-'${mdl:-opus}'-5-5"}}}'
       else
