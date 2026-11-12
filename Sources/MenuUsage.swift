@@ -155,7 +155,8 @@ struct QCMenuProfile: Equatable {
             // an old saved full limit keeps both rows (so the block has the shape of a fresh one and a fresh answer
             // replaces it live), but the other window's number, over an hour old, is not shown: "–"
             if old { rows = rows.map { $0.id == full?.id ? $0 : Row(id: $0.id, label: $0.label, p: nil, share: QuickChatLevel.pct(nil), resets: "", stale: true) } }
-            if rows.allSatisfy({ $0.p == nil }) { rows = [] }
+            // two "–" rows stay for a saved full that names no window, so it keeps a fresh block's shape too
+            if savedFull == nil, rows.allSatisfy({ $0.p == nil }) { rows = [] }
         }
         let agoWords = shownLevel?.at.map { AccountBook.ago($0, now: now) }
         let name = full.map { $0.id == "5h" ? "5-hour" : $0.id == "wk" ? "Week" : "Limit" }
@@ -167,8 +168,7 @@ struct QCMenuProfile: Equatable {
                   : name.map { $0 + " full" + (f.id == FullLimit.any ? f.resets.map { " · " + TimeWords.back($0, now: now) } ?? "" : "") + " · last known" }
         }
         let updated: String? = rows.isEmpty ? nil : agoWords.map { (fresh ? "Updated " : "Last known ") + $0 }
-        // no row to carry it (an old refusal that names no window): the muted line is the age, not "No recent numbers"
-        let noUsageText = savedFull != nil ? "Last known " + (agoWords ?? "earlier") : old ? noRecentWords : noUsageWords
+        let noUsageText = old ? noRecentWords : noUsageWords
         return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? shownLevel?.binding(now)?.p : nil, fullNote: note,
                              account: .inUse(address: address), rows: rows, noUsage: rows.isEmpty, updated: updated,
                              noUsageText: noUsageText, fullNoteStale: !fresh && note != nil)

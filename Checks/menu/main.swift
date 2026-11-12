@@ -85,9 +85,14 @@ check("saved full: the block is as tall as a fresh one (so a fresh answer can re
 var savedRefusal = QuickChatLevel()
 savedRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); savedRefusal.refusedAt = now.addingTimeInterval(-3 * 3600); savedRefusal.at = now.addingTimeInterval(-3 * 3600)
 let refusalBlock = make(savedRefusal)
-check("saved full: a refusal that names no window, 3 h old: 'Limit full · back at … · last known' (its end in the note), no bars, 'Last known 3 h ago'",
-      refusalBlock.fullNote == "Limit full · " + TimeWords.back(now.addingTimeInterval(2 * 3600), now: now) + " · last known" && refusalBlock.rows.isEmpty
-      && refusalBlock.noUsageText == "Last known 3 h ago" && refusalBlock.dotP == nil, "\(refusalBlock.lines)")
+check("saved full: a refusal that names no window, 3 h old: 'Limit full · back at … · last known' (its end in the note), two '–' rows, 'Last known 3 h ago'",
+      refusalBlock.fullNote == "Limit full · " + TimeWords.back(now.addingTimeInterval(2 * 3600), now: now) + " · last known" && refusalBlock.rows.map(\.share) == ["–", "–"]
+      && !refusalBlock.noUsage && refusalBlock.updated == "Last known 3 h ago" && refusalBlock.dotP == nil && refusalBlock.shape == rich.shape, "\(refusalBlock.lines)")
+var oldRefusal = level(five: 30, week: 40, ago: 3 * 3600)
+oldRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); oldRefusal.refusedAt = now.addingTimeInterval(-3 * 3600)
+let oldRefusalBlock = make(oldRefusal)
+check("saved full: the same refusal 3 h old with 5-hour 30% and week 40%: those old numbers aren't shown, two '–' rows, same note",
+      oldRefusalBlock.fullNote == refusalBlock.fullNote && oldRefusalBlock.rows.map(\.share) == ["–", "–"] && oldRefusalBlock.shape == rich.shape, "\(oldRefusalBlock.lines)")
 var recentRefusal = level(five: 30, week: 40, ago: 12 * 60)
 recentRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); recentRefusal.refusedAt = now.addingTimeInterval(-12 * 60)
 let recentRefusalBlock = make(recentRefusal)
@@ -160,10 +165,11 @@ check("new numbers (same height) are taken in place", block.model.rows.map(\.sha
 block.reload(none)
 check("a block that would change height keeps its own until the menu opens again", block.model.rows.map(\.share) == ["44%", "12%"])
 // a saved full limit on the open menu is replaced live by a fresh answer (the refresh finishing), 12 min old or a day old
-for (name, saved) in [("12 min old", staleFull), ("2 h old", savedWeek), ("a day old", savedDay)] {
+for (name, saved) in [("week, 12 min old", staleFull), ("week, 2 h old", savedWeek), ("week, a day old", savedDay), ("refusal naming no window, 3 h old, no numbers", refusalBlock),
+                      ("refusal naming no window, 3 h old, with numbers", oldRefusalBlock), ("refusal naming no window, 12 min old", recentRefusalBlock)] {
     let open = QCMenuUsageBlock(saved) {}
     open.reload(make(level(five: 5, week: 12)))
-    check("live: a saved full week (\(name)) is replaced by a fresh answer in the open menu",
+    check("live: a saved full (\(name)) is replaced by a fresh answer in the open menu",
           open.model.fullNote == nil && !open.model.fullNoteStale && open.model.rows.map(\.share) == ["5%", "12%"] && open.model.updated == "Updated just now",
           "\(open.model.lines)")
 }
