@@ -73,7 +73,7 @@ final class SettingsState: ObservableObject {
         guard !signingIn.isEmpty else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
-            // the folders' files are read off the main thread; what they said is judged from the value kept
+            // the folders' files are parsed off the main thread; then judged here (the look finds the parse done)
             ClaudeFolder.reload(Array(self.signingIn)) { [weak self] _ in
                 guard let self else { return }
                 ProfileStore.shared.noteAccounts()
@@ -915,7 +915,7 @@ struct AddPage: View {
     private func add(_ folder: String, name: String? = nil) {
         guard !store.uses(folder) else { problem = "\(tilde(expand(folder))) is a profile already."; return }
         // one account, one profile: the folder's file is read as it is now, not as it was when the list was drawn
-        if let a = ClaudeFolder.freshAccount(folder), let other = store.nameUsing(a) {
+        if let a = ClaudeFolder.account(folder), let other = store.nameUsing(a) {
             problem = AddPage.refusedWords(folder: folder, email: a.email, profile: other)
             return
         }

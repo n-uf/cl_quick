@@ -29,25 +29,23 @@ struct FolderRead {
     var email: String?
     var uuid: String?
     var plan: String?
+    /// Claude Code's organizationName for the account (two accounts may share an address, one per organization).
+    var organization: String? = nil
 }
 
-/// The .claude.json files, read for the account in them. A file can be several MB and changes often (every Claude Code
-/// session writes it), so the value read is kept per file; everything on the main thread reads the kept value, and the
-/// file is read again on one serial utility queue. Every reload is queued behind the reads before it, so its `done`
-/// always sees the file as it was when the reload was asked for, even if another read of it was under way.
+/// The .claude.json files, read for the account in them. There is no copy that can go out of date: every look stats the
+/// file and parses it again only when its modification time moved (`fresh`), so a sign-in made outside cl_quick is seen
+/// at the next look. A file can be several MB and changes often (every Claude Code session writes it), so `reload`
+/// parses the files on one serial utility queue first where it can, and the look on the main thread then finds the
+/// parse done. Every reload is queued behind the reads before it, so its `done` always sees the file as it was when the
+/// reload was asked for, even if another read of it was under way.
 enum FolderFiles {
     private static var cache: [String: FolderRead] = [:]
     private static let lock = NSLock()
     private static let queue = DispatchQueue(label: "cl_quick.folder-reads", qos: .utility)
 
-    /// The value kept for the file; read from it only when it was never looked at.
-    static func kept(_ file: String) -> FolderRead {
-        lock.lock(); let hit = cache[file]; lock.unlock()
-        return hit ?? fresh(file)
-    }
-
     /// Reads the files again, off the main thread (parsing only those whose modification time moved); `done` comes on
-    /// the main thread with whether an account changed since the value kept before these reads.
+    /// the main thread with whether an account changed since the value parsed before these reads.
     static func reload(_ files: [String], done: @escaping (Bool) -> Void) {
         queue.async {
             var changed = false
@@ -60,9 +58,14 @@ enum FolderFiles {
         }
     }
 
-    /// The file as it is now: parsed again only if its modification time moved.
+    private static func modified(_ file: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date
+    }
+
+    /// The file as it is now: parsed again only if its modification time moved (to any other time: a copy put back
+    /// with an older time of its own is another file too).
     static func fresh(_ file: String) -> FolderRead {
-        let mtime = (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date
+        let mtime = modified(file)
         lock.lock(); let hit = cache[file]; lock.unlock()
         if let hit, hit.mtime == mtime { return hit }
         var r = FolderRead(mtime: mtime)
@@ -71,19 +74,14 @@ enum FolderFiles {
            let a = j["oauthAccount"] as? [String: Any] {
             r.email = a["emailAddress"] as? String
             r.uuid = (a["accountUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            r.organization = (a["organizationName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
                 r.plan = p == p.lowercased() ? p.capitalized : p
             }
         }
-        return keep(r, for: file)
-    }
-
-    /// Keeps a value read, unless the value kept was read from a newer file (an older read, say on the main thread,
-    /// finished after a newer one on the queue). Returns the value to go by: the newer of the two.
-    static func keep(_ r: FolderRead, for file: String) -> FolderRead {
-        lock.lock(); defer { lock.unlock() }
-        if let cur = cache[file], let have = cur.mtime, let read = r.mtime, have > read { return cur }
-        cache[file] = r
+        // kept only while the file still has the time it was read at: a parse that a write overtook (or a read on one
+        // thread that finishes after a newer one on another) never stands for the file; the next look parses again
+        if modified(file) == mtime { lock.lock(); cache[file] = r; lock.unlock() }
         return r
     }
 }

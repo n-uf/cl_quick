@@ -544,26 +544,22 @@ do {
         try? FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: file)
     }
     writeAccount("u1", "ultra-1@example.com", mtime: t0)
-    check("folder: the first look reads the file", FolderFiles.kept(file).uuid == "u1" && FolderFiles.kept(file).plan == "Max")
-    writeAccount("u2", "ultra-2@example.com", mtime: t0.addingTimeInterval(5))      // the sign-in landed
-    check("folder: the kept value doesn't move by itself", FolderFiles.kept(file).uuid == "u1")
+    check("folder: the first look reads the file", FolderFiles.fresh(file).uuid == "u1" && FolderFiles.fresh(file).plan == "Max")
+    // the account changed outside cl_quick (claude auth login, /login, cl_audit): no reload asked, the next look sees it
+    writeAccount("u2", "ultra-2@example.com", mtime: t0.addingTimeInterval(5))
+    check("folder: an account changed outside cl_quick is seen at the next look, no reload needed", FolderFiles.fresh(file).uuid == "u2")
+    writeAccount("u3", "ultra-3@example.com", mtime: t0.addingTimeInterval(6))
     var first: Bool?, second: Bool?, seen: String?
     FolderFiles.reload([file]) { first = $0 }                    // a read under way ...
-    FolderFiles.reload([file]) { second = $0; seen = FolderFiles.kept(file).uuid }       // ... then what ask() does
+    FolderFiles.reload([file]) { second = $0; seen = FolderFiles.fresh(file).uuid }       // ... then what ask() does
     wait(5) { second != nil }
-    check("folder: a reload behind another read sees the new account", seen == "u2", seen as Any)
+    check("folder: a reload behind another read sees the new account", seen == "u3", seen as Any)
     check("folder: the first read said an account changed, the next had nothing new", first == true && second == false, (first as Any, second as Any))
-    // an older read finishing after a newer one never takes its place
-    let file2 = dir + "/second.json"
-    _ = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(20), email: "ultra-2@example.com", uuid: "u2", plan: nil), for: file2)
-    let late = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(10), email: "ultra-1@example.com", uuid: "u1", plan: nil), for: file2)
-    check("folder: an older read doesn't overwrite a newer one", FolderFiles.kept(file2).uuid == "u2" && late.uuid == "u2", late)
-    _ = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(30), email: "ultra-3@example.com", uuid: "u3", plan: nil), for: file2)
-    check("folder: a newer read replaces an older one", FolderFiles.kept(file2).uuid == "u3")
-    _ = FolderFiles.keep(FolderRead(mtime: t0.addingTimeInterval(30), email: "ultra-4@example.com", uuid: "u4", plan: nil), for: file2)
-    check("folder: the same time takes the later read", FolderFiles.kept(file2).uuid == "u4")
-    _ = FolderFiles.keep(FolderRead(mtime: nil, email: nil, uuid: nil, plan: nil), for: file2)
-    check("folder: a file that went away takes its place", FolderFiles.kept(file2).uuid == nil)
+    // a copy put back with an older time of its own (a restore, a switch tool that keeps times) is another file too
+    writeAccount("u1", "ultra-1@example.com", mtime: t0.addingTimeInterval(-60))
+    check("folder: a file put back with an older time is read, not hidden behind the newer parse", FolderFiles.fresh(file).uuid == "u1")
+    try? FileManager.default.removeItem(atPath: file)
+    check("folder: a file that went away names no account", FolderFiles.fresh(file).uuid == nil && FolderFiles.fresh(file).email == nil)
     try? FileManager.default.removeItem(atPath: dir)
 
     // what a `claude` reports belongs to the account it started on, whatever the chat's target says later

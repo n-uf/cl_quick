@@ -97,7 +97,7 @@ final class AccountSwitcher {
     /// and watches the result like a switch: the same account is "Signed in again", another one is the wrong account,
     /// and no sign-in in 10 minutes is a timeout.
     func signInAgain(_ p: Profile, origin: SwitchGoal.Origin) {
-        guard waiting[p.id] == nil, let now = ClaudeFolder.freshAccount(p.path) else {
+        guard waiting[p.id] == nil, let now = ClaudeFolder.account(p.path) else {
             // not signed in at all: nothing to watch for a given account; Claude Code's own sign-in, as before
             SignIn.open(folder: p.path) { why in if let why { SignIn.tell(why) } }
             return
@@ -120,8 +120,8 @@ final class AccountSwitcher {
         timer = Timer.scheduledTimer(withTimeInterval: Self.every, repeats: true) { [weak self] _ in self?.look() }
     }
 
-    /// One look at every folder being waited for: the files are read off the main thread, and what they said is judged
-    /// here, on the main thread, from the value kept.
+    /// One look at every folder being waited for: the files are parsed off the main thread, and what they say is judged
+    /// here, on the main thread (ClaudeFolder.account then finds the parse done).
     func look() {
         guard !waiting.isEmpty else { return }
         ClaudeFolder.reload(waiting.values.map(\.folder)) { [weak self] _ in self?.judge() }

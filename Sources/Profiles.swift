@@ -62,12 +62,11 @@ enum ClaudeFolder {
         isDefault(path) ? expand("~/.claude.json") : (expand(path) as NSString).appendingPathComponent(".claude.json")
     }
 
-    /// Views, the chat and the 2 s sign-in watch read only the value kept per folder (FolderFiles); the file itself is
-    /// read again off the main thread by `reload`, and once, on the spot, the first time a folder is looked at.
-    private static func read(_ path: String) -> FolderRead { FolderFiles.kept(json(path)) }
+    /// The folder's file as it is now: stat'ed at every look, parsed again only when it changed (FolderFiles.fresh).
+    private static func read(_ path: String) -> FolderRead { FolderFiles.fresh(json(path)) }
 
-    /// Reads the folders' files again, off the main thread; `done` comes on the main thread, after those reads, with
-    /// whether an account changed.
+    /// Parses the folders' files off the main thread where they changed, so the next look finds the parse done; `done`
+    /// comes on the main thread, after those reads, with whether an account changed.
     static func reload(_ paths: [String], done: @escaping (Bool) -> Void) {
         FolderFiles.reload(Array(Set(paths.map(json))), done: done)
     }
@@ -75,21 +74,23 @@ enum ClaudeFolder {
     /// The address Claude Code signed the folder in with; nil when it hasn't.
     static func email(_ path: String) -> String? { read(path).email }
 
-    /// The account signed in to the folder: Claude Code's accountUuid (or, in a file without one, "email:" and the
-    /// address in lower case) and the address. nil when it isn't signed in.
+    /// THE ACCOUNT IN USE on a profile, the one answer every part of cl_quick asks for it: the chat's target, the bar,
+    /// the menu, Settings, the switch watch, the offers, the menu's refresh. Claude Code's accountUuid (or, in a file
+    /// without one, "email:" and the address in lower case) and the address; nil when the folder isn't signed in.
+    ///
+    /// The rule: it is the folder's .claude.json `oauthAccount` as the file is NOW (stat'ed at every look, parsed again
+    /// when its modification time moved), never a copy kept from before, so a sign-in made outside cl_quick (`claude auth
+    /// login`, /login in Terminal, cl_audit) is seen at the next look. The file is only what was written last, though:
+    /// what a running `claude` reports belongs to the account THAT process says it is (its `initialize` answer,
+    /// AccountTrail), and it is recorded only while that is still the account this function returns.
     static func account(_ path: String) -> (uuid: String, email: String)? {
         let r = read(path)
         guard let email = r.email else { return nil }
         return (r.uuid ?? "email:" + email.lowercased(), email)
     }
 
-    /// The account signed in to the folder as the file says now: read on the spot (one parse, on the calling thread; the
-    /// file is MBs), for a one-off action that must not go by a value kept before a sign-in.
-    static func freshAccount(_ path: String) -> (uuid: String, email: String)? {
-        let r = FolderFiles.fresh(json(path))
-        guard let email = r.email else { return nil }
-        return (r.uuid ?? "email:" + email.lowercased(), email)
-    }
+    /// The organization of the account in use (Claude Code's organizationName), when the file names one.
+    static func organization(_ path: String) -> String? { read(path).organization }
 
     /// Claude's name for the plan ("Max"), when Claude Code recorded it.
     static func plan(_ path: String) -> String? { read(path).plan }
@@ -97,9 +98,8 @@ enum ClaudeFolder {
     /// A folder cl_quick can chat on: signed in to Claude Code, and not the home folder itself.
     static func usable(_ path: String) -> Bool {
         let p = (expand(path) as NSString).standardizingPath
-        // read fresh, not the kept value: a folder signed in since it was last looked at must be accepted (one parse on
-        // the main thread, for a one-off action)
-        return p != (NSHomeDirectory() as NSString).standardizingPath && FolderFiles.fresh(json(p)).email != nil
+        // the file as it is now (as every look is): a folder signed in since it was last looked at is accepted
+        return p != (NSHomeDirectory() as NSString).standardizingPath && email(p) != nil
     }
 
     /// ~/.claude and every ~/.claude-* folder, the plain one first. `home` is for the checks.
@@ -205,7 +205,7 @@ final class ProfileStore: ObservableObject {
         ClaudeFolder.account(p.path).map { a in p.accounts.first { $0.uuid == a.uuid } ?? KnownAccount(uuid: a.uuid, email: a.email) }
     }
 
-    /// What is wrong with the profile's sign-in, if anything (SignInProblem): as the folder's file was last read.
+    /// What is wrong with the profile's sign-in, if anything (SignInProblem): as the folder's file says now.
     func signInProblem(_ p: Profile) -> SignInProblem? {
         AccountBook.signInProblem(signedIn: ClaudeFolder.account(p.path), failedOn: authFailed[p.id])
     }
@@ -278,7 +278,7 @@ final class ProfileStore: ObservableObject {
     /// A folder already used by a profile.
     func uses(_ folder: String) -> Bool { profiles.contains { $0.path == expand(folder) } }
 
-    /// The name of the profile whose folder has this account signed in now (as last read), if any: one account never
+    /// The name of the profile whose folder has this account signed in now, if any: one account never
     /// makes two profiles.
     func nameUsing(_ account: (uuid: String, email: String)) -> String? {
         AccountBook.profileUsing(account, among: profiles.map { ($0.name, ClaudeFolder.account($0.path)) })
@@ -292,7 +292,7 @@ final class ProfileStore: ObservableObject {
     @discardableResult
     func forget(account uuid: String, of id: String) -> Bool {
         guard let p = profile(id) else { return false }
-        let now = ClaudeFolder.freshAccount(p.path)
+        let now = ClaudeFolder.account(p.path)
         guard let r = AccountBook.forgetting(uuid, of: id, accounts: p.accounts, levels: levels,
                                              inUse: now?.uuid, inUseEmail: now?.email) else { return false }
         var q = p
