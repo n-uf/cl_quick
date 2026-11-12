@@ -51,6 +51,9 @@ struct QuickChatLevel: Codable, Equatable {
     var refusedUntil: Date?
     /// When that refusal was said (nil in a levels.json from before this was kept: as old as can be).
     var refusedAt: Date?
+    /// The window that carried that refusal, "5h" or "wk"; nil when it isn't known (a refusal that named none, both
+    /// windows locked, or a levels.json from before this was kept). Only that window's number can say the refusal is over.
+    var refusedOn: String?
     /// When Claude Code reported it.
     var at: Date?
 
@@ -76,8 +79,11 @@ struct QuickChatLevel: Codable, Equatable {
         }
         let accountWide = type == nil || type == "five_hour" || type == "seven_day"
         guard accountWide else { return }
-        if status == "rejected" { refusedUntil = resets ?? now.addingTimeInterval(3600); refusedAt = now }
-        else if status == "allowed" { refusedUntil = nil; refusedAt = nil }
+        if status == "rejected" {
+            refusedUntil = resets ?? now.addingTimeInterval(3600); refusedAt = now
+            refusedOn = type == "five_hour" ? "5h" : type == "seven_day" ? "wk" : nil
+        }
+        else if status == "allowed" { refusedUntil = nil; refusedAt = nil; refusedOn = nil }
         at = now
     }
 
@@ -91,17 +97,26 @@ struct QuickChatLevel: Codable, Equatable {
         // already past never hides the number it just gave
         if let w = u.fiveHour, let p = w.used { fiveHour = p; fiveHourResets = w.resets }
         if let w = u.week, let p = w.used { week = p; weekResets = w.resets }
+        let lockedIds = [("5h", u.fiveHour), ("wk", u.week)].filter { $0.1?.locked == true }.map(\.0)
         let locked = [u.fiveHour, u.week].compactMap { $0 }.filter(\.locked)
         // a lock lasts until the window that holds it resets (the later one when both do)
         if !locked.isEmpty {
+            // the window that holds it, when one does; unknown when both do, or when it differs from the one a refusal
+            // still standing was said on
+            let was = refusedUntil.map { $0 > now } == true ? refusedOn : nil
+            refusedOn = lockedIds.count == 1 && (was == nil || was == lockedIds[0]) ? lockedIds[0] : nil
             refusedUntil = max(refusedUntil ?? .distantPast, locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600))
             refusedAt = now
         } else if refusedUntil != nil, now.timeIntervalSince(refusedAt ?? .distantPast) >= Self.freshFor,
-                  [u.fiveHour?.used, u.week?.used].compactMap({ $0 }).allSatisfy({ $0.rounded() < 100 }) {
+                  [u.fiveHour?.used, u.week?.used].compactMap({ $0 }).allSatisfy({ $0.rounded() < 100 }),
+                  // the answer must speak for the window that refused: both given, or that one among them (get_usage can
+                  // give a single window, and the absent one may be the refuser)
+                  (u.fiveHour?.used != nil && u.week?.used != nil)
+                    || (refusedOn == "5h" && u.fiveHour?.used != nil) || (refusedOn == "wk" && u.week?.used != nil) {
             // the windows have room and nothing is locked: a refusal said before now is over (a raised plan, a reset
             // granted, or one read on another account). One said in the last minutes stays: it may come from a limit
             // get_usage doesn't show, and ends at its own time or on a rate_limit_event "allowed"
-            refusedUntil = nil; refusedAt = nil
+            refusedUntil = nil; refusedAt = nil; refusedOn = nil
         }
         at = now
         return true

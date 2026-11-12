@@ -1420,7 +1420,7 @@ do {
 do {
     let now = Date()
     var day = QuickChatLevel()
-    day.week = 100; day.weekResets = now.addingTimeInterval(4 * 86400); day.refusedUntil = day.weekResets
+    day.week = 100; day.weekResets = now.addingTimeInterval(4 * 86400); day.refusedUntil = day.weekResets; day.refusedOn = "wk"
     day.at = now.addingTimeInterval(-28 * 3600)
     check("fresh: numbers a day old aren't the account now", !day.isFresh(now) && day.full(now)?.id == "wk")
     check("fresh: numbers given a minute ago are", { var l = day; l.at = now.addingTimeInterval(-60); return l.isFresh(now) }())
@@ -1433,6 +1433,24 @@ do {
     fresh.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
     check("fresh: a get_usage with room lifts a refusal said a day ago", fresh.full(now) == nil && fresh.weekNow(now) == 11 && fresh.isFresh(now),
           "\(fresh)")
+    // a partial answer (five_hour null, as get_usage gives at times) lifts only a refusal on the window it gave
+    var partial = day
+    partial.refusedOn = "5h"
+    partial.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
+    check("fresh: a get_usage that gave only the week doesn't lift a refusal on the 5-hour window", partial.refusedUntil != nil && partial.refusedOn == "5h", "\(partial)")
+    var unknownWindow = day
+    unknownWindow.refusedOn = nil
+    unknownWindow.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
+    check("fresh: …nor one whose window isn't known, from a single window", unknownWindow.refusedUntil != nil, "\(unknownWindow)")
+    unknownWindow.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 5, resets: nil), week: .init(used: 11, resets: day.weekResets)), now: now)
+    check("fresh: both windows given with room lift it whichever refused", unknownWindow.refusedUntil == nil && unknownWindow.refusedOn == nil, "\(unknownWindow)")
+    var locking = QuickChatLevel()
+    locking.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 100, resets: now.addingTimeInterval(3600), locked: true),
+                                        week: .init(used: 20, resets: now.addingTimeInterval(86400))), now: now.addingTimeInterval(-3600))
+    check("fresh: a lock on one window records that window", locking.refusedOn == "5h" && locking.refusedUntil != nil, "\(locking)")
+    var evRefused = QuickChatLevel()
+    evRefused.apply(type: "five_hour", used: 1.0, status: "rejected", resets: now.addingTimeInterval(3600), now: now.addingTimeInterval(-3600))
+    check("fresh: a rate_limit_event refusal records its window", evRefused.refusedOn == "5h")
     // a refusal said a minute ago stays (it may be a limit get_usage doesn't show)
     var recent = QuickChatLevel()
     recent.apply(type: "seven_day", used: 1.0, status: "rejected", resets: now.addingTimeInterval(86400), now: now.addingTimeInterval(-60))
