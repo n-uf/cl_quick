@@ -625,9 +625,9 @@ do {
     // the folder moved to another account (claude auth login, /login, cl_audit) while the answer was on its way
     check("trail: an answer that comes after the folder moved is dropped, never put on the new account", trail.owner(folder: a2) == nil)
     check("trail: …nor on no account", trail.owner(folder: nil) == nil)
-    // incognito: the conversation lives only in the running process, so it goes on only while that is the folder's account
-    check("trail: a chat goes on while the process is the folder's account", trail.canContinue(folder: a1))
-    check("trail: it isn't gone on with on another account, or none", !trail.canContinue(folder: a2) && !trail.canContinue(folder: nil))
+    // incognito: the conversation lives only in the running process, so the chat goes on only while `owner` names the
+    // folder's account (Chat.start: goesOn)
+    check("trail: a chat goes on while the process is the folder's account", trail.running && trail.owner(folder: a1) == a1.uuid)
     // the process's own word (initialize) wins over the file read before it started
     trail.identified(ProcessIdentity(email: "ULTRA-1@example.com", organization: "Org A"))
     check("trail: it said it is the folder's account (any case): its reports are that account's", trail.owner(folder: a1, organization: "Org A") == "u1")
@@ -660,14 +660,13 @@ do {
     placeholder.processStarted(on: "email:ultra-1@example.com", email: a1.email)     // a file that had no accountUuid yet
     check("trail: a placeholder uuid that became a real one is the same account", placeholder.owner(folder: a1) == "u1")
     trail.processEnded()
-    check("trail: the conversation ends with its process, a new chat can begin on any account",
-          trail.canContinue(folder: a2) && trail.canContinue(folder: a1) && trail.canContinue(folder: nil))
+    check("trail: the conversation ends with its process, a new chat can begin on any account", !trail.running)
     check("trail: a process that ended reports nowhere", trail.owner(folder: a1) == nil)
     trail.identified(ProcessIdentity(email: a1.email))
     check("trail: a word that comes after the process ended is ignored", trail.identity == nil)
     var noAccount = AccountTrail()
     noAccount.processStarted(on: nil, email: nil)       // a folder whose file names no account
-    check("trail: a chat begun with no account doesn't go on on one that appears", !noAccount.canContinue(folder: a1) && noAccount.owner(folder: a1) == nil)
+    check("trail: a chat begun with no account doesn't go on on one that appears", noAccount.owner(folder: a1) == nil)
 
     // an older levels.json, keyed by profile id (the values stand for weeks)
     let legacy: [String: Int] = ["main": 50, "work": 20, "gone": 7, "main|u9": 33]

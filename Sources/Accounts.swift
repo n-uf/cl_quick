@@ -165,12 +165,6 @@ struct AccountTrail {
         guard let from = launchedOn, AccountBook.unchanged(from: from, now: folder) else { return nil }
         return folder.uuid
     }
-
-    /// The conversation goes on only while the process is the account the folder is on now (no process: nothing to carry
-    /// across).
-    func canContinue(folder: (uuid: String, email: String)?, organization: String? = nil) -> Bool {
-        !running || owner(folder: folder, organization: organization) != nil
-    }
 }
 
 /// Why a profile's sign-in needs doing again; none while it works.
