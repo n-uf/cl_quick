@@ -61,7 +61,8 @@ struct QuickChatLevel: Codable, Equatable {
 
     /// Numbers count as the account's state now for this long after Claude Code gave them. Older ones are only what it
     /// said last (the plan may have changed since, or another account been in use): nothing is drawn full, refused or
-    /// offered elsewhere on them, and the menu shows them muted as last known (ProfileStore.shownLevel, QCMenuProfile).
+    /// offered elsewhere on them, and the menu shows them muted as last known (ProfileStore.shownLevel, QCMenuProfile),
+    /// a full limit whose reset is still ahead even when old.
     static let freshFor: TimeInterval = 5 * 60
     func isFresh(_ now: Date = Date()) -> Bool { at.map { now.timeIntervalSince($0) < Self.freshFor } ?? false }
 

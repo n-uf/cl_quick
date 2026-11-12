@@ -4,8 +4,13 @@
 // to the reset, and how old the numbers are. Only the account in use shows usage; a standby account shows none.
 //
 // The numbers are the ones cl_quick already keeps (levels.json, from Claude Code's `get_usage`); the menu shows them at
-// once when it opens: fresh ones in their colours, ones over a few minutes old grey as "Last known …" with no full
-// limit, ones over an hour old not at all. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
+// once when it opens: fresh ones in their colours (a full limit as a crimson note), ones over a few minutes old grey as
+// "Last known …", ones over an hour old not at all. One exception: a saved full limit (Week or 5-hour at 100%, or a
+// refusal) whose reset is still ahead stays, grey, until that reset, however old: "Week full · last known 3 h ago" in
+// the header and its row at 100% with "back …" (an old one shows only that row: the other window's number is over an hour
+// old and nothing bounds it, while a reset still ahead is what says the full one still stands), no dot colour. It is
+// only the menu's: the chat, "Ask on …" and the switch offers never act on a number that isn't fresh (ProfileStore.shownLevel),
+// and a fresh answer replaces it at once. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
 // background: a short-lived `claude` per profile, one at a time, that is sent `get_usage` and nothing else (no message
 // to a model), and ends as soon as it has answered. Nothing is read from the Keychain; no token is ever seen.
 
@@ -66,7 +71,8 @@ struct QCMenuProfile: Equatable {
     let title: String
     /// The share the profile's dot shows (the fuller window); nil: grey, no numbers.
     let dotP: Double?
-    /// "5-hour full · in 1h 5m", in crimson at the header's right, while a limit holds the account back.
+    /// "5-hour full · in 1h 5m", in crimson at the header's right, while a limit holds the account back; for numbers
+    /// no longer fresh "Week full · last known 3 h ago", grey (`fullNoteStale`).
     let fullNote: String?
     let account: Account
     /// The two windows; empty with no numbers.
@@ -77,11 +83,13 @@ struct QCMenuProfile: Equatable {
     let updated: String?
     /// The muted line when `noUsage`: "No usage yet", or "No recent numbers" when the last ones are over an hour old.
     var noUsageText = Self.noUsageWords
+    /// `fullNote` is a saved full limit, last known and not now: drawn grey, not crimson.
+    var fullNoteStale = false
 
     static let noUsageWords = "No usage yet"
     static let noRecentWords = "No recent numbers"
     /// Numbers older than this aren't shown at all, not even muted: the plan, the account or the week may have changed
-    /// since (the refresh asks for new ones as the menu opens).
+    /// since (the refresh asks for new ones as the menu opens). Except a full limit whose reset is still ahead.
     static let lastKnownFor: TimeInterval = 3600
 
     /// "Claude Main"; a name that starts with Claude as it is.
@@ -122,12 +130,14 @@ struct QCMenuProfile: Equatable {
                                  rows: [], noUsage: false, updated: nil)
         }
         // how old the numbers are: fresh ones are the account now; ones over a few minutes old are what Claude Code said
-        // last, drawn grey with no full limit (the refresh asks again as the menu opens); over an hour old, not shown
+        // last, drawn grey (the refresh asks again as the menu opens); over an hour old, not shown, except a saved full
+        // limit whose reset is still ahead: that stays, grey and worded "last known", until the reset
         let age = level?.at.map { now.timeIntervalSince($0) } ?? .infinity
         let fresh = level?.isFresh(now) == true
         let old = level != nil && age >= lastKnownFor
-        let shownLevel = old ? nil : level
-        let full = fresh ? shownLevel?.full(now) : nil
+        let savedFull: FullLimit? = fresh ? nil : level?.full(now).flatMap { f in f.resets.map { $0 > now } == true ? f : nil }
+        let shownLevel = old && savedFull == nil ? nil : level
+        let full = fresh ? shownLevel?.full(now) : savedFull
         func row(_ id: String, _ label: String, _ p: Double?, _ resets: Date?) -> Row {
             let isFull = full?.id == id
             let shown = isFull ? 100 : p
@@ -139,15 +149,25 @@ struct QCMenuProfile: Equatable {
         var rows: [Row] = []
         if let level = shownLevel {
             rows = [row("5h", "5-hour", level.fiveHourNow(now), level.fiveHourResets), row("wk", "Week", level.weekNow(now), level.weekResets)]
+            // an old saved full limit shows its own window only: the other one's number is over an hour old
+            if old { rows = rows.filter { $0.id == full?.id } }
             if rows.allSatisfy({ $0.p == nil }) { rows = [] }
         }
-        let note: String? = full.map { f in
-            (f.id == "5h" ? "5-hour" : f.id == "wk" ? "Week" : "Limit") + " full" + (f.resets.map { " · in " + TimeWords.countdown($0, now: now) } ?? "")
+        let ago = shownLevel?.at.map { AccountBook.ago($0, now: now) }
+        let name = full.map { $0.id == "5h" ? "5-hour" : $0.id == "wk" ? "Week" : "Limit" }
+        // fresh: "Week full · in 2d 3h", crimson; saved: "Week full · last known 3 h ago", grey (the age is in it, so no
+        // separate "Last known" line under the bars)
+        let note: String? = full.flatMap { f in
+            fresh ? name.map { $0 + " full" + (f.resets.map { " · in " + TimeWords.countdown($0, now: now) } ?? "") }
+                  : name.map { $0 + " full · last known " + (ago ?? "earlier") }
         }
-        let updated: String? = rows.isEmpty ? nil : shownLevel?.at.map { (fresh ? "Updated " : "Last known ") + AccountBook.ago($0, now: now) }
+        let updated: String? = rows.isEmpty || savedFull != nil ? nil : shownLevel?.at.map { (fresh ? "Updated " : "Last known ") + AccountBook.ago($0, now: now) }
+        // a refusal that names no window has no row to carry its reset: the muted line says when it ends
+        var noUsageText = old && savedFull == nil ? noRecentWords : noUsageWords
+        if rows.isEmpty, !fresh, let f = savedFull, let r = f.resets { noUsageText = "Held back until " + TimeWords.when(r, now: now) }
         return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? shownLevel?.binding(now)?.p : nil, fullNote: note,
                              account: .inUse(address: address), rows: rows, noUsage: rows.isEmpty, updated: updated,
-                             noUsageText: old ? noRecentWords : noUsageWords)
+                             noUsageText: noUsageText, fullNoteStale: !fresh && note != nil)
     }
 }
 
@@ -321,7 +341,7 @@ final class QCMenuUsageBlock: NSView {
         let headMid = Self.top + Self.headH / 2
         lamp(Painter.color(m.dotP, stale: false), glow: false, midY: headMid)
         text(m.title, Self.titleFont, .labelColor, x: x0 + Self.textGap, midY: headMid)
-        if let note = m.fullNote { textRight(note, Self.noteFont, Painter.crimson, right: bounds.width - Self.padX, midY: headMid) }
+        if let note = m.fullNote { textRight(note, Self.noteFont, m.fullNoteStale ? Painter.grey : Painter.crimson, right: bounds.width - Self.padX, midY: headMid) }
         // the account in use: a green lamp, the address (blurred until the pointer is on it), "· in use"
         let accMid = accountY + Self.accountH / 2
         switch m.account {

@@ -29,7 +29,9 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 - **The account in use, and its numbers, as they are now.** The folder's `.claude.json` is read again whenever it
   changed, so a sign-in made outside cl_quick counts at once. Limits are kept only for the account the answering Claude
   Code says it is, while the folder is still on it; numbers over 5 minutes old never show a full limit or an offer
-  (the menu shows them grey as last known, and none over an hour old), and a standby account is offered with no numbers.
+  (the menu shows them grey as last known, and none over an hour old, except a full limit whose reset is still ahead:
+  that stays in the menu, grey, as "Week full · last known 3 h ago" until it resets), and a standby account is offered
+  with no numbers.
 - **A profile picker** in the chat: a key in the controls row, with a menu of the profiles, each with its week as Claude
   Code last reported it and the address of its account in use, blurred until the pointer is on it, with a copy button.
   The menu also has **Settings for <profile>…** and **Add a profile…**. A full limit's notice names the window that is
