@@ -843,10 +843,9 @@ final class QuickChatModel: ObservableObject {
         case .usage(let u):
             // its limits now: kept like a report after an answer, for this account (an old level of another one isn't the base)
             var l = (trail.reportAccount == target?.accountUUID ? level : nil) ?? QuickChatLevel()
-            let before = l
-            l.apply(usage: u)
-            var same = l; same.at = before.at          // only a change of numbers is written and drawn again
-            if same != before { reportLevel(l) }
+            // numbers given: kept even when they are the same, so they count as fresh again (an answer with no numbers,
+            // `rate_limits` null, changes nothing and leaves the old ones as old as they were)
+            if l.apply(usage: u) { reportLevel(l) }
             return
         default: break
         }
@@ -887,8 +886,9 @@ final class QuickChatModel: ObservableObject {
             }
         case .limit(let type, let used, let status, let resets):
             var l = level ?? QuickChatLevel()
+            let before = l
             l.apply(type: type, used: used, status: status, resets: resets)
-            reportLevel(l)
+            if l != before { reportLevel(l) }       // a per-model week's event says nothing about the account's windows
         case .done(let isError, let text, let ms, _):
             flush()
             guard turns[i].busy else { return }
@@ -901,7 +901,8 @@ final class QuickChatModel: ObservableObject {
                 // a full limit Claude Code refused on before it reported one: the account line says so too
                 if turns[i].problem == .limitFull, level?.full() == nil {
                     var l = level ?? QuickChatLevel()
-                    l.refusedUntil = l.refusedUntil ?? Date().addingTimeInterval(3600)
+                    if l.refusedUntil == nil { l.refusedUntil = Date().addingTimeInterval(3600); l.refusedAt = Date() }
+                    l.at = Date()
                     reportLevel(l)
                 }
             } else {
@@ -1114,7 +1115,7 @@ final class QuickChat {
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
             guard let self else { return [] }
-            return self.store.profiles.filter(\.inPicker).map { ($0, self.store.level(of: $0)) }
+            return self.store.profiles.filter(\.inPicker).map { ($0, self.store.shownLevel(of: $0)) }
         }
         model.pickProfile = { [weak self] id in self?.move(to: id) }
         // refresh() may end the chat (profile removed, account or folder changed): never from inside the answer's own handling
@@ -1198,10 +1199,11 @@ final class QuickChat {
             model.accountChanged(to: now)
             restarted = true
         }
-        // the most room first; one that hasn't answered anything yet comes after, as it may have room too
+        // the most room first; one with no fresh numbers comes after, as it may have room too (old numbers say nothing:
+        // shownLevel leaves them out)
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in
-                guard let l = store.level(of: o) else { return QuickChatOffer(profileID: o.id, name: o.name, used: nil) }
+                guard let l = store.shownLevel(of: o) else { return QuickChatOffer(profileID: o.id, name: o.name, used: nil) }
                 guard l.full() == nil else { return nil }
                 return QuickChatOffer(profileID: o.id, name: o.name, used: l.binding()?.p)     // its fuller window
             }
@@ -1214,7 +1216,8 @@ final class QuickChat {
             ?? switcher.ended[id].map { e in
                 e.signedIn.map { .wrong(signedIn: $0, wanted: e.goal.wantedEmail) } ?? .timedOut(wanted: e.goal.wantedEmail)
             }
-        model.update(target: now, level: store.level(of: p), offer: others.first,
+        // only fresh numbers: older ones never draw the account full or offer elsewhere (warm() asks for new ones)
+        model.update(target: now, level: store.shownLevel(of: p), offer: others.first,
                      switchOffer: standby, notice: notice)
         // a new account or folder (a switch landed, open or hidden): its `claude` starts, so its limits are there by the
         // time the bar shows (a cold start takes about 12 s); with nothing asked it ends after 3 minutes

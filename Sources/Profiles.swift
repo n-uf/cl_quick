@@ -152,19 +152,20 @@ final class ProfileStore: ObservableObject {
         AccountBook.migrated(old) { id in profiles.first { $0.id == id }.flatMap(account) }
     }
 
-    /// The profile's week for one account: the one in use by default; nil: nothing reported on it yet. For the account
-    /// in use, a level kept from before it came into use (a switch seen in this run) isn't shown: its numbers are from
-    /// its last time in use, not now, until Claude Code reports again (get_usage, asked as the switch lands).
+    /// What was last recorded for one account of the profile (the one in use by default), however old; nil: nothing
+    /// reported on it yet. They may be from long ago (its last time in use, or a plan since changed): what is shown and
+    /// acted on goes through `shownLevel`.
     func level(of p: Profile, account uuid: String? = nil) -> QuickChatLevel? {
         guard let uuid = uuid ?? ClaudeFolder.account(p.path)?.uuid else { return nil }
-        guard let l = levels[Self.levelKey(p.id, uuid)] else { return nil }
-        if let since = inUseSince[p.id], since.uuid == uuid, (l.at ?? .distantPast) < since.at { return nil }
-        return l
+        return levels[Self.levelKey(p.id, uuid)]
     }
 
-    /// By profile id: the account in use as this run last saw it, and since when (the first look: since ever, so what
-    /// was kept shows; a change seen later: that moment). In memory only.
-    private var inUseSince: [String: (uuid: String, at: Date, email: String)] = [:]
+    /// The numbers the chat shows and acts on for the profile's account in use now: only fresh ones
+    /// (QuickChatLevel.freshFor). Older numbers never draw a full limit, a refusal, an "Ask on …" or a switch offer:
+    /// the bar asks Claude Code again as it opens (get_usage) and shows them once they come.
+    func shownLevel(of p: Profile, now: Date = Date()) -> QuickChatLevel? {
+        level(of: p).flatMap { $0.isFresh(now) ? $0 : nil }
+    }
 
     var hasProfiles: Bool { !profiles.isEmpty }
     func profile(_ id: String?) -> Profile? { profiles.first { $0.id == id } }
@@ -235,11 +236,6 @@ final class ProfileStore: ObservableObject {
         guard let a = ClaudeFolder.account(p.path) else { if authFailed[id] != nil { authFailed[id] = nil }; return }
         // a failure was on another account than the one signed in now: it doesn't come back if that one does
         if let failed = authFailed[id], failed != a.uuid { authFailed[id] = nil }
-        // another account came into use while cl_quick runs: from now on (level(of:) leaves out what was kept before)
-        // (a file that only now has its accountUuid is the same account: its kept level keeps showing)
-        if let seen = inUseSince[id] {
-            if seen.uuid != a.uuid { inUseSince[id] = (a.uuid, AccountBook.unchanged(from: (seen.uuid, seen.email), now: a) ? seen.at : now, a.email) }
-        } else { inUseSince[id] = (a.uuid, .distantPast, a.email) }
         var q = p
         let r = AccountBook.note(&q.accounts, uuid: a.uuid, email: a.email, now: now)
         guard r.changed else { return }

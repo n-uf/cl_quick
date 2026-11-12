@@ -92,7 +92,9 @@ Besides Quick chat, Settings… and Quit, the menu bar icon's menu has a block f
 draws it: the profile's name with a dot in the colour of its fuller limit, the account in use with a green lamp
 (`<address> · in use`, the address blurred until the pointer is on it), two bars, **5-hour** and **Week**, in green,
 amber and red by level, each with its share and the time to its reset ("13% in 1h 5m"), and how old the numbers are
-("Updated just now"). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
+("Updated just now"). Numbers count as the account's state for 5 minutes: older ones are grey, as "Last known 12 min
+ago", with no full limit, and ones over an hour old aren't shown ("No recent numbers"); the chat acts only on fresh
+ones (no full-limit notice, Ask on … or switch offer on old numbers). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
 a profile with no numbers yet says "No usage yet". A profile with standby accounts also has **Switch account ›**,
 listing them by their masked addresses and asking the same question as Switch… in Settings. The numbers are the ones Claude Code last gave cl_quick, shown at
 once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a

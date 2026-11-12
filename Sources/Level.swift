@@ -49,12 +49,24 @@ struct QuickChatLevel: Codable, Equatable {
     var fiveHourResets: Date?
     /// When Claude Code last said the account is refusing (rate_limit_event "rejected"), and until when.
     var refusedUntil: Date?
+    /// When that refusal was said (nil in a levels.json from before this was kept: as old as can be).
+    var refusedAt: Date?
     /// When Claude Code reported it.
     var at: Date?
 
     init() {}
 
-    /// What Claude Code said after an answer: "seven_day" or "five_hour", the share used (0…1), refusing or not.
+    /// Numbers count as the account's state now for this long after Claude Code gave them. Older ones are only what it
+    /// said last (the plan may have changed since, or another account been in use): nothing is drawn full, refused or
+    /// offered elsewhere on them, and the menu shows them muted as last known (ProfileStore.shownLevel, QCMenuProfile).
+    static let freshFor: TimeInterval = 5 * 60
+    func isFresh(_ now: Date = Date()) -> Bool { at.map { now.timeIntervalSince($0) < Self.freshFor } ?? false }
+
+    /// What Claude Code said after an answer (rate_limit_event): "seven_day" or "five_hour", the share used as a fraction
+    /// (0…1, as Claude Code 2.1.318 takes it from the API's headers; `get_usage` gives percent), refusing or not. Only
+    /// the two account-wide windows say anything about the account: a per-model week (seven_day_opus,
+    /// seven_day_sonnet), the overage-included week or overage refusing holds back that model or that spend, not the
+    /// account (the refused answer says so itself), so it neither sets nor lifts a refusal.
     mutating func apply(type: String?, used: Double?, status: String?, resets: Date?, now: Date = Date()) {
         let pct = used.map { min(100, max(0, $0 * 100)) }
         switch type {
@@ -62,25 +74,37 @@ struct QuickChatLevel: Codable, Equatable {
         case "five_hour"?: if let pct { fiveHour = pct }; if let resets { fiveHourResets = resets }
         default: break
         }
-        if status == "rejected" { refusedUntil = resets ?? now.addingTimeInterval(3600) }
-        else if status == "allowed" { refusedUntil = nil }
+        let accountWide = type == nil || type == "five_hour" || type == "seven_day"
+        guard accountWide else { return }
+        if status == "rejected" { refusedUntil = resets ?? now.addingTimeInterval(3600); refusedAt = now }
+        else if status == "allowed" { refusedUntil = nil; refusedAt = nil }
         at = now
     }
 
     /// What `get_usage` said: both windows as they are now (0…100), and whether either holds the account back. When
-    /// Claude Code says the limits aren't available, nothing changes: the last numbers stay.
-    mutating func apply(usage u: QuickChatUsage, now: Date = Date()) {
-        guard u.available, u.fiveHour != nil || u.week != nil else { return }
+    /// Claude Code says the limits aren't available (`rate_limits` null: its usage endpoint gave nothing), nothing
+    /// changes and false comes back: the last numbers stay, as old as they were (never made fresh by an empty answer).
+    @discardableResult
+    mutating func apply(usage u: QuickChatUsage, now: Date = Date()) -> Bool {
+        guard u.available, u.fiveHour?.used != nil || u.week?.used != nil else { return false }
         // a window given is taken whole: its reset as given too (none, for a window that hasn't started), so an old reset
         // already past never hides the number it just gave
         if let w = u.fiveHour, let p = w.used { fiveHour = p; fiveHourResets = w.resets }
         if let w = u.week, let p = w.used { week = p; weekResets = w.resets }
         let locked = [u.fiveHour, u.week].compactMap { $0 }.filter(\.locked)
-        // a lock lasts until the window that holds it resets (the later one when both do). No lock here never lifts a
-        // refusal Claude Code made: it may come from a limit get_usage files elsewhere, so it ends at its own time or
-        // on a rate_limit_event "allowed"
-        if !locked.isEmpty { refusedUntil = max(refusedUntil ?? .distantPast, locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600)) }
+        // a lock lasts until the window that holds it resets (the later one when both do)
+        if !locked.isEmpty {
+            refusedUntil = max(refusedUntil ?? .distantPast, locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600))
+            refusedAt = now
+        } else if refusedUntil != nil, now.timeIntervalSince(refusedAt ?? .distantPast) >= Self.freshFor,
+                  [u.fiveHour?.used, u.week?.used].compactMap({ $0 }).allSatisfy({ $0.rounded() < 100 }) {
+            // the windows have room and nothing is locked: a refusal said before now is over (a raised plan, a reset
+            // granted, or one read on another account). One said in the last minutes stays: it may come from a limit
+            // get_usage doesn't show, and ends at its own time or on a rate_limit_event "allowed"
+            refusedUntil = nil; refusedAt = nil
+        }
         at = now
+        return true
     }
 
     private static func holding(_ p: Double?, _ resets: Date?, _ now: Date) -> Bool {

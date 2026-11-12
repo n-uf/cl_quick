@@ -1309,6 +1309,45 @@ do {
     check("usage: not available keeps the last numbers", kept.fiveHour == 0 && kept.week == 62)
 }
 
+// the operator's case (sample numbers): a week recorded full a day ago (a plan raised since: the account is at 11% now)
+do {
+    let now = Date()
+    var day = QuickChatLevel()
+    day.week = 100; day.weekResets = now.addingTimeInterval(4 * 86400); day.refusedUntil = day.weekResets
+    day.at = now.addingTimeInterval(-28 * 3600)
+    check("fresh: numbers a day old aren't the account now", !day.isFresh(now) && day.full(now)?.id == "wk")
+    check("fresh: numbers given a minute ago are", { var l = day; l.at = now.addingTimeInterval(-60); return l.isFresh(now) }())
+    // get_usage as Claude Code 2.1.318 answers when its usage endpoint gave nothing: rate_limits null
+    var empty = day
+    let took = empty.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: nil), now: now)
+    check("fresh: an answer with rate_limits null takes nothing and makes nothing fresh", !took && empty == day && !empty.isFresh(now))
+    // get_usage with numbers (week 11%, the 5-hour window not started): the day-old refusal is over
+    var fresh = day
+    fresh.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
+    check("fresh: a get_usage with room lifts a refusal said a day ago", fresh.full(now) == nil && fresh.weekNow(now) == 11 && fresh.isFresh(now),
+          "\(fresh)")
+    // a refusal said a minute ago stays (it may be a limit get_usage doesn't show)
+    var recent = QuickChatLevel()
+    recent.apply(type: "seven_day", used: 1.0, status: "rejected", resets: now.addingTimeInterval(86400), now: now.addingTimeInterval(-60))
+    recent.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 20, resets: nil), week: .init(used: 40, resets: nil)), now: now)
+    check("fresh: a refusal said a minute ago stays through a get_usage with room", recent.full(now) != nil, "\(recent)")
+    // a per-model week (Opus) refusing holds back that model, not the account
+    var opus = QuickChatLevel(); opus.week = 11; opus.weekResets = now.addingTimeInterval(86400); opus.at = now
+    let before = opus
+    opus.apply(type: "seven_day_opus", used: 1.0, status: "rejected", resets: now.addingTimeInterval(86400), now: now)
+    check("fresh: a per-model week's refusal (seven_day_opus) doesn't hold the account back", opus.full(now) == nil && opus == before, "\(opus)")
+    var overage = QuickChatLevel()
+    overage.apply(type: "overage", used: nil, status: "rejected", resets: nil, now: now)
+    check("fresh: overage refusing doesn't either", overage.full(now) == nil && overage.at == nil)
+    // rate_limit_event's utilization is a fraction (0…1, from the API's headers), get_usage's is percent (0…100)
+    var ev = QuickChatLevel()
+    ev.apply(type: "seven_day", used: 0.11, status: "allowed", resets: now.addingTimeInterval(86400), now: now)
+    check("scale: a rate_limit_event's 0.11 is 11%", ev.week.map { abs($0 - 11) < 0.001 } == true, "\(ev)")
+    var gu = QuickChatLevel()
+    gu.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: nil)), now: now)
+    check("scale: get_usage's 11 is 11%", gu.week == 11)
+}
+
 // ── ⌘V in the bar ──────────────────────────────────────────────────────────────────────────────────
 do {
     chat.hide(); chat.model.newChat(); chat.open(); spin(0.5)

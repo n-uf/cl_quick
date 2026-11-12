@@ -52,8 +52,21 @@ check("countdown: minutes, hours, days", [TimeWords.countdown(now.addingTimeInte
 
 // ── relative time of the numbers' age ──────────────────────────────────────────────────────────────
 check("updated: just now", make(level(five: 13, week: 88, ago: 20)).updated == "Updated just now")
-check("updated: 12 min ago", make(level(five: 13, week: 88, ago: 12 * 60)).updated == "Updated 12 min ago", "\(String(describing: make(level(five: 13, week: 88, ago: 12 * 60)).updated))")
-check("updated: 3 h ago", make(level(five: 13, week: 88, ago: 3 * 3600 + 60)).updated == "Updated 3 h ago")
+check("updated: 3 min ago, still fresh, in colour", make(level(five: 13, week: 88, ago: 3 * 60)).updated == "Updated 3 min ago"
+      && make(level(five: 13, week: 88, ago: 3 * 60)).rows[1].colour == Painter.red)
+// numbers over a few minutes old are what Claude Code said last, not the account now
+let lastKnown = make(level(five: 13, week: 88, ago: 12 * 60))
+check("stale: 12 min old numbers are 'Last known', grey, with no dot colour",
+      lastKnown.updated == "Last known 12 min ago" && lastKnown.rows.allSatisfy { $0.colour == Painter.grey } && lastKnown.dotP == nil,
+      "\(lastKnown.lines)")
+let staleFull = make(level(five: nil, week: 100, ago: 12 * 60))
+check("stale: a full week 12 min old draws no full limit (no header note), only the grey last known share",
+      staleFull.fullNote == nil && staleFull.rows[1].share == "100%" && staleFull.rows[1].colour == Painter.grey, "\(staleFull.lines)")
+let dayOld = make(level(five: nil, week: 100, ago: 28 * 3600))
+check("stale: a day-old full week isn't shown at all: 'No recent numbers', no bars, no note, no age",
+      dayOld.lines == ["Claude Main", maskEmail(mainAddress) + " · in use", "No recent numbers"] && dayOld.rows.isEmpty && dayOld.fullNote == nil
+      && dayOld.dotP == nil && dayOld.updated == nil, "\(dayOld.lines)")
+check("stale: 'No recent numbers' sizes the block like 'No usage yet'", QCMenuUsageBlock.height(dayOld) == QCMenuUsageBlock.height(make(nil)))
 
 // ── no numbers, a window not known, a full limit, signed out ───────────────────────────────────────
 let none = make(nil)

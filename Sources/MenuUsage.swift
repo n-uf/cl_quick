@@ -4,7 +4,8 @@
 // to the reset, and how old the numbers are. Only the account in use shows usage; a standby account shows none.
 //
 // The numbers are the ones cl_quick already keeps (levels.json, from Claude Code's `get_usage`); the menu shows them at
-// once when it opens. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
+// once when it opens: fresh ones in their colours, ones over a few minutes old grey as "Last known …" with no full
+// limit, ones over an hour old not at all. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
 // background: a short-lived `claude` per profile, one at a time, that is sent `get_usage` and nothing else (no message
 // to a model), and ends as soon as it has answered. Nothing is read from the Keychain; no token is ever seen.
 
@@ -53,8 +54,10 @@ struct QCMenuProfile: Equatable {
         let share: String
         /// "in 1h 5m", "back at 15:28", or "".
         let resets: String
-        /// The level's colour (cl_audit's: green, amber from 50%, red from 80%, crimson from 95%).
-        var colour: NSColor { Painter.color(p, stale: false) }
+        /// Last known, not now (older than QuickChatLevel.freshFor): drawn grey.
+        var stale = false
+        /// The level's colour (cl_audit's: green, amber from 50%, red from 80%, crimson from 95%); grey when stale.
+        var colour: NSColor { Painter.color(p, stale: stale) }
         var text: String { [label, share, resets].filter { !$0.isEmpty }.joined(separator: " ") }
     }
 
@@ -68,12 +71,18 @@ struct QCMenuProfile: Equatable {
     let account: Account
     /// The two windows; empty with no numbers.
     let rows: [Row]
-    /// The account in use has no numbers yet: one muted line instead of the bars.
+    /// The account in use has no numbers yet, or none recent: one muted line instead of the bars.
     let noUsage: Bool
-    /// "Updated just now", "Updated 12 min ago".
+    /// "Updated just now", "Updated 3 min ago"; "Last known 12 min ago" for numbers no longer fresh.
     let updated: String?
+    /// The muted line when `noUsage`: "No usage yet", or "No recent numbers" when the last ones are over an hour old.
+    var noUsageText = Self.noUsageWords
 
     static let noUsageWords = "No usage yet"
+    static let noRecentWords = "No recent numbers"
+    /// Numbers older than this aren't shown at all, not even muted: the plan, the account or the week may have changed
+    /// since (the refresh asks for new ones as the menu opens).
+    static let lastKnownFor: TimeInterval = 3600
 
     /// "Claude Main"; a name that starts with Claude as it is.
     static func title(_ name: String) -> String { name.lowercased().hasPrefix("claude") ? name : "Claude " + name }
@@ -89,7 +98,7 @@ struct QCMenuProfile: Equatable {
     /// Every line the block shows, top to bottom, with the address masked.
     var lines: [String] {
         var l = [title + (fullNote.map { "  " + $0 } ?? ""), accountWords]
-        if noUsage { l.append(Self.noUsageWords) }
+        if noUsage { l.append(noUsageText) }
         l += rows.map(\.text)
         if let updated { l.append(updated) }
         return l
@@ -112,25 +121,33 @@ struct QCMenuProfile: Equatable {
             return QCMenuProfile(id: p.id, title: title(p.name), dotP: nil, fullNote: nil, account: .problem(words: problem.words),
                                  rows: [], noUsage: false, updated: nil)
         }
-        let full = level?.full(now)
+        // how old the numbers are: fresh ones are the account now; ones over a few minutes old are what Claude Code said
+        // last, drawn grey with no full limit (the refresh asks again as the menu opens); over an hour old, not shown
+        let age = level?.at.map { now.timeIntervalSince($0) } ?? .infinity
+        let fresh = level?.isFresh(now) == true
+        let old = level != nil && age >= lastKnownFor
+        let shownLevel = old ? nil : level
+        let full = fresh ? shownLevel?.full(now) : nil
         func row(_ id: String, _ label: String, _ p: Double?, _ resets: Date?) -> Row {
             let isFull = full?.id == id
             let shown = isFull ? 100 : p
             let at = isFull ? full?.resets : resets
             var words = ""
             if let shown, let at { words = shown.rounded() >= 100 ? TimeWords.back(at, now: now) : "in " + TimeWords.countdown(at, now: now) }
-            return Row(id: id, label: label, p: shown, share: QuickChatLevel.pct(shown), resets: words)
+            return Row(id: id, label: label, p: shown, share: QuickChatLevel.pct(shown), resets: words, stale: !fresh)
         }
         var rows: [Row] = []
-        if let level {
+        if let level = shownLevel {
             rows = [row("5h", "5-hour", level.fiveHourNow(now), level.fiveHourResets), row("wk", "Week", level.weekNow(now), level.weekResets)]
             if rows.allSatisfy({ $0.p == nil }) { rows = [] }
         }
         let note: String? = full.map { f in
             (f.id == "5h" ? "5-hour" : f.id == "wk" ? "Week" : "Limit") + " full" + (f.resets.map { " · in " + TimeWords.countdown($0, now: now) } ?? "")
         }
-        return QCMenuProfile(id: p.id, title: title(p.name), dotP: level?.binding(now)?.p, fullNote: note, account: .inUse(address: address), rows: rows,
-                             noUsage: rows.isEmpty, updated: rows.isEmpty ? nil : level?.at.map { "Updated " + AccountBook.ago($0, now: now) })
+        let updated: String? = rows.isEmpty ? nil : shownLevel?.at.map { (fresh ? "Updated " : "Last known ") + AccountBook.ago($0, now: now) }
+        return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? shownLevel?.binding(now)?.p : nil, fullNote: note,
+                             account: .inUse(address: address), rows: rows, noUsage: rows.isEmpty, updated: updated,
+                             noUsageText: old ? noRecentWords : noUsageWords)
     }
 }
 
@@ -188,7 +205,7 @@ final class QCMenuUsageBlock: NSView {
         }
         let reset = m.rows.map { w($0.resets, resetFont) }.max() ?? 0
         let rows = m.rows.isEmpty ? 0 : padX + labelW + colGap + barW + colGap + shareW + colGap + max(reset, 64) + padX
-        let note = max(m.updated.map { padX + w($0, resetFont) + padX } ?? 0, m.noUsage ? padX + w(QCMenuProfile.noUsageWords, accountFont) + padX : 0)
+        let note = max(m.updated.map { padX + w($0, resetFont) + padX } ?? 0, m.noUsage ? padX + w(m.noUsageText, accountFont) + padX : 0)
         return max(minWidth, head, account, rows, note)
     }
 
@@ -287,11 +304,11 @@ final class QCMenuUsageBlock: NSView {
     }
 
     /// A limit's bar: a faint track and the share in its level's colour, fading in from 70% at its left end (crimson whole).
-    private func bar(_ r: NSRect, p: Double?) {
+    private func bar(_ r: NSRect, p: Double?, stale: Bool) {
         NSColor.labelColor.withAlphaComponent(0.12).setFill()
         NSBezierPath(roundedRect: r, xRadius: r.height / 2, yRadius: r.height / 2).fill()
         guard let p, p > 0 else { return }
-        let c = Painter.color(p, stale: false)
+        let c = Painter.color(p, stale: stale)
         let w = max(r.height, r.width * CGFloat(min(100, p)) / 100)
         let fill = NSBezierPath(roundedRect: NSRect(x: r.minX, y: r.minY, width: w, height: r.height), xRadius: r.height / 2, yRadius: r.height / 2)
         NSGradient(starting: c.withAlphaComponent(c == Painter.crimson ? 1 : 0.7), ending: c)?.draw(in: fill, angle: 0)
@@ -322,14 +339,14 @@ final class QCMenuUsageBlock: NSView {
             text(words, Self.accountFont, .secondaryLabelColor, x: x0 + Self.textGap, midY: accMid)
         }
         if m.noUsage {
-            text(QCMenuProfile.noUsageWords, Self.accountFont, .tertiaryLabelColor, x: x0, midY: accountY + Self.accountH + Self.rowGap + Self.rowH / 2)
+            text(m.noUsageText, Self.accountFont, .tertiaryLabelColor, x: x0, midY: accountY + Self.accountH + Self.rowGap + Self.rowH / 2)
         }
         // the two bars: name, bar, share (in its level's colour), time to the reset
         for (i, r) in m.rows.enumerated() {
             let y = rowY(i), mid = y + Self.rowH / 2
             text(r.label, Self.rowFont, .labelColor, x: x0, midY: mid)
             let bx = x0 + Self.labelW + Self.colGap
-            bar(NSRect(x: bx, y: mid - Self.barH / 2, width: Self.barW, height: Self.barH), p: r.p)
+            bar(NSRect(x: bx, y: mid - Self.barH / 2, width: Self.barW, height: Self.barH), p: r.p, stale: r.stale)
             let sx = bx + Self.barW + Self.colGap
             textRight(r.share, Self.shareFont, r.p == nil ? .secondaryLabelColor : r.colour, right: sx + Self.shareW, midY: mid)
             text(r.resets, Self.resetFont, .secondaryLabelColor, x: sx + Self.shareW + Self.colGap, midY: mid)
@@ -446,7 +463,7 @@ enum QCStatusMenu {
 final class QCMenuUsageRefresher {
     static let shared = QCMenuUsageRefresher()
     /// Numbers older than this are asked for again.
-    static let staleAfter: TimeInterval = 5 * 60
+    static let staleAfter: TimeInterval = QuickChatLevel.freshFor
     /// A profile is tried at most this often, answered or not.
     static let retryAfter: TimeInterval = 3 * 60
     /// A `claude` that hasn't answered by then is ended.

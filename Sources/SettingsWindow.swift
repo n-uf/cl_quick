@@ -260,7 +260,8 @@ struct LimitBars: View {
     @Environment(\.face) private var face
 
     var body: some View {
-        let full = level.full(now)
+        // numbers older than a few minutes are shown as reported (the caption says when), never as a full limit now
+        let full = level.isFresh(now) ? level.full(now) : nil
         VStack(alignment: .leading, spacing: 8) {
             bar("5 hours", full?.id == "5h" ? 100 : level.fiveHourResets.map { $0 <= now } == true ? nil : level.fiveHour,
                 full?.id == "5h" ? full?.resets : level.fiveHourResets, full: full?.id == "5h")
@@ -343,7 +344,8 @@ struct InUseBox: View {
                 }
             }
             if let level = entry.level, level.at != nil {
-                LimitBars(level: level).saturation(broken ? 0 : 1).opacity(broken ? 0.6 : 1)
+                // older than a few minutes: what Claude Code said last (the caption says when), drawn without its colours
+                LimitBars(level: level).saturation(broken || !level.isFresh() ? 0 : 1).opacity(broken ? 0.6 : 1)
             } else {
                 Text("No limits yet: Claude Code reports them with the first answer.").font(.system(size: 11)).foregroundStyle(face.muted)
             }
