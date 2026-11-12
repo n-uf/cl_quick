@@ -608,6 +608,11 @@ do {
     check("folder: nothing changed, nothing signalled", notes == 0 && quiet == false, (notes, quiet as Any))
     NotificationCenter.default.removeObserver(watch)
     try? FileManager.default.removeItem(atPath: file)
+    try? #"{"oauthAccount":{"accountUuid":"u6","emailAddress":"ultra-6@example.com","organizationUuid":"org-9","organizationName":"Org Nine"}}"#
+        .write(toFile: file, atomically: true, encoding: .utf8)
+    try? FileManager.default.setAttributes([.modificationDate: t0.addingTimeInterval(20)], ofItemAtPath: file)
+    check("folder: the organization's uuid and name are read", FolderFiles.fresh(file).organizationUuid == "org-9" && FolderFiles.fresh(file).organization == "Org Nine")
+    try? FileManager.default.removeItem(atPath: file)
     check("folder: a file that went away names no account", FolderFiles.fresh(file).uuid == nil && FolderFiles.fresh(file).email == nil)
     try? FileManager.default.removeItem(atPath: dir)
 
@@ -628,6 +633,20 @@ do {
     check("trail: it said it is the folder's account (any case): its reports are that account's", trail.owner(folder: a1, organization: "Org A") == "u1")
     check("trail: the same address in another organization isn't it", trail.owner(folder: a1, organization: "Org B") == nil)
     check("trail: a file that names no organization goes by the address", trail.owner(folder: a1) == "u1")
+    // a rename of the organization (same organizationUuid) mid-process keeps its reports; another organization doesn't
+    var renamed = AccountTrail()
+    renamed.processStarted(on: a1.uuid, email: a1.email, organizationUuid: "org-1")
+    renamed.identified(ProcessIdentity(email: a1.email, organization: "Org A"))
+    check("trail: a renamed organization (same uuid) keeps the reports", renamed.owner(folder: a1, organization: "Org A renamed", organizationUuid: "org-1") == "u1")
+    check("trail: another organization's uuid with another name is cut", renamed.owner(folder: a1, organization: "Org B", organizationUuid: "org-2") == nil)
+    check("trail: a uuid that changed with the same name keeps the reports", renamed.owner(folder: a1, organization: "Org A", organizationUuid: "org-2") == "u1")
+    check("trail: no uuid in the file falls back to the names", renamed.owner(folder: a1, organization: "Org B") == nil && renamed.owner(folder: a1, organization: "Org A") == "u1")
+    var noOrgUuid = AccountTrail()
+    noOrgUuid.processStarted(on: a1.uuid, email: a1.email)
+    noOrgUuid.identified(ProcessIdentity(email: a1.email, organization: "Org A"))
+    check("trail: a process that started on no known uuid goes by the names",
+          noOrgUuid.owner(folder: a1, organization: "Org A", organizationUuid: "org-1") == "u1"
+          && noOrgUuid.owner(folder: a1, organization: "Org B", organizationUuid: "org-1") == nil)
     var raced = AccountTrail()
     raced.processStarted(on: a1.uuid, email: a1.email)       // cl_quick read u1 …
     raced.identified(ProcessIdentity(email: a2.email))         // … but the sign-in landed before the process read the file

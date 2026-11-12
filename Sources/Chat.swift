@@ -804,7 +804,8 @@ final class QuickChatModel: ObservableObject {
         appliedModel = cmd.model
         confirmedModel = cmd.model
         appliedEffort = cmd.effort
-        trail.processStarted(on: target.accountUUID, email: target.email)      // until it says who it is (initialize)
+        trail.processStarted(on: target.accountUUID, email: target.email,
+                             organizationUuid: ClaudeFolder.organizationUuid(target.configDir))      // until it says who it is (initialize)
         return nil
     }
 
@@ -936,7 +937,8 @@ final class QuickChatModel: ObservableObject {
     /// by the account it started on); nil, and the report is dropped, when the folder has moved to another account.
     private var reportOwner: String? {
         guard let t = target else { return nil }
-        return trail.owner(folder: ClaudeFolder.account(t.configDir), organization: ClaudeFolder.organization(t.configDir))
+        return trail.owner(folder: ClaudeFolder.account(t.configDir), organization: ClaudeFolder.organization(t.configDir),
+                           organizationUuid: ClaudeFolder.organizationUuid(t.configDir))
     }
 
     /// What Claude Code said about its limits is the account the `claude` is (reportOwner), recorded only while the

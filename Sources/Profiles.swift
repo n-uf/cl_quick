@@ -92,6 +92,9 @@ enum ClaudeFolder {
     /// The organization of the account in use (Claude Code's organizationName), when the file names one.
     static func organization(_ path: String) -> String? { read(path).organization }
 
+    /// The organizationUuid of that account: the same after the organization is renamed.
+    static func organizationUuid(_ path: String) -> String? { read(path).organizationUuid }
+
     /// Claude's name for the plan ("Max"), when Claude Code recorded it.
     static func plan(_ path: String) -> String? { read(path).plan }
 

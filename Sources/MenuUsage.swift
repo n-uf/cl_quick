@@ -525,7 +525,7 @@ final class QCMenuUsageRefresher {
         // (initialize) then says who it is
         let start = ClaudeFolder.account(p.path)
         var trail = AccountTrail()
-        trail.processStarted(on: start?.uuid, email: start?.email)
+        trail.processStarted(on: start?.uuid, email: start?.email, organizationUuid: ClaudeFolder.organizationUuid(p.path))
         process.onEvent = { [weak self, weak process] e in
             guard let self, let process, process === self.current else { return }
             switch e {
@@ -534,7 +534,8 @@ final class QCMenuUsageRefresher {
             case .usage(let u):
                 // recorded for the account the process is, only while the folder is still on it (AccountTrail.owner): an
                 // answer that comes after the folder moved to another account is dropped
-                if let owner = trail.owner(folder: ClaudeFolder.account(p.path), organization: ClaudeFolder.organization(p.path)) {
+                if let owner = trail.owner(folder: ClaudeFolder.account(p.path), organization: ClaudeFolder.organization(p.path),
+                                           organizationUuid: ClaudeFolder.organizationUuid(p.path)) {
                     var l = store.levels[ProfileStore.levelKey(p.id, owner)] ?? QuickChatLevel()
                     if l.apply(usage: u) { store.record(p.id, account: owner, l) }
                 }

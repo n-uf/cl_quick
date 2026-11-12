@@ -31,6 +31,8 @@ struct FolderRead {
     var plan: String?
     /// Claude Code's organizationName for the account (two accounts may share an address, one per organization).
     var organization: String? = nil
+    /// Claude Code's organizationUuid for the account: it doesn't change when the organization is renamed.
+    var organizationUuid: String? = nil
 }
 
 /// The .claude.json files, read for the account in them. There is no copy that can go out of date: every look stats the
@@ -88,6 +90,7 @@ enum FolderFiles {
             r.email = a["emailAddress"] as? String
             r.uuid = (a["accountUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             r.organization = (a["organizationName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            r.organizationUuid = (a["organizationUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
                 r.plan = p == p.lowercased() ? p.capitalized : p
             }
@@ -125,32 +128,38 @@ struct AccountTrail {
     private(set) var running = false
     /// The account the folder's file named just before the process started.
     private(set) var launchedOn: (uuid: String, email: String)?
+    /// The organizationUuid the file named at that moment (nil when it named none).
+    private(set) var launchedOrganizationUuid: String?
     /// What the process said it is, once its `initialize` answer came (nil until then).
     private(set) var identity: ProcessIdentity?
 
-    mutating func processStarted(on uuid: String?, email: String?) {
+    mutating func processStarted(on uuid: String?, email: String?, organizationUuid: String? = nil) {
         running = true; identity = nil
         launchedOn = uuid.map { ($0, email ?? "") }
+        launchedOrganizationUuid = organizationUuid
     }
     /// The process's `initialize` answer said who it is.
     mutating func identified(_ who: ProcessIdentity) { if running { identity = who } }
     /// The process ended, and the conversation with it.
-    mutating func processEnded() { running = false; launchedOn = nil; identity = nil }
+    mutating func processEnded() { running = false; launchedOn = nil; launchedOrganizationUuid = nil; identity = nil }
 
     /// The account a report from the running process belongs to, given the folder's account NOW (ClaudeFolder.account,
     /// and its organization): that account's uuid when the process is that account, else nil, and the report is
     /// dropped. The process is that account when
     /// - it said who it is: the same address, and the same organization when both name one. Its word wins over what
-    ///   cl_quick read before it started;
+    ///   cl_quick read before it started. Organizations are compared by name only when the file's organizationUuid is
+    ///   not the one the process started on (or one of the two isn't known): a rename of the same organization
+    ///   (same uuid) never cuts the reports;
     /// - it said nothing (no answer yet, or no account in it): the folder still names the account it named as the
     ///   process started.
     /// So a number is never recorded under an account the folder isn't on now: an answer that arrives after the folder
     /// moved to another account (a sign-in elsewhere) is dropped, never put on the account now in use.
-    func owner(folder: (uuid: String, email: String)?, organization: String? = nil) -> String? {
+    func owner(folder: (uuid: String, email: String)?, organization: String? = nil, organizationUuid: String? = nil) -> String? {
         guard running, let folder else { return nil }
         if let said = identity?.email {
             guard said.lowercased() == folder.email.lowercased() else { return nil }
-            if let a = identity?.organization, let b = organization, a != b { return nil }
+            let sameOrganization = launchedOrganizationUuid != nil && launchedOrganizationUuid == organizationUuid
+            if !sameOrganization, let a = identity?.organization, let b = organization, a != b { return nil }
             return folder.uuid
         }
         guard let from = launchedOn, AccountBook.unchanged(from: from, now: folder) else { return nil }
