@@ -566,6 +566,7 @@ do {
     // the account changed outside cl_quick (claude auth login, /login, cl_audit): no reload asked, the next look sees it
     writeAccount("u2", "ultra-2@example.com", mtime: t0.addingTimeInterval(5))
     check("folder: an account changed outside cl_quick is seen at the next look, no reload needed", FolderFiles.fresh(file).uuid == "u2")
+    wait(0.2) { false }                    // that look's own signal is delivered before the reload below is asked for
     writeAccount("u3", "ultra-3@example.com", mtime: t0.addingTimeInterval(6))
     var first: Bool?, second: Bool?, seen: String?
     FolderFiles.reload([file]) { first = $0 }                    // a read under way ...
@@ -576,6 +577,36 @@ do {
     // a copy put back with an older time of its own (a restore, a switch tool that keeps times) is another file too
     writeAccount("u1", "ultra-1@example.com", mtime: t0.addingTimeInterval(-60))
     check("folder: a file put back with an older time is read, not hidden behind the newer parse", FolderFiles.fresh(file).uuid == "u1")
+    // a look on the main thread parses the new file before the reload asked for: the change is still signalled, once
+    wait(0.2) { false }                    // what the looks above signalled is delivered before the watch starts
+    var notes = 0
+    let watch = NotificationCenter.default.addObserver(forName: FolderFiles.accountChanged, object: nil, queue: .main) { _ in notes += 1 }
+    writeAccount("u4", "ultra-4@example.com", mtime: t0.addingTimeInterval(10))
+    check("folder: a look on the main thread sees the new account", FolderFiles.fresh(file).uuid == "u4")
+    var lateDone: Bool?
+    FolderFiles.reload([file]) { lateDone = $0 }          // its parse finds nothing new: the look got there first
+    wait(5) { lateDone != nil }
+    wait(0.2) { false }
+    check("folder: …and the account change is signalled exactly once, by the look or by the reload",
+          notes + (lateDone == true ? 1 : 0) == 1, (notes, lateDone as Any))
+    // the same look, then a reload run before the look's own signal could be delivered
+    writeAccount("u5", "ultra-5@example.com", mtime: t0.addingTimeInterval(11))
+    notes = 0
+    _ = FolderFiles.fresh(file)
+    var done5: Bool?
+    FolderFiles.reload([file]) { done5 = $0 }
+    wait(5) { done5 != nil }
+    wait(0.2) { false }
+    check("folder: a reload queued right behind a look doesn't signal it twice", notes + (done5 == true ? 1 : 0) == 1, (notes, done5 as Any))
+    // no change, no signal
+    notes = 0
+    var quiet: Bool?
+    FolderFiles.reload([file]) { quiet = $0 }
+    _ = FolderFiles.fresh(file)
+    wait(5) { quiet != nil }
+    wait(0.2) { false }
+    check("folder: nothing changed, nothing signalled", notes == 0 && quiet == false, (notes, quiet as Any))
+    NotificationCenter.default.removeObserver(watch)
     try? FileManager.default.removeItem(atPath: file)
     check("folder: a file that went away names no account", FolderFiles.fresh(file).uuid == nil && FolderFiles.fresh(file).email == nil)
     try? FileManager.default.removeItem(atPath: dir)

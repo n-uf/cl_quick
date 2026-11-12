@@ -43,18 +43,29 @@ enum FolderFiles {
     private static var cache: [String: FolderRead] = [:]
     private static let lock = NSLock()
     private static let queue = DispatchQueue(label: "cl_quick.folder-reads", qos: .utility)
+    /// Posted (main thread) when a parse finds another account than the one it replaces in the cache, whoever parsed
+    /// it: a look on the main thread (the menu opening, a SwiftUI body) as much as a `reload`. Nothing is lost when a
+    /// look gets to the new file before the reload that was asked for.
+    static let accountChanged = Notification.Name("cl_quick.accountSwitch.changed")
+    /// An account change that no one has been told about yet (guarded by `lock`): a main-thread flush or the `done` of
+    /// a reload takes it, whichever comes first, so a change is signalled once.
+    private static var unsignalled = false
+
+    private static func takeUnsignalled() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let was = unsignalled
+        unsignalled = false
+        return was
+    }
 
     /// Reads the files again, off the main thread (parsing only those whose modification time moved); `done` comes on
-    /// the main thread with whether an account changed since the value parsed before these reads.
+    /// the main thread with whether an account changed that hasn't been signalled yet (by a look on the main thread that
+    /// already parsed the new file, `accountChanged` has been posted for it: false here). The caller posts
+    /// `accountChanged` itself on true, after its own bookkeeping.
     static func reload(_ files: [String], done: @escaping (Bool) -> Void) {
         queue.async {
-            var changed = false
-            for f in files {
-                lock.lock(); let before = cache[f]; lock.unlock()
-                let r = fresh(f)
-                if r.email != before?.email || r.uuid != before?.uuid { changed = true }
-            }
-            DispatchQueue.main.async { done(changed) }
+            for f in files { _ = fresh(f, signal: false) }
+            DispatchQueue.main.async { done(takeUnsignalled()) }
         }
     }
 
@@ -63,8 +74,10 @@ enum FolderFiles {
     }
 
     /// The file as it is now: parsed again only if its modification time moved (to any other time: a copy put back
-    /// with an older time of its own is another file too).
-    static func fresh(_ file: String) -> FolderRead {
+    /// with an older time of its own is another file too). A parse that finds another account than the one it replaces
+    /// is signalled (`accountChanged`, on the main thread, once per change); `reload` passes `signal: false` and tells
+    /// its own caller instead, so that caller can note the accounts first.
+    static func fresh(_ file: String, signal: Bool = true) -> FolderRead {
         let mtime = modified(file)
         lock.lock(); let hit = cache[file]; lock.unlock()
         if let hit, hit.mtime == mtime { return hit }
@@ -81,7 +94,16 @@ enum FolderFiles {
         }
         // kept only while the file still has the time it was read at: a parse that a write overtook (or a read on one
         // thread that finishes after a newer one on another) never stands for the file; the next look parses again
-        if modified(file) == mtime { lock.lock(); cache[file] = r; lock.unlock() }
+        guard modified(file) == mtime else { return r }
+        lock.lock()
+        let replaced = cache[file]
+        cache[file] = r
+        let changed = replaced.map { $0.email != r.email || $0.uuid != r.uuid } ?? false     // the first parse is no change
+        if changed { unsignalled = true }
+        lock.unlock()
+        if changed && signal {
+            DispatchQueue.main.async { if takeUnsignalled() { NotificationCenter.default.post(name: accountChanged, object: nil) } }
+        }
         return r
     }
 }

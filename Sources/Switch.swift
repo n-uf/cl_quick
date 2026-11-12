@@ -44,8 +44,8 @@ struct SwitchEnded: Equatable {
 final class AccountSwitcher {
     static let shared = AccountSwitcher()
     /// Posted (main thread) whenever a switch begins, ends or is dropped, or the account signed in to a folder changed:
-    /// the chat and Settings draw again.
-    static let changed = Notification.Name("cl_quick.accountSwitch.changed")
+    /// the chat and Settings draw again. (The folder's change is posted by FolderFiles itself, whoever parsed the file.)
+    static let changed = FolderFiles.accountChanged
     /// How long a sign-in is waited for, and how often the folder is looked at.
     static let giveUp: TimeInterval = 10 * 60
     static let every: TimeInterval = 2
