@@ -62,6 +62,13 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   show as thumbnails over the field (up to 5, each with a ✕) and go with the message, scaled down in memory to 1568 px.
   Nothing is saved, so chats stay incognito. An image alone is a message too.
 - **A mic button** next to Send starts macOS Dictation into the field; ⌘D turns it on and off from the keyboard.
+- **Links and search.** Paste a link, or ask about something current, and Claude can open the page or search the web.
+  It runs with Claude Code's two web tools, WebFetch and WebSearch (`--tools WebFetch,WebSearch`, allowed up front so
+  print mode never has to ask), and nothing else: no Bash, no files, no MCP. While a tool runs, a muted line beside the
+  dot says so ("Reading example.com…", "Searching the web for “…”…"); the answer is the whole reply, the text before and
+  after the call, and ⌘⇧C copies it all. What a page says is data for the answer, never instructions; the pages are
+  read for that answer only and nothing is stored. Settings ▸ General ▸ **Links and search**, on by default; off, no
+  tools at all, as before. It applies to the next chat. Pages count toward the account's usage.
 - **Any shortcut**: five Space shortcuts or Other… (any key held with ⌘, ⌃ or ⌥), with no Accessibility permission. It
   warns only about real clashes: macOS's own shortcuts, or a key another app holds (when macOS refuses it).
 - **Incognito chats.** Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under

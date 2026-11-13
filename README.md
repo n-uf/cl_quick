@@ -140,6 +140,12 @@ minutes for a profile.
   clipboard always pastes as text. An image alone is a message too. Each is scaled down in memory to 1568 px on its
   long side and sent as PNG (JPEG for a large photo) in the same connection as the text, so it stays incognito: no
   file is made for it, and the chat shows it only as a thumbnail until it ends. A file you drop is read, never copied.
+- **Links and search.** Paste a link in a message, or ask about something current, and Claude can read the page or
+  search the web. While it does, a muted line beside the dot says what it is doing ("Reading example.com…", "Searching
+  the web for “…”…") and goes when the text resumes; the answer is the whole reply (the text before and after the call),
+  and Copy and ⌘⇧C take all of it. Stop works while a page is being read. Pages count toward the account's usage, like
+  any answer. Settings ▸ General ▸ **Links and search** turns it off; a chat keeps the setting it started with, and the
+  next chat takes the change.
 - The window resizes from its edges and corners, and moves from any empty area of it (the header, the gaps around
   and between answers); the field, the buttons and the controls never move it.
 - The limits show in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from
@@ -175,6 +181,8 @@ minutes for a profile.
   nothing to a model; kept per profile and account in models.json). A family the account lacks isn't offered. Thinking
   is Off or the efforts the chosen model takes (Low, Medium, High, Extra, Max); a step it doesn't take moves to the
   nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
+- **Links and search**: on by default. "Claude can open links and search the web. Pages count toward your usage." Off:
+  Claude runs with no tools, as it did before, and a link in a message is only text. It applies to the next chat.
 - **Open at login**: in the menu bar, ready for the shortcut.
 - **Updates**: on by default. About once a day cl_quick checks GitHub Releases and, when a newer version exists, the
   menu bar menu shows **Update available: 26.11.3**; it opens the release's page in your browser. Nothing is
@@ -204,7 +212,13 @@ minutes for a profile.
   User-Agent "cl_quick"), compares the version and, if a newer one exists, adds "Update available" to the menu, which
   opens the release's page; nothing is downloaded or installed. It keeps the time of the last check and the newest
   version seen in `updates.json`. Settings ▸ General ▸ Updates turns it off, and then no request is made.
-- Your messages go through Claude Code. Claude Code runs with no tools, no MCP servers, no settings
+- Links and search (on by default; Settings ▸ General): Claude Code gets its two web tools, WebFetch and WebSearch
+  (`--tools WebFetch,WebSearch --allowedTools WebFetch,WebSearch`), and nothing else, so it can read a page you link or
+  search the web. The pages are fetched by Claude Code for that answer only, and the text goes to the model as part of
+  the chat, under your account. cl_quick stores none of it: the chat stays incognito, the page text is never shown raw
+  and is told to be data, never instructions. Off, Claude Code runs with no tools.
+- Your messages go through Claude Code. Claude Code runs with no tools (only the two web tools above, when Links and
+  search is on), no MCP servers, no settings
   files and its non-essential traffic (telemetry, error reports, update checks) off. It gets only an allowlisted part of
   the Mac's environment (who you are, the language, proxies and certificates) and answers on the profile's own sign-in;
   keys, tokens and other providers' settings from your shell are left out.
@@ -216,7 +230,10 @@ On its first run it copies cl_audit's old quick chat settings (the shortcut, mod
 
 ## Checks
 
-`Checks/run.sh` checks the engine and the Markdown against a stand-in `claude` (no account, no network).
+`Checks/run.sh` checks the engine and the Markdown against a stand-in `claude` (no account, no network); that includes
+the arguments with Links and search on and off, and web answers (a tool call between two pieces of text, as a real
+stream has it) with Stop in the middle of a tool. `Checks/panel.sh` runs the whole chat on the stand-in for those: the
+whole answer, the activity line shown and then gone, Stop mid-tool, ⌘⇧C copying the full answer, the setting.
 `Checks/bars.sh` checks the model and thinking controls in the real panel, with four, three and two families, at 320,
 440 and 640: a bar for every family, always shown and ending before Send, picking any value moves nothing, a click on
 each bar's centre picks that bar, a click on a label's right or left half goes round forward or back, the scroll wheel
