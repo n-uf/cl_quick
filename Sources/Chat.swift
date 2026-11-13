@@ -135,6 +135,9 @@ struct QuickChatTurn: Identifiable, Equatable {
     var thinkingSeconds: Double? = nil
     var phase: Phase = .waiting
     var problem: QuickChatProblem? = nil
+    /// While Claude runs a web tool: the short line that says so ("Reading example.com…"). It goes when text resumes
+    /// or the answer ends; never what the tool returned.
+    var activity: String? = nil
 
     var busy: Bool { phase == .waiting || phase == .streaming }
 }
@@ -328,6 +331,8 @@ final class QuickChatModel: ObservableObject {
     private var stale = StaleAnswers()
     private var staleTimer: Timer?
     private var pending = "", pendingThinking = ""
+    /// A web tool ran in this answer and no text has come since: the next text starts a new paragraph.
+    private var toolBreak = false
     private var flushWork: DispatchWorkItem?
     private var idleTimer: Timer?
     /// The account line last drawn as full: a limit that resets is drawn again even though its numbers didn't change.
@@ -510,7 +515,8 @@ final class QuickChatModel: ObservableObject {
         flush()
         turns[i].phase = .stopped
         turns[i].seconds = Date().timeIntervalSince(turns[i].started)
-        pending = ""; pendingThinking = ""
+        turns[i].activity = nil
+        pending = ""; pendingThinking = ""; toolBreak = false
         // a message still waiting for its folder to be read (ask()) is let go: Retry or a new message asks on its own
         generation += 1
         // one that never reached `claude` needs no interrupt
@@ -532,6 +538,7 @@ final class QuickChatModel: ObservableObject {
             return
         }
         turns[i].answer = ""; turns[i].thinking = ""; turns[i].problem = nil; turns[i].phase = .waiting
+        turns[i].activity = nil; toolBreak = false
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
@@ -874,8 +881,23 @@ final class QuickChatModel: ObservableObject {
             if turns[i].thinkingTitle != nil, turns[i].thinkingSeconds == nil, turns[i].answer.isEmpty, pending.isEmpty {
                 turns[i].thinkingSeconds = Date().timeIntervalSince(turns[i].started)
             }
+            // text again after a tool ran: the reply goes on in a new paragraph (the pieces are one answer, not the
+            // last or the first message alone)
+            if toolBreak {
+                toolBreak = false
+                let have = turns[i].answer + pending
+                if !have.isEmpty, !have.hasSuffix("\n") { pending += "\n\n" }
+            }
+            if turns[i].activity != nil { turns[i].activity = nil }
             pending += t
             scheduleFlush()
+        case .tool(let line):
+            // the reply so far is on screen first, then the tool's line under it
+            flush()
+            guard turns[i].busy else { return }
+            toolBreak = true
+            turns[i].activity = line
+            scrollTick += 1
         case .thinking(let t):
             pendingThinking += t
             scheduleFlush()
@@ -898,6 +920,7 @@ final class QuickChatModel: ObservableObject {
             flush()
             guard turns[i].busy else { return }
             messageSent = false
+            toolBreak = false; turns[i].activity = nil
             turns[i].seconds = ms > 0 ? Double(ms) / 1000 : Date().timeIntervalSince(turns[i].started)
             if isError, turns[i].problem == nil, QuickChatParse.isLimit(error: nil, text: text) { turns[i].problem = .limitFull }
             if isError || turns[i].problem != nil {
@@ -1021,6 +1044,7 @@ final class QuickChatModel: ObservableObject {
         }
         turns[i].phase = .failed
         turns[i].problem = p
+        turns[i].activity = nil
         turns[i].seconds = Date().timeIntervalSince(turns[i].started)
         scrollTick += 1
         // `claude` stopped or isn't signed in: its conversation is gone, Retry asks this question in a new chat
@@ -1046,7 +1070,7 @@ final class QuickChatModel: ObservableObject {
         process = nil
         processKey = ""
         trail.processEnded()
-        pending = ""; pendingThinking = ""
+        pending = ""; pendingThinking = ""; toolBreak = false
     }
 
     /// Answer pieces are drawn at most every 50 ms.

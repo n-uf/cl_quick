@@ -37,6 +37,9 @@ enum QuickChatEvent: Equatable {
     /// The account's limits now, from Claude Code's answer to `get_usage` (sent when `claude` starts, after each answer
     /// and when the panel opens again; nothing goes to a model).
     case usage(QuickChatUsage)
+    /// Claude calls a web tool (WebFetch, WebSearch): the short line to show while it runs ("Reading example.com…").
+    /// Never what the tool returns: a `tool_result` is ignored.
+    case tool(line: String)
     case ignored
 }
 
@@ -200,6 +203,40 @@ enum QuickChatModels {
 }
 
 enum QuickChatParse {
+    /// What one line of stream-json output holds, in order: `event(line)`, then a `.tool` for each tool call in an
+    /// assistant message (a message may carry text and a call). Nothing for what is `.ignored`.
+    static func events(_ line: Data) -> [QuickChatEvent] {
+        var out: [QuickChatEvent] = []
+        let e = event(line)
+        if e != .ignored { out.append(e) }
+        if case .message = e,
+           let o = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+           let blocks = (o["message"] as? [String: Any])?["content"] as? [[String: Any]] {
+            for b in blocks where b["type"] as? String == "tool_use" {
+                out.append(.tool(line: activity(tool: b["name"] as? String ?? "", input: b["input"] as? [String: Any] ?? [:])))
+            }
+        }
+        return out
+    }
+
+    /// The line shown while a tool runs: "Reading example.com…" (WebFetch: the host of the address), "Searching the web…"
+    /// (WebSearch, with the query when it has one, cut to 40 characters); any other tool, "Working…".
+    static func activity(tool: String, input: [String: Any]) -> String {
+        switch tool {
+        case "WebFetch":
+            guard let url = input["url"] as? String, var host = URL(string: url.trimmingCharacters(in: .whitespaces))?.host?.lowercased(),
+                  !host.isEmpty else { return "Reading the page…" }
+            if host.hasPrefix("www."), host.count > 4 { host.removeFirst(4) }
+            return "Reading \(host)…"
+        case "WebSearch":
+            let q = (input["query"] as? String)?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? ""
+            guard !q.isEmpty else { return "Searching the web…" }
+            return "Searching the web for “\(q.count > 40 ? q.prefix(40).trimmingCharacters(in: .whitespaces) + "…" : q)”…"
+        default:
+            return "Working…"
+        }
+    }
+
     /// One line of stream-json output. Lines it doesn't know are ignored, never an error.
     static func event(_ line: Data) -> QuickChatEvent {
         guard let o = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let type = o["type"] as? String else {
@@ -516,13 +553,11 @@ final class QuickChatProcess {
                 while let nl = buffer.firstIndex(of: 0x0A) {
                     let line = buffer[buffer.startIndex..<nl]
                     buffer.removeSubrange(buffer.startIndex...nl)
-                    let e = QuickChatParse.event(Data(line))
-                    if e != .ignored { self?.deliver(e) }
+                    for e in QuickChatParse.events(Data(line)) { self?.deliver(e) }
                 }
             }
             if !buffer.isEmpty {
-                let e = QuickChatParse.event(buffer)
-                if e != .ignored { self?.deliver(e) }
+                for e in QuickChatParse.events(buffer) { self?.deliver(e) }
             }
         }
         // the process's exit: once `claude` is gone, what it wrote is read within a moment (at once, when its output
