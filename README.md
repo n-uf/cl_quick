@@ -136,10 +136,20 @@ minutes for a profile.
 - **Images.** ⌘V with a screenshot or picture on the clipboard (⌃⇧⌘4 copies one), or with image files copied in Finder,
   attaches it; so does dropping image files or a picture from a page on the bar or the chat window. Each shows as a
   small thumbnail over the field with a ✕ (Delete in an empty field removes the last one); up to 5 go with a message,
-  and a sixth is left out with a line saying so. Files that aren't images are refused with a line. Text on the
-  clipboard always pastes as text. An image alone is a message too. Each is scaled down in memory to 1568 px on its
-  long side and sent as PNG (JPEG for a large photo) in the same connection as the text, so it stays incognito: no
-  file is made for it, and the chat shows it only as a thumbnail until it ends. A file you drop is read, never copied.
+  and a sixth is left out with a line saying so. Text on the clipboard always pastes as text. An image alone is a
+  message too. Each is scaled down in memory to 1568 px on its long side and sent as PNG (JPEG for a large photo) in
+  the same connection as the text, so it stays incognito: no file is made for it, and the chat shows it only as a
+  thumbnail until it ends. A file you drop is read, never copied.
+- **Files.** The same two ways take a PDF or a text file: drop files from Finder on the bar or the chat window, or copy
+  them in Finder and press ⌘V. A PDF (up to 32 MB and 100 pages) and any text or code file (txt, Markdown, CSV, JSON,
+  YAML, XML, HTML, logs, Swift, Python, JavaScript/TypeScript, Go, Rust, Java, C, Ruby, shell, SQL, TOML, CSS and the
+  like; up to 1 MB, UTF-8) show as chips next to the thumbnails: a symbol, the name and the page count or size, each
+  with a ✕. They count toward the 5 attachments of a message with the pictures, and with them toward the chat's
+  limit of about 20 MB (a PDF over about 15 MB is too large for a chat on its own). Claude reads what you attached,
+  with that message; it gets no access to your files or folders. A file it can't read (Word, Excel, zip, binaries, text
+  that isn't UTF-8) is refused with a muted line over the field ("cl_quick can't read .docx files yet."); one over a
+  limit says by how much ("too long: 140 pages, up to 100"). A file alone is a message too, and the chat shows the
+  chips, never the content.
 - **Links and search.** Paste a link in a message, or ask about something current, and Claude can read the page or
   search the web. While it does, a muted line beside the dot says what it is doing ("Reading example.com…", "Searching
   the web for “…”…") and goes when the text resumes; the answer is the whole reply (the text before and after the call),
@@ -218,6 +228,10 @@ minutes for a profile.
   search the web. The pages are fetched by Claude Code for that answer only, and the text goes to the model as part of
   the chat, under your account. cl_quick stores none of it: the chat stays incognito, the page text is never shown raw
   and is told to be data, never instructions. Off, Claude Code runs with no tools.
+- Attached files (PDFs, text) go to Claude Code inside the message they are attached to, as document blocks in the same
+  connection as the text, and are kept in memory only: nothing is copied to a temporary file, a cache or the app's
+  folder, and a file you drop or copy is only read. Claude Code still has no file tools, so it sees nothing but what you
+  attached. Like pictures, they stay in the running chat's conversation until it ends, and under the same account.
 - Your messages go through Claude Code. Claude Code runs with no tools (only the two web tools above, when Links and
   search is on), no MCP servers, no settings
   files and its non-essential traffic (telemetry, error reports, update checks) off. It gets only an allowlisted part of
