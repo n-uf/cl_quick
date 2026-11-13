@@ -117,6 +117,34 @@ check("image line: an image alone is one image block and no text block", onlyBlo
 let plainObj = (try? JSONSerialization.jsonObject(with: QuickChatParse.userLine("hi", images: []).dropLast())) as? [String: Any]
 check("no images: the plain string form is kept", (plainObj?["message"] as? [String: Any])?["content"] as? String == "hi", plainObj as Any)
 
+// a message with files: a PDF is a document block with a base64 source, a text file one with a text source, both titled
+// with the file's name; images and documents keep the order they were attached in, the text block comes last
+let pdfBytes = Data("%PDF-1.4 sample\u{0}\u{FB}\u{FF}".utf8) + Data([0xFB, 0xFF, 0xFE])
+let pdfDoc = QuickChatDocumentData(title: "Sample invoice.pdf", source: .pdf(pdfBytes))
+let csvDoc = QuickChatDocumentData(title: "sample \"quoted\".csv", source: .text("a,b\n1,2\n\"x\",é/🙂"))
+let withFiles = QuickChatParse.userLine("What is in these?", attachments: [.document(pdfDoc), .image(png1), .document(csvDoc)])
+check("file line ends in a newline and is one line", withFiles.last == 0x0A && !withFiles.dropLast().contains(0x0A))
+let fileBlocks = (((try? JSONSerialization.jsonObject(with: withFiles.dropLast())) as? [String: Any])?["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+check("file line: blocks in attach order, then the text", fileBlocks.map { $0["type"] as? String } == ["document", "image", "document", "text"], fileBlocks)
+let pdfSrc = fileBlocks.first?["source"] as? [String: Any]
+check("file line: a PDF is a base64 document with media type application/pdf",
+      pdfSrc?["type"] as? String == "base64" && pdfSrc?["media_type"] as? String == "application/pdf"
+      && Data(base64Encoded: pdfSrc?["data"] as? String ?? "") == pdfBytes, pdfSrc as Any)
+check("file line: the PDF's title is its name", fileBlocks.first?["title"] as? String == "Sample invoice.pdf")
+let csvSrc = fileBlocks[2]["source"] as? [String: Any]
+check("file line: a text file is a text document with media type text/plain, its text as it is",
+      csvSrc?["type"] as? String == "text" && csvSrc?["media_type"] as? String == "text/plain" && csvSrc?["data"] as? String == "a,b\n1,2\n\"x\",é/🙂", csvSrc as Any)
+check("file line: the text file's title is its name", fileBlocks[2]["title"] as? String == "sample \"quoted\".csv")
+check("file line: the image block is unchanged between documents", (fileBlocks[1]["source"] as? [String: Any])?["media_type"] as? String == "image/png")
+check("file line: the text block carries the text", fileBlocks.last?["text"] as? String == "What is in these?")
+check("file line: nothing is escaped that needn't be (slashes)", String(data: withFiles, encoding: .utf8)?.contains("\\/") == false)
+let filesOnly = QuickChatParse.userLine("", attachments: [.document(csvDoc)])
+let filesOnlyBlocks = (((try? JSONSerialization.jsonObject(with: filesOnly.dropLast())) as? [String: Any])?["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+check("file line: a file alone is one document block and no text block", filesOnlyBlocks.map { $0["type"] as? String } == ["document"], filesOnlyBlocks)
+func parsed(_ d: Data) -> NSDictionary? { (try? JSONSerialization.jsonObject(with: d.dropLast())) as? NSDictionary }     // key order isn't fixed
+check("file line: images only through attachments is the images-only line", parsed(QuickChatParse.userLine("hi", attachments: [.image(png1)])) == parsed(QuickChatParse.userLine("hi", images: [png1])))
+check("file line: no attachments is the plain string form", parsed(QuickChatParse.userLine("hi", attachments: [])) == parsed(QuickChatParse.userLine("hi")))
+
 // model names
 for (id, want) in [("claude-haiku-5-5", "Haiku 5.5"), ("claude-sonnet-5-5-20261001", "Sonnet 5.5"), ("claude-opus-5-5", "Opus 5.5"),
                    ("claude-fable-5-1", "Fable 5.1"), ("claude-haiku-4-5-20251001", "Haiku 4.5"), ("", ""), ("<synthetic>", "<synthetic>")] {

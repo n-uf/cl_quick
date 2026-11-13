@@ -50,6 +50,26 @@ struct QuickChatImageData: Equatable {
     var data: Data
 }
 
+/// A file attached to a message, ready to send as a `document` block (Attachments.swift makes them), only in memory:
+/// a PDF as it is (base64 on the way out), or a text file's text.
+struct QuickChatDocumentData: Equatable {
+    enum Source: Equatable {
+        /// The PDF's own bytes.
+        case pdf(Data)
+        /// The file's text (UTF-8, as read).
+        case text(String)
+    }
+    /// The file's name: Claude sees it as the document's title.
+    var title: String
+    var source: Source
+}
+
+/// What goes with a message besides its text, in the order it was attached.
+enum QuickChatAttachment: Equatable {
+    case image(QuickChatImageData)
+    case document(QuickChatDocumentData)
+}
+
 /// What `get_usage` says about the account's limits: the 5-hour and weekly windows. Experimental in Claude Code, so
 /// `rate_limit_event` after each answer stays as well; when it says the limits aren't available, nothing changes.
 struct QuickChatUsage: Equatable {
@@ -324,14 +344,32 @@ enum QuickChatParse {
         return f.date(from: String(s[..<dot]) + String(s[end...]))
     }
 
-    /// One message for Claude Code's input (stream-json), ending in a newline. Plain text goes as a string; with images the
-    /// content is a list of blocks, the images first (base64, as the API takes them), then the text block when there is
+    /// One message for Claude Code's input (stream-json), ending in a newline. Plain text goes as a string; with images
+    /// the content is a list of blocks, the images first (base64, as the API takes them), then the text block when there is
     /// text (an image alone is a message too). Checked against Claude Code 2.1.318: it reads both.
     static func userLine(_ text: String, images: [QuickChatImageData] = []) -> Data {
+        userLine(text, attachments: images.map { .image($0) })
+    }
+
+    /// The same with files too: the images and documents in the order they were attached, then the text block when there
+    /// is text. A PDF is a `document` block with a base64 source, a text file one with a text source (both titled with
+    /// the file's name). Checked against Claude Code 2.1.318 (2026-11-12): it takes both shapes, and a message of
+    /// documents alone with no text block.
+    static func userLine(_ text: String, attachments: [QuickChatAttachment]) -> Data {
         var content: Any = text
-        if !images.isEmpty {
-            var blocks: [[String: Any]] = images.map {
-                ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.data.base64EncodedString()]]
+        if !attachments.isEmpty {
+            var blocks: [[String: Any]] = attachments.map {
+                switch $0 {
+                case .image(let i):
+                    return ["type": "image", "source": ["type": "base64", "media_type": i.mediaType, "data": i.data.base64EncodedString()]]
+                case .document(let d):
+                    let source: [String: Any]
+                    switch d.source {
+                    case .pdf(let bytes): source = ["type": "base64", "media_type": "application/pdf", "data": bytes.base64EncodedString()]
+                    case .text(let s): source = ["type": "text", "media_type": "text/plain", "data": s]
+                    }
+                    return ["type": "document", "title": d.title, "source": source]
+                }
             }
             if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
             content = blocks
@@ -620,9 +658,15 @@ final class QuickChatProcess {
     /// is gone (the pipe is closed), nothing queued.
     @discardableResult
     func send(_ text: String, images: [QuickChatImageData] = []) -> Bool {
+        send(text, attachments: images.map { .image($0) })
+    }
+
+    /// The same with files too (images and documents in attach order).
+    @discardableResult
+    func send(_ text: String, attachments: [QuickChatAttachment]) -> Bool {
         guard !isStopping, process.isRunning else { return false }
         writes.async { [self] in
-            if !write(QuickChatParse.userLine(text, images: images)) {
+            if !write(QuickChatParse.userLine(text, attachments: attachments)) {
                 DispatchQueue.main.async { [self] in if !isStopping { onSendFailed() } }
             }
         }
