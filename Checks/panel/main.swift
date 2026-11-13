@@ -9,6 +9,7 @@
 
 import AppKit
 import Carbon.HIToolbox
+import PDFKit
 import SwiftUI
 
 Files.readOnly = true
@@ -1736,7 +1737,7 @@ do {
     func putI(_ f: (NSPasteboard) -> Void) { ipb.clearContents(); f(ipb) }
     let fixtures = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("image-fixtures")
     try? FileManager.default.createDirectory(at: fixtures, withIntermediateDirectories: true)
-    let fileA = fixtures.appendingPathComponent("shot-a.png"), fileB = fixtures.appendingPathComponent("shot-b.png"), fileT = fixtures.appendingPathComponent("notes.txt")
+    let fileA = fixtures.appendingPathComponent("shot-a.png"), fileB = fixtures.appendingPathComponent("shot-b.png"), fileT = fixtures.appendingPathComponent("notes.docx")       // a file the chat can't read
     try? png(40, 30).write(to: fileA); try? png(30, 40, (20, 200, 40)).write(to: fileB); try? Data("notes".utf8).write(to: fileT)
     putI { $0.setData(png(10, 10), forType: .png) }
     check("images: a picture alone is for the chat (paste and drop)", QCImages.found(in: ipb, forPaste: true) != nil && QCImages.found(in: ipb, forPaste: false) != nil)
@@ -1746,8 +1747,8 @@ do {
     putI { $0.setString("shot-a.png", forType: .string); $0.writeObjects([fileA as NSURL]) }
     check("images: a copied image file (Finder gives its name as text too) is an image paste", QCImages.found(in: ipb, forPaste: true)?.sources.count == 1)
     putI { _ = $0.writeObjects([fileT as NSURL]) }
-    check("images: a copied text file is left to the field (it pastes the name)", QCImages.found(in: ipb, forPaste: true) == nil)
-    check("images: …and a drop of it says it isn't an image", QCImages.found(in: ipb, forPaste: false)?.notImages == ["notes.txt"])
+    check("images: a copied file the chat can't read is left to the field (it pastes the name)", QCImages.found(in: ipb, forPaste: true) == nil)
+    check("images: …and a drop of it names it as unreadable", QCImages.found(in: ipb, forPaste: false)?.unsupported == [".docx"])
     putI { $0.setString("plain words", forType: .string) }
     check("images: plain text is no image", QCImages.found(in: ipb, forPaste: true) == nil && QCImages.found(in: ipb, forPaste: false) == nil)
     check("images: a drag of text alone is not an image drag", !QCImages.isImageDrag(ipb))
@@ -1820,11 +1821,11 @@ do {
     tv.pasteboard = ipb
     // a drop of files: images attach, others are said; a drop of nothing the chat takes is left alone
     putI { _ = $0.writeObjects([fileA as NSURL, fileT as NSURL]) }
-    check("images: a drop of an image and a text file is taken", m0.attachFromDrop(ipb))
+    check("images: a drop of an image and a file the chat can't read is taken", m0.attachFromDrop(ipb))
     waitImages(1); spin(0.3)
-    check("images: the image attached, the other named", m0.images.count == 1 && m0.imageNote == "Only images can be attached; notes.txt isn't one.", "\(m0.images.count) \(String(describing: m0.imageNote))")
+    check("images: the image attached, the other named", m0.images.count == 1 && m0.imageNote == "cl_quick can't read .docx files yet.", "\(m0.images.count) \(String(describing: m0.imageNote))")
     putI { _ = $0.writeObjects([fileT as NSURL]) }
-    check("images: a drop of only a text file attaches nothing and says why", m0.attachFromDrop(ipb) && m0.images.count == 1 && m0.imageNote == "Only images can be attached; notes.txt isn't one.")
+    check("images: a drop of only a file it can't read attaches nothing and says why", m0.attachFromDrop(ipb) && m0.images.count == 1 && m0.imageNote == "cl_quick can't read .docx files yet.")
     putI { $0.setString("words", forType: .string) }
     check("images: a drop of text is not taken (the field's own)", !m0.attachFromDrop(ipb))
     // the drag lands on the panel: its hosting view takes it as a drop, not a press; no drag surface is registered for drags
@@ -1975,9 +1976,9 @@ struct ImageFixChat {
         while !(m.turns.count == n && m.turns.last?.phase == .done), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     }
     /// Attaches and waits until they are in (or refused): `done` is called either way.
-    func attach(_ srcs: [QCImages.Source], notImages: [String] = []) {
+    func attach(_ srcs: [QCImages.Source], files: [URL] = [], unsupported: [String] = []) {
         var landed = false
-        m.attach(QCImages.Found(sources: srcs, notImages: notImages)) { landed = true }
+        m.attach(QCImages.Found(sources: srcs, files: files, unsupported: unsupported)) { landed = true }
         let end = Date().addingTimeInterval(8)
         while !landed, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     }
@@ -2120,7 +2121,7 @@ do {
     if case .failure(let why) = QCImages.prepare(headerOnlyPNG(4000, 2500)) { check("pixels: 10 megapixels is not refused for its size", why != .tooManyPixels, "\(why)") }
     else { check("pixels: 10 megapixels is not refused for its size", true) }
     check("pixels: the note says so in one line",
-          QCImages.note(notImages: [], failures: [.tooManyPixels], overCount: 0) == "An image has too many pixels to read (over 100 megapixels).")
+          QCAttach.note(failures: [.tooManyPixels]) == "An image has too many pixels to read (over 100 megapixels).")
 }
 
 // Paste in the field's context menu is enabled with only a picture on the pasteboard (the text view alone greys it out)
@@ -2254,6 +2255,301 @@ for chatWindow in [false, true] {
     }
     m.shutdown()
     try? FileManager.default.removeItem(at: c.dir)
+}
+
+// ── files: PDFs and text files attached like pictures (Sources/Attachments.swift), nothing on disk ───────────────────────────
+// The fixtures are sample files under build/ (sparse ones stand in for the big ones: a file over its limit is refused before
+// it is read, so its bytes are never touched). What is sent is read off the stand-in `claude`'s record of its message lines.
+do {
+    let passedBefore = passed, failedBefore = failed
+    let fx = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("file-fixtures")
+    try? FileManager.default.removeItem(at: fx)
+    try? FileManager.default.createDirectory(at: fx, withIntermediateDirectories: true)
+    func makePDF(_ pages: Int) -> Data {
+        let doc = PDFDocument()
+        for i in 0..<pages {
+            let img = NSImage(size: NSSize(width: 160, height: 100), flipped: false) { r in
+                NSColor.white.setFill(); r.fill()
+                NSString(string: "Sample invoice 42").draw(at: NSPoint(x: 10, y: 40), withAttributes: nil)
+                return true
+            }
+            if let pg = PDFPage(image: img) { doc.insert(pg, at: i) }
+        }
+        return doc.dataRepresentation() ?? Data()
+    }
+    func put(_ name: String, _ data: Data) -> URL { let u = fx.appendingPathComponent(name); try? data.write(to: u); return u }
+    func sparse(_ name: String, _ size: UInt64) -> URL {
+        let u = fx.appendingPathComponent(name)
+        FileManager.default.createFile(atPath: u.path, contents: nil)
+        if let h = try? FileHandle(forWritingTo: u) { try? h.truncate(atOffset: size); try? h.close() }
+        return u
+    }
+    let pdfData = makePDF(1)
+    let pdfFile = put("sample.pdf", pdfData), csvFile = put("sample.csv", Data("a,b\n1,2".utf8))
+    let mdFile = put("notes.md", Data("# Notes\n\nSome sample notes.\n".utf8)), swiftFile = put("tool.swift", Data("let x = 1\n".utf8))
+    let tsFile = put("app.ts", Data("export const n: number = 1\n".utf8)), jsonFile = put("data.json", Data(#"{"a":1}"#.utf8))
+    let bomFile = put("bom.txt", Data([0xEF, 0xBB, 0xBF]) + Data("with a mark".utf8))
+    let latin1 = put("latin1.txt", Data([0x63, 0x61, 0x66, 0xE9, 0x20, 0xFF, 0xFE]))          // "café" in Latin-1: not UTF-8
+    let binaryText = put("binary.txt", Data([0x61, 0x00, 0x62]))
+    let emptyFile = put("empty.txt", Data("  \n".utf8))
+    let docxFile = put("report.docx", Data("PK".utf8)), zipFile = put("archive.zip", Data("PK".utf8)), rtfFile = put("memo.rtf", Data(#"{\rtf1 hi}"#.utf8))
+    let noExt = put("blob", Data([0x01, 0x02, 0x03]))
+    let fakePDF = put("fake.pdf", Data("this is not a pdf".utf8))
+    let longPDF = put("long.pdf", makePDF(101)), hundredPDF = put("hundred.pdf", makePDF(100))
+    let hugePDF = sparse("huge.pdf", 33_000_000), bigPDF = sparse("big.pdf", 16_000_000), bigText = sparse("big.txt", 2_400_000)
+    let lockedURL = fx.appendingPathComponent("locked.pdf")
+    _ = PDFDocument(data: pdfData)?.write(to: lockedURL, withOptions: [.userPasswordOption: "pw", .ownerPasswordOption: "pw2"])
+    let image = put("pic.png", noisyPNG(20, 20))
+    let folder = fx.appendingPathComponent("a folder"); try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+    // what a file is
+    check("files: limits are 32 MB, 100 pages, 1 MB, 5 attachments", QCFiles.maxPDFBytes == 32_000_000 && QCFiles.maxPDFPages == 100 && QCFiles.maxTextBytes == 1_000_000 && QCImages.maxCount == 5)
+    check("files: a PDF is held to what an empty chat takes as base64 (15 MB), under its own 32 MB", QCFiles.pdfLimit == 15_000_000, "\(QCFiles.pdfLimit)")
+    func kind(_ u: URL) -> QCFiles.Kind { QCFiles.classify(u) }
+    check("files: a .pdf is a PDF", kind(pdfFile) == .pdf)
+    check("files: a picture is an image", kind(image) == .image)
+    check("files: csv, md, swift, json and ts (not video) are text", [csvFile, mdFile, swiftFile, jsonFile, tsFile, bomFile].allSatisfy { kind($0) == .text })
+    check("files: .docx is unsupported by its extension", kind(docxFile) == .unsupported(".docx"), "\(kind(docxFile))")
+    check("files: .zip is unsupported by its extension", kind(zipFile) == .unsupported(".zip"), "\(kind(zipFile))")
+    check("files: rich text (markup, not words) is unsupported", kind(rtfFile) == .unsupported(".rtf"), "\(kind(rtfFile))")
+    check("files: a file with no extension and no known type is unsupported, by its name", kind(noExt) == .unsupported("blob"), "\(kind(noExt))")
+    check("files: …but one macOS knows by name (Makefile) is source code", kind(put("Makefile", Data("all:\n".utf8))) == .text)
+    check("files: a folder is unsupported, by its name", kind(folder) == .unsupported("a folder"), "\(kind(folder))")
+    check("files: a type that conforms to public.source-code but isn't listed (.pas) is text", kind(put("unit.pas", Data("begin end.".utf8))) == .text)
+    check("files: …and one macOS has no type for (.scala) is in the list", kind(put("a.scala", Data("object A".utf8))) == .text)
+
+    // making one
+    func ok(_ r: Result<QCFile, QCFiles.Refusal>) -> QCFile? { if case .success(let f) = r { return f }; return nil }
+    func why(_ r: Result<QCFile, QCFiles.Refusal>) -> QCFiles.Refusal? { if case .failure(let w) = r { return w }; return nil }
+    let pdf = ok(QCFiles.prepare(pdfFile))
+    check("files: a PDF is read as a PDF document, its bytes as they are", pdf?.payload == QuickChatDocumentData(title: "sample.pdf", source: .pdf(pdfData)) && pdf?.style == .pdf)
+    check("files: a PDF's chip says its page count; it adds its base64 to the request", pdf?.pages == 1 && pdf?.detail == "1 page" && pdf?.size == (pdfData.count + 2) / 3 * 4, "\(String(describing: pdf?.detail))")
+    check("files: a hundred pages is fine", ok(QCFiles.prepare(hundredPDF))?.detail == "100 pages")
+    let csv = ok(QCFiles.prepare(csvFile))
+    check("files: a CSV is a text document titled with its name, its text as it is", csv?.payload == QuickChatDocumentData(title: "sample.csv", source: .text("a,b\n1,2")) && csv?.style == .table)
+    check("files: a text file's chip says its size", csv?.detail == "7 B" && csv?.size == 7 && csv?.pages == nil, "\(String(describing: csv?.detail))")
+    check("files: the chips' symbols are the PDF's, the CSV's and the text file's", pdf?.symbol == "doc.richtext" && csv?.symbol == "chart.bar.doc.horizontal" && ok(QCFiles.prepare(mdFile))?.symbol == "doc.text")
+    check("files: a byte-order mark is dropped, the text read as UTF-8", ok(QCFiles.prepare(bomFile))?.payload.source == .text("with a mark"))
+    check("files: 101 pages is too long, and says so", why(QCFiles.prepare(longPDF)) == .tooLong("long.pdf", pages: 101, limit: 100) && why(QCFiles.prepare(longPDF))?.sentence == "long.pdf is too long: 101 pages, up to 100.", "\(String(describing: why(QCFiles.prepare(longPDF))?.sentence))")
+    check("files: a PDF over 32 MB is too large, unread", why(QCFiles.prepare(hugePDF))?.sentence == "huge.pdf is too large: 33 MB, up to 15 MB.", "\(String(describing: why(QCFiles.prepare(hugePDF))?.sentence))")
+    check("files: a PDF that would not fit an empty chat as base64 is too large", why(QCFiles.prepare(bigPDF))?.sentence == "big.pdf is too large: 16 MB, up to 15 MB.", "\(String(describing: why(QCFiles.prepare(bigPDF))?.sentence))")
+    check("files: a text file over 1 MB is too large, unread", why(QCFiles.prepare(bigText))?.sentence == "big.txt is too large: 2.4 MB, up to 1 MB.", "\(String(describing: why(QCFiles.prepare(bigText))?.sentence))")
+    check("files: text that isn't UTF-8 is refused", why(QCFiles.prepare(latin1))?.sentence == "latin1.txt isn't UTF-8 text; cl_quick can't read it yet.", "\(String(describing: why(QCFiles.prepare(latin1))?.sentence))")
+    check("files: a NUL byte makes it binary, refused the same", why(QCFiles.prepare(binaryText)) == .notUTF8("binary.txt"))
+    check("files: an empty text file is refused", why(QCFiles.prepare(emptyFile))?.sentence == "empty.txt is empty.")
+    check("files: a file that isn't a PDF but says so couldn't be read", why(QCFiles.prepare(fakePDF))?.sentence == "fake.pdf couldn't be read.", "\(String(describing: why(QCFiles.prepare(fakePDF))?.sentence))")
+    if FileManager.default.fileExists(atPath: lockedURL.path) {
+        check("files: a password-protected PDF is refused", why(QCFiles.prepare(lockedURL))?.sentence == "locked.pdf is password-protected.", "\(String(describing: why(QCFiles.prepare(lockedURL))?.sentence)) \(String(describing: ok(QCFiles.prepare(lockedURL))?.detail))")
+    } else { print("  files: this Mac wrote no password-protected PDF; skipped") }
+    check("files: a missing file couldn't be read", why(QCFiles.prepare(fx.appendingPathComponent("gone.txt"))) == .unreadable("gone.txt"))
+
+    // the words
+    check("files: sizes read 12 B, 3.4 KB, 15 MB, 2.4 MB, 1 MB", [12, 3400, 15_000_000, 2_400_000, 1_000_000].map(QCFiles.bytes) == ["12 B", "3.4 KB", "15 MB", "2.4 MB", "1 MB"], "\(QCFiles.bytes(3400))")
+    check("files: the refusal for one type", QCFiles.unsupportedLine([".docx"]) == "cl_quick can't read .docx files yet.")
+    check("files: …for several, each type once", QCFiles.unsupportedLine([".docx", ".zip", ".docx", ".xlsx"]) == "cl_quick can't read .docx, .zip and .xlsx files yet.")
+    check("files: …for a file with no extension, its name", QCFiles.unsupportedLine(["blob"]) == "cl_quick can't read blob yet.")
+    check("files: …for both", QCFiles.unsupportedLine([".zip", "blob"]) == "cl_quick can't read .zip files and blob yet.")
+    check("files: a long name keeps its start and end in a line", QCFiles.short("A very long file name for a quarterly report.txt").count == 32 && QCFiles.short("A very long file name for a quarterly report.txt").hasSuffix("report.txt"))
+    check("files: the note names the first two refusals, counts the rest",
+          QCAttach.note(refusals: [.empty("a.txt"), .empty("b.txt"), .empty("c.txt"), .empty("d.txt")], files: true) == "a.txt is empty. b.txt is empty. 2 more couldn't be attached.")
+    check("files: the over-count line says attachments once a file is among them", QCAttach.note(overCount: 2, files: true) == "Up to 5 attachments go with a message; 2 were left out.")
+    check("files: …and images when it is all pictures", QCAttach.note(overCount: 1) == "Up to 5 images go with a message; one was left out.")
+    check("files: no words when nothing was left out", QCAttach.note() == nil)
+
+    // what a pasteboard holds
+    let fpb = NSPasteboard(name: NSPasteboard.Name("n-uf.cl-quick.file-checks"))
+    func putF(_ f: (NSPasteboard) -> Void) { fpb.clearContents(); f(fpb) }
+    putF { $0.setString("sample.pdf", forType: .string); $0.writeObjects([pdfFile as NSURL]) }
+    check("files: a copied PDF (Finder gives its name as text too) is a paste for the chat", QCImages.found(in: fpb, forPaste: true)?.files == [pdfFile])
+    putF { _ = $0.writeObjects([pdfFile as NSURL, docxFile as NSURL, csvFile as NSURL, image as NSURL]) }
+    let both = QCImages.found(in: fpb, forPaste: false)
+    check("files: a drop keeps the order it came in, and names what it can't read", both?.items.count == 3 && both?.unsupported == [".docx"], "\(String(describing: both?.items.count))")
+    if case .file(let u0)? = both?.items.first, case .file(let u1)? = both?.items.dropFirst().first, case .image? = both?.items.last {
+        check("files: …PDF, CSV, then the picture", u0 == pdfFile && u1 == csvFile)
+    } else { check("files: …PDF, CSV, then the picture", false) }
+    putF { _ = $0.writeObjects([docxFile as NSURL]) }
+    check("files: a paste of only a file it can't read is the field's (it pastes the name); a drop names it", QCImages.found(in: fpb, forPaste: true) == nil && QCImages.found(in: fpb, forPaste: false)?.unsupported == [".docx"])
+    check("files: files of any kind are the chat's, never the field's", !QCImages.fieldKeepsDrop(fpb))
+    fpb.clearContents()
+
+    // the chat: attach, send, what the stand-in reads
+    func ls(_ url: URL) -> [String] {
+        (FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])?.allObjects as? [URL] ?? [])
+            .map { u in let v = try? u.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]); return "\(u.path) \(v?.fileSize ?? -1) \(v?.contentModificationDate?.timeIntervalSince1970 ?? 0)" }
+            .sorted()
+    }
+    let support = ls(Files.folder)
+    let tmp = Set((try? FileManager.default.contentsOfDirectory(atPath: NSTemporaryDirectory())) ?? [])
+    let c = imageFixChat("files-chat"), m = c.m
+    let work = ls(c.dir.appendingPathComponent("work"))
+    func content(_ line: String) -> [[String: Any]] {
+        ((((try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any])?["message"] as? [String: Any])?["content"] as? [[String: Any]]) ?? []
+    }
+    func types(_ line: String) -> [String] { content(line).map { $0["type"] as? String ?? "?" } }
+    c.attach([], files: [pdfFile, csvFile])
+    check("files: a PDF and a CSV attach as two chips, in order", m.files.map(\.name) == ["sample.pdf", "sample.csv"] && m.files[0].order < m.files[1].order && m.preparing == 0, "\(m.files.map(\.name))")
+    m.field = "What is in these two files?"
+    m.send()
+    check("files: sending takes the chips into the message and empties the row", m.files.isEmpty && m.turns.count == 1 && m.turns[0].files.map(\.name) == ["sample.pdf", "sample.csv"] && m.turns[0].question == "What is in these two files?")
+    c.answered(1)
+    check("files: the message was answered", m.turns.last?.phase == .done, "\(String(describing: m.turns.last?.phase))")
+    let l1 = c.lines.first ?? ""
+    check("files: the line is document, document, then the text", types(l1) == ["document", "document", "text"], "\(types(l1))")
+    let d0 = content(l1).first, d1 = content(l1).dropFirst().first
+    let s0 = d0?["source"] as? [String: Any], s1 = d1?["source"] as? [String: Any]
+    check("files: the PDF is a base64 source, application/pdf, the file's own bytes, titled sample.pdf",
+          s0?["type"] as? String == "base64" && s0?["media_type"] as? String == "application/pdf" && Data(base64Encoded: s0?["data"] as? String ?? "") == pdfData && d0?["title"] as? String == "sample.pdf")
+    check("files: the CSV is a text source, text/plain, its text, titled sample.csv",
+          s1?["type"] as? String == "text" && s1?["media_type"] as? String == "text/plain" && s1?["data"] as? String == "a,b\n1,2" && d1?["title"] as? String == "sample.csv")
+    check("files: the question is the text block", content(l1).last?["text"] as? String == "What is in these two files?")
+    // files only: no text, no default text, no text block
+    c.attach([], files: [csvFile])
+    m.send()
+    check("files: a file alone is a message (a turn with no text and the chip)", m.turns.count == 2 && m.turns[1].question.isEmpty && m.turns[1].files.count == 1)
+    c.answered(2)
+    check("files: the files-only message was answered", m.turns.last?.phase == .done, "\(String(describing: m.turns.last?.phase))")
+    check("files: its line is one document block and no text block", c.lines.count == 2 && types(c.lines[1]) == ["document"], "\(c.lines.map(types))")
+    // retry: the same files again, in a new chat (a running one holds them already)
+    m.again(); c.answered(2)
+    check("files: Ask again sends the same file again, once to each `claude`", c.lines.count == 3 && types(c.lines[2]) == ["document"] && c.lines.suffix(2).allSatisfy { $0.contains("\"document\"") }, "\(c.lines.map(types))")
+    // nothing to send
+    m.turns.removeAll(); m.field = ""
+    m.send()
+    check("files: nothing attached and nothing typed sends nothing", m.turns.isEmpty)
+    m.shutdown()
+
+    // pictures and files share one order and one count of five
+    let c2 = imageFixChat("files-order"), m2 = c2.m
+    c2.attach([.data(noisyPNG(24, 24))])
+    c2.attach([], files: [pdfFile])
+    c2.attach([.data(noisyPNG(30, 30))])
+    check("files: a picture, a PDF, a picture: one order", m2.images.count == 2 && m2.files.count == 1 && m2.images[0].order < m2.files[0].order && m2.files[0].order < m2.images[1].order)
+    check("files: the row shows them in that order", QCAttachItem.all(images: m2.images, files: m2.files).map { if case .file = $0 { return "file" }; return "image" } == ["image", "file", "image"])
+    m2.field = "Compare"; m2.send(); c2.answered(1)
+    check("files: the message line has them in that order, then the text", types(c2.lines.first ?? "") == ["image", "document", "image", "text"], "\(c2.lines.map(types))")
+    // one batch keeps its own order too
+    m2.turns.removeAll()
+    var landed = false
+    m2.attach(QCImages.Found(items: [.file(csvFile), .image(.data(noisyPNG(20, 20))), .file(mdFile)])) { landed = true }
+    while !landed { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    m2.send(); c2.answered(1)
+    check("files: a mixed batch goes in the order it came: file, picture, file", types(c2.lines.last ?? "") == ["document", "image", "document"], "\(c2.lines.map(types))")
+    m2.shutdown()
+
+    let c3 = imageFixChat("files-count"), m3 = c3.m
+    c3.attach([], files: [pdfFile, csvFile, mdFile, swiftFile, tsFile, jsonFile])
+    check("files: six files: five are taken", m3.files.count == 5, "\(m3.files.count)")
+    check("files: …and the note says so", m3.imageNote == "Up to 5 attachments go with a message; one was left out.", "\(String(describing: m3.imageNote))")
+    m3.field = "x"; m3.send(); c3.answered(1)
+    c3.attach([.data(noisyPNG(20, 20)), .data(noisyPNG(22, 22)), .data(noisyPNG(24, 24))], files: [pdfFile, csvFile])
+    check("files: three pictures and two files: five", m3.images.count + m3.files.count == 5, "\(m3.images.count) \(m3.files.count)")
+    c3.attach([.data(noisyPNG(26, 26))], files: [mdFile])
+    check("files: a sixth thing is left out whichever kind", m3.images.count + m3.files.count == 5 && m3.imageNote == "Up to 5 attachments go with a message; 2 were left out.", "\(String(describing: m3.imageNote))")
+    check("files: Delete in an empty field takes the latest attached, a file or a picture", m3.removeLastImage() && m3.files.count + m3.images.count == 4)
+    m3.shutdown()
+
+    // refused: said in one line, nothing attached, nothing sent
+    let c4 = imageFixChat("files-refused"), m4 = c4.m
+    c4.attach([], files: [longPDF])
+    check("files: a PDF over 100 pages isn't attached and the note says why", m4.files.isEmpty && m4.imageNote == "long.pdf is too long: 101 pages, up to 100.", "\(String(describing: m4.imageNote))")
+    c4.attach([], unsupported: [".docx"])
+    check("files: a .docx isn't attached and the note says cl_quick can't read it yet", m4.files.isEmpty && m4.imageNote == "cl_quick can't read .docx files yet.", "\(String(describing: m4.imageNote))")
+    c4.attach([], files: [latin1, emptyFile], unsupported: [".zip"])
+    check("files: several at once give one line", m4.files.isEmpty && m4.imageNote == "cl_quick can't read .zip files yet. latin1.txt isn't UTF-8 text; cl_quick can't read it yet. empty.txt is empty.", "\(String(describing: m4.imageNote))")
+    m4.send()
+    check("files: nothing attached, so nothing is sent", m4.turns.isEmpty && c4.lines.isEmpty)
+    // the chat's cap counts files
+    m4.imageCap = pdf.map { $0.size + 600 } ?? 0
+    let twoK = put("notes2k.txt", Data(String(repeating: "x", count: 2000).utf8))
+    c4.attach([], files: [pdfFile, mdFile, twoK])
+    check("files: a PDF counts toward the chat's cap: the PDF and a short note fit, a 2 KB one doesn't", m4.files.count == 2 && m4.imageNote == "This chat holds as many attachments as it can; start a new chat (⌘N) for more.", "\(m4.files.count) \(String(describing: m4.imageNote))")
+    m4.send(); c4.answered(1)
+    m4.imageCap = m4.turns[0].files.reduce(0) { $0 + $1.size }          // exactly what the chat holds now
+    c4.attach([], files: [csvFile])
+    check("files: after sending them the chat takes no more files", m4.files.isEmpty && m4.imageNote == "This chat holds as many attachments as it can; start a new chat (⌘N) for more.", "\(m4.files.count) \(String(describing: m4.imageNote))")
+    m4.newChat()
+    c4.attach([], files: [csvFile])
+    check("files: a new chat takes files again", m4.files.count == 1 && m4.imageNote == nil)
+    m4.shutdown()
+
+    // the chip's ✕ (a click delivered through the window, as an image's is) and the sent message's chips
+    for chatWindow in [false, true] {
+        let mode = chatWindow ? "chat window" : "bar"
+        let cx = imageFixChat("files-x\(chatWindow)"), mx = cx.m
+        if chatWindow { var t = oneTurn(); t.files = [ok(QCFiles.prepare(pdfFile))!, ok(QCFiles.prepare(csvFile))!]; t.question = "What is in these?"; mx.turns = [t] }
+        cx.attach([], files: [pdfFile, csvFile])
+        let names = mx.files.map(\.name)
+        let win = OffscreenWindow(contentRect: NSRect(x: -30000, y: -30000, width: 760, height: chatWindow ? 580 : 262), styleMask: QuickChatPanel.style, backing: .buffered, defer: false)
+        win.titleVisibility = .hidden
+        win.titlebarAppearsTransparent = true
+        win.contentView = QuickChatHostingView(rootView: QuickChatRoot(model: mx))
+        win.alphaValue = 0.01
+        win.orderFrontRegardless()
+        win.setFrameOrigin(NSPoint(x: -30000, y: -30000))
+        spin(0.8)
+        func marks(_ v: NSView, _ out: inout [NSView]) { if v is QCControlMarkView { out.append(v) }; v.subviews.forEach { marks($0, &out) } }
+        func targets() -> [NSView] {
+            var all: [NSView] = []
+            marks(win.contentView!, &all)
+            let small = all.filter { let r = $0.convert($0.bounds, to: nil); return r.width == 24 && r.height == 24 }
+            let low = small.map { $0.convert($0.bounds, to: nil).minY }.min() ?? 0
+            return small.filter { abs($0.convert($0.bounds, to: nil).minY - low) < 1 }.sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+        }
+        func click(_ pt: NSPoint) {
+            func ev(_ t: NSEvent.EventType) -> NSEvent {
+                NSEvent.mouseEvent(with: t, location: pt, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: win.windowNumber, context: nil, eventNumber: 9, clickCount: 1, pressure: 1)!
+            }
+            win.sendEvent(ev(.leftMouseDown)); spin(0.05); win.sendEvent(ev(.leftMouseUp)); spin(0.3)
+        }
+        if chatWindow {
+            // the sent message shows its chips, never what is in the files: the turn keeps the files for the chips (the view
+            // draws QCSentAttachments from them: no content goes to a view), and the chips draw at a thumbnail's height
+            let t0 = mx.turns[0]
+            check("files (chat window): the sent message holds its two chips: name, and page count or size",
+                  t0.files.map { "\($0.name) \($0.detail)" } == ["sample.pdf 1 page", "sample.csv 7 B"] && t0.question == "What is in these?", "\(t0.files.map(\.name))")
+            let size: CGSize = MainActor.assumeIsolated {
+                let drawn = ImageRenderer(content: QCSentAttachments(images: [], files: t0.files).environment(\.colorScheme, .dark))
+                drawn.scale = 1
+                return drawn.nsImage?.size ?? .zero
+            }
+            check("files (chat window): the chips draw 44 pt high, side by side, at most 200 pt each", size.height == 44 && size.width > 160 && size.width <= 404, "\(size)")
+        }
+        var xs = targets()
+        check("✕ (\(mode), files): one 24 pt target for each chip", xs.count == 2, "\(xs.count)")
+        var moves = 0
+        let oldDrag = QCDragView.drag
+        QCDragView.drag = { _, _ in moves += 1 }
+        if let first = xs.first {
+            let r = first.convert(first.bounds, to: nil)
+            click(NSPoint(x: r.minX + 2, y: r.minY + 2))
+            check("✕ (\(mode), files): a click near the corner of its 24 pt target removes that chip (the first)", mx.files.map(\.name) == Array(names.dropFirst()), "\(mx.files.map(\.name))")
+        }
+        xs = targets()
+        if let only = xs.first {
+            let r = only.convert(only.bounds, to: nil)
+            click(NSPoint(x: r.midX, y: r.midY))
+            check("✕ (\(mode), files): a click in the middle of the other removes it too", mx.files.isEmpty, "\(mx.files.count)")
+        }
+        QCDragView.drag = oldDrag
+        check("✕ (\(mode), files): neither click started a window move", moves == 0, "\(moves)")
+        win.orderOut(nil)
+        mx.shutdown()
+        try? FileManager.default.removeItem(at: cx.dir)
+    }
+
+    // incognito: nothing was written for the files, not in the app's folder, the work folder or the temp folder
+    check("files: nothing was written to the app's support folder", ls(Files.folder) == support, "\(ls(Files.folder).count) vs \(support.count)")
+    check("files: nothing was written to the work folder", ls(c.dir.appendingPathComponent("work")) == work, "\(ls(c.dir.appendingPathComponent("work")))")
+    let newTmp = Set((try? FileManager.default.contentsOfDirectory(atPath: NSTemporaryDirectory())) ?? []).subtracting(tmp)
+        .filter { ["pdf", "txt", "csv", "md", "json", "swift", "ts"].contains(($0 as NSString).pathExtension.lowercased()) || $0.contains("sample") }
+    check("files: no copy of a file was made in the temp folder", newTmp.isEmpty, "\(newTmp)")
+    try? FileManager.default.removeItem(at: c.dir)
+    for d in ["files-order", "files-count", "files-refused"] {
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(d))
+    }
+    try? FileManager.default.removeItem(at: fx)
+    print("  files: \(passed - passedBefore) of \(passed + failed - passedBefore - failedBefore) checks passed")
 }
 
 // Return (or an automatic send: after an account switch, Ask on …) while pictures are being read sends once they are in
@@ -2405,9 +2701,9 @@ do {
     put { _ = $0.writeObjects([img as NSURL]) }
     over("an image file", taken: true)
     put { _ = $0.writeObjects([txt as NSURL]) }
-    over("a text file", taken: false, text: "notes.txt")
+    over("a text file", taken: true)
     put { _ = $0.writeObjects([folder as NSURL]) }
-    over("a folder", taken: false, text: "a folder")
+    over("a folder (named as unreadable by the chat, its path no longer goes into the field)", taken: true)
     put { _ = $0.writeObjects([txt as NSURL, img as NSURL]) }
     over("an image file with a text file", taken: true)
     put { $0.setString("words", forType: .string) }
