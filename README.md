@@ -141,15 +141,19 @@ minutes for a profile.
   the same connection as the text, so it stays incognito: no file is made for it, and the chat shows it only as a
   thumbnail until it ends. A file you drop is read, never copied.
 - **Files.** The same two ways take a PDF or a text file: drop files from Finder on the bar or the chat window, or copy
-  them in Finder and press ⌘V. A PDF (up to 32 MB and 100 pages) and any text or code file (txt, Markdown, CSV, JSON,
+  them in Finder and press ⌘V. A PDF (up to 15 MB and 100 pages) and any text or code file (txt, Markdown, CSV, JSON,
   YAML, XML, HTML, logs, Swift, Python, JavaScript/TypeScript, Go, Rust, Java, C, Ruby, shell, SQL, TOML, CSS and the
-  like; up to 1 MB, UTF-8) show as chips next to the thumbnails: a symbol, the name and the page count or size, each
-  with a ✕. They count toward the 5 attachments of a message with the pictures, and with them toward the chat's
-  limit of about 20 MB (a PDF over about 15 MB is too large for a chat on its own). Claude reads what you attached,
-  with that message; it gets no access to your files or folders. A file it can't read (Word, Excel, zip, binaries, text
-  that isn't UTF-8) is refused with a muted line over the field ("cl_quick can't read .docx files yet."); one over a
-  limit says by how much ("too long: 140 pages, up to 100"). A file alone is a message too, and the chat shows the
-  chips, never the content.
+  like; up to 400 KB, UTF-8) show as chips next to the thumbnails: a symbol, the name and the page count or size, each
+  with a ✕. They count toward the 5 attachments of a message with the pictures. The whole conversation goes to the
+  model with every message, so a chat also holds at most about 20 MB of attachments, 100 PDF pages and 400 KB of text
+  files in all, counting what was sent earlier in it and what waits in the field (✕ gives the room back, a new chat
+  starts from nothing); past that a muted line says so. Claude reads what you attached, with that message; it gets no
+  access to your files or folders, and only regular files are read (a link to one is followed; pipes and devices are
+  refused). A file it can't read (Word, Excel, zip, binaries, text that isn't UTF-8, a password-protected PDF) is
+  refused with a muted line over the field ("cl_quick can't read .docx files yet."); one over a limit says by how much
+  ("too long: 140 pages, up to 100"). A file alone is a message too, and the chat shows the chips, never the content.
+  If a long chat finally outgrows the model ("Prompt is too long"), the chat ends with a line saying so; Retry asks the
+  question again in a new one.
 - **Links and search.** Paste a link in a message, or ask about something current, and Claude can read the page or
   search the web. While it does, a muted line beside the dot says what it is doing ("Reading example.com…", "Searching
   the web for “…”…") and goes when the text resumes; the answer is the whole reply (the text before and after the call),

@@ -63,10 +63,13 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   Nothing is saved, so chats stay incognito. An image alone is a message too.
 - **Files in the chat.** Drop PDFs and text files (Markdown, CSV, JSON, code and the like) from Finder on the bar or the
   chat window, or copy them in Finder and press ⌘V: they show as chips next to the thumbnails (a symbol, the name, the
-  page count or size, each with a ✕) and go with the message as documents, so Claude reads them. A PDF up to 32 MB and
-  100 pages, a text file up to 1 MB, 5 attachments a message with the pictures, and the chat's 20 MB for everything
-  attached. Word, Excel, zip, binaries and text that isn't UTF-8 are refused with a muted line, and Claude Code still
-  has no file tools. Files are kept in memory only, never written anywhere, and a file alone is a message too.
+  page count or size, each with a ✕) and go with the message as documents, so Claude reads them. A PDF up to 15 MB and
+  100 pages, a text file up to 400 KB, 5 attachments a message with the pictures; and per chat, counting what was sent
+  earlier and what waits, 20 MB for everything attached, 100 PDF pages and 400 KB of text files. Word, Excel, zip,
+  binaries, text that isn't UTF-8 and password-protected PDFs are refused with a muted line, only regular files are
+  read (never a pipe or a device), and Claude Code still has no file tools. Files are kept in memory only, never
+  written anywhere, and a file alone is a message too. A chat that finally outgrows the model ends with a line saying
+  so (Retry asks again in a new chat).
 - **A mic button** next to Send starts macOS Dictation into the field; ⌘D turns it on and off from the keyboard.
 - **Links and search.** Paste a link, or ask about something current, and Claude can open the page or search the web.
   It runs with Claude Code's two web tools, WebFetch and WebSearch (`--tools WebFetch,WebSearch`, allowed up front so
