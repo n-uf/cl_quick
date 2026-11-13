@@ -464,7 +464,16 @@ struct QCTurnView: View {
             if !turn.answer.isEmpty {
                 QCAnswer(text: turn.answer).equatable().padding(.top, turn.thinkingTitle != nil ? 4 : 10)
             }
-            if turn.phase == .waiting || turn.phase == .streaming { QCPulse().padding(.top, 10) }
+            if turn.phase == .waiting || turn.phase == .streaming {
+                // while a web tool runs, the dot has a muted line beside it: "Reading example.com…"
+                HStack(spacing: 8) {
+                    QCPulse()
+                    if let line = turn.activity {
+                        Text(line).font(.system(size: 12.5)).foregroundColor(QCColor.muted).lineLimit(1).truncationMode(.tail)
+                    }
+                }
+                .padding(.top, 10)
+            }
             if turn.phase == .done || turn.phase == .stopped {
                 let shown = last || hover || model.copied == turn.id       // ⌘⇧C on an earlier answer says "Copied" under it
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
@@ -2268,6 +2277,8 @@ enum QuickChatRender {
         case "dictation-off": m.dictationNote = QCDictation.offWords
         case "notinstalled": m.field = q1; m.barProblem = .notInstalled
         case "streaming": var t = t1; t.answer = String(a1.prefix(90)); t.phase = .streaming; m.turns = [t]
+        case "reading": var t = t1; t.answer = "I'll open the page."; t.phase = .streaming; t.activity = "Reading example.com…"; m.turns = [t]
+        case "searching": var t = t1; t.answer = ""; t.phase = .waiting; t.activity = "Searching the web for “swift concurrency actors”…"; m.turns = [t]
         case "answer": m.turns = [t1]
         case "copied": m.turns = [t1]; m.copied = t1.id          // after ⌘⇧C or a click on Copy: the tick and "Copied"
         case "failed": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .failed

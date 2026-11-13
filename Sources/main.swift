@@ -4,7 +4,8 @@
 //
 // Command line, for checking:
 //   --render-quick-chat OUT.png STATE   the bar or the chat window with sample data (bar, typing, notinstalled,
-//                                       streaming, answer, failed, notsigned, thinking, full, level95; with accounts:
+//                                       streaming, reading, searching (the line while a web tool runs), answer, failed,
+//                                       notsigned, thinking, full, level95; with accounts:
 //                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
 //                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
 //                                       switched (the new chat's first line); incognito: ended-idle, ended-stopped,
@@ -25,7 +26,7 @@
 //                                       accounts-other, accounts-forget), Add a profile (add, first, add-refused,
 //                                       add-empty) and General (general, general-clash, general-off,
 //                                       general-recording, general-taken, general-fable, general-haiku,
-//                                       general-nolist)
+//                                       general-nolist, general-noweb)
 //   --render-menu OUT.png STATE [dark]  the menu bar menu's profile blocks in a drawn menu, light or dark (STATE: menu,
 //                                       address (the pointer on the first profile's address), full, one, signedout)
 //   --version
