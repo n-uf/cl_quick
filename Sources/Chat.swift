@@ -127,6 +127,8 @@ struct QuickChatTurn: Identifiable, Equatable {
     var question: String
     /// The images that went with the question (in memory only; Retry sends them again).
     var images: [QCImage] = []
+    /// The files (PDFs, text) that went with it, the same.
+    var files: [QCFile] = []
     var answer = ""
     var thinking = ""
     /// The model that answered ("Haiku 5.5"), from Claude Code.
@@ -250,8 +252,13 @@ final class QuickChatModel: ObservableObject {
     @Published var dictationNote: String?
     /// The images attached to the message being written (thumbnails over the field), up to QCImages.maxCount, in memory only.
     @Published var images: [QCImage] = []
-    /// Images being read and scaled down (a placeholder tile each); a message waits for them.
+    /// The files (PDFs and text files) attached to it: chips next to the thumbnails, in memory only. Pictures and files
+    /// together are at most QCImages.maxCount.
+    @Published var files: [QCFile] = []
+    /// Images and files being read (a placeholder tile each); a message waits for them.
     @Published var preparing = 0
+    /// Counts the attachments landed, so images and files keep the order they came in.
+    private var attachOrder = 0
     /// Counts the times the attachments were cleared (a new chat): images still being read for an earlier count are dropped.
     private var attachGeneration = 0
     /// A send was asked while images were still being read: it goes when the last one is in. A new chat or hiding the
@@ -345,9 +352,12 @@ final class QuickChatModel: ObservableObject {
     /// A failed write waits this long for `claude`'s own exit report before the chat says it didn't take the message.
     static let sendFailedWait: TimeInterval = 1
     private var sendFailedWork: DispatchWorkItem?
-    /// The images in the running `claude`'s conversation, in bytes of base64: every request carries all of them, and the
-    /// API takes 32 MB a request, so past `imageCap` the chat takes no more (a new chat starts from nothing).
+    /// The attachments in the running `claude`'s conversation (images as base64, PDFs as base64, text as it is): every
+    /// request carries all of them, and the API takes 32 MB a request, so past `imageCap` the chat takes no more (a new
+    /// chat starts from nothing).
     private var sentImageBytes = 0
+    /// The bytes the attachments waiting in the field add.
+    private var waitingBytes: Int { images.reduce(0) { $0 + $1.base64Size } + files.reduce(0) { $0 + $1.size } }
     var imageCap = QCImages.chatCap
     /// Answers Stop gave up on whose `done` is still to come (see StaleAnswers), and the wait's limit.
     private var stale = StaleAnswers()
@@ -431,55 +441,68 @@ final class QuickChatModel: ObservableObject {
         // (Return, an automatic resend after an account switch or Ask on …)
         if preparing > 0, !busy, !blocked { sendWhenReady = true; return }
         sendWhenReady = false
-        // images alone are a message too
-        guard !q.isEmpty || !images.isEmpty, !busy, !blocked else { return }
+        // images or files alone are a message too (Claude Code takes a message of documents with no text block)
+        guard !q.isEmpty || !images.isEmpty || !files.isEmpty, !busy, !blocked else { return }
         guard target != nil else { barProblem = .noProfile; return }
         dictationNote = nil
-        let sent = images
+        let sent = images, sentFiles = files
         field = ""
-        images = []; imageNote = nil
+        images = []; files = []; imageNote = nil
         barProblem = nil
         // the chat on screen ended: this message starts a new one, with nothing from the old one
         if ended != nil { turns = []; ended = nil; accountNote = nil; takeWebDefault() }
-        turns.append(QuickChatTurn(question: q, images: sent, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
+        turns.append(QuickChatTurn(question: q, images: sent, files: sentFiles, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
         scrollTick += 1
-        ask(q, images: sent)
+        ask(q, images: sent, files: sentFiles)
     }
 
-    // MARK: images
+    // MARK: images and files
 
-    /// ⌘V: takes the pasteboard when it holds images (or image files) and no text; false leaves the paste to the field.
+    /// ⌘V: takes the pasteboard when it holds images or files the chat reads (and no text); false leaves the paste to the field.
     @discardableResult func attachFromPaste(_ pb: NSPasteboard) -> Bool {
         guard let f = QCImages.found(in: pb, forPaste: true) else { return false }
         attach(f)
         return true
     }
 
-    /// A drop of images, or of files (the ones that aren't images are said): false when it holds neither.
+    /// A drop of images or files (the ones the chat can't read are said): false when it holds neither.
     @discardableResult func attachFromDrop(_ pb: NSPasteboard) -> Bool {
         guard let f = QCImages.found(in: pb, forPaste: false) else { return false }
         attach(f)
         return true
     }
 
-    /// Reads and scales the images down off the main thread (a placeholder tile each meanwhile), then adds them in the
-    /// order they came. `done` (checks): called on the main thread when they are in.
+    /// What a batch's items came to, read off the main thread.
+    private enum Prepared {
+        case image(Result<QCImage, QCImages.Failure>)
+        case file(Result<QCFile, QCFiles.Refusal>)
+    }
+
+    /// Reads the images (scaled down) and files off the main thread (a placeholder tile each meanwhile), then adds them in
+    /// the order they came. `done` (checks): called on the main thread when they are in.
     func attach(_ f: QCImages.Found, done: @escaping () -> Void = {}) {
-        let room = max(0, QCImages.maxCount - images.count - preparing)
-        let take = Array(f.sources.prefix(room))
-        let over = f.sources.count - take.count
-        // the chat already holds what it can (the pictures sent plus those waiting): nothing is read
-        let full = sentImageBytes + images.reduce(0) { $0 + $1.base64Size } >= imageCap
+        let room = max(0, QCImages.maxCount - images.count - files.count - preparing)
+        let take = Array(f.items.prefix(room))
+        let over = f.items.count - take.count
+        // the notes say "attachments" once a file is among them
+        let withFiles = !files.isEmpty || f.items.contains { if case .file = $0 { return true }; return false }
+        // the chat already holds what it can (what was sent plus what waits): nothing is read
+        let full = sentImageBytes + waitingBytes >= imageCap
         guard !take.isEmpty, !full else {
-            say(QCImages.note(notImages: f.notImages, failures: [], overCount: over, chatFull: full && !f.sources.isEmpty))
+            say(QCAttach.note(unsupported: f.unsupported, overCount: over, chatFull: full && !f.items.isEmpty, files: withFiles))
             done()
             return
         }
         preparing += take.count
-        let notImages = f.notImages
+        let unsupported = f.unsupported
         let generation = attachGeneration
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let results = take.map { QCImages.prepare($0) }
+            let results: [Prepared] = take.map {
+                switch $0 {
+                case .image(let s): return .image(QCImages.prepare(s))
+                case .file(let u): return .file(QCFiles.prepare(u))
+                }
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.preparing -= take.count
@@ -492,20 +515,28 @@ final class QuickChatModel: ObservableObject {
                     return
                 }
                 var failures: [QCImages.Failure] = []
-                var held = self.sentImageBytes + self.images.reduce(0) { $0 + $1.base64Size }
+                var refusals: [QCFiles.Refusal] = []
+                var held = self.sentImageBytes + self.waitingBytes
                 var chatFull = false
                 for r in results {
                     switch r {
-                    case .success(let img):
+                    case .image(.success(let img)):
                         if held + img.base64Size > self.imageCap { chatFull = true; continue }
                         held += img.base64Size
+                        img.order = self.attachOrder; self.attachOrder += 1
                         self.images.append(img)
-                    case .failure(let why): failures.append(why)
+                    case .image(.failure(let why)): failures.append(why)
+                    case .file(.success(let file)):
+                        if held + file.size > self.imageCap { chatFull = true; continue }
+                        held += file.size
+                        file.order = self.attachOrder; self.attachOrder += 1
+                        self.files.append(file)
+                    case .file(.failure(let why)): refusals.append(why)
                     }
                 }
                 // a message waiting for these goes now (its note, if any, is said after: send() clears the old one)
                 if self.preparing == 0, self.sendWhenReady { self.send() }
-                self.say(QCImages.note(notImages: notImages, failures: failures, overCount: over, chatFull: chatFull))
+                self.say(QCAttach.note(unsupported: unsupported, failures: failures, refusals: refusals, overCount: over, chatFull: chatFull, files: withFiles))
                 done()
             }
         }
@@ -517,10 +548,21 @@ final class QuickChatModel: ObservableObject {
         focusTick += 1
     }
 
-    /// The last attached image goes (Delete in an empty field).
+    func removeFile(_ id: UUID) {
+        files.removeAll { $0.id == id }
+        imageNote = nil
+        focusTick += 1
+    }
+
+    /// The last attached picture or file goes (Delete in an empty field): the latest attached of either.
     @discardableResult func removeLastImage() -> Bool {
-        guard let last = images.last else { return false }
-        removeImage(last.id)
+        let lastImage = images.last, lastFile = files.last
+        switch (lastImage, lastFile) {
+        case (nil, nil): return false
+        case (let i?, nil): removeImage(i.id)
+        case (nil, let f?): removeFile(f.id)
+        case (let i?, let f?): if f.order > i.order { removeFile(f.id) } else { removeImage(i.id) }
+        }
         return true
     }
 
@@ -557,12 +599,12 @@ final class QuickChatModel: ObservableObject {
     func again() {
         guard !busy, let i = turns.indices.last else { return }
         if ended != nil {
-            let q = turns[i].question, imgs = turns[i].images
-            turns = [QuickChatTurn(question: q, images: imgs, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
+            let q = turns[i].question, imgs = turns[i].images, fls = turns[i].files
+            turns = [QuickChatTurn(question: q, images: imgs, files: fls, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
             ended = nil; accountNote = nil
             takeWebDefault()
             scrollTick += 1
-            ask(q, images: imgs)
+            ask(q, images: imgs, files: fls)
             return
         }
         turns[i].answer = ""; turns[i].thinking = ""; turns[i].problem = nil; turns[i].phase = .waiting
@@ -570,11 +612,11 @@ final class QuickChatModel: ObservableObject {
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
-        // a running `claude` already holds this message's pictures in its conversation, and sending them again would pile
-        // them up (a request over the API's limit fails every later message): a retry that carries images starts a new
-        // chat, with this message alone (start() says so when there was more before it)
-        if !turns[i].images.isEmpty, process != nil { closeProcess() }
-        ask(turns[i].question, images: turns[i].images)
+        // a running `claude` already holds this message's pictures and files in its conversation, and sending them again
+        // would pile them up (a request over the API's limit fails every later message): a retry that carries any starts
+        // a new chat, with this message alone (start() says so when there was more before it)
+        if !turns[i].images.isEmpty || !turns[i].files.isEmpty, process != nil { closeProcess() }
+        ask(turns[i].question, images: turns[i].images, files: turns[i].files)
     }
 
     /// A chat that ended (idle, a crash, Stop that ended it, the account changed) leaves nothing behind: its turns, its
@@ -585,12 +627,13 @@ final class QuickChatModel: ObservableObject {
         // a switch of account waiting to resend the question a full limit stopped (continueSwitched reads it from the
         // last turn or the field): the question moves to the field, so the switch still sends it, and it can be seen
         let waitingQuestion: String? = {
-            if case .waiting? = switchNotice, field.isEmpty, images.isEmpty, turns.last?.problem == .limitFull { return turns.last?.question }
+            if case .waiting? = switchNotice, field.isEmpty, images.isEmpty, files.isEmpty, turns.last?.problem == .limitFull { return turns.last?.question }
             return nil
         }()
         let waitingImages: [QCImage] = waitingQuestion == nil ? [] : turns.last?.images ?? []
+        let waitingFiles: [QCFile] = waitingQuestion == nil ? [] : turns.last?.files ?? []
         ended = nil
-        if let q = waitingQuestion { field = q; images = waitingImages }
+        if let q = waitingQuestion { field = q; images = waitingImages; files = waitingFiles }
         turns = []
         takeWebDefault()
         accountNote = nil
@@ -624,7 +667,7 @@ final class QuickChatModel: ObservableObject {
         returnHeld = false
         sendWhenReady = false
         if dictating || dictationNoticed { dictate(false) }
-        if !keepField { field = ""; images = []; imageNote = nil; attachGeneration += 1 }
+        if !keepField { field = ""; images = []; files = []; imageNote = nil; attachGeneration += 1 }
         barProblem = nil
         accountNote = nil
         if dropsSwitch { dropSwitch() }
@@ -667,29 +710,34 @@ final class QuickChatModel: ObservableObject {
     /// Ask on …: the chat moves to the profile offered and sends the question there. The full one isn't changed.
     func askOnOffer() {
         guard let o = offer else { return }
-        let q = pendingQuestion(), imgs = pendingImages()
+        let q = pendingQuestion(), imgs = pendingImages(), fls = pendingFiles()
         pickProfile(o.profileID)
-        field = q; images = imgs
+        field = q; images = imgs; files = fls
         send()
     }
 
     /// What would be asked again on another profile or account: what's typed, else the question a full limit stopped.
     func pendingQuestion() -> String {
-        field.isEmpty && images.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
+        field.isEmpty && images.isEmpty && files.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
     }
 
     /// The images that go with pendingQuestion().
     func pendingImages() -> [QCImage] {
-        field.isEmpty && images.isEmpty && turns.last?.problem == .limitFull ? turns.last?.images ?? [] : images
+        field.isEmpty && images.isEmpty && files.isEmpty && turns.last?.problem == .limitFull ? turns.last?.images ?? [] : images
+    }
+
+    /// The files that go with pendingQuestion().
+    func pendingFiles() -> [QCFile] {
+        field.isEmpty && images.isEmpty && files.isEmpty && turns.last?.problem == .limitFull ? turns.last?.files ?? [] : files
     }
 
     /// The profile is on another account now: a new chat on the same profile (a chat may not go on across accounts),
     /// what was typed (or the question the full limit stopped) is sent, and one line says where it is.
     /// The caller has set the new target.
     func continueSwitched(note: String) {
-        let q = pendingQuestion(), imgs = pendingImages()
+        let q = pendingQuestion(), imgs = pendingImages(), fls = pendingFiles()
         newChat(keepField: true)
-        field = q; images = imgs
+        field = q; images = imgs; files = fls
         accountNote = note
         send()
     }
@@ -698,9 +746,9 @@ final class QuickChatModel: ObservableObject {
     /// starts on the same profile; what was typed (or the question a full limit stopped) stays in the field, and one
     /// line says where it is. Not while an answer is on its way: the next message meets the same rule in ask().
     func accountChanged(to t: QuickChatTarget) {
-        let q = pendingQuestion(), imgs = pendingImages()
+        let q = pendingQuestion(), imgs = pendingImages(), fls = pendingFiles()
         newChat(keepField: true, dropsSwitch: false)
-        field = q; images = imgs
+        field = q; images = imgs; files = fls
         forgetAccount()
         target = t
         accountNote = "\(t.name) is on \(maskEmail(t.email ?? "another account")) now."
@@ -710,9 +758,9 @@ final class QuickChatModel: ObservableObject {
     /// `claude` was started on the old one, and the conversation lives only in it, so the chat ends and a new one starts
     /// on the same profile. What was typed stays.
     func folderChanged(to t: QuickChatTarget) {
-        let q = pendingQuestion(), imgs = pendingImages()
+        let q = pendingQuestion(), imgs = pendingImages(), fls = pendingFiles()
         newChat(keepField: true, dropsSwitch: false)
-        field = q; images = imgs
+        field = q; images = imgs; files = fls
         forgetAccount()
         target = t
         accountNote = "\(t.name) uses another folder now. New chat."
@@ -745,7 +793,7 @@ final class QuickChatModel: ObservableObject {
 
     // MARK: talking to Claude Code
 
-    private func ask(_ q: String, images: [QCImage] = []) {
+    private func ask(_ q: String, images: [QCImage] = [], files: [QCFile] = []) {
         guard let first = target else { fail(.noProfile); return }
         let gen = generation
         messageSent = false
@@ -767,12 +815,12 @@ final class QuickChatModel: ObservableObject {
                     }
                 }
                 guard let target = self.target else { self.fail(.noProfile); return }
-                self.start(q, images: images, path: path, target: target)
+                self.start(q, images: images, files: files, path: path, target: target)
             }
         }
     }
 
-    private func start(_ q: String, images: [QCImage], path: String, target: QuickChatTarget) {
+    private func start(_ q: String, images: [QCImage], files: [QCFile], path: String, target: QuickChatTarget) {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
                                    workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort, web: web)
         let key = keyFor(path, target)
@@ -796,8 +844,8 @@ final class QuickChatModel: ObservableObject {
         }
         idleTimer?.invalidate()
         // queued: the line is written off the main thread; a write that then fails comes back through onSendFailed
-        messageSent = process?.send(q, images: images.map(\.payload)) == true
-        if messageSent { sentImageBytes += images.reduce(0) { $0 + $1.base64Size } }
+        messageSent = process?.send(q, attachments: QCAttach.payloads(images: images, files: files)) == true
+        if messageSent { sentImageBytes += images.reduce(0) { $0 + $1.base64Size } + files.reduce(0) { $0 + $1.size } }
         else { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
@@ -1079,6 +1127,7 @@ final class QuickChatModel: ObservableObject {
         if p == .notInstalled || p == .noProfile, turns.count == 1, turns[i].answer.isEmpty {
             field = turns[i].question
             images = turns[i].images
+            files = turns[i].files
             turns = []
             barProblem = p
             return

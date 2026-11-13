@@ -1,6 +1,7 @@
 // Images: pictures attached to a quick chat message. Pasted (⌘V with an image on the pasteboard, or image files copied in
 // Finder) or dropped on the panel; they sit as thumbnails over the field until the message is sent, go to Claude Code as
-// image blocks in the same stream-json line as the text, and show in the chat as thumbnails of the message.
+// image blocks in the same stream-json line as the text, and show in the chat as thumbnails of the message. PDFs and
+// text files attach the same way (Attachments.swift); the paste and drop rules here sort a pasteboard's contents for both.
 //
 // Incognito: an image lives only in memory, from the pasteboard to the process's pipe and the chat's turn: no temp
 // file, no cache, nothing for the app's folder. An image file that is dropped or copied is only read, never copied.
@@ -22,6 +23,8 @@ final class QCImage: Identifiable, Equatable {
     let pixels: CGSize
     /// What it adds to a request: its bytes as base64.
     var base64Size: Int { (payload.data.count + 2) / 3 * 4 }
+    /// Where it came in among the attachments (images and files share one order: the message lists them in it).
+    var order = 0
 
     init(payload: QuickChatImageData, thumbnail: NSImage, pixels: CGSize) {
         self.payload = payload; self.thumbnail = thumbnail; self.pixels = pixels
@@ -53,46 +56,53 @@ enum QCImages {
         case file(URL)
     }
 
-    /// What a paste or a drop holds for the chat: the images, and the names of files that are not images.
+    /// What a paste or a drop holds for the chat, in the order it came: images, PDF and text files, and what can't be read
+    /// (an extension, or a name when there is none: ".docx").
     struct Found {
-        var sources: [Source] = []
-        var notImages: [String] = []
+        enum Item { case image(Source), file(URL) }
+        var items: [Item] = []
+        var unsupported: [String] = []
+
+        init(items: [Item] = [], unsupported: [String] = []) { self.items = items; self.unsupported = unsupported }
+        init(sources: [Source] = [], files: [URL] = [], unsupported: [String] = []) {
+            self.init(items: sources.map { .image($0) } + files.map { .file($0) }, unsupported: unsupported)
+        }
+        var sources: [Source] { items.compactMap { if case .image(let s) = $0 { return s }; return nil } }
+        var files: [URL] { items.compactMap { if case .file(let u) = $0 { return u }; return nil } }
     }
 
     /// The types an image travels as on a pasteboard, best first (a screenshot is PNG; Preview and browsers give TIFF).
     static let dataTypes: [NSPasteboard.PasteboardType] = [.png, NSPasteboard.PasteboardType("public.jpeg"), .tiff,
                                                            NSPasteboard.PasteboardType("public.heic")]
 
-    private static func isImageFile(_ url: URL) -> Bool {
-        guard let t = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType else {
-            return UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
-        }
-        return t.conforms(to: .image)
-    }
-
     /// What the pasteboard holds for the chat, or nil when it holds nothing the chat takes.
     ///
-    /// Files come first (Finder gives the file's name as text too): image files are taken, and the others named, so the
-    /// drop says why they weren't. Then, for a paste (not a drop), text wins over a picture: a spreadsheet's cells and a
-    /// page's selection come with a picture of themselves, and the field must paste the words. Then picture data.
-    /// A paste of only non-image files is the field's own (it pastes their names).
+    /// Files come first (Finder gives the file's name as text too): image files, PDFs and text-like files are taken
+    /// (QCFiles.classify), and the others named, so the drop says why they weren't. Then, for a paste (not a drop), text
+    /// wins over a picture: a spreadsheet's cells and a page's selection come with a picture of themselves, and the field
+    /// must paste the words. Then picture data. A paste of only files the chat can't take is the field's own (it pastes
+    /// their names).
     static func found(in pb: NSPasteboard, forPaste: Bool) -> Found? {
         var f = Found()
         let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         if !urls.isEmpty {
             for u in urls {
-                if isImageFile(u) { f.sources.append(.file(u)) } else { f.notImages.append(u.lastPathComponent) }
+                switch QCFiles.classify(u) {
+                case .image: f.items.append(.image(.file(u)))
+                case .pdf, .text: f.items.append(.file(u))
+                case .unsupported(let token): f.unsupported.append(token)
+                }
             }
-            if f.sources.isEmpty && forPaste { return nil }
+            if f.items.isEmpty && forPaste { return nil }
             return f
         }
         if forPaste, let s = pb.string(forType: .string), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
         for item in pb.pasteboardItems ?? [] {
             for t in dataTypes {
-                if let d = item.data(forType: t), !d.isEmpty { f.sources.append(.data(d)); break }
+                if let d = item.data(forType: t), !d.isEmpty { f.items.append(.image(.data(d))); break }
             }
         }
-        return f.sources.isEmpty ? nil : f
+        return f.items.isEmpty ? nil : f
     }
 
     /// Whether a drag carries something for the chat: files, or picture data (cheap: only the types are looked at, as it is
@@ -103,12 +113,12 @@ enum QCImages {
     }
 
     /// Whether the text field keeps a drop for itself: text with no files (the paste rule: a selection dragged out of Word,
-    /// Excel, Numbers or Pages comes with a picture of itself, and the field must take the words), or files that aren't
-    /// images (their paths go in as text, as they always did). Pictures, image files, and a mix with an image file are the
-    /// chat's.
+    /// Excel, Numbers or Pages comes with a picture of itself, and the field must take the words). Files of any kind are
+    /// the chat's, as are pictures: it takes the ones it can read and says why it left the others (a drop of only
+    /// files it can't read used to insert their paths in the field; it names them as refused now).
     static func fieldKeepsDrop(_ pb: NSPasteboard) -> Bool {
         let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        if !urls.isEmpty { return urls.allSatisfy { !isImageFile($0) } }
+        if !urls.isEmpty { return false }
         return (pb.types ?? []).contains(.string)
     }
 
@@ -219,21 +229,5 @@ enum QCImages {
         if let quality { props[kCGImageDestinationLossyCompressionQuality] = quality }
         CGImageDestinationAddImage(dest, image, props as CFDictionary)
         return CGImageDestinationFinalize(dest) ? out as Data : nil
-    }
-
-    // MARK: what is said
-
-    /// The one line that says what was left out (QCNote), or nil.
-    static func note(notImages: [String], failures: [Failure], overCount: Int, chatFull: Bool = false) -> String? {
-        var parts: [String] = []
-        if notImages.count == 1 { parts.append("Only images can be attached; \(notImages[0]) isn't one.") }
-        else if notImages.count > 1 { parts.append("Only images can be attached; \(notImages.count) of those files aren't.") }
-        if failures.contains(.notAnImage) && notImages.isEmpty { parts.append("That isn't an image Claude can read.") }
-        if failures.contains(.unreadable) { parts.append("An image couldn't be read.") }
-        if failures.contains(.tooManyPixels) { parts.append("An image has too many pixels to read (over 100 megapixels).") }
-        if failures.contains(.tooLarge) { parts.append("An image was too large to send, even scaled down.") }
-        if overCount > 0 { parts.append("Up to \(maxCount) images go with a message; \(overCount == 1 ? "one was" : "\(overCount) were") left out.") }
-        if chatFull { parts.append("This chat holds as many images as it can; start a new chat (⌘N) for more.") }
-        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 }

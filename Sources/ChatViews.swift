@@ -6,6 +6,7 @@
 // (QCStepControl).
 
 import AppKit
+import PDFKit
 import SwiftUI
 
 /// Claude's dark colours.
@@ -142,7 +143,7 @@ struct QCWindow: View {
                 QCAttachRow(model: model)
                 // the whole box above the picker row is the field: its padding and the gap to the row press into it
                 QCField(model: model, placeholder: "Reply…", size: 15,
-                        area: EdgeInsets(top: model.images.isEmpty && model.preparing == 0 ? QCSpace.boxPadding.top : 0, leading: QCSpace.boxPadding.leading, bottom: 8, trailing: QCSpace.boxPadding.trailing))
+                        area: EdgeInsets(top: model.images.isEmpty && model.files.isEmpty && model.preparing == 0 ? QCSpace.boxPadding.top : 0, leading: QCSpace.boxPadding.leading, bottom: 8, trailing: QCSpace.boxPadding.trailing))
                 QCControls(model: model, inBar: false)
             }
             .padding(QCSpace.boxPadding)
@@ -445,8 +446,8 @@ struct QCTurnView: View {
             HStack {
                 Spacer(minLength: 56)        // a bubble is at most about 82% of the chat's width
                 VStack(alignment: .trailing, spacing: 6) {
-                    if !turn.images.isEmpty { QCSentImages(images: turn.images) }
-                    if !turn.question.isEmpty {       // an image alone has no bubble
+                    if !turn.images.isEmpty || !turn.files.isEmpty { QCSentAttachments(images: turn.images, files: turn.files) }
+                    if !turn.question.isEmpty {       // pictures or files alone have no bubble
                         Text(turn.question)
                             .font(.system(size: 14))
                             .lineSpacing(3)
@@ -887,8 +888,8 @@ struct QCControls: View {
                 }
                 .buttonStyle(.plain).help("Stop")
             } else {
-                // images alone are a message; images still being read make it wait
-                let empty = (model.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.images.isEmpty)
+                // images or files alone are a message; ones still being read make it wait
+                let empty = (model.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.images.isEmpty && model.files.isEmpty)
                     || model.preparing > 0 || model.blocked
                 Button(action: model.send) {
                     Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold))
@@ -2258,7 +2259,7 @@ enum QuickChatRender {
             let shots = [sample(0.85, 0.45, 0.30, 1600, 1000), sample(0.25, 0.55, 0.85, 900, 900)].compactMap { $0 }
             switch state {
             case "images": m.images = shots; m.field = "What is different between these two?"
-            case "images-note": m.images = shots; m.imageNote = QCImages.note(notImages: ["notes.pdf"], failures: [], overCount: 0)
+            case "images-note": m.images = shots; m.imageNote = QCAttach.note(unsupported: [".docx"])
             case "images-one": m.images = Array(shots.prefix(1))
             case "images-chat":
                 var t = QuickChatTurn(question: "What is different between these two?", images: shots, answer: "The second one is cooler: its blues replace the first one's oranges. The layout is the same.", model: "Haiku 5.5")
@@ -2266,6 +2267,70 @@ enum QuickChatRender {
             default:
                 var t = QuickChatTurn(question: "", images: shots, answer: "Two gradients, one warm and one cool, each with a white label bar.", model: "Haiku 5.5")
                 t.phase = .done; t.seconds = 1.8; m.turns = [t]
+            }
+        // attached files (sample data): a PDF, a CSV and a text file as chips over the field (files; files-note: with a line
+        // about what was refused; files-mixed: pictures among them; files-long: names that don't fit; files-five: the
+        // most a message takes), and a sent message with them in the chat (files-chat, files-only-chat)
+        case "files", "files-note", "files-mixed", "files-long", "files-five", "files-chat", "files-only-chat":
+            func pdf(_ pages: Int, _ name: String) -> QCFile? {
+                let doc = PDFDocument()
+                for i in 0..<pages {
+                    let img = NSImage(size: NSSize(width: 200, height: 260), flipped: false) { r in
+                        NSColor.white.setFill(); r.fill()
+                        NSString(string: "Sample invoice \(42 + i)").draw(at: NSPoint(x: 20, y: 120), withAttributes: [.font: NSFont.systemFont(ofSize: 18)])
+                        return true
+                    }
+                    if let page = PDFPage(image: img) { doc.insert(page, at: i) }
+                }
+                guard let data = doc.dataRepresentation(), case .success(let f) = QCFiles.pdf(data, name: name) else { return nil }
+                return f
+            }
+            func text(_ s: String, _ name: String) -> QCFile? {
+                guard case .success(let f) = QCFiles.text(Data(s.utf8), name: name) else { return nil }
+                return f
+            }
+            let invoice = pdf(12, "Sample invoice 42.pdf"), sheet = text("a,b\n1,2\n3,4\n", "sample.csv")
+            let notes = text(String(repeating: "A line of sample notes.\n", count: 120), "notes.md")
+            let chips = [invoice, sheet, notes].compactMap { $0 }
+            for (i, c) in chips.enumerated() { c.order = i }
+            switch state {
+            case "files": m.files = Array(chips.prefix(2)); m.field = "What is in these two files?"
+            case "files-note":
+                m.files = Array(chips.prefix(1))
+                m.imageNote = QCAttach.note(unsupported: [".docx", ".zip"], refusals: [.tooLong("Annual report 2025 final.pdf", pages: 140, limit: 100)], files: true)
+            case "files-mixed":
+                func shot() -> QCImage? {
+                    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 400, bitsPerSample: 8, samplesPerPixel: 4,
+                                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                          let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+                    NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = ctx
+                    NSGradient(colors: [NSColor(deviceRed: 0.85, green: 0.45, blue: 0.3, alpha: 1), NSColor(deviceRed: 0.3, green: 0.85, blue: 0.45, alpha: 1)])?
+                        .draw(in: NSRect(x: 0, y: 0, width: 600, height: 400), angle: 35)
+                    NSGraphicsContext.restoreGraphicsState()
+                    guard let png = rep.representation(using: .png, properties: [:]), case .success(let img) = QCImages.prepare(png) else { return nil }
+                    return img
+                }
+                // the invoice first, then the picture, then the sheet: the row follows the order they came in
+                let picture = shot()
+                picture?.order = 1
+                chips[0].order = 0; chips[1].order = 2
+                m.images = [picture].compactMap { $0 }; m.files = Array(chips.prefix(2)); m.field = "Compare the picture with the invoice."
+            case "files-long":
+                let long = text("sample\n", "A very long file name for a quarterly report that goes on and on.txt")
+                let long2 = pdf(3, "Quarterly-financial-statements-2025-final-reviewed.pdf")
+                m.files = [long, long2, sheet].compactMap { $0 }
+                for (i, f) in m.files.enumerated() { f.order = i }
+            case "files-five":
+                let more = (1...5).compactMap { text("x\n", "file-\($0)-with-a-longer-name.txt") }
+                m.files = more
+                for (i, f) in m.files.enumerated() { f.order = i }
+            case "files-chat":
+                var t = QuickChatTurn(question: "What is in these two files? One line each.", files: Array(chips.prefix(2)),
+                                      answer: "- **Sample invoice 42.pdf:** a 12-page sample invoice.\n- **sample.csv:** a table with columns a and b and two rows of numbers.", model: "Haiku 5.5")
+                t.phase = .done; t.seconds = 2.6; m.turns = [t]; m.files = Array(chips.suffix(1))
+            default:
+                var t = QuickChatTurn(question: "", files: Array(chips.prefix(2)), answer: "A sample invoice (12 pages) and a small table with two columns.", model: "Haiku 5.5")
+                t.phase = .done; t.seconds = 2.0; m.turns = [t]
             }
         // the bar's usage indicator: the 5-hour window higher, the week higher, the 5-hour window full
         case "usage-5h": level.fiveHour = 78; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 20; m.level = level

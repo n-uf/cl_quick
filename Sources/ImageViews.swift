@@ -18,18 +18,37 @@ struct QCImageTile: View {
     }
 }
 
-/// The images attached to the message being written, in a row over the field; each can be removed.
+/// A picture or a file of a message, in the order they were attached.
+enum QCAttachItem: Identifiable {
+    case image(QCImage)
+    case file(QCFile)
+    var id: UUID { switch self { case .image(let i): return i.id; case .file(let f): return f.id } }
+    var order: Int { switch self { case .image(let i): return i.order; case .file(let f): return f.order } }
+
+    static func all(images: [QCImage], files: [QCFile]) -> [QCAttachItem] {
+        let items = images.map { QCAttachItem.image($0) } + files.map { QCAttachItem.file($0) }
+        return items.enumerated().sorted { ($0.element.order, $0.offset) < ($1.element.order, $1.offset) }.map(\.element)
+    }
+}
+
+/// The pictures and files attached to the message being written, in a row over the field; each can be removed.
 struct QCAttachRow: View {
     @ObservedObject var model: QuickChatModel
-    /// A thumbnail's side.
+    /// A thumbnail's side (and a file chip's height).
     static let tile: CGFloat = 44
 
     var body: some View {
-        if !model.images.isEmpty || model.preparing > 0 {
+        if !model.images.isEmpty || !model.files.isEmpty || model.preparing > 0 {
             HStack(spacing: 8) {
-                ForEach(model.images) { img in
-                    QCImageTile(image: img)
-                        .overlay(alignment: .topTrailing) { remove(img) }
+                ForEach(QCAttachItem.all(images: model.images, files: model.files)) { item in
+                    switch item {
+                    case .image(let img):
+                        QCImageTile(image: img).overlay(alignment: .topTrailing) { remove(img) }
+                    case .file(let file):
+                        // the ✕ sits half over the chip's corner, off its text
+                        QCFileChip(file: file)
+                            .overlay(alignment: .topTrailing) { QCRemoveImageButton(label: "Remove file") { model.removeFile(file.id) }.offset(x: 6, y: -6) }
+                    }
                 }
                 ForEach(0..<model.preparing, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: 8, style: .continuous).fill(QCColor.hover)
@@ -49,6 +68,7 @@ struct QCAttachRow: View {
 }
 
 struct QCRemoveImageButton: View {
+    var label = "Remove image"
     let action: () -> Void
     @State private var hover = false
     var body: some View {
@@ -63,17 +83,24 @@ struct QCRemoveImageButton: View {
         .qcPointingHand()
         .onHover { hover = $0 }
         .help("Remove")
-        .accessibilityLabel("Remove image")
+        .accessibilityLabel(label)
     }
 }
 
-/// A sent message's images in the chat, small, right-aligned above its bubble like the bubble itself.
-struct QCSentImages: View {
+/// A sent message's pictures and files in the chat, small, right-aligned above its bubble like the bubble itself (their
+/// chips, never what is in them).
+struct QCSentAttachments: View {
     let images: [QCImage]
+    let files: [QCFile]
     static let side: CGFloat = 44
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(images) { QCImageTile(image: $0, side: Self.side) }
+            ForEach(QCAttachItem.all(images: images, files: files)) { item in
+                switch item {
+                case .image(let img): QCImageTile(image: img, side: Self.side)
+                case .file(let file): QCFileChip(file: file)
+                }
+            }
         }
     }
 }
