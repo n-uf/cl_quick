@@ -54,6 +54,9 @@ struct QuickChatSettings: Codable, Equatable {
     var importedFromAudit = false
     /// About once a day, ask GitHub whether a newer release exists (Updates.swift); a key missing from the file is on.
     var checkForUpdates = true
+    /// Web links and search: Claude may open a link in a message and search the web (WebFetch, WebSearch; the pages count
+    /// toward the account's usage). On by default; a key missing from the file is on. It applies to the next chat.
+    var webLinks = true
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -66,6 +69,7 @@ struct QuickChatSettings: Codable, Equatable {
         dictationReturn = (try? c.decodeIfPresent(QuickChatDictationReturn.self, forKey: .dictationReturn)) ?? .showFirst
         importedFromAudit = (try? c.decodeIfPresent(Bool.self, forKey: .importedFromAudit)) ?? false
         checkForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checkForUpdates)) ?? true
+        webLinks = (try? c.decodeIfPresent(Bool.self, forKey: .webLinks)) ?? true
     }
 
     static func load() -> QuickChatSettings { Files.read(QuickChatSettings.self, Files.settings) ?? .init() }
@@ -204,6 +208,12 @@ final class QuickChatModel: ObservableObject {
     @Published var target: QuickChatTarget?
     @Published var choice: QuickChatModelChoice = .haiku
     @Published var thinking: QuickChatThinking = .off
+    /// Web links and search for this chat: the running `claude` is started with it (or without) and can't change it, so
+    /// it is part of what the process is keyed on. It follows the setting for a new chat; a chat on screen keeps its own.
+    var web = false
+    /// The setting changed: a bar with no chat on screen takes it at once (its idle `claude`, if any, is replaced on the
+    /// next message); a chat on screen keeps what it started with until a new chat (⌘N) takes the setting.
+    func webSettingChanged(_ on: Bool) { if turns.isEmpty { web = on } }
     /// The full name each choice answered with last ("Haiku 5.5"), for its key.
     @Published var knownModels: [QuickChatModelChoice: String] = [:]
     /// Asks the field to take the keyboard.
@@ -600,7 +610,7 @@ final class QuickChatModel: ObservableObject {
         accountNote = nil
         if dropsSwitch { dropSwitch() }
         let d = defaults()
-        choice = d.model; thinking = d.thinking
+        choice = d.model; thinking = d.thinking; web = d.webLinks
         focusTick += 1
     }
 
@@ -745,7 +755,7 @@ final class QuickChatModel: ObservableObject {
 
     private func start(_ q: String, images: [QCImage], path: String, target: QuickChatTarget) {
         let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
-                                   workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort)
+                                   workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort, web: web)
         let key = keyFor(path, target)
         // (target is the folder as read just now, freshTarget: the process must still be its account)
         let goesOn = process?.isRunning == true && key == processKey && (!trail.running || reportOwner == target.accountUUID)
@@ -774,9 +784,10 @@ final class QuickChatModel: ObservableObject {
 
     /// The same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
     /// aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
-    /// accounts may share one, and must not share a running claude.
+    /// accounts may share one, and must not share a running claude. Web links and search is part of it too: the tools are
+    /// fixed when `claude` starts, so a message in a chat whose setting differs from its process starts a new chat.
     private func keyFor(_ path: String, _ target: QuickChatTarget) -> String {
-        [path, target.configDir, target.workFolder, target.accountUUID ?? target.email ?? ""].joined(separator: "|")
+        [path, target.configDir, target.workFolder, target.accountUUID ?? target.email ?? "", web ? "web" : "noweb"].joined(separator: "|")
     }
 
     /// A new `claude` for the target, asked at once for the account's models and limits (nothing goes to a model).
@@ -835,7 +846,8 @@ final class QuickChatModel: ObservableObject {
         resolveClaude { [weak self] path in
             guard let self, let path, gen == self.generation, self.process == nil, !self.busy, let t = self.target else { return }
             let cmd = QuickChatCommand(claude: path, configDir: t.configDir, isDefaultDir: t.isDefaultDir,
-                                       workFolder: t.workFolder, model: self.resolvedModel.value, effort: self.effectiveThinking.effort)
+                                       workFolder: t.workFolder, model: self.resolvedModel.value, effort: self.effectiveThinking.effort,
+                                       web: self.web)
             if self.launch(cmd, key: self.keyFor(path, t), target: t) == nil { self.armIdle(Self.warmIdleSeconds) }
         }
     }
@@ -1141,6 +1153,7 @@ final class QuickChat {
     func start() {
         model.choice = settings.model
         model.thinking = settings.thinking
+        model.web = settings.webLinks
         model.resolveClaude = { [weak self] done in self?.resolveClaude(done) ?? done(nil) }
         model.hide = { [weak self] in self?.hide() }
         model.escape = { [weak self] in self?.escape() }
@@ -1207,10 +1220,12 @@ final class QuickChat {
         if !isOpen { open(profile: p.id) }
     }
 
-    /// Settings changed (the settings window): the shortcut is registered again and the next new chat uses the defaults.
+    /// Settings changed (the settings window): the shortcut is registered again and the next new chat uses the defaults
+    /// (web links and search too; a bar with no chat on screen takes it at once).
     func settingsChanged(_ s: QuickChatSettings) {
         settings = s
         s.save()
+        model.webSettingChanged(s.webLinks)
         applyShortcut()
     }
 

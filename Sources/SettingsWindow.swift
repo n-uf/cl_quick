@@ -1041,6 +1041,15 @@ struct GeneralPage: View {
                              : "Return after dictation sends the text at once.", face.muted)
                     }
                 }
+                GridLine(label: "Links and search") {
+                    VStack(alignment: .leading, spacing: 7) {
+                        SSwitch(isOn: Binding(get: { state.settings.webLinks },
+                                              set: { state.settings.webLinks = $0; state.save() }), on: "", off: "")
+                        note(state.settings.webLinks
+                             ? "Claude can open links and search the web. Pages count toward your usage."
+                             : "Claude can't open links or search the web; a link in a message is only text.", face.muted)
+                    }
+                }
                 GridLine(label: "Open at login") {
                     SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
                 }
@@ -1322,6 +1331,7 @@ enum SettingsRender {
                 .init(value: "claude-opus-4-8", displayName: "Opus 4.8", efforts: ["low", "medium", "high"])]
             if page == "general-fable" { st.settings.model = .fable; st.settings.thinking = .max }
             if page == "general-haiku" { st.settings.thinking = .max }
+            if page == "general-noweb" { st.settings.webLinks = false }
             let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.commandSpace.title + " opens Spotlight in macOS." : nil,
                                        registered: page == "general-taken" ? QuickChatShortcut.optionSpace.title + " is taken by another app." : nil,
                                        models: page == "general-nolist" ? nil : models)
