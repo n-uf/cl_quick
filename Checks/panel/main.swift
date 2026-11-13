@@ -2710,11 +2710,13 @@ do {
         m10.shutdown(); try? FileManager.default.removeItem(at: c10.dir)
     }
 
+    let fixtureNames = ((try? FileManager.default.contentsOfDirectory(atPath: fx.path)) ?? []).filter { $0.count > 4 }
     // incognito: nothing was written for the files, not in the app's folder, the work folder or the temp folder
     check("files: nothing was written to the app's support folder", ls(Files.folder) == support, "\(ls(Files.folder).count) vs \(support.count)")
     check("files: nothing was written to the work folder", ls(c.dir.appendingPathComponent("work")) == work, "\(ls(c.dir.appendingPathComponent("work")))")
     let newTmp = Set((try? FileManager.default.contentsOfDirectory(atPath: NSTemporaryDirectory())) ?? []).subtracting(tmp)
-        .filter { ["pdf", "txt", "csv", "md", "json", "swift", "ts"].contains(($0 as NSString).pathExtension.lowercased()) || $0.contains("sample") }
+        // (other programs write to the temp folder too: only a name of one of these fixtures counts as a copy of a file)
+        .filter { name in fixtureNames.contains { name.contains($0) } || name.contains("sample") }
     check("files: no copy of a file was made in the temp folder", newTmp.isEmpty, "\(newTmp)")
     try? FileManager.default.removeItem(at: c.dir)
     for d in ["files-order", "files-count", "files-refused"] {
