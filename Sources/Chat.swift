@@ -352,6 +352,8 @@ final class QuickChatModel: ObservableObject {
     private var appliedModel = "", appliedEffort: String?
     /// The question being answered reached `claude` (not still waiting for the folder to be read or `claude` to be found).
     private var messageSent = false
+    /// Claude Code's own message said the conversation is longer than the model takes (QuickChatParse.isTooLong).
+    private var sawTooLong = false
     /// A failed write waits this long for `claude`'s own exit report before the chat says it didn't take the message.
     static let sendFailedWait: TimeInterval = 1
     private var sendFailedWork: DispatchWorkItem?
@@ -819,6 +821,7 @@ final class QuickChatModel: ObservableObject {
         guard let first = target else { fail(.noProfile); return }
         let gen = generation
         messageSent = false
+        sawTooLong = false
         resolveClaude { [weak self] path in
             guard let self, gen == self.generation else { return }
             guard let path else { self.fail(.notInstalled); return }
@@ -1016,7 +1019,12 @@ final class QuickChatModel: ObservableObject {
             scheduleFlush()
         case .message(let text, let model, let error):
             if !model.isEmpty, !model.hasPrefix("<") { setModel(model, turn: i) }
-            if error == "authentication_failed", let target {
+            if model.hasPrefix("<"), QuickChatParse.isTooLong(text) {
+                // Claude Code's own message (the synthetic model, never the model's words) says the conversation outgrew the
+                // model: noted whatever its error field or the result's is_error say, and the answer ends the chat
+                sawTooLong = true
+                if turns[i].answer.isEmpty, pending.isEmpty { turns[i].problem = .refused(text: text) }
+            } else if error == "authentication_failed", let target {
                 turns[i].problem = .notSignedIn(profile: target.name, id: target.profileID)
                 if let u = reportOwner { authResult(target.profileID, u, true) }
             } else if error != nil || model.hasPrefix("<"), QuickChatParse.isLimit(error: error, text: text) {
@@ -1038,9 +1046,11 @@ final class QuickChatModel: ObservableObject {
             toolBreak = false; thinkBreak = false; turns[i].activity = nil
             turns[i].seconds = ms > 0 ? Double(ms) / 1000 : Date().timeIntervalSince(turns[i].started)
             if isError, turns[i].problem == nil, QuickChatParse.isLimit(error: nil, text: text) { turns[i].problem = .limitFull }
-            var tooLong = QuickChatParse.isTooLong(text)
-            if case .refused(let said)? = turns[i].problem, QuickChatParse.isTooLong(said) { tooLong = true }
-            if isError || turns[i].problem != nil {
+            // too long: Claude Code's own synthetic message said so (sawTooLong), or the result is an error with those words
+            // (the words of an answer that succeeded are never read: a page summary may talk about long prompts)
+            let tooLong = sawTooLong || (isError && QuickChatParse.isTooLong(text))
+            sawTooLong = false
+            if isError || turns[i].problem != nil || tooLong {
                 turns[i].phase = .failed
                 if turns[i].problem == nil { turns[i].problem = .refused(text: text.isEmpty ? "Claude Code couldn't answer." : text) }
                 // a full limit Claude Code refused on before it reported one: the account line says so too
@@ -1063,7 +1073,7 @@ final class QuickChatModel: ObservableObject {
             if case .notSignedIn? = turns[i].problem { endChat(.failed) }
             // the conversation outgrew the model (the API's "prompt is too long", Claude Code's "Prompt is too long"):
             // every later message in it would fail the same way, so the chat ends here; Retry asks in a new chat
-            else if isError, tooLong { endChat(.tooLong) }
+            else if tooLong { endChat(.tooLong) }
             else { armIdle() }
         case .control(let id, let error, _):
             // a refused `set_model` leaves the model Claude Code confirmed last answering, so the next message asks again
@@ -1183,7 +1193,7 @@ final class QuickChatModel: ObservableObject {
         stale.reset()
         messageSent = false
         sentImageBytes = 0          // the conversation that held them is gone with its process
-        sentPages = 0; sentText = 0
+        sentPages = 0; sentText = 0; sawTooLong = false
         spoken = false; lastEvent = .distantPast
         modelRequests = [:]
         process?.onEvent = { _ in }

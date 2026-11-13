@@ -157,7 +157,9 @@ enum QCFiles {
         // refused before it is read: what is over the limit is never loaded
         guard f.size <= limit else { return .failure(.tooLarge(name, size: f.size, limit: limit)) }
         // at most one byte past the limit is ever read, whatever the file does meanwhile
-        guard let data = try? handle.read(upToCount: limit + 1) else { return .failure(.unreadable(name)) }
+        // (read(upToCount:) gives nil, not empty data, for a file of no bytes: that is "empty", not "couldn't be read")
+        let data: Data
+        do { data = try handle.read(upToCount: limit + 1) ?? Data() } catch { return .failure(.unreadable(name)) }
         guard data.count <= limit else { return .failure(.tooLarge(name, size: data.count, limit: limit)) }
         return kind == .pdf ? pdf(data, name: name) : text(data, name: name)
     }

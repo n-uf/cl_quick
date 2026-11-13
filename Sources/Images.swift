@@ -43,6 +43,8 @@ enum QCImages {
     /// The images one chat holds (its process's conversation), in bytes of base64: the API refuses a request over 32 MB,
     /// and the whole conversation is in every request.
     static let chatCap = 20_000_000
+    /// A picture file of more bytes than this is refused unread (a 100-megapixel JPEG or HEIC is well under it; an uncompressed one of that size isn't).
+    static let maxFileBytes = 256_000_000
     /// A picture of more pixels than this (width × height) is refused unread.
     static let maxPixels = 100_000_000
     static let jpegQuality = 0.85
@@ -139,8 +141,15 @@ enum QCImages {
         switch source {
         case .data(let d): data = d
         case .file(let u):
-            // only a regular file (a link to one is followed): a link to /dev/zero or a pipe would be read forever
-            guard QCFiles.isRegularFile(u), let d = try? Data(contentsOf: u, options: [.mappedIfSafe]) else { return .failure(.unreadable) }
+            // only a regular file (a link to one is followed): a link to /dev/zero or a pipe would be read forever. Its size
+            // is looked at before anything is read (a picture file over `maxFileBytes` is refused unread: on a network or
+            // removable volume reading it would take minutes), and it is read from the descriptor that was looked at.
+            guard let f = QCFiles.openRegular(u) else { return .failure(.unreadable) }
+            let handle = FileHandle(fileDescriptor: f.fd, closeOnDealloc: true)
+            guard f.size <= maxFileBytes else { return .failure(.tooLarge) }
+            let d: Data
+            do { d = try handle.read(upToCount: maxFileBytes + 1) ?? Data() } catch { return .failure(.unreadable) }
+            guard d.count <= maxFileBytes else { return .failure(.tooLarge) }
             data = d
         }
         return prepare(data)

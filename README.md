@@ -139,7 +139,7 @@ minutes for a profile.
   and a sixth is left out with a line saying so. Text on the clipboard always pastes as text. An image alone is a
   message too. Each is scaled down in memory to 1568 px on its long side and sent as PNG (JPEG for a large photo) in
   the same connection as the text, so it stays incognito: no file is made for it, and the chat shows it only as a
-  thumbnail until it ends. A file you drop is read, never copied.
+  thumbnail until it ends. A file you drop is read, never copied; a picture file over 256 MB is refused unread.
 - **Files.** The same two ways take a PDF or a text file: drop files from Finder on the bar or the chat window, or copy
   them in Finder and press ⌘V. A PDF (up to 15 MB and 100 pages) and any text or code file (txt, Markdown, CSV, JSON,
   YAML, XML, HTML, logs, Swift, Python, JavaScript/TypeScript, Go, Rust, Java, C, Ruby, shell, SQL, TOML, CSS and the
