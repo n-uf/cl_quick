@@ -145,6 +145,13 @@ func parsed(_ d: Data) -> NSDictionary? { (try? JSONSerialization.jsonObject(wit
 check("file line: images only through attachments is the images-only line", parsed(QuickChatParse.userLine("hi", attachments: [.image(png1)])) == parsed(QuickChatParse.userLine("hi", images: [png1])))
 check("file line: no attachments is the plain string form", parsed(QuickChatParse.userLine("hi", attachments: [])) == parsed(QuickChatParse.userLine("hi")))
 
+// a conversation longer than the model takes: Claude Code's own words, the API's, and the 32 MB request limit's
+for (text, want) in [("Prompt is too long", true), ("API Error: 400 {\"message\":\"prompt is too long: 250000 tokens > 200000 maximum\"}", true),
+                     ("Request too large (max 32MB). Try with a smaller file.", true), ("Answer 1", false), ("That was too long ago.", false),
+                     ("You've hit your limit · resets 5pm", false), ("", false)] {
+    check("too long: \"\(text.prefix(30))\" is \(want ? "" : "not ")a conversation that outgrew the model", QuickChatParse.isTooLong(text) == want)
+}
+
 // model names
 for (id, want) in [("claude-haiku-5-5", "Haiku 5.5"), ("claude-sonnet-5-5-20261001", "Sonnet 5.5"), ("claude-opus-5-5", "Opus 5.5"),
                    ("claude-fable-5-1", "Fable 5.1"), ("claude-haiku-4-5-20251001", "Haiku 4.5"), ("", ""), ("<synthetic>", "<synthetic>")] {

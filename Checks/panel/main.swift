@@ -2303,8 +2303,9 @@ do {
     let folder = fx.appendingPathComponent("a folder"); try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
     // what a file is
-    check("files: limits are 32 MB, 100 pages, 1 MB, 5 attachments", QCFiles.maxPDFBytes == 32_000_000 && QCFiles.maxPDFPages == 100 && QCFiles.maxTextBytes == 1_000_000 && QCImages.maxCount == 5)
-    check("files: a PDF is held to what an empty chat takes as base64 (15 MB), under its own 32 MB", QCFiles.pdfLimit == 15_000_000, "\(QCFiles.pdfLimit)")
+    check("files: limits are 100 pages a PDF and a chat, 400 KB a text file and a chat, 5 attachments",
+          QCFiles.maxPDFPages == 100 && QCFiles.maxChatPages == 100 && QCFiles.maxTextBytes == 400_000 && QCFiles.maxChatText == 400_000 && QCImages.maxCount == 5)
+    check("files: a PDF is held to what an empty chat takes as base64: 15 MB", QCFiles.pdfLimit == 15_000_000, "\(QCFiles.pdfLimit)")
     func kind(_ u: URL) -> QCFiles.Kind { QCFiles.classify(u) }
     check("files: a .pdf is a PDF", kind(pdfFile) == .pdf)
     check("files: a picture is an image", kind(image) == .image)
@@ -2331,9 +2332,9 @@ do {
     check("files: the chips' symbols are the PDF's, the CSV's and the text file's", pdf?.symbol == "doc.richtext" && csv?.symbol == "chart.bar.doc.horizontal" && ok(QCFiles.prepare(mdFile))?.symbol == "doc.text")
     check("files: a byte-order mark is dropped, the text read as UTF-8", ok(QCFiles.prepare(bomFile))?.payload.source == .text("with a mark"))
     check("files: 101 pages is too long, and says so", why(QCFiles.prepare(longPDF)) == .tooLong("long.pdf", pages: 101, limit: 100) && why(QCFiles.prepare(longPDF))?.sentence == "long.pdf is too long: 101 pages, up to 100.", "\(String(describing: why(QCFiles.prepare(longPDF))?.sentence))")
-    check("files: a PDF over 32 MB is too large, unread", why(QCFiles.prepare(hugePDF))?.sentence == "huge.pdf is too large: 33 MB, up to 15 MB.", "\(String(describing: why(QCFiles.prepare(hugePDF))?.sentence))")
+    check("files: a PDF over 15 MB is too large, unread", why(QCFiles.prepare(hugePDF))?.sentence == "huge.pdf is too large: 33 MB, up to 15 MB.", "\(String(describing: why(QCFiles.prepare(hugePDF))?.sentence))")
     check("files: a PDF that would not fit an empty chat as base64 is too large", why(QCFiles.prepare(bigPDF))?.sentence == "big.pdf is too large: 16 MB, up to 15 MB.", "\(String(describing: why(QCFiles.prepare(bigPDF))?.sentence))")
-    check("files: a text file over 1 MB is too large, unread", why(QCFiles.prepare(bigText))?.sentence == "big.txt is too large: 2.4 MB, up to 1 MB.", "\(String(describing: why(QCFiles.prepare(bigText))?.sentence))")
+    check("files: a text file over 400 KB is too large, unread", why(QCFiles.prepare(bigText))?.sentence == "big.txt is too large: 2.4 MB, up to 400 KB.", "\(String(describing: why(QCFiles.prepare(bigText))?.sentence))")
     check("files: text that isn't UTF-8 is refused", why(QCFiles.prepare(latin1))?.sentence == "latin1.txt isn't UTF-8 text; cl_quick can't read it yet.", "\(String(describing: why(QCFiles.prepare(latin1))?.sentence))")
     check("files: a NUL byte makes it binary, refused the same", why(QCFiles.prepare(binaryText)) == .notUTF8("binary.txt"))
     check("files: an empty text file is refused", why(QCFiles.prepare(emptyFile))?.sentence == "empty.txt is empty.")
@@ -2538,6 +2539,177 @@ do {
         try? FileManager.default.removeItem(at: cx.dir)
     }
 
+    // ── review fixes ──
+    func land(_ m: QuickChatModel, _ f: QCImages.Found, _ secs: TimeInterval = 10) {
+        var landed = false
+        m.attach(f) { landed = true }
+        let end = Date().addingTimeInterval(secs)
+        while !landed, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    }
+    /// Runs `body` off the main thread and waits at most `secs`: false when it didn't come back (it would have hung).
+    func returns(within secs: TimeInterval, _ body: @escaping () -> Void) -> Bool {
+        let sem = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { body(); sem.signal() }
+        return sem.wait(timeout: .now() + secs) == .success
+    }
+
+    // links and pipes: only a regular file is read (a link to one is followed), never more than its limit
+    let big5G = sparse("five-gigabytes.bin", 5_000_000_000)
+    let linkBig = fx.appendingPathComponent("big-link.txt"), linkZero = fx.appendingPathComponent("zero-link.txt")
+    let linkImgZero = fx.appendingPathComponent("zero-link.png"), linkOK = fx.appendingPathComponent("ok-link.txt")
+    let fifo = fx.appendingPathComponent("pipe.txt"), linkFifo = fx.appendingPathComponent("pipe-link.txt")
+    try? FileManager.default.createSymbolicLink(at: linkBig, withDestinationURL: big5G)
+    try? FileManager.default.createSymbolicLink(at: linkZero, withDestinationURL: URL(fileURLWithPath: "/dev/zero"))
+    try? FileManager.default.createSymbolicLink(at: linkImgZero, withDestinationURL: URL(fileURLWithPath: "/dev/zero"))
+    try? FileManager.default.createSymbolicLink(at: linkOK, withDestinationURL: csvFile)
+    mkfifo(fifo.path, 0o600)
+    try? FileManager.default.createSymbolicLink(at: linkFifo, withDestinationURL: fifo)
+    var resBig: Result<QCFile, QCFiles.Refusal>?, resZero: Result<QCFile, QCFiles.Refusal>?, resFifo: Result<QCFile, QCFiles.Refusal>?
+    var resLinkFifo: Result<QCFile, QCFiles.Refusal>?, resImg: Result<QCImage, QCImages.Failure>?
+    let fast = returns(within: 10) {
+        resBig = QCFiles.prepare(linkBig); resZero = QCFiles.prepare(linkZero); resFifo = QCFiles.prepare(fifo)
+        resLinkFifo = QCFiles.prepare(linkFifo); resImg = QCImages.prepare(.file(linkImgZero))
+    }
+    check("links: none of a link to 5 GB, a link to /dev/zero, a pipe, a link to a pipe, an image link to /dev/zero is read (all came back at once)", fast)
+    check("links: a text link to a 5 GB file is too large, by the target's size, unread", why(resBig ?? .success(csv!))?.sentence == "big-link.txt is too large: 5 GB, up to 400 KB.", "\(String(describing: resBig.flatMap(why)?.sentence))")
+    check("links: a link to /dev/zero couldn't be read", resZero.flatMap(why) == .unreadable("zero-link.txt"))
+    check("links: a pipe couldn't be read, and neither could a link to one", resFifo.flatMap(why) == .unreadable("pipe.txt") && resLinkFifo.flatMap(why) == .unreadable("pipe-link.txt"))
+    if case .failure(let w)? = resImg { check("links: an image link to /dev/zero is unreadable", w == .unreadable) } else { check("links: an image link to /dev/zero is unreadable", false) }
+    check("links: a link to a regular file is read, under the link's name", ok(QCFiles.prepare(linkOK))?.payload == QuickChatDocumentData(title: "ok-link.txt", source: .text("a,b\n1,2")))
+    check("links: a regular file is still read", ok(QCFiles.prepare(csvFile)) != nil && QCFiles.isRegularFile(csvFile) && !QCFiles.isRegularFile(fifo) && !QCFiles.isRegularFile(URL(fileURLWithPath: "/dev/zero")))
+    // a text file of exactly 400 KB goes; one byte more doesn't
+    let t400 = put("exact.txt", Data(String(repeating: "x", count: 400_000).utf8)), t400p = put("over.txt", Data(String(repeating: "x", count: 400_001).utf8))
+    check("files: 400 KB of text goes", ok(QCFiles.prepare(t400)) != nil)
+    check("files: one byte more doesn't", why(QCFiles.prepare(t400p))?.sentence == "over.txt is too large: 400 KB, up to 400 KB.", "\(String(describing: why(QCFiles.prepare(t400p))?.sentence))")
+    // a restriction-only PDF (an owner password: no printing or copying) opens for anyone, and the API reads it
+    let ownerOnly = PDFDocument(data: pdfData)?.dataRepresentation(options: [PDFDocumentWriteOption.ownerPasswordOption: "owner"]) ?? Data()
+    check("files: a PDF with only an owner password is sent (the API reads it)", ok(QCFiles.pdf(ownerOnly, name: "owner.pdf"))?.payload.source == .pdf(ownerOnly))
+
+    // ⌘N while a read is stuck: Send isn't held; a late landing neither drops into the new chat nor leaves the count off
+    do {
+        let c5 = imageFixChat("files-stuck"), m5 = c5.m
+        let slow = noisyPNG(3000, 3000)
+        var landedSlow = false
+        m5.attach(QCImages.Found(sources: [.data(slow)])) { landedSlow = true }
+        check("stuck: a read is under way, so Send waits", m5.preparing == 1)
+        m5.newChat()
+        check("stuck: ⌘N clears the count, so Send is free at once", m5.preparing == 0)
+        var low = 0
+        var landedFast = false
+        m5.attach(QCImages.Found(sources: [.data(noisyPNG(20, 20))])) { landedFast = true }
+        check("stuck: a new batch counts for itself", m5.preparing == 1)
+        let end = Date().addingTimeInterval(12)
+        while !(landedSlow && landedFast), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)); low = min(low, m5.preparing) }
+        check("stuck: the late read of the old chat is dropped and the count never goes below zero", landedSlow && landedFast && low == 0 && m5.preparing == 0 && m5.images.count == 1, "\(landedSlow) \(landedFast) low=\(low) now=\(m5.preparing) images=\(m5.images.count)")
+        m5.field = "go"; m5.send()
+        check("stuck: and a message goes", m5.turns.count == 1)
+        m5.shutdown(); try? FileManager.default.removeItem(at: c5.dir)
+    }
+
+    // the order is reserved when the attach starts: a slow picture, then a quick file that lands first, keeps the picture first
+    do {
+        let c6 = imageFixChat("files-slotted"), m6 = c6.m
+        var landedSlow = false, landedFast = false
+        m6.attach(QCImages.Found(sources: [.data(noisyPNG(3000, 3000))])) { landedSlow = true }
+        m6.attach(QCImages.Found(files: [csvFile])) { landedFast = true }
+        var fileFirst = false
+        let end = Date().addingTimeInterval(12)
+        while !(landedSlow && landedFast), Date() < end {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            if m6.files.count == 1, m6.images.isEmpty { fileFirst = true }
+        }
+        check("order: the file landed first (the slow picture was still being read)", fileFirst)
+        check("order: and the picture still goes first", m6.images.count == 1 && m6.files.count == 1 && m6.images[0].order < m6.files[0].order
+              && QCAttachItem.all(images: m6.images, files: m6.files).map { if case .file = $0 { return "file" }; return "image" } == ["image", "file"])
+        m6.field = "x"; m6.send(); c6.answered(1)
+        check("order: and so does the message line", types(c6.lines.first ?? "") == ["image", "document", "text"], "\(c6.lines.map(types))")
+        m6.shutdown(); try? FileManager.default.removeItem(at: c6.dir)
+    }
+
+    // the room is looked at again when a read lands (a field refilled meanwhile can't make six), and what is being read
+    // makes the field not empty for what is asked again after a full limit
+    do {
+        let c7 = imageFixChat("files-room"), m7 = c7.m
+        c7.attach([.data(noisyPNG(30, 30)), .data(noisyPNG(32, 32)), .data(noisyPNG(34, 34)), .data(noisyPNG(36, 36))])
+        let spare = m7.images[0]
+        m7.attach(QCImages.Found(sources: [.data(noisyPNG(3000, 3000))]))
+        check("room: one more is being read (five in all)", m7.images.count == 4 && m7.preparing == 1)
+        var t = QuickChatTurn(question: "the old question", files: [csv!]); t.phase = .failed; t.problem = .limitFull
+        let saved = m7.images
+        m7.images = []; m7.files = []
+        check("room: with nothing in the field a full limit's question is asked again", m7.pendingQuestion() == "" && m7.pendingFiles().isEmpty, "\(m7.pendingQuestion())")
+        m7.turns = [t]
+        check("room: with a read under way the field isn't empty, so the old question isn't pending", m7.pendingQuestion() == "" && m7.pendingImages().isEmpty && m7.pendingFiles().isEmpty, "\(m7.pendingQuestion())")
+        m7.images = saved + [spare]          // the field refilled while it was being read (a restored question, say)
+        let end = Date().addingTimeInterval(12)
+        while m7.preparing > 0, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        check("room: it landed on a full field: still five, one left out, with the note", m7.images.count + m7.files.count == 5 && m7.imageNote == "Up to 5 images go with a message; one was left out.", "\(m7.images.count) \(String(describing: m7.imageNote))")
+        m7.turns = []
+        check("room: with nothing being read the old question is pending again", { m7.images = []; m7.files = []; m7.turns = [t]; return m7.pendingQuestion() == "the old question" && m7.pendingFiles().count == 1 }())
+        m7.turns = []
+        m7.shutdown(); try? FileManager.default.removeItem(at: c7.dir)
+    }
+
+    // a chat holds 100 PDF pages (the API's limit is per request, and the whole conversation is in each), 400 KB of text
+    do {
+        let pdf60 = put("sixty.pdf", makePDF(60)), pdf40 = put("forty.pdf", makePDF(40)), pdf10 = put("ten.pdf", makePDF(10))
+        let c8 = imageFixChat("files-totals"), m8 = c8.m
+        let pagesNote = "This chat holds up to 100 PDF pages; start a new chat (⌘N) for more."
+        c8.attach([], files: [pdf60, pdf60])
+        check("pages: 60 pages fit, a second 60 doesn't (100 in a chat)", m8.files.count == 1 && m8.imageNote == pagesNote, "\(m8.files.count) \(String(describing: m8.imageNote))")
+        c8.attach([], files: [pdf40])
+        check("pages: 40 more make exactly 100, which fits", m8.files.count == 2 && m8.imageNote == nil, "\(m8.files.count) \(String(describing: m8.imageNote))")
+        c8.attach([], files: [pdf10])
+        check("pages: 10 more don't", m8.files.count == 2 && m8.imageNote == pagesNote)
+        m8.removeFile(m8.files[0].id)
+        c8.attach([], files: [pdf10])
+        check("pages: ✕ gives the pages back", m8.files.count == 2 && m8.imageNote == nil && m8.files.map { $0.pages } == [40, 10], "\(m8.files.map { $0.pages as Any })")
+        m8.removeFile(m8.files[1].id)
+        m8.field = "x"; m8.send(); c8.answered(1)                        // 40 pages are in the conversation now
+        c8.attach([], files: [pdf60])
+        check("pages: pages already sent count: 40 sent, 60 fit", m8.files.count == 1 && m8.imageNote == nil)
+        m8.removeLastImage()
+        c8.attach([], files: [pdf60, pdf10])
+        check("pages: 40 sent, and 60 + 10 waiting: the 60 goes, the 10 doesn't", m8.files.map { $0.pages } == [60] && m8.imageNote == pagesNote, "\(m8.files.map { $0.pages as Any }) \(String(describing: m8.imageNote))")
+        m8.newChat()
+        c8.attach([], files: [pdf60, pdf40])
+        check("pages: a new chat starts from nothing", m8.files.map { $0.pages } == [60, 40] && m8.imageNote == nil, "\(m8.files.map { $0.pages as Any })")
+        m8.shutdown(); try? FileManager.default.removeItem(at: c8.dir)
+
+        let t300 = put("t300.txt", Data(String(repeating: "y", count: 300_000).utf8)), t200 = put("t200.txt", Data(String(repeating: "z", count: 200_000).utf8))
+        let t100 = put("t100.txt", Data(String(repeating: "w", count: 100_000).utf8))
+        let c9 = imageFixChat("files-text"), m9 = c9.m
+        let textNote = "This chat holds up to 400 KB of text files; start a new chat (⌘N) for more."
+        c9.attach([], files: [t300, t200])
+        check("text: 300 KB fits, 200 KB more doesn't (400 KB in a chat)", m9.files.count == 1 && m9.imageNote == textNote, "\(m9.files.count) \(String(describing: m9.imageNote))")
+        c9.attach([], files: [t100])
+        check("text: 100 KB more make exactly 400 KB, which fits", m9.files.count == 2 && m9.imageNote == nil)
+        m9.removeFile(m9.files[0].id)
+        c9.attach([], files: [t200])
+        check("text: ✕ gives the room back", m9.files.count == 2 && m9.imageNote == nil)
+        m9.field = "x"; m9.send(); c9.answered(1)                       // 300 KB are in the conversation
+        c9.attach([], files: [t200])
+        check("text: what was sent counts too", m9.files.isEmpty && m9.imageNote == textNote, "\(m9.files.count) \(String(describing: m9.imageNote))")
+        c9.attach([], files: [t100, pdf10])
+        check("text: a PDF has its own count: 100 KB of text and a PDF fit beside what was sent", m9.files.count == 2 && m9.imageNote == nil, "\(m9.files.count) \(String(describing: m9.imageNote))")
+        m9.shutdown(); try? FileManager.default.removeItem(at: c9.dir)
+    }
+
+    // an answer that fails because the conversation is too long ends the chat, with a line; the next message starts a new one
+    do {
+        let c10 = imageFixChat("files-toolong", mode: "toolong"), m10 = c10.m
+        m10.field = "a question"; m10.send()
+        let end = Date().addingTimeInterval(8)
+        while !(m10.turns.last?.phase == .failed), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        spin(0.3)
+        check("too long: the answer failed", m10.turns.last?.phase == .failed, "\(String(describing: m10.turns.last?.phase))")
+        check("too long: the chat ended with its own line", m10.ended == .tooLong && m10.ended?.line == "This chat got too long for the model; start a new chat (⌘N).", "\(String(describing: m10.ended))")
+        try? "mode=ok\nargs=\(c10.argsFile)\n".write(to: c10.dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+        m10.again(); c10.answered(1)
+        check("too long: Retry asks it again in a new chat, which answers", m10.turns.last?.phase == .done && m10.ended == nil, "\(String(describing: m10.turns.last?.phase)) \(String(describing: m10.ended))")
+        m10.shutdown(); try? FileManager.default.removeItem(at: c10.dir)
+    }
+
     // incognito: nothing was written for the files, not in the app's folder, the work folder or the temp folder
     check("files: nothing was written to the app's support folder", ls(Files.folder) == support, "\(ls(Files.folder).count) vs \(support.count)")
     check("files: nothing was written to the work folder", ls(c.dir.appendingPathComponent("work")) == work, "\(ls(c.dir.appendingPathComponent("work")))")
@@ -2598,7 +2770,8 @@ do {
     m.field = "order"
     m.attach(QCImages.Found(sources: [.data(noisyPNG(8, 8))]))
     m.send()
-    check("ready: Return while an old and a new batch are preparing waits", m.turns.isEmpty && m.preparing == 3 && m.sendWhenReady, "\(m.turns.count) \(m.preparing) \(m.sendWhenReady)")
+    // (the old chat's two are no longer counted: ⌘N cleared the count, and only the new chat's own batch holds Send)
+    check("ready: Return while an old and a new batch are preparing waits for the new one", m.turns.isEmpty && m.preparing == 1 && m.sendWhenReady, "\(m.turns.count) \(m.preparing) \(m.sendWhenReady)")
     waitLanded { m.preparing == 0 }
     waitLanded { m.turns.count == 1 && m.turns[0].phase == .done }
     check("ready: the old batch finishing last still sends the message, once, with the new picture",

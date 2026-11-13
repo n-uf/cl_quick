@@ -11,6 +11,8 @@
 #   mode=abort         half an answer, then it waits for an interrupt control request, ends that answer with an
 #                      aborted result, and answers the next message normally (its count of messages goes on)
 #   mode=limitword     an ordinary answer whose text talks about a rate limit ("…the rate limit reached its cap…")
+#   mode=toolong       Claude Code's refusal when the conversation is longer than the model takes ("Prompt is too long": a
+#                      synthetic message with error invalid_request, then an error result)
 #   mode=limit         Claude Code's refusal on a full limit (synthetic message with error rate_limit, an error result)
 #   mode=web           a web answer shaped like Claude Code 2.1.318's (captured from a real one, sample text): text ("Let me
 #                      open that page."), a WebFetch tool_use (stream events, then the assistant message), a rate_limit_event,
@@ -158,6 +160,12 @@ while IFS= read -r line; do
       # a real refusal: Claude Code's own message (synthetic model, error rate_limit), then an error result
       echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You'"'"'ve hit your limit · resets 5pm"}]},"error":"rate_limit","session_id":"'$sid'"}'
       echo '{"type":"result","subtype":"success","is_error":true,"result":"You'"'"'ve hit your limit · resets 5pm","duration_ms":5,"session_id":"'$sid'"}'
+      ;;
+    toolong)
+      # Claude Code's own message when the conversation is longer than the model takes (its text "Prompt is too long", a
+      # synthetic message with an API error, then an error result)
+      echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Prompt is too long"}]},"error":"invalid_request","session_id":"'$sid'"}'
+      echo '{"type":"result","subtype":"success","is_error":true,"result":"Prompt is too long","duration_ms":5,"session_id":"'$sid'"}'
       ;;
     auth)
       echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed","session_id":"'$sid'"}'
