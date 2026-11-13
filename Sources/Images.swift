@@ -33,7 +33,7 @@ final class QCImage: Identifiable, Equatable {
 }
 
 enum QCImages {
-    /// At most this many images go with one message.
+    /// At most this many attachments (pictures and files together, Attachments.swift) go with one message.
     static let maxCount = 5
     /// The longest side sent, in pixels.
     static let maxSide = 1568
