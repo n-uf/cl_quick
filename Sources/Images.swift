@@ -139,7 +139,8 @@ enum QCImages {
         switch source {
         case .data(let d): data = d
         case .file(let u):
-            guard let d = try? Data(contentsOf: u, options: [.mappedIfSafe]) else { return .failure(.unreadable) }
+            // only a regular file (a link to one is followed): a link to /dev/zero or a pipe would be read forever
+            guard QCFiles.isRegularFile(u), let d = try? Data(contentsOf: u, options: [.mappedIfSafe]) else { return .failure(.unreadable) }
             data = d
         }
         return prepare(data)

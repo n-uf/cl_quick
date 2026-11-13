@@ -7,10 +7,14 @@
 // Incognito, like the images: a file lives only in memory, from the file (read, never copied) to the process's pipe and
 // the chat's turn. No temp file, no cache, nothing for the app's folder.
 //
-// Limits (the same note words as the images: one muted line over the field): a PDF up to 32 MB and 100 pages, a text file
-// up to 1 MB, five attachments (pictures included) a message, and the chat's own cap of about 20 MB for everything
-// attached in it (QCImages.chatCap: the API takes 32 MB a request, and the whole conversation is in every request; a PDF
-// goes as base64, a third larger, so one that would not fit an empty chat is refused as too large on its own).
+// Limits (the same note words as the images: one muted line over the field): a PDF up to 15 MB and 100 pages, a text file
+// up to 400 KB, five attachments (pictures included) a message, and per chat (the whole conversation is in every request)
+// about 20 MB for everything attached (QCImages.chatCap; the API takes 32 MB a request, and a PDF goes as base64, a third
+// larger, so 15 MB is the most one PDF can be), 100 PDF pages and 400 KB of text files, each counting what was sent
+// earlier in the chat and what waits in the field.
+//
+// A file is opened without blocking and looked at through its descriptor: only a regular file is read (a link to one is
+// followed; a link to /dev/zero or a pipe is refused unread), and never more than its limit plus one byte.
 
 import AppKit
 import PDFKit
@@ -27,6 +31,8 @@ final class QCFile: Identifiable, Equatable {
     let pages: Int?
     /// What it adds to a request, in bytes: a PDF as base64, a text file as its UTF-8.
     let size: Int
+    /// What it adds to the chat's text total (0 for a PDF).
+    var textBytes: Int { pages == nil ? size : 0 }
     /// What its chip says under the name: "3 pages" for a PDF, its size for a text file.
     let detail: String
     /// Where it came in among the attachments (images and files share one order: the message lists them in it).
@@ -48,15 +54,18 @@ final class QCFile: Identifiable, Equatable {
 }
 
 enum QCFiles {
-    /// A PDF's size (on disk), at most.
-    static let maxPDFBytes = 32_000_000
     /// A PDF's pages, at most.
     static let maxPDFPages = 100
-    /// A text file's size, at most.
-    static let maxTextBytes = 1_000_000
+    /// The PDF pages a chat holds, at most: the API takes 100 pages in a request, and the whole conversation is in every
+    /// request, so this counts the pages sent earlier in the chat and those waiting in the field.
+    static let maxChatPages = 100
+    /// A text file's size, at most (1 MB of text is some 250,000 tokens: more than a request holds with room to answer).
+    static let maxTextBytes = 400_000
+    /// The text files a chat holds, in all (sent and waiting), at most.
+    static let maxChatText = 400_000
 
-    /// The most a PDF may be: 32 MB, and what an empty chat holds once it is base64 (a third larger).
-    static var pdfLimit: Int { min(maxPDFBytes, QCImages.chatCap / 4 * 3) }
+    /// The most a PDF may be: what an empty chat holds once it is base64 (a third larger): 15 MB.
+    static var pdfLimit: Int { QCImages.chatCap / 4 * 3 }
 
     // MARK: what a file is
 
@@ -118,16 +127,38 @@ enum QCFiles {
         }
     }
 
+    /// Opens `url` (a link is followed) for reading only when what it names is a regular file: a link to /dev/zero, a pipe
+    /// or a socket would be read forever or block, and a link's own size says nothing of its target's. Opened without
+    /// blocking and looked at through the descriptor itself (fstat), so there is no gap between the look and the read.
+    /// Returns the descriptor and the file's size, or nil when it isn't a regular file or can't be opened.
+    static func openRegular(_ url: URL) -> (fd: Int32, size: Int)? {
+        let fd = open(url.path, O_RDONLY | O_NONBLOCK)
+        guard fd >= 0 else { return nil }
+        var st = stat()
+        guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG else { close(fd); return nil }
+        return (fd, Int(st.st_size))
+    }
+
+    /// Whether `url` names a regular file (links followed), without reading it.
+    static func isRegularFile(_ url: URL) -> Bool {
+        guard let f = openRegular(url) else { return false }
+        close(f.fd)
+        return true
+    }
+
     /// Reads and checks one PDF or text file, in memory. Off the main thread is fine (a large PDF takes a moment).
     static func prepare(_ url: URL) -> Result<QCFile, Refusal> {
         let name = url.lastPathComponent
         let kind = classify(url)
         guard kind == .pdf || kind == .text else { return .failure(.unreadable(name)) }
-        guard let onDisk = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else { return .failure(.unreadable(name)) }
+        guard let f = openRegular(url) else { return .failure(.unreadable(name)) }
+        let handle = FileHandle(fileDescriptor: f.fd, closeOnDealloc: true)
         let limit = kind == .pdf ? pdfLimit : maxTextBytes
         // refused before it is read: what is over the limit is never loaded
-        guard onDisk <= limit else { return .failure(.tooLarge(name, size: onDisk, limit: limit)) }
-        guard let data = try? Data(contentsOf: url) else { return .failure(.unreadable(name)) }
+        guard f.size <= limit else { return .failure(.tooLarge(name, size: f.size, limit: limit)) }
+        // at most one byte past the limit is ever read, whatever the file does meanwhile
+        guard let data = try? handle.read(upToCount: limit + 1) else { return .failure(.unreadable(name)) }
+        guard data.count <= limit else { return .failure(.tooLarge(name, size: data.count, limit: limit)) }
         return kind == .pdf ? pdf(data, name: name) : text(data, name: name)
     }
 
@@ -135,6 +166,8 @@ enum QCFiles {
         guard data.count <= pdfLimit else { return .failure(.tooLarge(name, size: data.count, limit: pdfLimit)) }
         guard data.starts(with: Array("%PDF".utf8)) || data.prefix(1024).range(of: Data("%PDF".utf8)) != nil,
               let doc = PDFDocument(data: data), doc.pageCount > 0 else { return .failure(.unreadable(name)) }
+        // locked: it needs a password to open. One that only restricts (an owner password: no printing, copying) opens
+        // for anyone, and the API reads it (tried against Claude Code 2.1.318, 2026-11-13), so it is sent.
         if doc.isLocked { return .failure(.locked(name)) }
         guard doc.pageCount <= maxPDFPages else { return .failure(.tooLong(name, pages: doc.pageCount, limit: maxPDFPages)) }
         let n = doc.pageCount
@@ -195,7 +228,8 @@ enum QCAttach {
     /// The one line that says what was left out (QCNote), or nil. `files`: files are among the attachments, so the words
     /// say "attachments" where the images' own line says "images".
     static func note(unsupported: [String] = [], failures: [QCImages.Failure] = [], refusals: [QCFiles.Refusal] = [],
-                     overCount: Int = 0, chatFull: Bool = false, files: Bool = false) -> String? {
+                     overCount: Int = 0, chatFull: Bool = false, pagesFull: Bool = false, textFull: Bool = false,
+                     files: Bool = false) -> String? {
         var parts: [String] = []
         if let u = QCFiles.unsupportedLine(unsupported) { parts.append(u) }
         if failures.contains(.notAnImage) && unsupported.isEmpty { parts.append("That isn't an image Claude can read.") }
@@ -209,6 +243,8 @@ enum QCAttach {
         let max = QCImages.maxCount
         if overCount > 0 { parts.append("Up to \(max) \(word) go with a message; \(overCount == 1 ? "one was" : "\(overCount) were") left out.") }
         if chatFull { parts.append("This chat holds as many \(word) as it can; start a new chat (⌘N) for more.") }
+        if pagesFull { parts.append("This chat holds up to \(QCFiles.maxChatPages) PDF pages; start a new chat (⌘N) for more.") }
+        if textFull { parts.append("This chat holds up to \(QCFiles.bytes(QCFiles.maxChatText)) of text files; start a new chat (⌘N) for more.") }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 

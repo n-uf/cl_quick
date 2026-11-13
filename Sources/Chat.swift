@@ -159,10 +159,13 @@ enum QuickChatEnd: Equatable {
     case failed
     /// Claude Code ended on its own while the chat sat idle.
     case closed
+    /// An answer failed because the conversation (pictures and files included) is longer than the model takes.
+    case tooLong
 
     /// The plain line under the chat.
     var line: String {
         switch self {
+        case .tooLong: return "This chat got too long for the model; start a new chat (⌘N)."
         case .idle: return "This chat ended after 15 minutes idle. Nothing was saved."
         case .stopped: return "Stop ended this chat. Nothing was saved."
         case .failed: return "This chat ended. Retry asks the last question in a new chat."
@@ -356,8 +359,13 @@ final class QuickChatModel: ObservableObject {
     /// request carries all of them, and the API takes 32 MB a request, so past `imageCap` the chat takes no more (a new
     /// chat starts from nothing).
     private var sentImageBytes = 0
+    /// The PDF pages and the bytes of text files in that conversation (the API takes 100 pages a request; text is
+    /// tokens): like the bytes, each counts what was sent and what waits in the field, and starts over with a new chat.
+    private var sentPages = 0, sentText = 0
     /// The bytes the attachments waiting in the field add.
     private var waitingBytes: Int { images.reduce(0) { $0 + $1.base64Size } + files.reduce(0) { $0 + $1.size } }
+    private var waitingPages: Int { files.reduce(0) { $0 + ($1.pages ?? 0) } }
+    private var waitingText: Int { files.reduce(0) { $0 + $1.textBytes } }
     var imageCap = QCImages.chatCap
     /// Answers Stop gave up on whose `done` is still to come (see StaleAnswers), and the wait's limit.
     private var stale = StaleAnswers()
@@ -496,6 +504,10 @@ final class QuickChatModel: ObservableObject {
         preparing += take.count
         let unsupported = f.unsupported
         let generation = attachGeneration
+        // each item's place in the order is reserved now, not when its read lands: a slow PDF lands after a fast picture
+        // and still goes first
+        let firstOrder = attachOrder
+        attachOrder += take.count
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let results: [Prepared] = take.map {
                 switch $0 {
@@ -505,38 +517,45 @@ final class QuickChatModel: ObservableObject {
             }
             DispatchQueue.main.async {
                 guard let self else { return }
+                // the attachments were cleared meanwhile (⌘N, the chat removed): what was being read has no field to land
+                // in, and `preparing` was reset then (it counts the current field's batches only, so a late one can't
+                // push it below what is really in flight)
+                guard generation == self.attachGeneration else { done(); return }
                 self.preparing -= take.count
-                // the attachments were cleared meanwhile (⌘N, the chat removed): what was being read has no field to land in
-                // (a message typed after the clear may be waiting on a newer batch that finished first: this one was the
-                // last in the way, so it goes now)
-                guard generation == self.attachGeneration else {
-                    if self.preparing == 0, self.sendWhenReady { self.send() }
-                    done()
-                    return
-                }
                 var failures: [QCImages.Failure] = []
                 var refusals: [QCFiles.Refusal] = []
                 var held = self.sentImageBytes + self.waitingBytes
-                var chatFull = false
-                for r in results {
+                var pagesHeld = self.sentPages + self.waitingPages, textHeld = self.sentText + self.waitingText
+                // the room is looked at again now: the field may have been refilled meanwhile (a question restored by a
+                // switch of account, say); what other batches still being read will take is theirs already
+                var occupied = self.images.count + self.files.count + self.preparing
+                var overflow = over
+                var chatFull = false, pagesFull = false, textFull = false
+                for (n, r) in results.enumerated() {
                     switch r {
                     case .image(.success(let img)):
+                        if occupied >= QCImages.maxCount { overflow += 1; continue }
                         if held + img.base64Size > self.imageCap { chatFull = true; continue }
-                        held += img.base64Size
-                        img.order = self.attachOrder; self.attachOrder += 1
+                        held += img.base64Size; occupied += 1
+                        img.order = firstOrder + n
                         self.images.append(img)
                     case .image(.failure(let why)): failures.append(why)
                     case .file(.success(let file)):
+                        if occupied >= QCImages.maxCount { overflow += 1; continue }
                         if held + file.size > self.imageCap { chatFull = true; continue }
-                        held += file.size
-                        file.order = self.attachOrder; self.attachOrder += 1
+                        if let pg = file.pages, pagesHeld + pg > QCFiles.maxChatPages { pagesFull = true; continue }
+                        if file.pages == nil, textHeld + file.textBytes > QCFiles.maxChatText { textFull = true; continue }
+                        held += file.size; occupied += 1
+                        pagesHeld += file.pages ?? 0; textHeld += file.textBytes
+                        file.order = firstOrder + n
                         self.files.append(file)
                     case .file(.failure(let why)): refusals.append(why)
                     }
                 }
                 // a message waiting for these goes now (its note, if any, is said after: send() clears the old one)
                 if self.preparing == 0, self.sendWhenReady { self.send() }
-                self.say(QCAttach.note(unsupported: unsupported, failures: failures, refusals: refusals, overCount: over, chatFull: chatFull, files: withFiles))
+                self.say(QCAttach.note(unsupported: unsupported, failures: failures, refusals: refusals, overCount: overflow,
+                                       chatFull: chatFull, pagesFull: pagesFull, textFull: textFull, files: withFiles))
                 done()
             }
         }
@@ -627,7 +646,7 @@ final class QuickChatModel: ObservableObject {
         // a switch of account waiting to resend the question a full limit stopped (continueSwitched reads it from the
         // last turn or the field): the question moves to the field, so the switch still sends it, and it can be seen
         let waitingQuestion: String? = {
-            if case .waiting? = switchNotice, field.isEmpty, images.isEmpty, files.isEmpty, turns.last?.problem == .limitFull { return turns.last?.question }
+            if case .waiting? = switchNotice, field.isEmpty, images.isEmpty, files.isEmpty, preparing == 0, turns.last?.problem == .limitFull { return turns.last?.question }
             return nil
         }()
         let waitingImages: [QCImage] = waitingQuestion == nil ? [] : turns.last?.images ?? []
@@ -667,7 +686,9 @@ final class QuickChatModel: ObservableObject {
         returnHeld = false
         sendWhenReady = false
         if dictating || dictationNoticed { dictate(false) }
-        if !keepField { field = ""; images = []; files = []; imageNote = nil; attachGeneration += 1 }
+        // (what was still being read is dropped when it lands, and no longer counts: a read that never lands can't hold
+        // Send off, and the late ones can't push the count below zero)
+        if !keepField { field = ""; images = []; files = []; imageNote = nil; attachGeneration += 1; preparing = 0 }
         barProblem = nil
         accountNote = nil
         if dropsSwitch { dropSwitch() }
@@ -718,17 +739,18 @@ final class QuickChatModel: ObservableObject {
 
     /// What would be asked again on another profile or account: what's typed, else the question a full limit stopped.
     func pendingQuestion() -> String {
-        field.isEmpty && images.isEmpty && files.isEmpty ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
+        // (attachments still being read make the field not empty: what the field holds is what is sent, not the old question)
+        field.isEmpty && images.isEmpty && files.isEmpty && preparing == 0 ? (turns.last?.problem == .limitFull ? turns.last?.question ?? "" : "") : field
     }
 
     /// The images that go with pendingQuestion().
     func pendingImages() -> [QCImage] {
-        field.isEmpty && images.isEmpty && files.isEmpty && turns.last?.problem == .limitFull ? turns.last?.images ?? [] : images
+        field.isEmpty && images.isEmpty && files.isEmpty && preparing == 0 && turns.last?.problem == .limitFull ? turns.last?.images ?? [] : images
     }
 
     /// The files that go with pendingQuestion().
     func pendingFiles() -> [QCFile] {
-        field.isEmpty && images.isEmpty && files.isEmpty && turns.last?.problem == .limitFull ? turns.last?.files ?? [] : files
+        field.isEmpty && images.isEmpty && files.isEmpty && preparing == 0 && turns.last?.problem == .limitFull ? turns.last?.files ?? [] : files
     }
 
     /// The profile is on another account now: a new chat on the same profile (a chat may not go on across accounts),
@@ -845,7 +867,11 @@ final class QuickChatModel: ObservableObject {
         idleTimer?.invalidate()
         // queued: the line is written off the main thread; a write that then fails comes back through onSendFailed
         messageSent = process?.send(q, attachments: QCAttach.payloads(images: images, files: files)) == true
-        if messageSent { sentImageBytes += images.reduce(0) { $0 + $1.base64Size } + files.reduce(0) { $0 + $1.size } }
+        if messageSent {
+            sentImageBytes += images.reduce(0) { $0 + $1.base64Size } + files.reduce(0) { $0 + $1.size }
+            sentPages += files.reduce(0) { $0 + ($1.pages ?? 0) }
+            sentText += files.reduce(0) { $0 + $1.textBytes }
+        }
         else { fail(.stopped(detail: "Claude Code didn't take the message.")) }
     }
 
@@ -1012,6 +1038,8 @@ final class QuickChatModel: ObservableObject {
             toolBreak = false; thinkBreak = false; turns[i].activity = nil
             turns[i].seconds = ms > 0 ? Double(ms) / 1000 : Date().timeIntervalSince(turns[i].started)
             if isError, turns[i].problem == nil, QuickChatParse.isLimit(error: nil, text: text) { turns[i].problem = .limitFull }
+            var tooLong = QuickChatParse.isTooLong(text)
+            if case .refused(let said)? = turns[i].problem, QuickChatParse.isTooLong(said) { tooLong = true }
             if isError || turns[i].problem != nil {
                 turns[i].phase = .failed
                 if turns[i].problem == nil { turns[i].problem = .refused(text: text.isEmpty ? "Claude Code couldn't answer." : text) }
@@ -1032,7 +1060,11 @@ final class QuickChatModel: ObservableObject {
             guard turns.indices.contains(i) else { return }
             scrollTick += 1
             // a `claude` that says it isn't signed in is let go: Retry (after signing in) asks in a new chat
-            if case .notSignedIn? = turns[i].problem { endChat(.failed) } else { armIdle() }
+            if case .notSignedIn? = turns[i].problem { endChat(.failed) }
+            // the conversation outgrew the model (the API's "prompt is too long", Claude Code's "Prompt is too long"):
+            // every later message in it would fail the same way, so the chat ends here; Retry asks in a new chat
+            else if isError, tooLong { endChat(.tooLong) }
+            else { armIdle() }
         case .control(let id, let error, _):
             // a refused `set_model` leaves the model Claude Code confirmed last answering, so the next message asks again
             if let asked = modelRequests.removeValue(forKey: id) {
@@ -1151,6 +1183,7 @@ final class QuickChatModel: ObservableObject {
         stale.reset()
         messageSent = false
         sentImageBytes = 0          // the conversation that held them is gone with its process
+        sentPages = 0; sentText = 0
         spoken = false; lastEvent = .distantPast
         modelRequests = [:]
         process?.onEvent = { _ in }

@@ -407,6 +407,14 @@ enum QuickChatParse {
             || t.contains("out of extra usage")
     }
 
+    /// Claude Code's answer when the conversation is longer than the model takes: its own message "Prompt is too long" (an
+    /// error message of the synthetic model, and the result's text), or the API's "prompt is too long: N tokens > M
+    /// maximum" and "Request too large" when a request is over 32 MB, which Claude Code passes on.
+    static func isTooLong(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return t.contains("prompt is too long") || t.contains("request too large") || t.contains("request_too_large")
+    }
+
     /// "claude-haiku-5-5" → "Haiku 5.5"; "claude-sonnet-5-5-20261001" → "Sonnet 5.5"; anything else as it is.
     static func modelName(_ id: String) -> String {
         var parts = id.split(separator: "-").map(String.init)
