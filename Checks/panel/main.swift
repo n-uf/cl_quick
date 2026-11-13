@@ -2338,6 +2338,7 @@ do {
     check("files: text that isn't UTF-8 is refused", why(QCFiles.prepare(latin1))?.sentence == "latin1.txt isn't UTF-8 text; cl_quick can't read it yet.", "\(String(describing: why(QCFiles.prepare(latin1))?.sentence))")
     check("files: a NUL byte makes it binary, refused the same", why(QCFiles.prepare(binaryText)) == .notUTF8("binary.txt"))
     check("files: an empty text file is refused", why(QCFiles.prepare(emptyFile))?.sentence == "empty.txt is empty.")
+    check("files: a file of no bytes at all is empty too, not unreadable", why(QCFiles.prepare(put("zero-bytes.txt", Data())))?.sentence == "zero-bytes.txt is empty.", "\(String(describing: why(QCFiles.prepare(fx.appendingPathComponent("zero-bytes.txt")))?.sentence))")
     check("files: a file that isn't a PDF but says so couldn't be read", why(QCFiles.prepare(fakePDF))?.sentence == "fake.pdf couldn't be read.", "\(String(describing: why(QCFiles.prepare(fakePDF))?.sentence))")
     if FileManager.default.fileExists(atPath: lockedURL.path) {
         check("files: a password-protected PDF is refused", why(QCFiles.prepare(lockedURL))?.sentence == "locked.pdf is password-protected.", "\(String(describing: why(QCFiles.prepare(lockedURL))?.sentence)) \(String(describing: ok(QCFiles.prepare(lockedURL))?.detail))")
@@ -2577,6 +2578,17 @@ do {
     if case .failure(let w)? = resImg { check("links: an image link to /dev/zero is unreadable", w == .unreadable) } else { check("links: an image link to /dev/zero is unreadable", false) }
     check("links: a link to a regular file is read, under the link's name", ok(QCFiles.prepare(linkOK))?.payload == QuickChatDocumentData(title: "ok-link.txt", source: .text("a,b\n1,2")))
     check("links: a regular file is still read", ok(QCFiles.prepare(csvFile)) != nil && QCFiles.isRegularFile(csvFile) && !QCFiles.isRegularFile(fifo) && !QCFiles.isRegularFile(URL(fileURLWithPath: "/dev/zero")))
+    // a picture file has a size cap too (256 MB), looked at before anything is read, a link to one the same
+    let bigPNG = sparse("five-gigabytes.png", 5_000_000_000), bigPNGLink = fx.appendingPathComponent("big-link.png")
+    try? FileManager.default.createSymbolicLink(at: bigPNGLink, withDestinationURL: bigPNG)
+    var imgBig: Result<QCImage, QCImages.Failure>?, imgBigLink: Result<QCImage, QCImages.Failure>?, imgNone: Result<QCImage, QCImages.Failure>?
+    let imgFast = returns(within: 10) {
+        imgBig = QCImages.prepare(.file(bigPNG)); imgBigLink = QCImages.prepare(.file(bigPNGLink))
+        imgNone = QCImages.prepare(.file(fx.appendingPathComponent("zero-bytes.txt")))
+    }
+    func fail(_ r: Result<QCImage, QCImages.Failure>?) -> QCImages.Failure? { if case .failure(let w)? = r { return w }; return nil }
+    check("images: a 5 GB .png and a link to it are refused as too large, unread (they came back at once)", imgFast && fail(imgBig) == .tooLarge && fail(imgBigLink) == .tooLarge, "\(imgFast) \(String(describing: fail(imgBig))) \(String(describing: fail(imgBigLink)))")
+    check("images: the cap is 256 MB, and a file of no bytes isn't an image", QCImages.maxFileBytes == 256_000_000 && fail(imgNone) == .notAnImage, "\(String(describing: fail(imgNone)))")
     // a text file of exactly 400 KB goes; one byte more doesn't
     let t400 = put("exact.txt", Data(String(repeating: "x", count: 400_000).utf8)), t400p = put("over.txt", Data(String(repeating: "x", count: 400_001).utf8))
     check("files: 400 KB of text goes", ok(QCFiles.prepare(t400)) != nil)
@@ -2708,6 +2720,23 @@ do {
         m10.again(); c10.answered(1)
         check("too long: Retry asks it again in a new chat, which answers", m10.turns.last?.phase == .done && m10.ended == nil, "\(String(describing: m10.turns.last?.phase)) \(String(describing: m10.ended))")
         m10.shutdown(); try? FileManager.default.removeItem(at: c10.dir)
+
+        // the same words from Claude Code's own message without an error field and with a result that isn't an error: still
+        // the end of the chat (the synthetic model's message, not the result, says it)
+        let q = imageFixChat("files-toolong-quiet", mode: "toolongquiet"), mq = q.m
+        mq.field = "a question"; mq.send()
+        let endQ = Date().addingTimeInterval(8)
+        while !(mq.turns.last?.phase == .failed), Date() < endQ { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        spin(0.3)
+        check("too long (no error field, result not an error): the answer failed and the chat ended with its own line",
+              mq.turns.last?.phase == .failed && mq.ended == .tooLong && mq.turns.last?.answer.isEmpty == true, "\(String(describing: mq.turns.last?.phase)) \(String(describing: mq.ended)) \(String(describing: mq.turns.last?.answer))")
+        mq.shutdown(); try? FileManager.default.removeItem(at: q.dir)
+
+        // an ordinary answer that talks about a prompt being too long is just an answer
+        let t = imageFixChat("files-talkslong", mode: "talkslong"), mt = t.m
+        mt.field = "What is a prompt too long?"; mt.send(); t.answered(1)
+        check("too long: an answer (not Claude Code's own message) that talks about long prompts doesn't end the chat", mt.turns.last?.phase == .done && mt.ended == nil && mt.turns.last?.answer.contains("too long") == true, "\(String(describing: mt.turns.last?.phase)) \(String(describing: mt.ended))")
+        mt.shutdown(); try? FileManager.default.removeItem(at: t.dir)
     }
 
     let fixtureNames = ((try? FileManager.default.contentsOfDirectory(atPath: fx.path)) ?? []).filter { $0.count > 4 }

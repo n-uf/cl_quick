@@ -13,6 +13,8 @@
 #   mode=limitword     an ordinary answer whose text talks about a rate limit ("…the rate limit reached its cap…")
 #   mode=toolong       Claude Code's refusal when the conversation is longer than the model takes ("Prompt is too long": a
 #                      synthetic message with error invalid_request, then an error result)
+#   mode=toolongquiet  the same synthetic message without an error field, and a result with is_error false
+#   mode=talkslong     an ordinary answer whose text talks about a prompt being too long (not that)
 #   mode=limit         Claude Code's refusal on a full limit (synthetic message with error rate_limit, an error result)
 #   mode=web           a web answer shaped like Claude Code 2.1.318's (captured from a real one, sample text): text ("Let me
 #                      open that page."), a WebFetch tool_use (stream events, then the assistant message), a rate_limit_event,
@@ -163,9 +165,23 @@ while IFS= read -r line; do
       ;;
     toolong)
       # Claude Code's own message when the conversation is longer than the model takes (its text "Prompt is too long", a
-      # synthetic message with an API error, then an error result)
+      # synthetic message with an API error, then an error result): shaped like the usage-limit refusal above, which came
+      # from a real stream (the same path of Claude Code makes both: an assistant message of the synthetic model with
+      # `error` set, then a result with is_error true)
       echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Prompt is too long"}]},"error":"invalid_request","session_id":"'$sid'"}'
       echo '{"type":"result","subtype":"success","is_error":true,"result":"Prompt is too long","duration_ms":5,"session_id":"'$sid'"}'
+      ;;
+    toolongquiet)
+      # the same, without the error field and with a result that doesn't say it is an error: the synthetic message's own
+      # words are enough
+      echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Prompt is too long"}]},"session_id":"'$sid'"}'
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"Prompt is too long","duration_ms":5,"session_id":"'$sid'"}'
+      ;;
+    talkslong)
+      # an ordinary answer (not synthetic) that talks about long prompts: not a chat that outgrew the model
+      delta "A prompt is too long when it passes the context window."
+      echo '{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"text","text":"A prompt is too long when it passes the context window."}]},"session_id":"'$sid'"}'
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"A prompt is too long when it passes the context window.","duration_ms":1200,"session_id":"'$sid'"}'
       ;;
     auth)
       echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed","session_id":"'$sid'"}'
