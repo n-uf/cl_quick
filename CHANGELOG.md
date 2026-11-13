@@ -68,7 +68,7 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   dot says so ("Reading example.com…", "Searching the web for “…”…"); the answer is the whole reply, the text before and
   after the call, and ⌘⇧C copies it all. What a page says is data for the answer, never instructions; the pages are
   read for that answer only and nothing is stored. Settings ▸ General ▸ **Links and search**, on by default; off, no
-  tools at all, as before. It applies to the next chat. Pages count toward the account's usage.
+  tools at all, as before. A change applies from the next message (after the answer under way, if one is running): the chat then starts anew, since the tools are fixed when `claude` starts, and says so. Pages count toward the account's usage.
 - **Any shortcut**: five Space shortcuts or Other… (any key held with ⌘, ⌃ or ⌥), with no Accessibility permission. It
   warns only about real clashes: macOS's own shortcuts, or a key another app holds (when macOS refuses it).
 - **Incognito chats.** Quick chats are incognito: nothing is saved on this Mac. Your messages still go to Anthropic under

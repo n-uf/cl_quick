@@ -197,7 +197,10 @@ enum QuickChatSwitchNotice: Equatable {
 
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
 final class QuickChatModel: ObservableObject {
-    @Published var turns: [QuickChatTurn] = []
+    @Published var turns: [QuickChatTurn] = [] {
+        // a setting change that came while an answer was running applies as soon as the answer has ended
+        didSet { if wantedWeb != nil { syncWeb() } }
+    }
     @Published var field = "" {
         // the first keystroke after a chat ended: the dead chat goes (its turns, notices and the ended line), the bar is
         // what's typed in
@@ -208,12 +211,21 @@ final class QuickChatModel: ObservableObject {
     @Published var target: QuickChatTarget?
     @Published var choice: QuickChatModelChoice = .haiku
     @Published var thinking: QuickChatThinking = .off
-    /// Web links and search for this chat: the running `claude` is started with it (or without) and can't change it, so
-    /// it is part of what the process is keyed on. It follows the setting for a new chat; a chat on screen keeps its own.
+    /// Web links and search for the next message: the running `claude` is started with it (or without) and can't change
+    /// it, so it is part of what the process is keyed on: a message sent with another value starts a new chat (a new
+    /// `claude`, with the "New chat" line when there was one before).
     var web = false
-    /// The setting changed: a bar with no chat on screen takes it at once (its idle `claude`, if any, is replaced on the
-    /// next message); a chat on screen keeps what it started with until a new chat (⌘N) takes the setting.
-    func webSettingChanged(_ on: Bool) { if turns.isEmpty { web = on } }
+    /// The setting changed while an answer was running: it applies when that answer has ended.
+    private var wantedWeb: Bool?
+    /// The setting changed, in either direction: the next message takes it whenever no answer is running (an idle chat, an
+    /// ended one and an empty bar alike); while one runs, it applies right after it ends.
+    func webSettingChanged(_ on: Bool) { wantedWeb = on; syncWeb() }
+    private func syncWeb() {
+        guard let w = wantedWeb, !busy else { return }
+        web = w; wantedWeb = nil
+    }
+    /// A new chat starts from the setting as it is now.
+    private func takeWebDefault() { web = defaults().webLinks; wantedWeb = nil }
     /// The full name each choice answered with last ("Haiku 5.5"), for its key.
     @Published var knownModels: [QuickChatModelChoice: String] = [:]
     /// Asks the field to take the keyboard.
@@ -341,8 +353,13 @@ final class QuickChatModel: ObservableObject {
     private var stale = StaleAnswers()
     private var staleTimer: Timer?
     private var pending = "", pendingThinking = ""
-    /// A web tool ran in this answer and no text has come since: the next text starts a new paragraph.
-    private var toolBreak = false
+    /// A web tool ran in this answer and no text (thinking) has come since: the next starts a new paragraph.
+    private var toolBreak = false, thinkBreak = false
+    /// What joins text to the text before it as a paragraph: nothing after nothing or a blank line, one more line break
+    /// after one, a blank line after anything else.
+    static func paragraphGap(after have: String) -> String {
+        have.isEmpty || have.hasSuffix("\n\n") ? "" : have.hasSuffix("\n") ? "\n" : "\n\n"
+    }
     private var flushWork: DispatchWorkItem?
     private var idleTimer: Timer?
     /// The account line last drawn as full: a limit that resets is drawn again even though its numbers didn't change.
@@ -423,7 +440,7 @@ final class QuickChatModel: ObservableObject {
         images = []; imageNote = nil
         barProblem = nil
         // the chat on screen ended: this message starts a new one, with nothing from the old one
-        if ended != nil { turns = []; ended = nil; accountNote = nil }
+        if ended != nil { turns = []; ended = nil; accountNote = nil; takeWebDefault() }
         turns.append(QuickChatTurn(question: q, images: sent, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
         scrollTick += 1
         ask(q, images: sent)
@@ -526,7 +543,7 @@ final class QuickChatModel: ObservableObject {
         turns[i].phase = .stopped
         turns[i].seconds = Date().timeIntervalSince(turns[i].started)
         turns[i].activity = nil
-        pending = ""; pendingThinking = ""; toolBreak = false
+        pending = ""; pendingThinking = ""; toolBreak = false; thinkBreak = false
         // a message still waiting for its folder to be read (ask()) is let go: Retry or a new message asks on its own
         generation += 1
         // one that never reached `claude` needs no interrupt
@@ -543,12 +560,13 @@ final class QuickChatModel: ObservableObject {
             let q = turns[i].question, imgs = turns[i].images
             turns = [QuickChatTurn(question: q, images: imgs, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
             ended = nil; accountNote = nil
+            takeWebDefault()
             scrollTick += 1
             ask(q, images: imgs)
             return
         }
         turns[i].answer = ""; turns[i].thinking = ""; turns[i].problem = nil; turns[i].phase = .waiting
-        turns[i].activity = nil; toolBreak = false
+        turns[i].activity = nil; toolBreak = false; thinkBreak = false
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
         scrollTick += 1
@@ -574,6 +592,7 @@ final class QuickChatModel: ObservableObject {
         ended = nil
         if let q = waitingQuestion { field = q; images = waitingImages }
         turns = []
+        takeWebDefault()
         accountNote = nil
         barProblem = nil
         scrollTick += 1
@@ -610,7 +629,7 @@ final class QuickChatModel: ObservableObject {
         accountNote = nil
         if dropsSwitch { dropSwitch() }
         let d = defaults()
-        choice = d.model; thinking = d.thinking; web = d.webLinks
+        choice = d.model; thinking = d.thinking; web = d.webLinks; wantedWeb = nil
         focusTick += 1
     }
 
@@ -897,8 +916,7 @@ final class QuickChatModel: ObservableObject {
             // last or the first message alone)
             if toolBreak {
                 toolBreak = false
-                let have = turns[i].answer + pending
-                if !have.isEmpty, !have.hasSuffix("\n") { pending += "\n\n" }
+                pending += Self.paragraphGap(after: turns[i].answer + pending)
             }
             if turns[i].activity != nil { turns[i].activity = nil }
             pending += t
@@ -907,10 +925,19 @@ final class QuickChatModel: ObservableObject {
             // the reply so far is on screen first, then the tool's line under it
             flush()
             guard turns[i].busy else { return }
-            toolBreak = true
+            // a call that opens the answer: the thinking before it ended here, so "Thought for 5 s" leaves the fetch out
+            if turns[i].thinkingTitle != nil, turns[i].thinkingSeconds == nil, turns[i].answer.isEmpty {
+                turns[i].thinkingSeconds = Date().timeIntervalSince(turns[i].started)
+            }
+            toolBreak = true; thinkBreak = true
             turns[i].activity = line
             scrollTick += 1
         case .thinking(let t):
+            // thinking again after a tool ran: a new paragraph, not run on from the thinking before the call
+            if thinkBreak {
+                thinkBreak = false
+                pendingThinking += Self.paragraphGap(after: turns[i].thinking + pendingThinking)
+            }
             pendingThinking += t
             scheduleFlush()
         case .message(let text, let model, let error):
@@ -918,7 +945,9 @@ final class QuickChatModel: ObservableObject {
             if error == "authentication_failed", let target {
                 turns[i].problem = .notSignedIn(profile: target.name, id: target.profileID)
                 if let u = reportOwner { authResult(target.profileID, u, true) }
-            } else if QuickChatParse.isLimit(error: error, text: text) {
+            } else if error != nil || model.hasPrefix("<"), QuickChatParse.isLimit(error: error, text: text) {
+                // only an error message (or Claude Code's own, "<synthetic>") is read for limit words: an answer that
+                // merely talks about a rate limit, a page summary say, is not one
                 turns[i].problem = .limitFull
             } else if let error, turns[i].answer.isEmpty, pending.isEmpty {
                 turns[i].problem = .refused(text: text.isEmpty ? error : text)
@@ -932,7 +961,7 @@ final class QuickChatModel: ObservableObject {
             flush()
             guard turns[i].busy else { return }
             messageSent = false
-            toolBreak = false; turns[i].activity = nil
+            toolBreak = false; thinkBreak = false; turns[i].activity = nil
             turns[i].seconds = ms > 0 ? Double(ms) / 1000 : Date().timeIntervalSince(turns[i].started)
             if isError, turns[i].problem == nil, QuickChatParse.isLimit(error: nil, text: text) { turns[i].problem = .limitFull }
             if isError || turns[i].problem != nil {
@@ -1082,7 +1111,7 @@ final class QuickChatModel: ObservableObject {
         process = nil
         processKey = ""
         trail.processEnded()
-        pending = ""; pendingThinking = ""; toolBreak = false
+        pending = ""; pendingThinking = ""; toolBreak = false; thinkBreak = false
     }
 
     /// Answer pieces are drawn at most every 50 ms.

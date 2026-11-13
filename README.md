@@ -144,8 +144,9 @@ minutes for a profile.
   search the web. While it does, a muted line beside the dot says what it is doing ("Reading example.com…", "Searching
   the web for “…”…") and goes when the text resumes; the answer is the whole reply (the text before and after the call),
   and Copy and ⌘⇧C take all of it. Stop works while a page is being read. Pages count toward the account's usage, like
-  any answer. Settings ▸ General ▸ **Links and search** turns it off; a chat keeps the setting it started with, and the
-  next chat takes the change.
+  any answer. Settings ▸ General ▸ **Links and search** turns it off. A change applies from the next message (after the
+  answer under way, if one is running); the tools are fixed when `claude` starts, so that message starts a new chat and
+  the window says "New chat; nothing from the last one was carried over."
 - The window resizes from its edges and corners, and moves from any empty area of it (the header, the gaps around
   and between answers); the field, the buttons and the controls never move it.
 - The limits show in cl_audit's colours: green, amber from 50%, red from 80%, crimson from 95%. The numbers come from
@@ -182,7 +183,7 @@ minutes for a profile.
   is Off or the efforts the chosen model takes (Low, Medium, High, Extra, Max); a step it doesn't take moves to the
   nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
 - **Links and search**: on by default. "Claude can open links and search the web. Pages count toward your usage." Off:
-  Claude runs with no tools, as it did before, and a link in a message is only text. It applies to the next chat.
+  Claude runs with no tools, as it did before, and a link in a message is only text. A change applies from the next message, in a new chat.
 - **Open at login**: in the menu bar, ready for the shortcut.
 - **Updates**: on by default. About once a day cl_quick checks GitHub Releases and, when a newer version exists, the
   menu bar menu shows **Update available: 26.11.3**; it opens the release's page in your browser. Nothing is
