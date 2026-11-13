@@ -2432,6 +2432,98 @@ do {
     check("update setting: off survives a save", back?.checkForUpdates == false)
 }
 
+// ── web links and search: the chat on the stand-in `claude` (mode=web: text, a WebFetch call, its result, more text) ────────────
+do {
+    let passedBefore = passed, failedBefore = failed
+    defer { print("  web: \(passed - passedBefore) of \(passed + failed - passedBefore - failedBefore) checks passed") }
+    let tools = "ARG [--tools]\nARG [WebFetch,WebSearch]\nARG [--allowedTools]\nARG [WebFetch,WebSearch]\n"
+    let whole = "Let me open that page.\n\nIt is a sample page."
+    func waitFor(_ m: QuickChatModel, _ s: TimeInterval = 8, _ f: () -> Bool) {
+        let end = Date().addingTimeInterval(s)
+        while !f(), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.03)) }
+    }
+
+    // the whole answer: the text before and after the tool call, in one answer, the tool's result nowhere; the line is
+    // shown while the tool runs and gone when text resumes; ⌘⇧C copies the whole answer
+    let c = imageFixChat("web-whole", conf: "tooldelay=1.5\n", mode: "web"), m = c.m
+    m.web = true
+    let pb = NSPasteboard(name: NSPasteboard.Name("cl-quick-web-check-\(ProcessInfo.processInfo.processIdentifier)"))
+    pb.clearContents(); m.pasteboard = pb
+    defer { pb.releaseGlobally() }
+    m.field = "What is at https://www.example.com/page?"; m.send()
+    waitFor(m) { m.turns.last?.activity != nil }
+    check("web: while the tool runs the line says Reading example.com…", m.turns.last?.activity == "Reading example.com…", "\(String(describing: m.turns.last?.activity))")
+    check("web: the text before the call is on screen at that point", m.turns.last?.answer == "Let me open that page." && m.busy, "\(m.turns.last?.answer ?? "nil")")
+    check("web: the answer is not done while the tool runs (nothing to copy yet)", m.turns.last?.phase != .done && m.latestAnswer == nil && !m.copyLatestAnswer())
+    c.answered(1)
+    let t = m.turns[0]
+    check("web: the answer is the text before and after the call, in two paragraphs", t.answer == whole, t.answer)
+    check("web: the line is gone when the answer ends", t.activity == nil && t.phase == .done)
+    check("web: nothing the tool returned is on screen", !t.answer.contains("SECRET-TOOL-RESULT-TEXT") && !t.thinking.contains("SECRET"))
+    check("web: no problem, and its time is known", t.problem == nil && t.seconds != nil)
+    check("web: the process ran with the two web tools, allowed up front", ((try? String(contentsOfFile: c.argsFile, encoding: .utf8)) ?? "").contains(tools))
+    check("web: ⌘⇧C takes the final full answer", m.copyLatestAnswer() && pb.string(forType: .string) == whole, "\(pb.string(forType: .string) ?? "nil")")
+
+    // a follow-up in the same chat: another answer, whole again
+    m.field = "And?"; m.send(); c.answered(2)
+    check("web: a follow-up is whole too, in the same `claude`", m.turns.count == 2 && m.turns[1].answer == whole && m.turns[0].answer == whole, "\(m.turns.map(\.answer))")
+    check("web: ⌘⇧C then copies the latest, whole too", m.copyLatestAnswer() && pb.string(forType: .string) == whole)
+
+    // a WebSearch shows the searching line
+    let s = imageFixChat("web-search", conf: "tool=search\ntooldelay=1.5\n", mode: "web"), sm = s.m
+    sm.web = true
+    sm.field = "What is new?"; sm.send()
+    waitFor(sm) { sm.turns.last?.activity != nil }
+    check("web: a search shows Searching the web for “…”…", sm.turns.last?.activity == "Searching the web for “swift concurrency actors”…", "\(String(describing: sm.turns.last?.activity))")
+    s.answered(1)
+    check("web: and the line is gone after it", sm.turns[0].activity == nil && sm.turns[0].answer == whole)
+
+    // Stop while the tool runs: the answer ends where it is, the line goes, the same `claude` answers the next message
+    let h = imageFixChat("web-stop", mode: "webhold"), hm = h.m
+    hm.web = true
+    hm.field = "What is at that page?"; hm.send()
+    waitFor(hm) { hm.turns.last?.activity != nil }
+    check("web: the tool is running (its line is shown)", hm.turns.last?.activity == "Reading example.com…")
+    let pid = h.pid
+    hm.stop()
+    check("web: Stop mid-tool: stopped at once, the line gone, the text so far kept",
+          hm.turns[0].phase == .stopped && hm.turns[0].activity == nil && hm.turns[0].answer == "Let me open that page.", "\(hm.turns[0].phase) \(String(describing: hm.turns[0].activity)) \(hm.turns[0].answer)")
+    check("web: a stopped answer is what ⌘⇧C copies (its text is on screen)", hm.latestAnswer?.id == hm.turns[0].id)
+    hm.field = "Try again"; hm.send(); h.answered(2)
+    check("web: the next message is answered whole, by the same `claude` (the aborted answer's leftovers dropped)",
+          hm.turns.count == 2 && hm.turns[1].answer == whole && hm.turns[0].answer == "Let me open that page." && hm.ended == nil && h.pid == pid,
+          "\(hm.turns.map(\.answer)) \(String(describing: hm.ended))")
+    check("web: Stop leaves no line behind", hm.turns.allSatisfy { $0.activity == nil })
+
+    // the setting: off, claude runs with no tools at all; a chat on screen keeps its own until a new chat; an empty bar takes it
+    let o = imageFixChat("web-off", mode: "web"), om = o.m
+    om.web = false
+    om.field = "hi"; om.send(); o.answered(1)
+    check("web off: no tools, no allowed tools", { let r = (try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? ""; return r.contains("ARG [--tools]\nARG []\n") && !r.contains("--allowedTools") && !r.contains("WebFetch") }())
+    let pidOff = o.pid
+    om.webSettingChanged(true)
+    check("web: a chat on screen keeps its own setting when the setting changes", om.web == false)
+    om.field = "again"; om.send(); o.answered(2)
+    check("web: …so its next message goes to the same `claude`, still without tools", o.pid == pidOff && om.turns.count == 2)
+    var on = QuickChatSettings(); on.webLinks = true
+    om.defaults = { on }
+    om.newChat()
+    check("web: a new chat takes the setting", om.web == true)
+    om.field = "now with the web"; om.send(); o.answered(1)
+    check("web: …and starts a `claude` with the web tools", o.pid != pidOff && ((try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? "").contains(tools))
+    // an empty bar takes the change at once; its idle `claude` is replaced by the next message
+    om.newChat()
+    om.webSettingChanged(false)
+    check("web: a bar with no chat takes the setting at once", om.web == false)
+    check("web: a missing key is on; off and on are read; a wrong type is on",
+          (try? JSONDecoder().decode(QuickChatSettings.self, from: Data("{}".utf8)))?.webLinks == true
+          && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"webLinks":false}"#.utf8)))?.webLinks == false
+          && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"webLinks":"no"}"#.utf8)))?.webLinks == true
+          && QuickChatSettings().webLinks == true)
+    for x in [m, sm, hm, om] { x.shutdown() }
+    for d in [c.dir, s.dir, h.dir, o.dir] { try? FileManager.default.removeItem(at: d) }
+}
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

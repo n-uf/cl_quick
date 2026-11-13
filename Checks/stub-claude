@@ -10,6 +10,15 @@
 #   mode=slow        half an answer, then it waits for 30 s and doesn't listen (a Claude Code that can't be interrupted)
 #   mode=abort         half an answer, then it waits for an interrupt control request, ends that answer with an
 #                      aborted result, and answers the next message normally (its count of messages goes on)
+#   mode=web           a web answer shaped like Claude Code 2.1.318's (captured from a real one, sample text): text ("Let me
+#                      open that page."), a WebFetch tool_use (stream events, then the assistant message), a rate_limit_event,
+#                      the user message with the tool_result (a text that must never reach the screen), then more text
+#                      ("It is a sample page.") and a result holding only that last text, as the real one does
+#   mode=webhold       the first answer is mode=web's up to the tool call, then waits for an interrupt (the tool is still
+#                      running), ends with the tool_result of an interrupted tool and an aborted result; later answers are
+#                      mode=web's
+#   tool=search        in mode=web / webhold the call is a WebSearch (query "swift concurrency actors")
+#   tooldelay=SECONDS  mode=web waits that long between the tool call and its result (the tool is running)
 #   control requests   each one is answered with a control_response and written to args.ctl (subtype and what it sets);
 #                      `initialize` gets a list of models shaped like Claude Code 2.1.318's (sample names);
 #                      `get_usage` gets limits shaped like 2.1.318's (sample numbers: 5 hours 44%, week 12%)
@@ -29,6 +38,8 @@ QC_STUB_ARGS="$(sed -n 's/^args=//p' "$conf" 2>/dev/null)"
 usage="$(sed -n 's/^usage=//p' "$conf" 2>/dev/null)"
 usagedelay="$(sed -n 's/^usagedelay=//p' "$conf" 2>/dev/null)"
 account="$(sed -n 's/^account=//p' "$conf" 2>/dev/null)"
+tool="$(sed -n 's/^tool=//p' "$conf" 2>/dev/null)"
+tooldelay="$(sed -n 's/^tooldelay=//p' "$conf" 2>/dev/null)"
 org=""
 if [ -z "$account" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -f "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
   account="$(sed -n 's/.*"emailAddress":"\([^"]*\)".*/\1/p' "$CLAUDE_CONFIG_DIR/.claude.json" | head -1)"
@@ -94,7 +105,36 @@ while IFS= read -r line; do
   ctl "USER $n"
   [ -n "${QC_STUB_ARGS:-}" ] && printf '%s\n' "$line" >> "$QC_STUB_ARGS.in"     # the message as it came (images included)
   m="$mode"; [ "$mode" = abort ] && [ "$n" -gt 1 ] && m=ok      # abort mode aborts the first answer only
+  [ "$mode" = webhold ] && [ "$n" -gt 1 ] && m=web              # so does webhold
   case "$m" in
+    web|webhold)
+      delta "Let me open that page."
+      echo '{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"text","text":"Let me open that page."}]},"session_id":"'$sid'"}'
+      if [ "$tool" = search ]; then tname=WebSearch; tinput='{"query":"swift concurrency actors"}'
+      else tname=WebFetch; tinput='{"url":"https://www.example.com/page","prompt":"Summarize this page."}'; fi
+      echo '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_stub1","name":"'$tname'","input":{},"caller":{"type":"direct"}}},"session_id":"'$sid'"}'
+      echo '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}},"session_id":"'$sid'"}'
+      echo '{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_stub1","name":"'$tname'","input":'"$tinput"',"caller":{"type":"direct"}}]},"session_id":"'$sid'"}'
+      echo '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1794776400,"rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"utilization":0.62,"resetsAt":1794776400,"status":"allowed"}}},"session_id":"'$sid'"}'
+      if [ "$m" = webhold ]; then
+        # the tool is running: the next line is the interrupt; the tool ends with an error result, then the answer is aborted
+        while IFS= read -r line2; do
+          case "$line2" in *'"subtype":"interrupt"'*) break ;; esac
+        done
+        ctl "CTRL interrupt"
+        rid="$(printf '%s' "$line2" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')"
+        echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"still_queued":[]}}}'
+        echo '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"SECRET-TOOL-RESULT-TEXT interrupted","is_error":true,"tool_use_id":"toolu_stub1"}]},"session_id":"'$sid'"}'
+        echo '{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":30,"terminal_reason":"aborted_tools","session_id":"'$sid'"}'
+      else
+        [ -n "$tooldelay" ] && sleep "$tooldelay"
+        echo '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_stub1","type":"tool_result","content":"SECRET-TOOL-RESULT-TEXT the page says things"}]},"parent_tool_use_id":null,"session_id":"'$sid'","tool_use_result":{"bytes":577,"code":200,"codeText":"OK","result":"SECRET-TOOL-RESULT-TEXT the page says things","durationMs":1256,"url":"https://www.example.com/page"}}'
+        delta "It is a "
+        delta "sample page."
+        echo '{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"text","text":"It is a sample page."}]},"session_id":"'$sid'"}'
+        echo '{"type":"result","subtype":"success","is_error":false,"result":"It is a sample page.","duration_ms":1200,"session_id":"'$sid'"}'
+      fi
+      ;;
     abort)
       delta "Half an ans"
       # the next line is the interrupt; the answer ends with an aborted result, as Claude Code's does
