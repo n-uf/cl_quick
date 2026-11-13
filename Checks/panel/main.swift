@@ -2501,16 +2501,100 @@ do {
     om.field = "hi"; om.send(); o.answered(1)
     check("web off: no tools, no allowed tools", { let r = (try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? ""; return r.contains("ARG [--tools]\nARG []\n") && !r.contains("--allowedTools") && !r.contains("WebFetch") }())
     let pidOff = o.pid
+    // the setting turned on while the chat is idle: the next message takes it, in a new `claude` (the folder-change way:
+    // "New chat; nothing from the last one was carried over.")
     om.webSettingChanged(true)
-    check("web: a chat on screen keeps its own setting when the setting changes", om.web == false)
-    om.field = "again"; om.send(); o.answered(2)
-    check("web: …so its next message goes to the same `claude`, still without tools", o.pid == pidOff && om.turns.count == 2)
+    check("web: an idle chat takes a changed setting for its next message", om.web == true)
+    om.field = "again"; om.send(); o.answered(1)
+    check("web: …which starts a new `claude` with the web tools, and says it is a new chat",
+          o.pid != pidOff && ((try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? "").contains(tools)
+          && om.turns.count == 1 && om.accountNote?.contains("New chat") == true, "\(o.pid) \(pidOff) \(om.turns.count) \(String(describing: om.accountNote))")
     var on = QuickChatSettings(); on.webLinks = true
     om.defaults = { on }
     om.newChat()
     check("web: a new chat takes the setting", om.web == true)
-    om.field = "now with the web"; om.send(); o.answered(1)
-    check("web: …and starts a `claude` with the web tools", o.pid != pidOff && ((try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? "").contains(tools))
+
+    // turned off in the middle of an idle chat: the next message has no web tools, whatever the chat had before
+    let pidOn = o.pid
+    om.field = "with the web"; om.send(); o.answered(1)
+    let pidWeb = o.pid
+    check("web: a chat started with the web tools has them", pidWeb != pidOn && ((try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? "").contains(tools))
+    var off = QuickChatSettings(); off.webLinks = false
+    om.defaults = { off }
+    om.webSettingChanged(false)
+    check("web: the setting off reaches the chat on screen at once (nothing is running)", om.web == false)
+    om.field = "and now?"; om.send(); o.answered(1)
+    let r1 = (try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? ""
+    check("web: …so its next message has no web tools and no allowed tools",
+          o.pid != pidWeb && r1.contains("ARG [--tools]\nARG []\n") && !r1.contains("--allowedTools") && !r1.contains("WebFetch") && om.accountNote?.contains("New chat") == true, r1)
+
+    // turned off while an answer is running: that answer goes on with the tools it started with, the change applies when it ends
+    let b = imageFixChat("web-busy", conf: "tooldelay=1.5\n", mode: "web"), bm = b.m
+    bm.web = true
+    bm.defaults = { off }
+    bm.field = "slow page"; bm.send()
+    waitFor(bm) { bm.turns.last?.activity != nil }
+    bm.webSettingChanged(false)
+    check("web: a change while an answer runs waits for it to end", bm.web == true && bm.busy)
+    b.answered(1)
+    check("web: …and applies right after it", bm.web == false && bm.turns[0].answer == whole, "\(bm.web) \(bm.turns[0].answer)")
+    let pidBusy = b.pid
+    bm.field = "next"; bm.send(); b.answered(1)
+    let r2 = (try? String(contentsOfFile: b.argsFile, encoding: .utf8)) ?? ""
+    check("web: …so the next message has no web tools, in a new `claude`", b.pid != pidBusy && r2.contains("ARG [--tools]\nARG []\n") && !r2.contains("WebFetch"), r2)
+
+    // a chat that ended (the stand-in dies mid-answer) with the web tools: the setting turned off, the next message has none
+    func rewrite(_ x: ImageFixChat, mode: String) {
+        try? "mode=\(mode)\nargs=\(x.argsFile)\n".write(to: x.dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+    }
+    let e = imageFixChat("web-ended", mode: "crash"), em = e.m
+    em.web = true; em.defaults = { off }
+    em.field = "hi"; em.send()
+    waitFor(em) { em.ended != nil }
+    check("web: the chat with the web tools ended", em.ended == .failed && (try? String(contentsOfFile: e.argsFile, encoding: .utf8))?.contains(tools) == true, "\(String(describing: em.ended))")
+    rewrite(e, mode: "web")
+    em.webSettingChanged(false)
+    check("web: the setting off reaches an ended chat too", em.web == false)
+    em.field = "once more"; em.send(); e.answered(1)
+    let r3 = (try? String(contentsOfFile: e.argsFile, encoding: .utf8)) ?? ""
+    check("web: …so the next message starts a new chat with no tools", r3.contains("ARG [--tools]\nARG []\n") && !r3.contains("WebFetch") && em.turns.count == 1, r3)
+    // Retry of an ended chat, and the first key after it, start from the setting as it is
+    let e2 = imageFixChat("web-ended2", mode: "crash"), em2 = e2.m
+    em2.web = true; em2.defaults = { off }
+    em2.field = "hi"; em2.send()
+    waitFor(em2) { em2.ended != nil }
+    rewrite(e2, mode: "web")
+    em2.again(); e2.answered(1)
+    let r4 = (try? String(contentsOfFile: e2.argsFile, encoding: .utf8)) ?? ""
+    check("web: Retry of an ended chat starts from the setting (off): no tools", r4.contains("ARG [--tools]\nARG []\n") && !r4.contains("WebFetch"), r4)
+    let e3 = imageFixChat("web-ended3", mode: "crash"), em3 = e3.m
+    em3.web = true; em3.defaults = { off }
+    em3.field = "hi"; em3.send()
+    waitFor(em3) { em3.ended != nil }
+    em3.field = "x"       // the first key after the chat ended: the dead chat goes
+    check("web: the first key after an ended chat clears it and takes the setting", em3.ended == nil && em3.turns.isEmpty && em3.web == false)
+    for x in [em, em2, em3, bm] { x.shutdown() }
+    for d in [b.dir, e.dir, e2.dir, e3.dir] { try? FileManager.default.removeItem(at: d) }
+
+    // an answer that only talks about rate limits is not a limit (nothing blocked, the next message goes); a real refusal is
+    let lw = imageFixChat("web-limitword", mode: "limitword"), lwm = lw.m
+    lwm.field = "What does a 429 mean?"; lwm.send(); lw.answered(1)
+    check("limit words: an ordinary answer that mentions a rate limit is a plain answer", lwm.turns[0].problem == nil && lwm.turns[0].phase == .done
+          && lwm.turns[0].answer.contains("rate limit reached"), "\(String(describing: lwm.turns[0].problem)) \(lwm.turns[0].phase)")
+    check("limit words: …and blocks nothing", !lwm.blocked && lwm.level?.refusedUntil == nil)
+    lwm.field = "again"; lwm.send(); lw.answered(2)
+    check("limit words: …so the next message goes through", lwm.turns.count == 2 && lwm.turns[1].phase == .done)
+    let lr = imageFixChat("web-limitreal", mode: "limit"), lrm = lr.m
+    lrm.field = "hello"; lrm.send()
+    waitFor(lrm) { lrm.turns.last?.phase == .failed }
+    check("limit words: Claude Code's own refusal is still a full limit", lrm.turns[0].phase == .failed && lrm.turns[0].problem == .limitFull, "\(String(describing: lrm.turns[0].problem))")
+    check("limit words: …and blocks the account until it resets", lrm.blocked, "\(String(describing: lrm.level))")
+    lwm.shutdown(); lrm.shutdown()
+    for d in [lw.dir, lr.dir] { try? FileManager.default.removeItem(at: d) }
+    // a text joins the one before it as a paragraph: after one line break one more, after none a blank line
+    check("web: the paragraph gap is nothing at the start, 2 breaks after text, 1 after a line break, 0 after a blank line",
+          QuickChatModel.paragraphGap(after: "").isEmpty && QuickChatModel.paragraphGap(after: "a") == "\n\n"
+          && QuickChatModel.paragraphGap(after: "a\n") == "\n" && QuickChatModel.paragraphGap(after: "a\n\n").isEmpty)
     // an empty bar takes the change at once; its idle `claude` is replaced by the next message
     om.newChat()
     om.webSettingChanged(false)

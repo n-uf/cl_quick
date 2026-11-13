@@ -10,6 +10,8 @@
 #   mode=slow        half an answer, then it waits for 30 s and doesn't listen (a Claude Code that can't be interrupted)
 #   mode=abort         half an answer, then it waits for an interrupt control request, ends that answer with an
 #                      aborted result, and answers the next message normally (its count of messages goes on)
+#   mode=limitword     an ordinary answer whose text talks about a rate limit ("…the rate limit reached its cap…")
+#   mode=limit         Claude Code's refusal on a full limit (synthetic message with error rate_limit, an error result)
 #   mode=web           a web answer shaped like Claude Code 2.1.318's (captured from a real one, sample text): text ("Let me
 #                      open that page."), a WebFetch tool_use (stream events, then the assistant message), a rate_limit_event,
 #                      the user message with the tool_result (a text that must never reach the screen), then more text
@@ -145,6 +147,17 @@ while IFS= read -r line; do
       rid="$(printf '%s' "$line2" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')"
       echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$rid'","response":{"still_queued":[]}}}'
       echo '{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":30,"terminal_reason":"aborted_streaming","session_id":"'$sid'"}'
+      ;;
+    limitword)
+      # an ordinary answer (a page's summary, say) that talks about rate limits: not a limit
+      delta "A 429 means the rate limit reached its cap, so retry later."
+      echo '{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"text","text":"A 429 means the rate limit reached its cap, so retry later."}]},"session_id":"'$sid'"}'
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"A 429 means the rate limit reached its cap, so retry later.","duration_ms":1200,"session_id":"'$sid'"}'
+      ;;
+    limit)
+      # a real refusal: Claude Code's own message (synthetic model, error rate_limit), then an error result
+      echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You'"'"'ve hit your limit · resets 5pm"}]},"error":"rate_limit","session_id":"'$sid'"}'
+      echo '{"type":"result","subtype":"success","is_error":true,"result":"You'"'"'ve hit your limit · resets 5pm","duration_ms":5,"session_id":"'$sid'"}'
       ;;
     auth)
       echo '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"error":"authentication_failed","session_id":"'$sid'"}'

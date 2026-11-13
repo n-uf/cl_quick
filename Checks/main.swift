@@ -64,6 +64,13 @@ check("web: a plain message is one event", QuickChatParse.events(line(#"{"type":
       == [.message(text: "Hi", model: "claude-haiku-5-5", error: nil)])
 check("web: a stream line is one event, ignored ones none", QuickChatParse.events(line(#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"x"}}}"#)) == [.text("x")]
       && QuickChatParse.events(line("not json")).isEmpty)
+// what a sub-agent says (parent_tool_use_id is a string) is not the chat's answer: no text, no message, no tool line; the
+// top-level lines carry null there and are read as always
+check("web: a sub-agent's text delta is ignored", QuickChatParse.events(line(#"{"type":"stream_event","parent_tool_use_id":"toolu_9","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"x"}}}"#)).isEmpty)
+check("web: a sub-agent's message and its tool call are ignored", QuickChatParse.events(line(#"{"type":"assistant","parent_tool_use_id":"toolu_9","message":{"model":"claude-haiku-5-5","content":[{"type":"text","text":"sub"},{"type":"tool_use","id":"t","name":"WebFetch","input":{"url":"https://example.com"}}]}}"#)).isEmpty)
+check("web: a null parent_tool_use_id is the chat's own", QuickChatParse.events(line(#"{"type":"assistant","parent_tool_use_id":null,"message":{"model":"claude-haiku-5-5","content":[{"type":"text","text":"Hi"}]}}"#))
+      == [.message(text: "Hi", model: "claude-haiku-5-5", error: nil)]
+      && QuickChatParse.events(line(#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"x"}}}"#)) == [.text("x")])
 // a call is dropped with the rest of an answer Stop gave up on
 var staleWeb = StaleAnswers(); staleWeb.abandon()
 check("web: a tool call of an abandoned answer is dropped", staleWeb.fate(of: .tool(line: "Reading example.com…")) == .drop)
@@ -143,9 +150,12 @@ check("incognito with thinking too", a2.contains("--no-session-persistence") && 
 
 // web links and search. Off (the default of the struct, and what the usage-only `claude` of the menu runs): exactly the
 // arguments there were before the setting existed. On: the two web tools, allowed up front, and nothing else changes.
+// (the prompt as it was before the setting existed, pinned as it was written: not derived from the code under test)
+let oldPrompt = "You are Claude, answering in a small floating chat window on the user's Mac. Answer directly and briefly unless asked for more. Use Markdown; put code in fenced blocks with the language named. You have no tools here."
+check("web off: the prompt is the old one, word for word", QuickChatCommand.systemPrompt == oldPrompt, QuickChatCommand.systemPrompt)
 let offArguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                     "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
-                    "--system-prompt", QuickChatCommand.systemPrompt, "--model", "haiku", "--settings", #"{"alwaysThinkingEnabled":false}"#]
+                    "--system-prompt", oldPrompt, "--model", "haiku", "--settings", #"{"alwaysThinkingEnabled":false}"#]
 check("web off: the arguments are exactly what they were", a == offArguments && !cmd.web, a)
 var cw = cmd; cw.web = true
 let aw = cw.arguments
