@@ -121,7 +121,7 @@ minutes for a profile.
   - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
   - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
   - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, Return, ⇧Return, ⌘N, ⌘D
-    (Dictation on/off), Esc and ⌘W, and the shortcut that opens cl_quick. A click elsewhere or Esc closes it.
+    (Dictation on/off), ⌘⇧C (copy the last answer), Esc and ⌘W, and the shortcut that opens cl_quick. A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
     fuller), two thin stacked bars (the 5-hour window over the week) and the share of the fuller window, such as
     "5h ▬ 78%" ("full" when a limit is full). On a narrow bar it drops the share, then the label.
@@ -132,7 +132,17 @@ minutes for a profile.
 - The mic button left of Send starts macOS Dictation into the field (cl_quick stays in the background: the panel takes
   the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); ⌘D does the same
   as a click, on and off (also for a Dictation macOS's own shortcut started); a click again,
-  sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on.
+  sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on. Return while
+  dictating stops it and shows the text, and Return again sends it (Settings ▸ General ▸ **Dictation** can make the
+  first Return send at once). The field grows with what you dictate.
+- **⌘⇧C** copies the latest complete answer, in any chat, the same as its Copy button.
+- **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
+  app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
+  The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under
+  it. Text already in the field stays above the quote; a selection over 20,000 characters is cut there, with a line
+  saying so. No Accessibility permission: macOS hands the selection over. Nothing about it is kept.
+- **Keyboard layouts.** The chat's shortcuts and paste (⌘V, ⌘C, ⌘X, ⌘A, ⌘Z, ⌘N, ⌘W, ⌘D, ⌘⇧C) work on Cyrillic
+  layouts such as Russian and Ukrainian too: on a layout whose letters aren't Latin they follow the key's place.
 - **Images.** ⌘V with a screenshot or picture on the clipboard (⌃⇧⌘4 copies one), or with image files copied in Finder,
   attaches it; so does dropping image files or a picture from a page on the bar or the chat window. Each shows as a
   small thumbnail over the field with a ✕ (Delete in an empty field removes the last one); up to 5 go with a message,
@@ -198,6 +208,8 @@ minutes for a profile.
   nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
 - **Links and search**: on by default. "Claude can open links and search the web. Pages count toward your usage." Off:
   Claude runs with no tools, as it did before, and a link in a message is only text. A change applies from the next message, in a new chat.
+- **Dictation**: what Return does after dictating. **Shows text first** (the default: "Return after dictation shows
+  the text; Return again sends it.") or **Sends at once** ("Return after dictation sends the text at once.").
 - **Open at login**: in the menu bar, ready for the shortcut.
 - **Updates**: on by default. About once a day cl_quick checks GitHub Releases and, when a newer version exists, the
   menu bar menu shows **Update available: 26.11.3**; it opens the release's page in your browser. Nothing is
