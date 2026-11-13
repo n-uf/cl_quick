@@ -242,6 +242,8 @@ enum QuickChatParse {
         guard let o = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let type = o["type"] as? String else {
             return .ignored
         }
+        // what a sub-agent says (its `parent_tool_use_id` is the call that started it) is not this chat's answer
+        if type == "stream_event" || type == "assistant", o["parent_tool_use_id"] is String { return .ignored }
         switch type {
         case "system":
             guard o["subtype"] as? String == "init", let s = o["session_id"] as? String else { return .ignored }
