@@ -67,12 +67,19 @@ final class AccountSwitcher {
     /// "Switch to …": asks first, in plain words, then opens Claude Code's sign-in and watches the folder.
     func confirmAndSwitch(_ p: Profile, uuid: String?, email: String, origin: SwitchGoal.Origin) {
         NSApp.activate(ignoringOtherApps: true)
-        let a = NSAlert()
-        a.messageText = "Switch \(p.name) to \(maskEmail(email))?"
-        a.informativeText = AccountBook.switchWords(folder: tilde(p.path), email: maskEmail(email), isDefault: ClaudeFolder.isDefault(p.path))
-        a.addButton(withTitle: "Switch"); a.addButton(withTitle: "Cancel")
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        guard Self.confirmAlert(p, email: email).runModal() == .alertFirstButtonReturn else { return }
         begin(p, uuid: uuid, email: email, origin: origin)
+    }
+
+    /// The switch question. An alert's text can't blur, so the address is not in it: the words say "this account" and the
+    /// address sits under them in an accessory view, blurred until the pointer is on it.
+    static func confirmAlert(_ p: Profile, email: String) -> NSAlert {
+        let a = NSAlert()
+        a.messageText = "Switch \(p.name) to this account?"
+        a.informativeText = AccountBook.switchWords(folder: tilde(p.path), isDefault: ClaudeFolder.isDefault(p.path))
+        a.accessoryView = QCAddressLabel(address: email)
+        a.addButton(withTitle: "Switch"); a.addButton(withTitle: "Cancel")
+        return a
     }
 
     /// Opens the sign-in for `email` on the profile's folder and waits for the folder's account to change.

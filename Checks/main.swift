@@ -874,11 +874,11 @@ do {
     check("broken: the words", SignInProblem.signedOut.words == "Signed out." && SignInProblem.stopped.words == "The sign-in stopped working.")
     check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
     // a switch's confirmation says what it affects: Claude Code on the folder, not the Claude app
-    let sw0 = AccountBook.switchWords(folder: "~/.claude", email: "a•••@example.com", isDefault: true)
-    check("switch words: ~/.claude", sw0.hasPrefix("Claude Code in Terminal and editors on ~/.claude moves to a•••@example.com, sessions running now included")
-          && sw0.contains("the Claude app keeps its own sign-in"))
-    check("switch words: another folder", AccountBook.switchWords(folder: "~/.claude-work", email: "s•••@work.example", isDefault: false)
-          .hasPrefix("Claude Code pointed at ~/.claude-work with CLAUDE_CONFIG_DIR moves to s•••@work.example"))
+    let sw0 = AccountBook.switchWords(folder: "~/.claude", isDefault: true)
+    check("switch words: ~/.claude", sw0.hasPrefix("Claude Code in Terminal and editors on ~/.claude moves to this account, sessions running now included")
+          && sw0.contains("the Claude app keeps its own sign-in") && !sw0.contains("@"))
+    check("switch words: another folder", AccountBook.switchWords(folder: "~/.claude-work", isDefault: false)
+          .hasPrefix("Claude Code pointed at ~/.claude-work with CLAUDE_CONFIG_DIR moves to this account"))
     // a standby account's "last in use"
     let n0 = Date(timeIntervalSince1970: 1_800_000_000)
     check("ago: the steps", AccountBook.ago(n0.addingTimeInterval(-30), now: n0) == "just now" && AccountBook.ago(n0.addingTimeInterval(-720), now: n0) == "12 min ago"

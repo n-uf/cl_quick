@@ -1281,9 +1281,11 @@ enum SettingsRender {
             view = AnyView(VStack(alignment: .leading, spacing: 14) {
                 profile(main)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(confirm ? "Switch Main to \(maskEmail("kim@example.org"))?" : ForgetWords.title("kim@example.org")).font(.system(size: 13, weight: .bold))
-                    Text(confirm ? AccountBook.switchWords(folder: "~/.claude", email: maskEmail("kim@example.org"), isDefault: true)
+                    Text(confirm ? "Switch Main to this account?" : ForgetWords.title("kim@example.org")).font(.system(size: 13, weight: .bold))
+                    Text(confirm ? AccountBook.switchWords(folder: "~/.claude", isDefault: true)
                                  : ForgetWords.detail(profile: "Main")).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    // the switch question's address sits under its words, blurred until the pointer is on it (the real alert's accessory)
+                    if confirm { QCBlurredAddress(address: "kim@example.org", size: 13) }
                     HStack(spacing: 8) {
                         Spacer()
                         Button("Cancel") {}

@@ -322,3 +322,51 @@ final class QCSwitchMenuRow: NSView {
         needsDisplay = true
     }
 }
+
+/// An address on its own line in an alert's accessory view (an NSAlert's text can't blur): drawn blurred, sharp while
+/// the pointer is on it. The whole address is for drawing only; its accessibility label is the masked one.
+final class QCAddressLabel: NSView {
+    let address: String
+    /// The pointer is on it: drawn readable.
+    private(set) var revealed = false
+
+    static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    /// The frame holds the blur's reach on every side.
+    static var pad: CGFloat { QCProfileMenuRow.blurPad }
+
+    init(address: String) {
+        self.address = address
+        let s = (address as NSString).size(withAttributes: [.font: Self.font])
+        super.init(frame: NSRect(x: 0, y: 0, width: ceil(s.width) + 2 * Self.pad, height: ceil(s.height) + 2 * Self.pad))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(maskEmail(address))
+    }
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    override var isFlipped: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with e: NSEvent) { reveal(true) }
+    override func mouseExited(with e: NSEvent) { reveal(false) }
+    func reveal(_ on: Bool) { guard on != revealed else { return }; revealed = on; needsDisplay = true }
+
+    override func draw(_ dirty: NSRect) {
+        if revealed {
+            (address as NSString).draw(at: NSPoint(x: Self.pad, y: Self.pad), withAttributes: [.font: Self.font, .foregroundColor: NSColor.labelColor])
+        } else if let img = blurCache ?? QCProfileMenuRow.blurred(address, color: .labelColor, font: Self.font) {
+            blurCache = img
+            img.draw(in: NSRect(origin: .zero, size: img.size))
+        }
+    }
+    private var blurCache: NSImage?
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        blurCache = nil
+        needsDisplay = true
+    }
+}

@@ -778,6 +778,28 @@ do {
           blurredDraw.edges > 0 && blurredDraw.edges < sharpDraw.edges * 0.8, "\(blurredDraw) \(sharpDraw)")
     check("address chat: the note keeps its layout (as wide and as high as the plain sentence)",
           abs(blurredDraw.size.width - sharpDraw.size.width) <= 2 && abs(blurredDraw.size.height - sharpDraw.size.height) <= 2, "\(blurredDraw.size) \(sharpDraw.size)")
+
+    // the switch question: its words never hold the address; it sits under them in an accessory, blurred until hovered
+    let alert = AccountSwitcher.confirmAlert(Profile(id: "main", name: "Main", folder: "~/.claude"), email: "kim@example.org")
+    check("alert: the message and the text name no address (\"this account\"), whole or masked",
+          alert.messageText == "Switch Main to this account?" && !alert.messageText.contains("@") && !alert.informativeText.contains("@")
+          && !alert.messageText.contains("•") && !alert.informativeText.contains("•") && alert.informativeText.contains("moves to this account"),
+          "\(alert.messageText) | \(alert.informativeText)")
+    check("alert: its buttons are Switch and Cancel", alert.buttons.map(\.title) == ["Switch", "Cancel"])
+    if let label = alert.accessoryView as? QCAddressLabel {
+        check("alert: the accessory holds the whole address for drawing, blurred at rest", label.address == "kim@example.org" && !label.revealed)
+        check("alert: its accessibility label is the masked address", label.accessibilityLabel() == maskEmail("kim@example.org") && label.isAccessibilityElement())
+        func look() -> Data? {
+            guard let rep = label.bitmapImageRepForCachingDisplay(in: label.bounds) else { return nil }
+            label.cacheDisplay(in: label.bounds, to: rep)
+            return rep.tiffRepresentation
+        }
+        let rest = look()
+        label.reveal(true)
+        check("alert: the pointer on it makes it readable", label.revealed && look() != rest)
+        label.reveal(false)
+        check("alert: the pointer gone, blurred again", !label.revealed && look() == rest)
+    } else { check("alert: the address is in an accessory view", false) }
 }
 
 // ── the mic button: macOS Dictation into OUR field, cl_quick never activated (stand-ins for Dictation: no real one
