@@ -17,7 +17,7 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   account in use in its own box, with its address, plan and two bars, the 5-hour limit and the week, with their
   shares and reset times. Standby accounts are slim rows with **Switch…** and **Forget…** and no usage (one folder
   holds one sign-in, so a standby account's limits aren't known). **Sign in again…** appears only when the sign-in is
-  broken. Account addresses are shown in full in Settings; prompts and dialogs may mask them.
+  broken. Account addresses are shown in full in Settings; everywhere else they are blurred until the pointer is on them.
 - **Profiles with several accounts.** A profile is one Claude Code folder; the account signed in to it is in use and the
   others it has had are standby. **Switch…** signs in again in the same folder as another account, through Claude
   Code's own sign-in in Terminal, and checks the result every 2 s (up to 10 minutes). Before it starts, the question
@@ -40,8 +40,11 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   with a green lamp (address blurred until the pointer is on it), the 5-hour and week bars with their share and time
   to reset, and how old the numbers are; only the account in use shows usage. Old numbers are asked for again in the
   background when the menu opens (`get_usage` only, one `claude` at a time), nothing else is sent or read. A profile
-  with standby accounts has **Switch account ›** under its block (masked addresses, the usual switch question; a line
-  shows its full address while it is highlighted, and the chat's "Switch to…" button while the pointer is on it).
+  with standby accounts has **Switch account ›** under its block (its lines blur the address until highlighted, the
+  usual switch question).
+- **Addresses blur instead of being masked.** Wherever cl_quick draws an account address (the menu's rows and Switch
+  account lines, the chat's notes and Switch to… button, the switch question) it is blurred and sharp while the pointer is
+  on it; only the words VoiceOver reads keep the masked form.
 - **A quiet chat header.** Once the bar has become a chat window, its header shows only the usage meters ("5h" and
   "wk", with reset times when there's room) and a darker capsule with **+** (new chat) and **✕** (hide). No profile
   name and no address. The window resizes from its edges and moves from any empty area.

@@ -2,6 +2,10 @@
 // of the profile's account in use, blurred at rest and readable only while the pointer is on it. It draws what a native
 // item draws (the check mark, the level's dot, the name with its week under it, the menu's own highlight) and leaves the
 // rest to the menu: the arrow keys highlight it, Return picks it (the item's action), a click picks it.
+//
+// The rule for addresses: blurred on screen everywhere, masked only as words (VoiceOver, an item's title, the checks).
+// This file draws them blurred in the menus (QCProfileMenuRow, QCSwitchMenuRow) and in an alert's accessory view
+// (QCAddressLabel); the chat's views do it in AddressViews.swift.
 
 import AppKit
 import CoreImage

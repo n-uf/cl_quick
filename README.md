@@ -60,8 +60,8 @@ the account in use. A profile's page has:
 **Forget…** asks first, then drops a standby account from the profile's list. Nothing is signed out and no session is
 touched; the account comes back if it signs in on that folder again.
 
-Account addresses are shown in full in Settings. Prompts, dialogs and the chat's notices may mask them
-(p•••@example.com).
+Account addresses are shown in full in Settings. Everywhere else they are blurred until the pointer is on them; the
+words VoiceOver reads have them masked (p•••@example.com).
 
 The **+** tile adds a profile: a folder found on this Mac (Add, or Sign in… for one that isn't signed in), Choose a
 folder… (it must be a signed-in Claude Code folder), or "A new account, in a new folder", which takes a name, makes
@@ -85,9 +85,10 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   whenever it changed), so a sign-in made outside cl_quick (`claude auth login`, /login, another app) counts at once.
   Numbers are kept only for the account the answering `claude` says it is (its `initialize` answer) and only while the
   folder is still on that account: an answer that arrives after the folder moved to another account is dropped.
-- Addresses are in full in Settings. Prompts and dialogs may mask them (p•••@example.com). In the chat the address is in
-  the profile menu only: each profile's row has the address of its account in use (never a standby one's), blurred
-  until the pointer is on it; a copy button beside it copies it.
+- Addresses are in full in Settings. Everywhere else they are blurred until the pointer is on them (the switch question's
+  alert holds it under its words, in an accessory view); the words VoiceOver reads have them masked (p•••@example.com). In
+  the chat's header there is none; the profile menu's rows have the address of the account in use (never a standby
+  one's), with a copy button beside it, and the chat's notes about an account change blur it too.
 
 ## The menu bar menu
 
@@ -99,7 +100,7 @@ amber and red by level, each with its share and the time to its reset ("13% in 1
 ago", with no full limit, and ones over an hour old aren't shown ("No recent numbers"); the chat acts only on fresh
 ones (no full-limit notice, Ask on … or switch offer on old numbers). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
 a profile with no numbers yet says "No usage yet". A profile with standby accounts also has **Switch account ›**,
-listing them by their masked addresses and asking the same question as Switch… in Settings. The numbers are the ones Claude Code last gave cl_quick, shown at
+listing them by their addresses (blurred until the line is highlighted) and asking the same question as Switch… in Settings. The numbers are the ones Claude Code last gave cl_quick, shown at
 once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a
 time is sent `get_usage` and nothing else (no message to a model, no Keychain, no token), at most once every 3
 minutes for a profile.

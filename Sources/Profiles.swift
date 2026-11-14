@@ -15,7 +15,8 @@ func tilde(_ path: String) -> String {
     return path == home ? "~" : path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
 }
 
-/// you@example.com → y••••••@example.com
+/// you@example.com → y••••••@example.com. The words' stand-in for an address (VoiceOver, an item's title, the checks):
+/// on screen an address is blurred, never masked.
 func maskEmail(_ email: String) -> String {
     guard let at = email.firstIndex(of: "@") else { return email }
     let local = email[..<at]
@@ -283,9 +284,6 @@ final class ProfileStore: ObservableObject {
     func nameUsing(_ account: (uuid: String, email: String)) -> String? {
         AccountBook.profileUsing(account, among: profiles.map { ($0.name, ClaudeFolder.account($0.path)) })
     }
-
-    /// What is said when a folder's account is in use on another profile.
-    static func inUseWords(_ email: String, on profile: String) -> String { "\(maskEmail(email)) is already in use on \(profile)." }
 
     /// cl_quick forgets a standby account of a profile, and its week. The account in use (as the folder's file says right
     /// now) is never forgotten. Returns whether it was.

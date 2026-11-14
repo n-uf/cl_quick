@@ -97,7 +97,7 @@ struct QCMenuProfile: Equatable {
     /// "Claude Main"; a name that starts with Claude as it is.
     static func title(_ name: String) -> String { name.lowercased().hasPrefix("claude") ? name : "Claude " + name }
 
-    /// The address as words everywhere but the drawn, blurred line: masked (never a full address unhovered).
+    /// The address as words (VoiceOver, the checks): masked. On screen it is blurred everywhere, masked only as words.
     var accountWords: String {
         switch account {
         case .inUse(let a): return maskEmail(a) + " · in use"
