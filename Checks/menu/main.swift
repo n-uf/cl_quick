@@ -205,29 +205,49 @@ check("switch: one Switch account › item, for the profile with a standby accou
       withSwitch.count == 4 && subs.count == 1 && subs.first?.title == "Switch account" && withSwitch.firstIndex(of: subs[0]) == 1 && withSwitch[2].isSeparatorItem,
       "\(withSwitch.map { $0.title })")
 let lines = subs.first?.submenu?.items ?? []
-check("switch: its line names the standby account masked, never in full", lines.map(\.title) == ["Switch to \(maskEmail("zed@example.com"))…"] && !lines.map(\.title).joined().contains("zed"), "\(lines.map(\.title))")
-// hovered, a line reads in full; any other highlight (or none) puts it back masked
-let swSub = subs.first?.submenu
-let swFull = "Switch to zed@example.com…", swMasked = "Switch to \(maskEmail("zed@example.com"))…"
-if let swSub, let line = lines.first {
-    swSub.delegate?.menu?(swSub, willHighlight: line)
-    check("switch: highlighted, its line names the standby account in full", line.title == swFull, line.title)
-    swSub.delegate?.menu?(swSub, willHighlight: nil)
-    check("switch: highlight gone, it is masked again", line.title == swMasked, line.title)
-    swSub.delegate?.menu?(swSub, willHighlight: line)
-    swSub.delegate?.menu?(swSub, willHighlight: NSMenuItem(title: "other", action: nil, keyEquivalent: ""))
-    check("switch: highlight on another item, it is masked again", line.title == swMasked, line.title)
-    swSub.delegate?.menu?(swSub, willHighlight: line)
-    swSub.delegate?.menuDidClose?(swSub)
-    check("switch: the menu closing leaves it masked", line.title == swMasked, line.title)
-} else { check("switch: a submenu with a line to highlight", false) }
-check("switch: the submenu is sized for the full line from the start",
-      (swSub?.minimumWidth ?? 0) >= (swFull as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width)
-check("switch: the item keeps its hover delegate alive", subs.first?.representedObject is QCStatusMenu.SwitchHover && swSub?.delegate === subs.first?.representedObject as AnyObject?)
+// each line is a drawn row that holds the whole address for drawing; its words, title and VoiceOver label hold it masked
+let swMasked = "Switch to \(maskEmail("zed@example.com"))…"
+let swRows = lines.compactMap { $0.view as? QCSwitchMenuRow }
+check("switch: its line is a drawn row with the standby account's whole address for drawing", swRows.count == 1 && lines.count == 1 && swRows[0].address == "zed@example.com")
+check("switch: its title and VoiceOver label name the account masked, never in full",
+      lines.map(\.title) == [swMasked] && !lines.map(\.title).joined().contains("zed") && swRows.first?.accessibilityLabel() == swMasked, "\(lines.map(\.title))")
+if let row = swRows.first {
+    row.frame = NSRect(x: 0, y: 0, width: row.frame.width, height: QCSwitchMenuRow.height)
+    check("switch: at rest the address is blurred (not lit), and drawn as wide as it reads", !row.lit && row.frame.width >= QCSwitchMenuRow.width("zed@example.com"))
+    row.highlighted = true
+    check("switch: highlighted, the address is sharp", row.lit)
+    row.highlighted = false
+    check("switch: highlight gone, it is blurred again", !row.lit)
+    // the drawn picture: at rest it holds a blurred address (an image), lit it is plain text; neither throws or comes out empty
+    func picture(_ lit: Bool) -> NSBitmapImageRep? {
+        row.highlighted = lit
+        guard let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds) else { return nil }
+        row.cacheDisplay(in: row.bounds, to: rep)
+        return rep
+    }
+    func differs(_ a: NSBitmapImageRep?, _ b: NSBitmapImageRep?) -> Bool { a?.tiffRepresentation != b?.tiffRepresentation }
+    let rest = picture(false), lit = picture(true)
+    check("switch: the lit line is drawn differently from the resting one", differs(rest, lit))
+    row.highlighted = false
+}
+check("switch: the submenu holds no hover delegate and no widened minimum", subs.first?.submenu?.delegate == nil && (subs.first?.submenu?.minimumWidth ?? 0) == 0)
+check("switch: a click on its row closes the menu path and picks (after the menu closes)", {
+    swRows.first?.press(); spin(0.1)
+    return switched == ["main:u9"]
+}(), "\(switched)")
+switched = []
 if let line = lines.first, let t = line.target, let a = line.action { _ = t.perform(a, with: line) }
-check("switch: picking it goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")
+check("switch: the item's own action (Return) goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")
 let waitingItems = QCStatusMenu.items(infos, now: now, switching: { $0.id == "main" }, switchTo: { _, _ in }) { _ in }
-check("switch: while a sign-in is waited for, its lines are off", waitingItems.first { $0.submenu != nil }?.submenu?.items.allSatisfy { !$0.isEnabled } == true)
+let waitingLines = waitingItems.first { $0.submenu != nil }?.submenu?.items ?? []
+check("switch: while a sign-in is waited for, its lines are off", !waitingLines.isEmpty && waitingLines.allSatisfy { !$0.isEnabled })
+if let w = waitingLines.first?.view as? QCSwitchMenuRow {
+    var fired = 0
+    let dim = QCSwitchMenuRow(address: "zed@example.com", enabled: false) { fired += 1 }
+    w.highlighted = true; dim.highlighted = true; dim.press(); spin(0.1)
+    check("switch: a dimmed row is never lit, does nothing on a click and is disabled for VoiceOver",
+          !w.lit && !dim.lit && fired == 0 && !dim.isAccessibilityEnabled() && !dim.accessibilityPerformPress())
+} else { check("switch: a waiting row is still a drawn row", false) }
 check("switch: without a switch path there is no such item", items.allSatisfy { $0.submenu == nil })
 
 // ── from the store: a standby account's week never shows, the account in use's does ────────────────

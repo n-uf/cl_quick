@@ -201,9 +201,10 @@ final class QCProfileMenuRow: NSView {
     }
 
     static let blurPad: CGFloat = 6
-    /// The address drawn and blurred (a Gaussian blur, so it reads as an address's shape and nothing more).
-    static func blurred(_ text: String, color: NSColor) -> NSImage? {
-        let attrs: [NSAttributedString.Key: Any] = [.font: addressFont, .foregroundColor: color]
+    /// The address drawn and blurred (a Gaussian blur, so it reads as an address's shape and nothing more), in the
+    /// address font or the one given.
+    static func blurred(_ text: String, color: NSColor, font: NSFont = addressFont) -> NSImage? {
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let s = (text as NSString).size(withAttributes: attrs)
         let size = NSSize(width: ceil(s.width) + 2 * blurPad, height: ceil(s.height) + 2 * blurPad)
         let sharp = NSImage(size: size, flipped: false) { _ in
@@ -217,5 +218,107 @@ final class QCProfileMenuRow: NSView {
         let out = NSImage(size: size)
         out.addRepresentation(rep)
         return out
+    }
+}
+
+/// A line of a profile's Switch account › submenu: "Switch to " + the standby account's address + "…", drawn by hand
+/// like QCProfileMenuRow (and with its blur): the address is blurred at rest and sharp while the line is highlighted
+/// (the menu's highlight follows the pointer and the arrow keys). A click closes the menu and runs the switch, as the
+/// item's action does for Return. While a sign-in for the profile is waited for the line is dimmed and does nothing.
+final class QCSwitchMenuRow: NSView {
+    /// The whole address, for drawing only; the words and the accessibility label hold it masked.
+    let address: String
+    let enabled: Bool
+    let pick: () -> Void
+    /// For pictures: drawn as if the menu highlighted it.
+    var highlighted = false
+
+    static let height: CGFloat = 22
+    static let font = NSFont.menuFont(ofSize: 0)
+    static let lead: CGFloat = 14, trailing: CGFloat = 14
+    static let before = "Switch to ", after = "…"
+
+    /// The line as words (VoiceOver, the item's title): the address masked.
+    static func words(_ address: String) -> String { before + maskEmail(address) + after }
+
+    init(address: String, enabled: Bool, pick: @escaping () -> Void) {
+        self.address = address; self.enabled = enabled; self.pick = pick
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(address), height: Self.height))
+        autoresizingMask = [.width]
+        setAccessibilityElement(true)
+        setAccessibilityRole(.menuItem)
+        setAccessibilityLabel(Self.words(address))
+        setAccessibilityEnabled(enabled)
+    }
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    override var isFlipped: Bool { true }
+
+    private static func w(_ s: String) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: font]).width) }
+    /// The least width that shows the line: the address is as wide blurred as it is sharp.
+    static func width(_ address: String) -> CGFloat { lead + w(before) + w(address) + w(after) + trailing }
+
+    /// Whether the line is lit by the menu (the address is sharp then); a dimmed line never is.
+    var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with e: NSEvent) { needsDisplay = true }
+    override func mouseExited(with e: NSEvent) { needsDisplay = true }
+    override func mouseUp(with e: NSEvent) { press() }
+
+    /// A click: closes the menu, then runs the switch (not inside the menu's tracking loop). Nothing while dimmed.
+    func press() {
+        guard enabled else { return }
+        enclosingMenuItem?.menu?.cancelTracking()
+        let pick = self.pick
+        DispatchQueue.main.async { pick() }
+    }
+
+    /// VoiceOver's press does the same.
+    override func accessibilityPerformPress() -> Bool {
+        guard enabled else { return false }
+        press()
+        return true
+    }
+
+    override func draw(_ dirty: NSRect) {
+        let on = lit
+        if on {
+            NSColor.selectedContentBackgroundColor.setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 5, dy: 0), xRadius: 4, yRadius: 4).fill()
+        }
+        let fg: NSColor = !enabled ? .disabledControlTextColor : on ? .selectedMenuItemTextColor : .labelColor
+        let attrs: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: fg]
+        func put(_ s: String, at x: CGFloat) {
+            let h = (s as NSString).size(withAttributes: attrs).height
+            (s as NSString).draw(at: NSPoint(x: x, y: bounds.midY - h / 2), withAttributes: attrs)
+        }
+        var x = Self.lead
+        put(Self.before, at: x); x += Self.w(Self.before)
+        if on {
+            put(address, at: x)
+        } else if let img = blurredAddress(fg) {
+            img.draw(in: NSRect(x: x - QCProfileMenuRow.blurPad, y: bounds.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
+        }
+        x += Self.w(address)
+        put(Self.after, at: x)
+    }
+
+    /// The blurred address, made once for the look it is drawn in (the lit look never shows it), made again if the
+    /// appearance changes (its colour is the system's).
+    private var blurCache: NSImage?
+    private func blurredAddress(_ color: NSColor) -> NSImage? {
+        if let blurCache { return blurCache }
+        blurCache = QCProfileMenuRow.blurred(address, color: color, font: Self.font)
+        return blurCache
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        blurCache = nil
+        needsDisplay = true
     }
 }
