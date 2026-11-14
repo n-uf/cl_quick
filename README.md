@@ -88,7 +88,8 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
 - Addresses are in full in Settings. Everywhere else they are blurred until the pointer is on them (the switch question's
   alert holds it under its words, in an accessory view); the words VoiceOver reads have them masked (p•••@example.com). In
   the chat's header there is none; the profile menu's rows have the address of the account in use (never a standby
-  one's), with a copy button beside it, and the chat's notes about an account change blur it too.
+  one's), with a copy button beside it, and the chat's notes about an account change blur it too. **Settings ▸ General ▸
+  Blur addresses** (on by default) turns the blur off: addresses then show in full, sharp, and the words hold them in full.
 
 ## The menu bar menu
 

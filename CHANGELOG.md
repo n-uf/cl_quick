@@ -44,7 +44,8 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   usual switch question).
 - **Addresses blur instead of being masked.** Wherever cl_quick draws an account address (the menu's rows and Switch
   account lines, the chat's notes and Switch to… button, the switch question) it is blurred and sharp while the pointer is
-  on it; only the words VoiceOver reads keep the masked form.
+  on it; only the words VoiceOver reads keep the masked form. **Settings ▸ General ▸ Blur addresses** (on by default)
+  turns it off: addresses then show in full, sharp, everywhere, at once in the chat and the next time a menu opens.
 - **A quiet chat header.** Once the bar has become a chat window, its header shows only the usage meters ("5h" and
   "wk", with reset times when there's room) and a darker capsule with **+** (new chat) and **✕** (hide). No profile
   name and no address. The window resizes from its edges and moves from any empty area.

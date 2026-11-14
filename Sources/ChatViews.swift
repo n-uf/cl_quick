@@ -1613,7 +1613,7 @@ struct QCButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .accessibilityLabel(address.map { title + maskEmail($0) + after } ?? title)
+        .accessibilityLabel(address.map { title + AddressPrivacy.words($0) + after } ?? title)
     }
 }
 

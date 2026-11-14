@@ -57,6 +57,9 @@ struct QuickChatSettings: Codable, Equatable {
     /// Web links and search: Claude may open a link in a message and search the web (WebFetch, WebSearch; the pages count
     /// toward the account's usage). On by default; a key missing from the file is on. It applies to the next chat.
     var webLinks = true
+    /// Account addresses are blurred until the pointer is on them (AddressPrivacy); off: drawn in full. On by default; a
+    /// key missing from the file is on. It applies at once to the chat and to the menus the next time they open.
+    var blurAddresses = true
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -70,6 +73,7 @@ struct QuickChatSettings: Codable, Equatable {
         importedFromAudit = (try? c.decodeIfPresent(Bool.self, forKey: .importedFromAudit)) ?? false
         checkForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checkForUpdates)) ?? true
         webLinks = (try? c.decodeIfPresent(Bool.self, forKey: .webLinks)) ?? true
+        blurAddresses = (try? c.decodeIfPresent(Bool.self, forKey: .blurAddresses)) ?? true
     }
 
     static func load() -> QuickChatSettings { Files.read(QuickChatSettings.self, Files.settings) ?? .init() }
@@ -1275,6 +1279,7 @@ final class QuickChat {
         model.choice = settings.model
         model.thinking = settings.thinking
         model.web = settings.webLinks
+        AddressPrivacy.shared.apply(settings)
         model.resolveClaude = { [weak self] done in self?.resolveClaude(done) ?? done(nil) }
         model.hide = { [weak self] in self?.hide() }
         model.escape = { [weak self] in self?.escape() }
@@ -1347,6 +1352,7 @@ final class QuickChat {
         settings = s
         s.save()
         model.webSettingChanged(s.webLinks)
+        AddressPrivacy.shared.apply(s)
         applyShortcut()
     }
 

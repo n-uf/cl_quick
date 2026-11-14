@@ -5,6 +5,21 @@
 import SwiftUI
 import AppKit
 
+/// Whether account addresses are blurred (Settings ▸ General ▸ Blur addresses; on unless it was turned off). On: an
+/// address is blurred until the pointer is on it, and as words (VoiceOver, an item's title) it is masked. Off: it is
+/// drawn in full and sharp, and the words hold it in full. Drawn views read it as they are drawn, so a change reaches the
+/// chat at once and the menus the next time they open.
+final class AddressPrivacy: ObservableObject {
+    static let shared = AddressPrivacy()
+    @Published var blur = true
+
+    /// Takes the setting (as the app starts and whenever Settings changes it).
+    func apply(_ s: QuickChatSettings) { if blur != s.blurAddresses { blur = s.blurAddresses } }
+
+    /// An address as words: masked while blurring, else in full.
+    static func words(_ address: String) -> String { shared.blur ? maskEmail(address) : address }
+}
+
 /// A sentence in pieces: words and, apart from them, the addresses in it (whole, for drawing only).
 struct QCWords: Equatable {
     struct Piece: Equatable {
@@ -35,8 +50,9 @@ struct QCWords: Equatable {
 
     /// The whole addresses in it, in order (for drawing).
     var addresses: [String] { pieces.filter(\.isAddress).map(\.text) }
-    /// The sentence as words (VoiceOver, the checks): every address masked, never in full.
-    var spoken: String { pieces.map { $0.isAddress ? maskEmail($0.text) : $0.text }.joined() }
+    /// The sentence as words (VoiceOver, the checks): every address masked, never in full (in full only with the
+    /// blur turned off, AddressPrivacy).
+    var spoken: String { pieces.map { $0.isAddress ? AddressPrivacy.words($0.text) : $0.text }.joined() }
     var isEmpty: Bool { pieces.isEmpty }
 }
 
@@ -48,17 +64,20 @@ struct QCBlurredAddress: View {
     var size: CGFloat = 12.5
     var revealed = false
     @State private var hover = false
+    @ObservedObject private var privacy = AddressPrivacy.shared
 
-    /// The blur radius for a text size: none while the address is meant to be read.
-    static func blurRadius(size: CGFloat, revealed: Bool) -> CGFloat { revealed ? 0 : (size * 0.21).rounded(toPlaces: 2) }
+    /// The blur radius for a text size: none while the address is meant to be read (or the blur is turned off).
+    static func blurRadius(size: CGFloat, revealed: Bool, blur: Bool = true) -> CGFloat {
+        revealed || !blur ? 0 : (size * 0.21).rounded(toPlaces: 2)
+    }
 
     var body: some View {
         Text(address)
             .fixedSize()
-            .blur(radius: Self.blurRadius(size: size, revealed: hover || revealed))
+            .blur(radius: Self.blurRadius(size: size, revealed: hover || revealed, blur: privacy.blur))
             .contentShape(Rectangle())
             .onHover { hover = $0 }
-            .accessibilityLabel(maskEmail(address))
+            .accessibilityLabel(AddressPrivacy.words(address))
     }
 }
 
@@ -115,6 +134,7 @@ struct QCSentence: View {
     var color: Color
     var strongColor: Color = QCColor.text
     var lineLimit: Int? = nil
+    @ObservedObject private var privacy = AddressPrivacy.shared
 
     private func styled(_ p: QCWords.Piece) -> Text {
         p.strong ? Text(p.text).fontWeight(.semibold).foregroundColor(strongColor) : Text(p.text).foregroundColor(color)
@@ -136,7 +156,8 @@ struct QCSentence: View {
     }
 
     var body: some View {
-        if words.addresses.isEmpty {
+        // (with the blur off the address is plain text in the sentence: one Text, as with no address at all)
+        if words.addresses.isEmpty || !privacy.blur {
             words.pieces.reduce(Text("")) { $0 + styled($1) }.lineLimit(lineLimit)
         } else {
             let spaceW = (" " as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width

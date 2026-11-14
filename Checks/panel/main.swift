@@ -800,6 +800,35 @@ do {
         label.reveal(false)
         check("alert: the pointer gone, blurred again", !label.revealed && look() == rest)
     } else { check("alert: the address is in an accessory view", false) }
+
+    // Settings ▸ Blur addresses: on by default, a key missing or wrong is on; off draws every address in full and sharp
+    check("blur setting: on by default, and when the key is missing or not a Bool",
+          QuickChatSettings().blurAddresses && AddressPrivacy.shared.blur
+          && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data("{}".utf8)))?.blurAddresses == true
+          && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"blurAddresses":false}"#.utf8)))?.blurAddresses == false
+          && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"blurAddresses":"no"}"#.utf8)))?.blurAddresses == true)
+    let offRow = QCProfileMenuRow(title: "Main", detail: "week 40%", dot: nil, on: true, address: a, pick: {})
+    check("blur setting: on, the picker row's address is blurred at rest and the words are masked",
+          !offRow.sharp && QCBlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) > 2 && note.spoken.contains(maskEmail(a)))
+    var offSettings = QuickChatSettings(); offSettings.blurAddresses = false
+    AddressPrivacy.shared.apply(offSettings)
+    check("blur setting: off, the picker row draws the full address sharp at rest", offRow.sharp && !offRow.revealed)
+    check("blur setting: off, the blur radius is none even at rest", QCBlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0)
+    check("blur setting: off, the words hold the full address (no mask)", note.spoken == "Main is on \(a) now." && wrong.spoken.contains(a) && wrong.spoken.contains(b) && !wrong.spoken.contains("•"))
+    let offDraw = drawn(note)
+    check("blur setting: off, the note draws the address sharp (as the plain sentence) at the same size",
+          abs(offDraw.edges - sharpDraw.edges) < sharpDraw.edges * 0.02 && abs(offDraw.size.width - sharpDraw.size.width) <= 1 && abs(offDraw.size.height - sharpDraw.size.height) <= 1,
+          "\(offDraw) \(sharpDraw)")
+    let offAlert = AccountSwitcher.confirmAlert(Profile(id: "main", name: "Main", folder: "~/.claude"), email: "kim@example.org")
+    if let label = offAlert.accessoryView as? QCAddressLabel {
+        check("blur setting: off, the alert's address is drawn sharp at rest, its label is the full address",
+              label.sharp && !label.revealed && label.accessibilityLabel() == "kim@example.org")
+    } else { check("blur setting: off, the alert still has its address accessory", false) }
+    let button = QCButton(title: "Switch to ", address: a, after: "…") {}
+    check("blur setting: off, the button's address is not blurred", QCBlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0 && button.address == a)
+    AddressPrivacy.shared.apply(QuickChatSettings())
+    check("blur setting: on again, blurred at rest and masked as words",
+          !offRow.sharp && note.spoken == "Main is on \(maskEmail(a)) now." && drawn(note).edges < sharpDraw.edges * 0.8)
 }
 
 // ── the mic button: macOS Dictation into OUR field, cl_quick never activated (stand-ins for Dictation: no real one

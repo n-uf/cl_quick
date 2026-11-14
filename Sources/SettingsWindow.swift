@@ -1050,6 +1050,15 @@ struct GeneralPage: View {
                              : "Claude can't open links or search the web; a link in a message is only text.", face.muted)
                     }
                 }
+                GridLine(label: "Blur addresses") {
+                    VStack(alignment: .leading, spacing: 7) {
+                        SSwitch(isOn: Binding(get: { state.settings.blurAddresses },
+                                              set: { state.settings.blurAddresses = $0; state.save() }), on: "", off: "")
+                        note(state.settings.blurAddresses
+                             ? "Account addresses stay blurred until the pointer is on them."
+                             : "Account addresses show in full.", face.muted)
+                    }
+                }
                 GridLine(label: "Open at login") {
                     SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
                 }

@@ -100,7 +100,7 @@ struct QCMenuProfile: Equatable {
     /// The address as words (VoiceOver, the checks): masked. On screen it is blurred everywhere, masked only as words.
     var accountWords: String {
         switch account {
-        case .inUse(let a): return maskEmail(a) + " · in use"
+        case .inUse(let a): return AddressPrivacy.words(a) + " · in use"
         case .problem(let w): return w
         }
     }
@@ -188,6 +188,8 @@ final class QCMenuUsageBlock: NSView {
     let pick: () -> Void
     /// The pointer is on the address: it is drawn readable.
     private(set) var revealed = false
+    /// The address is drawn readable: the pointer is on it, or addresses are not blurred (AddressPrivacy).
+    var sharp: Bool { revealed || !AddressPrivacy.shared.blur }
     private var watch: AnyCancellable?
 
     static let padX: CGFloat = 14, top: CGFloat = 7, bottom: CGFloat = 8
@@ -353,7 +355,7 @@ final class QCMenuUsageBlock: NSView {
         case .inUse(let address):
             lamp(.systemGreen, glow: true, midY: accMid)
             let a = addressRect
-            if revealed {
+            if sharp {
                 text(address, QCProfileMenuRow.addressFont, .secondaryLabelColor, x: a.minX, midY: accMid)
             } else if let img = blurred(address) {
                 img.draw(in: NSRect(x: a.minX - QCProfileMenuRow.blurPad, y: a.midY - img.size.height / 2, width: img.size.width, height: img.size.height))

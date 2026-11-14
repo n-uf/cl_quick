@@ -21,6 +21,8 @@ final class QCProfileMenuRow: NSView {
 
     /// The pointer is on the address: it is drawn readable.
     private(set) var revealed = false
+    /// The address is drawn readable: the pointer is on it, or addresses are not blurred (AddressPrivacy).
+    var sharp: Bool { revealed || !AddressPrivacy.shared.blur }
     /// The pointer is on the row: the copy glyph shows after the address.
     private(set) var rowHover = false
     /// The pointer is on the copy glyph.
@@ -172,7 +174,7 @@ final class QCProfileMenuRow: NSView {
             }
             return
         }
-        if revealed {
+        if sharp {
             let s = (address as NSString).size(withAttributes: [.font: Self.addressFont])
             (address as NSString).draw(at: NSPoint(x: a.minX, y: a.midY - s.height / 2), withAttributes: [.font: Self.addressFont, .foregroundColor: sub])
         } else if let img = blurredAddress(sub, lit: lit) {
@@ -243,7 +245,7 @@ final class QCSwitchMenuRow: NSView {
     static let before = "Switch to ", after = "…"
 
     /// The line as words (VoiceOver, the item's title): the address masked.
-    static func words(_ address: String) -> String { before + maskEmail(address) + after }
+    static func words(_ address: String) -> String { before + AddressPrivacy.words(address) + after }
 
     init(address: String, enabled: Bool, pick: @escaping () -> Void) {
         self.address = address; self.enabled = enabled; self.pick = pick
@@ -264,6 +266,8 @@ final class QCSwitchMenuRow: NSView {
 
     /// Whether the line is lit by the menu (the address is sharp then); a dimmed line never is.
     var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
+    /// The address is drawn readable: the line is lit, or addresses are not blurred (AddressPrivacy).
+    var sharp: Bool { lit || !AddressPrivacy.shared.blur }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -303,7 +307,7 @@ final class QCSwitchMenuRow: NSView {
         }
         var x = Self.lead
         put(Self.before, at: x); x += Self.w(Self.before)
-        if on {
+        if sharp {
             put(address, at: x)
         } else if let img = blurredAddress(fg) {
             img.draw(in: NSRect(x: x - QCProfileMenuRow.blurPad, y: bounds.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
@@ -344,7 +348,7 @@ final class QCAddressLabel: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: ceil(s.width) + 2 * Self.pad, height: ceil(s.height) + 2 * Self.pad))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel(maskEmail(address))
+        setAccessibilityLabel(AddressPrivacy.words(address))
     }
     required init?(coder: NSCoder) { fatalError("not from a nib") }
 
@@ -359,8 +363,11 @@ final class QCAddressLabel: NSView {
     override func mouseExited(with e: NSEvent) { reveal(false) }
     func reveal(_ on: Bool) { guard on != revealed else { return }; revealed = on; needsDisplay = true }
 
+    /// Drawn readable: the pointer is on it, or addresses are not blurred (AddressPrivacy).
+    var sharp: Bool { revealed || !AddressPrivacy.shared.blur }
+
     override func draw(_ dirty: NSRect) {
-        if revealed {
+        if sharp {
             (address as NSString).draw(at: NSPoint(x: Self.pad, y: Self.pad), withAttributes: [.font: Self.font, .foregroundColor: NSColor.labelColor])
         } else if let img = blurCache ?? QCProfileMenuRow.blurred(address, color: .labelColor, font: Self.font) {
             blurCache = img

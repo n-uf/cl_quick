@@ -248,6 +248,48 @@ if let w = waitingLines.first?.view as? QCSwitchMenuRow {
     check("switch: a dimmed row is never lit, does nothing on a click and is disabled for VoiceOver",
           !w.lit && !dim.lit && fired == 0 && !dim.isAccessibilityEnabled() && !dim.accessibilityPerformPress())
 } else { check("switch: a waiting row is still a drawn row", false) }
+
+// ── Settings ▸ Blur addresses: on (the default) blurs at rest; off draws every address in full and sharp, and the words hold
+// it in full too; it applies to what is built or drawn next ──────────────────────────────────────────────
+do {
+    func picture(_ v: NSView) -> Data? {
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return nil }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        return rep.tiffRepresentation
+    }
+    func build() -> (block: QCMenuUsageBlock, row: QCSwitchMenuRow?, item: NSMenuItem?) {
+        let its = QCStatusMenu.items(infos, now: now, switchTo: { _, _ in }) { _ in }
+        let b = its.compactMap { $0.view as? QCMenuUsageBlock }.first!
+        let line = its.compactMap { $0.submenu }.first?.items.first
+        return (b, line?.view as? QCSwitchMenuRow, line)
+    }
+    check("blur setting: on by default (the shared state and a settings file with no such key)",
+          AddressPrivacy.shared.blur && QuickChatSettings().blurAddresses)
+    let on = build()
+    let onBlock = picture(on.block), onRow = on.row.flatMap(picture)
+    check("blur setting: on, the usage block's address is blurred at rest and masked as words, the switch row too",
+          !on.block.sharp && on.block.model.lines[1] == maskEmail(mainAddress) + " · in use" && on.row?.sharp == false
+          && on.item?.title == swMasked && on.row?.accessibilityLabel() == swMasked)
+
+    var offSettings = QuickChatSettings(); offSettings.blurAddresses = false
+    AddressPrivacy.shared.apply(offSettings)
+    let off = build()
+    check("blur setting: off, the usage block draws the full address sharp at rest", off.block.sharp && !off.block.revealed)
+    check("blur setting: off, the block's words and VoiceOver label hold the full address, no mask",
+          off.block.model.lines[1] == mainAddress + " · in use" && off.block.model.spoken.contains(mainAddress) && !off.block.model.spoken.contains("•")
+          && (off.block.accessibilityLabel() ?? "").contains(mainAddress), "\(off.block.model.lines)")
+    check("blur setting: off, the switch row draws the full address sharp at rest, unlit, and its title and label hold it in full",
+          off.row?.sharp == true && off.row?.lit == false && off.row?.address == "zed@example.com"
+          && off.item?.title == "Switch to zed@example.com…" && off.row?.accessibilityLabel() == "Switch to zed@example.com…")
+    check("blur setting: off, what is drawn differs from the blurred look", picture(off.block) != onBlock && off.row.flatMap(picture) != onRow)
+    // a dimmed row shows the address in full too
+    check("blur setting: off, a dimmed row is sharp as well (and still does nothing)", QCSwitchMenuRow(address: "zed@example.com", enabled: false) {}.sharp)
+
+    AddressPrivacy.shared.apply(QuickChatSettings())
+    let back = build()
+    check("blur setting: on again, the next menu blurs and masks as before", !back.block.sharp && back.block.model.lines[1] == maskEmail(mainAddress) + " · in use"
+          && back.row?.sharp == false && back.item?.title == swMasked && picture(back.block) == onBlock)
+}
 check("switch: without a switch path there is no such item", items.allSatisfy { $0.submenu == nil })
 
 // ── from the store: a standby account's week never shows, the account in use's does ────────────────
