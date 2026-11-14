@@ -206,6 +206,24 @@ check("switch: one Switch account › item, for the profile with a standby accou
       "\(withSwitch.map { $0.title })")
 let lines = subs.first?.submenu?.items ?? []
 check("switch: its line names the standby account masked, never in full", lines.map(\.title) == ["Switch to \(maskEmail("zed@example.com"))…"] && !lines.map(\.title).joined().contains("zed"), "\(lines.map(\.title))")
+// hovered, a line reads in full; any other highlight (or none) puts it back masked
+let swSub = subs.first?.submenu
+let swFull = "Switch to zed@example.com…", swMasked = "Switch to \(maskEmail("zed@example.com"))…"
+if let swSub, let line = lines.first {
+    swSub.delegate?.menu?(swSub, willHighlight: line)
+    check("switch: highlighted, its line names the standby account in full", line.title == swFull, line.title)
+    swSub.delegate?.menu?(swSub, willHighlight: nil)
+    check("switch: highlight gone, it is masked again", line.title == swMasked, line.title)
+    swSub.delegate?.menu?(swSub, willHighlight: line)
+    swSub.delegate?.menu?(swSub, willHighlight: NSMenuItem(title: "other", action: nil, keyEquivalent: ""))
+    check("switch: highlight on another item, it is masked again", line.title == swMasked, line.title)
+    swSub.delegate?.menu?(swSub, willHighlight: line)
+    swSub.delegate?.menuDidClose?(swSub)
+    check("switch: the menu closing leaves it masked", line.title == swMasked, line.title)
+} else { check("switch: a submenu with a line to highlight", false) }
+check("switch: the submenu is sized for the full line from the start",
+      (swSub?.minimumWidth ?? 0) >= (swFull as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width)
+check("switch: the item keeps its hover delegate alive", subs.first?.representedObject is QCStatusMenu.SwitchHover && swSub?.delegate === subs.first?.representedObject as AnyObject?)
 if let line = lines.first, let t = line.target, let a = line.action { _ = t.perform(a, with: line) }
 check("switch: picking it goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")
 let waitingItems = QCStatusMenu.items(infos, now: now, switching: { $0.id == "main" }, switchTo: { _, _ in }) { _ in }

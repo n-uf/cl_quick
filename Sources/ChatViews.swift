@@ -744,7 +744,8 @@ struct QCProblemView: View {
         case .limitFull:
             if let o = model.offer { QCButton(title: "Ask on \(o.name)") { model.askOnOffer() } }
             if let s = model.switchOffer, model.switchNotice == nil {
-                QCButton(title: "Switch to \(maskEmail(s.email))…", ghost: model.offer != nil) { model.switchTo(s) }
+                // masked at rest, in full while the pointer is on it (the button is as wide as the full one throughout)
+                QCButton(title: "Switch to \(maskEmail(s.email))…", ghost: model.offer != nil, hoverTitle: "Switch to \(s.email)…") { model.switchTo(s) }
             }
         }
     }
@@ -1578,16 +1579,25 @@ enum QCMenu {
 struct QCButton: View {
     let title: String
     var ghost = false
+    /// Shown instead of `title` while the pointer is over the button (the full address of a masked one). The button is
+    /// as wide as the longer of the two from the start, so the row doesn't move on hover.
+    var hoverTitle: String? = nil
     let action: () -> Void
+    @State private var hover = false
     var body: some View {
         Button(action: action) {
-            Text(title).font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(ghost ? QCColor.text : QCColor.bubble)
-                .padding(.horizontal, 12).frame(height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ghost ? QCColor.hover : QCColor.text))
-                .qcControl()
+            ZStack {
+                Text(hoverTitle ?? title).opacity(0)        // reserves the longer title's width
+                Text(hover ? hoverTitle ?? title : title)
+            }
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundColor(ghost ? QCColor.text : QCColor.bubble)
+            .padding(.horizontal, 12).frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ghost ? QCColor.hover : QCColor.text))
+            .qcControl()
         }
         .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
 

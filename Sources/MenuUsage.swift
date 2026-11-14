@@ -426,23 +426,47 @@ enum QCStatusMenu {
         @objc func fire() { run() }
     }
 
-    /// "Switch account ›" for a profile with standby accounts: each one a line, by its masked address, that asks the
-    /// switch question (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing
-    /// new happens here: it is the path the chat's and Settings' Switch… take. Lines are off while a sign-in for the
-    /// profile is waited for.
+    /// The words of a Switch account › line: the address masked, or in full while the line is highlighted.
+    static func switchTitle(_ email: String, full: Bool) -> String { "Switch to \(full ? email : maskEmail(email))…" }
+
+    /// Shows the highlighted Switch account › line with its full address and every other line masked (never a full
+    /// address unhovered, like the drawn block). The submenu's delegate is weak: the "Switch account" item keeps this
+    /// one in its representedObject.
+    final class SwitchHover: NSObject, NSMenuDelegate {
+        private var lines: [(item: NSMenuItem, email: String)] = []
+        func add(_ item: NSMenuItem, email: String) { lines.append((item, email)) }
+
+        func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+            for l in lines { l.item.title = QCStatusMenu.switchTitle(l.email, full: l.item === item) }
+        }
+        func menuDidClose(_ m: NSMenu) { self.menu(m, willHighlight: nil) }
+    }
+
+    /// "Switch account ›" for a profile with standby accounts: each one a line, by its masked address (in full while
+    /// the line is highlighted: SwitchHover), that asks the switch question (AccountSwitcher.confirmAndSwitch: what it
+    /// moves, then Claude Code's sign-in in Terminal). Nothing new happens here: it is the path the chat's and
+    /// Settings' Switch… take. Lines are off while a sign-in for the profile is waited for. The submenu is as wide as
+    /// its widest full line from the start, so a line growing to its full address doesn't widen or jump the menu.
     static func switchItem(_ i: Info, waiting: Bool, switchTo: @escaping (Profile, KnownAccount) -> Void) -> NSMenuItem {
         let item = NSMenuItem(title: "Switch account", action: nil, keyEquivalent: "")
         let sub = NSMenu(title: "Switch account")
         sub.autoenablesItems = false
+        let hover = SwitchHover()
         for a in i.standby {
             let h = Handler { switchTo(i.profile, a) }
-            let line = NSMenuItem(title: "Switch to \(maskEmail(a.email))…", action: #selector(Handler.fire), keyEquivalent: "")
+            let line = NSMenuItem(title: switchTitle(a.email, full: false), action: #selector(Handler.fire), keyEquivalent: "")
             line.target = h
             line.representedObject = h          // the menu item keeps its handler alive
             line.isEnabled = !waiting
             sub.addItem(line)
+            hover.add(line, email: a.email)
         }
+        let font = NSFont.menuFont(ofSize: 0)
+        let widest = i.standby.map { (switchTitle($0.email, full: true) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        sub.minimumWidth = ceil(widest) + 36    // the menu's side margins
+        sub.delegate = hover
         item.submenu = sub
+        item.representedObject = hover
         return item
     }
 
