@@ -81,7 +81,7 @@ struct QCBar: View {
                 else if model.blocked { QCProblemView(problem: .limitFull, model: model, answered: false) }
             }
             .padding(.bottom, 4)
-            if let note = model.accountNote { QCNote(text: note) }
+            if let note = model.accountNote { QCNote(words: note) }
             if let note = model.dictationNote { QCNote(text: note) }
             if let note = model.imageNote { QCNote(text: note) }
             QCAttachRow(model: model)
@@ -173,7 +173,7 @@ struct QCWindow: View {
     }
 
     @ViewBuilder private var turns: some View {
-        if let note = model.accountNote { QCNote(text: note).padding(.top, 14) }
+        if let note = model.accountNote { QCNote(words: note).padding(.top, 14) }
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
             QCTurnView(turn: t, first: i == 0 && model.accountNote == nil, last: i == model.turns.count - 1, model: model)
         }
@@ -677,8 +677,8 @@ struct QCProblemView: View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(QCColor.crimson).frame(width: 8, height: 8).padding(.top, 5)
             VStack(alignment: .leading, spacing: 7) {
-                (Text(title).fontWeight(.semibold).foregroundColor(QCColor.text) + Text(more.isEmpty ? "" : " " + more))
-                    .font(.system(size: 13)).foregroundColor(QCColor.soft).fixedSize(horizontal: false, vertical: true)
+                QCSentence(words: words, size: 13, color: QCColor.soft)
+                    .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
                 if let d = detail {
                     Text(d).font(.system(size: 11.5, design: .monospaced)).foregroundColor(QCColor.muted)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -705,22 +705,29 @@ struct QCProblemView: View {
         }
     }
 
-    private var more: String {
+    /// The notice's words: the title, semibold, then what more there is to say (an address in it apart, to blur).
+    private var words: QCWords {
+        let lead = QCWords(title).strong
+        let rest = more
+        return rest.isEmpty ? lead : lead + .text(" ") + rest
+    }
+
+    private var more: QCWords {
         switch problem {
-        case .notInstalled: return "The quick chat answers through it."
-        case .notSignedIn: return "Its sign-in opens in Terminal. Then try again."
-        case .stopped: return answered ? "What arrived is kept above." : ""
-        case .refused: return ""
-        case .noProfile: return "Pick a Claude Code folder in Settings."
+        case .notInstalled: return QCWords("The quick chat answers through it.")
+        case .notSignedIn: return QCWords("Its sign-in opens in Terminal. Then try again.")
+        case .stopped: return QCWords(answered ? "What arrived is kept above." : "")
+        case .refused: return QCWords()
+        case .noProfile: return QCWords("Pick a Claude Code folder in Settings.")
         case .limitFull:
             func room(_ who: String, _ used: Double?) -> String {
                 used.map { "\(who) has room (\(Int($0.rounded()))% at its last answer)." } ?? "\(who) has no numbers yet."
             }
-            var parts: [String] = []
-            if let o = model.offer { parts.append(room(o.name, o.used)) }
+            var parts: [QCWords] = []
+            if let o = model.offer { parts.append(QCWords(room(o.name, o.used))) }
             // a standby account shows no usage: it is offered, never described by numbers from its last time in use
-            if let s = model.switchOffer { parts.append("\(maskEmail(s.email)) is on standby.") }
-            return parts.joined(separator: " ")
+            if let s = model.switchOffer { parts.append(.address(s.email) + .text(" is on standby.")) }
+            return parts.dropFirst().reduce(parts.first ?? QCWords()) { $0 + .text(" ") + $1 }
         }
     }
 
@@ -744,8 +751,8 @@ struct QCProblemView: View {
         case .limitFull:
             if let o = model.offer { QCButton(title: "Ask on \(o.name)") { model.askOnOffer() } }
             if let s = model.switchOffer, model.switchNotice == nil {
-                // masked at rest, in full while the pointer is on it (the button is as wide as the full one throughout)
-                QCButton(title: "Switch to \(maskEmail(s.email))…", ghost: model.offer != nil, hoverTitle: "Switch to \(s.email)…") { model.switchTo(s) }
+                // the address blurred at rest, sharp while the pointer is on the button
+                QCButton(title: "Switch to ", address: s.email, after: "…", ghost: model.offer != nil) { model.switchTo(s) }
             }
         }
     }
@@ -766,8 +773,8 @@ struct QCSwitchView: View {
             HStack(alignment: .top, spacing: 10) {
                 if waiting { QCPulse().padding(.top, 3) } else { Circle().fill(tint).frame(width: 8, height: 8).padding(.top, 5) }
                 VStack(alignment: .leading, spacing: 7) {
-                    (Text(title(n)).fontWeight(.semibold).foregroundColor(QCColor.text) + Text(more(n)))
-                        .font(.system(size: 13)).foregroundColor(QCColor.soft).fixedSize(horizontal: false, vertical: true)
+                    QCSentence(words: title(n).strong + more(n), size: 13, color: QCColor.soft)
+                        .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         if waiting { QCButton(title: "Stop waiting", ghost: true) { model.dropSwitch() } }
                         else {
@@ -784,30 +791,34 @@ struct QCSwitchView: View {
         }
     }
 
-    private func title(_ n: QuickChatSwitchNotice) -> String {
+    private func title(_ n: QuickChatSwitchNotice) -> QCWords {
         switch n {
-        case .waiting: return "Waiting for the sign-in…"
-        case .wrong(let signedIn, let wanted): return "Signed in as \(maskEmail(signedIn)), not \(maskEmail(wanted))."
-        case .timedOut: return "No sign-in in 10 minutes."
+        case .waiting: return QCWords("Waiting for the sign-in…")
+        case .wrong(let signedIn, let wanted):
+            return .text("Signed in as ") + .address(signedIn) + .text(", not ") + .address(wanted) + .text(".")
+        case .timedOut: return QCWords("No sign-in in 10 minutes.")
         }
     }
 
-    private func more(_ n: QuickChatSwitchNotice) -> String {
+    private func more(_ n: QuickChatSwitchNotice) -> QCWords {
         switch n {
-        case .waiting(let wanted): return " Finish it in Terminal and the browser as \(maskEmail(wanted))."
-        case .wrong: return ""
-        case .timedOut: return " The account in use hasn't changed."
+        case .waiting(let wanted): return .text(" Finish it in Terminal and the browser as ") + .address(wanted) + .text(".")
+        case .wrong: return QCWords()
+        case .timedOut: return QCWords(" The account in use hasn't changed.")
         }
     }
 }
 
-/// One line at the top of a chat: where it is now ("Main is on p•••@example.com now.").
+/// One line at the top of a chat: where it is now ("Main is on <address> now.", the address blurred until the pointer
+/// is on it).
 struct QCNote: View {
-    let text: String
+    let words: QCWords
+    init(text: String) { words = QCWords(text) }
+    init(words: QCWords) { self.words = words }
     var body: some View {
         HStack(spacing: 7) {
             Circle().fill(Color(nsColor: Painter.green)).frame(width: 7, height: 7)
-            Text(text).font(.system(size: 12.5)).foregroundColor(QCColor.muted).lineLimit(2)
+            QCSentence(words: words, size: 12.5, color: QCColor.muted, lineLimit: 2).font(.system(size: 12.5))
             Spacer(minLength: 0)
         }
     }
@@ -1578,17 +1589,21 @@ enum QCMenu {
 
 struct QCButton: View {
     let title: String
+    /// An address between `title` and `after` ("Switch to ", the address, "…"): blurred until the pointer is on the
+    /// button, and masked in the button's accessibility label.
+    var address: String? = nil
+    var after = ""
     var ghost = false
-    /// Shown instead of `title` while the pointer is over the button (the full address of a masked one). The button is
-    /// as wide as the longer of the two from the start, so the row doesn't move on hover.
-    var hoverTitle: String? = nil
     let action: () -> Void
     @State private var hover = false
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Text(hoverTitle ?? title).opacity(0).accessibilityHidden(true)   // reserves the longer title's width, unread
-                Text(hover ? hoverTitle ?? title : title)
+            HStack(spacing: 0) {
+                Text(title)
+                if let address {
+                    QCBlurredAddress(address: address, revealed: hover)
+                    Text(after)
+                }
             }
             .font(.system(size: 12.5, weight: .semibold))
             .foregroundColor(ghost ? QCColor.text : QCColor.bubble)
@@ -1598,6 +1613,7 @@ struct QCButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .accessibilityLabel(address.map { title + maskEmail($0) + after } ?? title)
     }
 }
 
@@ -2411,7 +2427,7 @@ enum QuickChatRender {
             var t = QuickChatTurn(question: q1); t.phase = .waiting
             target.email = "ultra-2@example.com"; m.target = target
             m.level = nil
-            m.accountNote = "Main is on \(maskEmail("ultra-2@example.com")) now."
+            m.accountNote = .isOn("Main", address: "ultra-2@example.com")
             m.turns = [t]
         case "ended-idle": m.turns = [t1]; m.ended = .idle
         case "ended-stopped": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .stopped; m.turns = [t]; m.ended = .stopped

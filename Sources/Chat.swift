@@ -245,8 +245,8 @@ final class QuickChatModel: ObservableObject {
     @Published var switchOffer: QuickChatSwitchOffer?
     /// A switch under way or gone wrong, in place of the limit notice.
     @Published var switchNotice: QuickChatSwitchNotice?
-    /// One line after a switch: "Main is on p•••@example.com now."
-    @Published var accountNote: String?
+    /// One line after a switch: "Main is on <address> now." (the address apart from the words, to blur it).
+    @Published var accountNote: QCWords?
     /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
     @Published var ended: QuickChatEnd?
     /// macOS Dictation into the field is on (the mic button's own state: macOS doesn't say; QCDictation).
@@ -758,7 +758,7 @@ final class QuickChatModel: ObservableObject {
     /// The profile is on another account now: a new chat on the same profile (a chat may not go on across accounts),
     /// what was typed (or the question the full limit stopped) is sent, and one line says where it is.
     /// The caller has set the new target.
-    func continueSwitched(note: String) {
+    func continueSwitched(note: QCWords) {
         let q = pendingQuestion(), imgs = pendingImages(), fls = pendingFiles()
         newChat(keepField: true)
         field = q; images = imgs; files = fls
@@ -775,7 +775,7 @@ final class QuickChatModel: ObservableObject {
         field = q; images = imgs; files = fls
         forgetAccount()
         target = t
-        accountNote = "\(t.name) is on \(maskEmail(t.email ?? "another account")) now."
+        accountNote = .isOn(t.name, address: t.email)
     }
 
     /// The chat's profile points at another folder now (a profile removed and added again on another folder, say): its
@@ -787,7 +787,7 @@ final class QuickChatModel: ObservableObject {
         field = q; images = imgs; files = fls
         forgetAccount()
         target = t
-        accountNote = "\(t.name) uses another folder now. New chat."
+        accountNote = QCWords("\(t.name) uses another folder now. New chat.")
     }
 
     /// The chat's profile was removed: the chat ends with its `claude` (nothing is left running for a profile that's gone).
@@ -836,7 +836,7 @@ final class QuickChatModel: ObservableObject {
                     // the folder moved to another account: the account line starts over and says where it is
                     if let was, let now = fresh.accountUUID, was != now {
                         self.forgetAccount()
-                        self.accountNote = "\(fresh.name) is on \(maskEmail(fresh.email ?? "another account")) now."
+                        self.accountNote = .isOn(fresh.name, address: fresh.email)
                     }
                 }
                 guard let target = self.target else { self.fail(.noProfile); return }
@@ -863,7 +863,7 @@ final class QuickChatModel: ObservableObject {
             closeProcess()
             if turns.count > 1, let last = turns.last {
                 turns = [last]
-                accountNote = (accountNote.map { $0 + " " } ?? "") + "New chat; nothing from the last one was carried over."
+                accountNote = (accountNote.map { $0 + .text(" ") } ?? QCWords()) + .text("New chat; nothing from the last one was carried over.")
             }
             if let why = launch(cmd, key: key, target: target) { fail(.stopped(detail: why)); return }
         }
@@ -1337,7 +1337,7 @@ final class QuickChat {
         model.forgetAccount()
         model.target = QuickChatTarget(p)          // the account signed in now: its address and uuid, for the next `claude`
         refresh()
-        model.continueSwitched(note: "\(p.name) is on \(maskEmail(model.target?.email ?? goal.wantedEmail)) now.")
+        model.continueSwitched(note: .isOn(p.name, address: model.target?.email ?? goal.wantedEmail))
         if !isOpen { open(profile: p.id) }
     }
 

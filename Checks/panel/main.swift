@@ -737,6 +737,49 @@ do {
     pb.releaseGlobally()
 }
 
+// ── addresses in the chat's sentences: apart from the words, blurred at rest, masked as words ─────────
+do {
+    let a = "ultra-2@example.com", b = "ultra-3@example.com"
+    let note = QCWords.isOn("Main", address: a)
+    check("address words: the note holds the whole address apart from its words, and nothing else of it",
+          note.addresses == [a] && note.pieces.map(\.text) == ["Main is on ", a, " now."] && note.pieces.map(\.isAddress) == [false, true, false])
+    check("address words: as words (VoiceOver, checks) the address is masked, never in full",
+          note.spoken == "Main is on \(maskEmail(a)) now." && !note.spoken.contains("ultra-2"))
+    check("address words: no address known, no address piece", QCWords.isOn("Main", address: nil).addresses.isEmpty && QCWords.isOn("Main", address: nil).spoken == "Main is on another account now.")
+    // the account notes the model makes carry the address apart
+    let m = QuickChatModel()
+    var t = QuickChatTarget(Profile(id: "main", name: "Main", folder: "~/.claude-sample"))
+    t.email = a
+    m.accountChanged(to: t)
+    check("address words: the note after an account change carries the address apart, masked as words",
+          m.accountNote?.addresses == [a] && m.accountNote?.spoken == "Main is on \(maskEmail(a)) now.", "\(String(describing: m.accountNote))")
+    // the sign-in texts: both addresses apart, the punctuation stays glued to each so a line never starts with a comma
+    let wrong = QCWords.text("Signed in as ") + .address(a) + .text(", not ") + .address(b) + .text(".")
+    let tokens = QCSentence.tokens(wrong).map { $0.map(\.text).joined() }
+    check("address words: the wrapping tokens keep each address with the punctuation after it",
+          tokens == ["Signed", "in", "as", a + ",", "not", b + "."] && wrong.addresses == [a, b] && !wrong.spoken.contains("ultra-"), "\(tokens)")
+    check("address words: the blur is at rest and gone while the pointer is on it",
+          QCBlurredAddress.blurRadius(size: 12.5, revealed: false) > 2 && QCBlurredAddress.blurRadius(size: 12.5, revealed: true) == 0)
+    // drawn: the note with an address is as wide as the same sentence in plain text (the wrapping is unchanged), and its
+    // address is not sharp (less edge energy than the plain one)
+    func drawn(_ w: QCWords) -> (size: CGSize, edges: Double) {
+        MainActor.assumeIsolated {
+            let r = ImageRenderer(content: QCNote(words: w).environment(\.colorScheme, .dark).background(Color.black))
+            r.scale = 2
+            guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return (.zero, 0) }
+            var e = 0.0
+            func lum(_ x: Int, _ y: Int) -> Double { Double(rep.colorAt(x: x, y: y)?.usingColorSpace(.genericGray)?.whiteComponent ?? 0) }
+            for y in 0..<rep.pixelsHigh { for x in 1..<rep.pixelsWide { e += abs(lum(x, y) - lum(x - 1, y)) } }
+            return (img.size, e)
+        }
+    }
+    let blurredDraw = drawn(note), sharpDraw = drawn(QCWords("Main is on \(a) now."))
+    check("address chat: the note's address is drawn blurred at rest (less sharp than the plain text)",
+          blurredDraw.edges > 0 && blurredDraw.edges < sharpDraw.edges * 0.8, "\(blurredDraw) \(sharpDraw)")
+    check("address chat: the note keeps its layout (as wide and as high as the plain sentence)",
+          abs(blurredDraw.size.width - sharpDraw.size.width) <= 2 && abs(blurredDraw.size.height - sharpDraw.size.height) <= 2, "\(blurredDraw.size) \(sharpDraw.size)")
+}
+
 // ── the mic button: macOS Dictation into OUR field, cl_quick never activated (stand-ins for Dictation: no real one
 // starts here) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 do {
@@ -2045,7 +2088,7 @@ do {
     let pid2 = r.pid
     n.again(); r.answered(1)
     check("retry: a message with a picture starts a new `claude` (the old one holds the picture already)", !pid2.isEmpty && r.pid != pid2, "\(pid2) \(r.pid)")
-    check("retry: …with that message alone, and says it is a new chat", n.turns.count == 1 && n.turns[0].question == "look" && n.accountNote?.contains("New chat") == true, "\(n.turns.count) \(String(describing: n.accountNote))")
+    check("retry: …with that message alone, and says it is a new chat", n.turns.count == 1 && n.turns[0].question == "look" && n.accountNote?.spoken.contains("New chat") == true, "\(n.turns.count) \(String(describing: n.accountNote))")
     check("retry: the picture went once to each `claude`, none got it twice", r.lines.count == 4 && r.lines.map(r.imageBlocks) == [0, 0, 1, 1], "\(r.lines.map(r.imageBlocks))")
     n.shutdown()
     m.shutdown()
@@ -2781,7 +2824,7 @@ do {
     // an automatic resend (the account switch's continueSwitched) waits as well
     m.field = "again"
     m.attach(QCImages.Found(sources: [.data(slow)]))
-    m.continueSwitched(note: "Moved.")
+    m.continueSwitched(note: QCWords("Moved."))
     check("ready: an automatic resend waits for the picture", m.sendWhenReady && m.turns.isEmpty, "\(m.sendWhenReady) \(m.turns.count)")
     waitLanded { m.turns.count == 1 && m.turns[0].phase == .done }
     check("ready: …and goes with it", m.turns.count == 1 && m.turns[0].question == "again" && m.turns[0].images.count == 1, "\(m.turns.count)")
@@ -3008,7 +3051,7 @@ do {
     om.field = "again"; om.send(); o.answered(1)
     check("web: …which starts a new `claude` with the web tools, and says it is a new chat",
           o.pid != pidOff && ((try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? "").contains(tools)
-          && om.turns.count == 1 && om.accountNote?.contains("New chat") == true, "\(o.pid) \(pidOff) \(om.turns.count) \(String(describing: om.accountNote))")
+          && om.turns.count == 1 && om.accountNote?.spoken.contains("New chat") == true, "\(o.pid) \(pidOff) \(om.turns.count) \(String(describing: om.accountNote))")
     var on = QuickChatSettings(); on.webLinks = true
     om.defaults = { on }
     om.newChat()
@@ -3026,7 +3069,7 @@ do {
     om.field = "and now?"; om.send(); o.answered(1)
     let r1 = (try? String(contentsOfFile: o.argsFile, encoding: .utf8)) ?? ""
     check("web: …so its next message has no web tools and no allowed tools",
-          o.pid != pidWeb && r1.contains("ARG [--tools]\nARG []\n") && !r1.contains("--allowedTools") && !r1.contains("WebFetch") && om.accountNote?.contains("New chat") == true, r1)
+          o.pid != pidWeb && r1.contains("ARG [--tools]\nARG []\n") && !r1.contains("--allowedTools") && !r1.contains("WebFetch") && om.accountNote?.spoken.contains("New chat") == true, r1)
 
     // turned off while an answer is running: that answer goes on with the tools it started with, the change applies when it ends
     let b = imageFixChat("web-busy", conf: "tooldelay=1.5\n", mode: "web"), bm = b.m
