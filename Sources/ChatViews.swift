@@ -1587,7 +1587,7 @@ struct QCButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Text(hoverTitle ?? title).opacity(0)        // reserves the longer title's width
+                Text(hoverTitle ?? title).opacity(0).accessibilityHidden(true)   // reserves the longer title's width, unread
                 Text(hover ? hoverTitle ?? title : title)
             }
             .font(.system(size: 12.5, weight: .semibold))
