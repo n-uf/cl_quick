@@ -41,6 +41,34 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
     if ok { passed += 1 } else { failed += 1; print("FAIL \(name) \(detail())") }
 }
 func spin(_ s: TimeInterval = 0.4) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
+/// Pumps the run loop until `done()` holds, for `ceiling` s at most: a slow runner (a CI virtual Mac, a Mac under load) gets the
+/// time its deferred layout passes need, and a condition that never comes ends at the ceiling, where the check that follows
+/// fails with its own detail. Returns whether `done()` held.
+@discardableResult
+func spinUntil(_ ceiling: TimeInterval = 20, _ done: () -> Bool) -> Bool {
+    let end = Date().addingTimeInterval(ceiling)
+    while !done(), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    CheckQuiet.verify("after a spin")
+    return done()
+}
+/// Pumps the run loop until `window` has made `turns` turns in a row without a resize or a changed frame (its deferred layout
+/// passes and fit() tries are over), for `ceiling` s at most. Counted in turns, not in seconds: a pass waiting in the main
+/// queue runs in the first turn that comes, however slow the machine. A window that never settles (a frame set and taken back
+/// on every turn) ends at the ceiling, and the check that follows counts what it counts. Returns whether it settled.
+@discardableResult
+func spinQuiet(_ window: NSWindow, turns: Int = 15, ceiling: TimeInterval = 20) -> Bool {
+    var resizes = 0
+    let watch = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: nil) { _ in resizes += 1 }
+    defer { NotificationCenter.default.removeObserver(watch) }
+    let end = Date().addingTimeInterval(ceiling)
+    var quiet = 0, seen = resizes, frame = window.frame
+    while quiet < turns, Date() < end {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        if resizes == seen && window.frame == frame { quiet += 1 } else { quiet = 0; seen = resizes; frame = window.frame }
+    }
+    CheckQuiet.verify("after a spin")
+    return quiet >= turns
+}
 /// A sample Claude Code folder signed in to a sample account: a chat's `claude` reports (and goes on) only while the folder
 /// is on the account it is (AccountTrail.owner), so a chat on the stand-in needs its folder signed in like a real one.
 func signedInFolder(_ folder: URL, uuid: String, email: String) {
@@ -423,12 +451,18 @@ do {
     spin(0.5)
     check("late least height: the bar is held at three lines while the content's least height says so", abs(p.frame.height - three) < 0.5,
           "\(p.frame.height) vs \(three)")
-    // fit() tries the smaller frame and AppKit takes it back: once, not on every turn while the least height stays
+    // fit() tries the smaller frame and AppKit takes it back: once, not on every turn while the least height stays. That one
+    // try (a set and a taking back: two resizes) comes whenever SwiftUI's own update for the empty field lands (the content's
+    // ideal height coming down), which on a slow runner is later than any fixed wait: the count starts once it has landed and
+    // the window has been quiet; a set-and-take-back on every turn never gets quiet, and is counted below all the same
+    let idealLanded = spinUntil { cv.intrinsicContentSize.height < three - 5 }
+    let quiet = spinQuiet(p)
     var resizes = 0
     let watch = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: p, queue: nil) { _ in resizes += 1 }
     spin(0.5)
     NotificationCenter.default.removeObserver(watch)
-    check("late least height: while held, the frame is left alone (no setting and taking back on every turn)", resizes == 0, "\(resizes) resizes in 0.5 s")
+    check("late least height: while held, the frame is left alone (no setting and taking back on every turn)", resizes == 0,
+          "\(resizes) resizes in 0.5 s (content's ideal height came down: \(idealLanded), window quiet before: \(quiet))")
     held.isActive = false
     cv.needsUpdateConstraints = true       // as SwiftUI marks its own size constraints when it changes them
     spin(0.5)
@@ -530,11 +564,19 @@ NotificationCenter.default.post(name: NSWindow.willStartLiveResizeNotification, 
 check("a resize is not idle", !p.isIdle)
 chat.model.field = "a\nb\nc\nd"
 spin(0.5)
+spinUntil { cv.intrinsicContentSize.height > bar.height + 20 }     // the four lines are in (a slow runner: later than 0.5 s)
+spinQuiet(p)
 let before = p.frame
 chat.model.field = ""        // the lines go: only fit() would shrink the bar back, and it must not now
 spin(0.5)
+// The user's drag below lasts far longer than SwiftUI needs to bring the content's ideal height down for the empty field
+// (the bar's own, bar.height); the drag's end takes the extra height from it (barExtra: the frame less the ideal height). On a
+// slow runner that update landed after the drag ended, the stale four-line ideal height took the whole extra, and fit() then
+// shrank the bar to its content (520x127, not the 520x180 the user left it at; CI, 2026-11-14): let the update land first.
+let idealDown = spinUntil { abs(cv.intrinsicContentSize.height - bar.height) < 0.5 }
+spinQuiet(p)
 chat.fit()
-check("fit() stays out during a resize", p.frame == before, "\(p.frame) vs \(before)")
+check("fit() stays out during a resize", p.frame == before, "\(p.frame) vs \(before) (content's ideal height down: \(idealDown), now \(cv.intrinsicContentSize.height))")
 // the user drags the bottom edge down by 50: macOS sets the frame, then ends the live resize
 var f = p.frame
 f.size.height += 50; f.origin.y -= 50
@@ -543,6 +585,7 @@ NotificationCenter.default.post(name: NSWindow.didEndLiveResizeNotification, obj
 check("a resize ended: idle again", p.isIdle)
 let sized = p.frame
 spin(0.4)
+spinQuiet(p)       // a fit() try waiting in the queue or in SwiftUI's own update would come in here: it must keep the size too
 check("the user's bar size stays after the resize", p.frame.size == sized.size, "\(p.frame.size) vs \(sized.size)")
 chat.model.field = ""
 spin(0.5)
@@ -1503,9 +1546,14 @@ do {
     func signIn(_ uuid: String, _ email: String) {
         try? Data(#"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)"}}"#.utf8).write(to: folder.appendingPathComponent(".claude.json"))
     }
-    func attempt(conf: String, switchMidway: Bool) -> (recorded: [(String, QuickChatLevel)], level: QuickChatLevel?) {
+    /// `ceiling`: how long to wait for an answer that is expected (the wait ends as soon as it comes); an answer expected NOT to
+    /// come waits the short one out.
+    func attempt(conf: String, switchMidway: Bool, ceiling: TimeInterval = 5) -> (recorded: [(String, QuickChatLevel)], level: QuickChatLevel?) {
         signIn("u-a", "alex@example.com")
-        try? conf.write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+        // the stand-in logs each control request it gets to <args>.ctl, the moment it gets it (before any usagedelay)
+        let args = dir.appendingPathComponent("args.txt").path
+        try? FileManager.default.removeItem(atPath: args + ".ctl")
+        try? ("args=\(args)\n" + conf).write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
         let m = QuickChatModel()
         var t = QuickChatTarget(Profile(id: "switch-check", name: "Main", folder: folder.path))
         t.workFolder = dir.appendingPathComponent("work").path
@@ -1515,10 +1563,12 @@ do {
         m.levelReported = { _, account, l in recorded.append((account, l)) }
         m.warm()
         if switchMidway {
-            spin(0.8)                                    // started, initialize answered, get_usage still on its way
+            // started, initialize answered, get_usage still on its way: waited for, not for a fixed 0.8 s (a loaded Mac starts the
+            // stand-in later than that, and a switch before its initialize is a different case: the process is on the new account)
+            spinUntil(30) { ((try? String(contentsOfFile: args + ".ctl", encoding: .utf8)) ?? "").contains("CTRL get_usage") }
             signIn("u-b", "blake@example.com")           // `claude auth login` as another account, outside cl_quick
         }
-        let end = Date().addingTimeInterval(5)
+        let end = Date().addingTimeInterval(ceiling)
         while recorded.isEmpty, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
         let l = m.level
         m.shutdown()
@@ -1527,7 +1577,7 @@ do {
     let late = attempt(conf: "usagedelay=2\n", switchMidway: true)
     check("switch: a get_usage answer that arrives after the folder moved to another account is dropped",
           late.recorded.isEmpty && late.level == nil, "\(late.recorded.map(\.0))")
-    let same = attempt(conf: "usagedelay=1\n", switchMidway: false)
+    let same = attempt(conf: "usagedelay=1\n", switchMidway: false, ceiling: 40)
     check("switch: the same wait with no switch is kept, for the account in use", same.recorded.map(\.0) == ["u-a"] && same.level?.week == 12,
           "\(same.recorded.map(\.0))")
     let other = attempt(conf: "account=casey@example.com\n", switchMidway: false)
@@ -2152,7 +2202,8 @@ struct ImageFixChat {
         return c.filter { $0["type"] as? String == "image" }.count
     }
     func answered(_ n: Int) {
-        let end = Date().addingTimeInterval(8)
+        // a ceiling, not a wait: the loop ends as soon as the turn is done (a loaded Mac starts the stand-in late)
+        let end = Date().addingTimeInterval(40)
         while !(m.turns.count == n && m.turns.last?.phase == .done), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     }
     /// Attaches and waits until they are in (or refused): `done` is called either way.
