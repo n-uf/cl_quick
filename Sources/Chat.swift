@@ -1659,7 +1659,22 @@ final class QuickChat {
     func digit(_ action: QCDigitAction) {
         switch action {
         case .model(let c, let t): model.pick(c, thinking: t)
+        case .place(let spot): move(to: spot)
         }
+    }
+
+    /// ⌃1 … ⌃6: the panel, at the size it has, goes to that corner or edge centre of the visible frame of the screen it is on
+    /// (QCGeometry.origin: the same places the first opening and the clamps use). Only the origin changes, so nothing of the
+    /// user's size (chatHeight, barExtra) is touched. The bar keeps growing as it does wherever it was put (fit() holds
+    /// its top edge, and the visible frame's bottom stops it), and a chat that is not showing is not moved.
+    func move(to spot: QCSpot) {
+        guard let p = panel, p.isVisible, p.isIdle, let vis = visibleFrame(of: p) else { return }
+        var f = p.frame
+        f.size = NSSize(width: min(f.width, vis.width), height: min(f.height, vis.height))
+        f.origin = QCGeometry.origin(for: spot, size: f.size, in: vis)
+        guard f != p.frame else { return }
+        p.setFrame(f, display: true)
+        p.invalidateShadow()
     }
 
     /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
@@ -1692,16 +1707,15 @@ final class QuickChat {
         QCQuiet.on ? QCQuiet.screen : (p.screen ?? NSScreen.main)?.visibleFrame
     }
 
-    /// The first time: centred on the screen with the mouse, low, its bottom edge 85 pt above the visible frame's
-    /// bottom (just above the Dock); never below the visible frame's bottom nor above its top.
+    /// The first time: centred on the screen with the mouse, low, its bottom edge QCGeometry.bottomGap (85 pt) above the
+    /// visible frame's bottom (just above the Dock); never below the visible frame's bottom nor above its top. It is
+    /// the place ⌃2 puts the panel at.
     private func place(_ p: QuickChatPanel) {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let vis = QCQuiet.on ? QCQuiet.screen : screen?.visibleFrame else { return }
-        let w = min(p.frame.width, vis.width)           // the size it has now: a fall-back for a lost place keeps it
-        let h = min(p.frame.height, vis.height)
-        let bottom = min(vis.minY + 85, vis.maxY - h)   // h <= vis.height, so this stays inside vis
-        p.setFrame(NSRect(x: vis.midX - w / 2, y: bottom, width: w, height: h), display: false)
+        let size = NSSize(width: min(p.frame.width, vis.width), height: min(p.frame.height, vis.height))   // the size it has now: a fall-back for a lost place keeps it
+        p.setFrame(NSRect(origin: QCGeometry.origin(for: QCSpot(across: .centre, down: .bottom), size: size, in: vis), size: size), display: false)
     }
 
     /// Whether the panel's top strip (where it's grabbed) shows on some screen, clear of the menu bar and the Dock.
@@ -1764,7 +1778,7 @@ final class QuickChatPanel: NSPanel {
     var onDictate: () -> Void = {}
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
-    /// The digit keys (QCDigitKeys): ⌘ digits the model and thinking.
+    /// The digit keys (QCDigitKeys): ⌘ digits the model and thinking, ⌃ digits the place on the screen.
     var onDigit: (QCDigitAction) -> Void = { _ in }
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
@@ -1889,8 +1903,14 @@ final class QuickChatPanel: NSPanel {
         }
     }
 
-    /// Caps Lock off again: a text-input window kept invisible for it is back to normal (macOS may reuse it).
+    /// The digit keys without ⌘ (⌃ and ⌃⌥ digits) are no key equivalents AppKit offers performKeyEquivalent first, and the
+    /// field would take them as text: they are read here, before the event goes anywhere, and handled as the ⌘ digits are
+    /// (QCDigitKeys). Caps Lock off again: a text-input window kept invisible for it is back to normal (macOS may reuse it).
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, !event.modifierFlags.contains(.command), let action = QCDigitKeys.action(for: event) {
+            if !event.isARepeat { onDigit(action) }
+            return
+        }
         if event.type == .flagsChanged, !event.modifierFlags.contains(.capsLock) {
             for w in childWindows ?? [] where String(describing: type(of: w)).hasPrefix("TUI") && w.alphaValue == 0 {
                 w.alphaValue = 1

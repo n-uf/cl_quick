@@ -1929,6 +1929,83 @@ do {
     try? FileManager.default.removeItem(at: dir)
 }
 
+// ── ⌃1 … ⌃6: the panel goes to a corner or an edge centre of its screen's visible frame, its size unchanged ───────────
+do {
+    let m = chat.model
+    let vis = QCQuiet.screen
+    let gap: CGFloat = 85       // QCGeometry.bottomGap: where the panel first opens above the bottom
+    func expected(_ code: Int, _ size: CGSize) -> CGPoint {
+        let col = (code - 1) % 3, bottom = code <= 3
+        let x = [vis.minX, vis.midX - size.width / 2, vis.maxX - size.width][col]
+        return CGPoint(x: x, y: bottom ? vis.minY + gap : vis.maxY - size.height)
+    }
+    /// A ⌃ key through the panel's event entry (sendEvent: the path AppKit's own key events take, where ⌃ digits are no key equivalent)
+    func ctrlKey(_ code: UInt16, _ ch: String, _ flags: NSEvent.ModifierFlags = .control) {
+        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                    context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) { p.sendEvent(e) }
+    }
+    for chatMode in [false, true] {
+        let name = chatMode ? "chat" : "bar"
+        chat.hide(); m.newChat(); m.field = ""
+        if chatMode {
+            var turn = QuickChatTurn(question: "q"); turn.answer = "a"; turn.phase = .done
+            m.turns = [turn]
+        }
+        chat.open(); spin(0.5); spinQuiet(p)
+        let size = p.frame.size
+        // a first place, away from the six
+        p.setFrame(NSRect(x: vis.minX + 700, y: vis.minY + 400, width: size.width, height: size.height), display: false)
+        for i in 1...6 {
+            ctrlKey(rowCodes[i - 1], String(i)); spin(0.15)
+            let want = expected(i, size)
+            check("\(name) ⌃\(i): the panel is at \(i <= 3 ? "bottom" : "top") \(["left", "centre", "right"][(i - 1) % 3])",
+                  abs(p.frame.minX - want.x) < 0.5 && abs(p.frame.minY - want.y) < 0.5, "\(p.frame) wanted \(want)")
+            check("\(name) ⌃\(i): the size is unchanged, the frame is on the screen", p.frame.size == size && vis.contains(p.frame), "\(p.frame.size) vs \(size)")
+        }
+        // the same keys by the other ways a layout gives them: the keypad, AZERTY's number row (no digit in the character), Caps Lock
+        for (label, code, ch, flags) in [("keypad", padCodes[2], "3", NSEvent.ModifierFlags([.control, .numericPad])),
+                                         ("AZERTY", rowCodes[3], "'", NSEvent.ModifierFlags([.control])),
+                                         ("Caps Lock", rowCodes[1], "2", NSEvent.ModifierFlags([.control, .capsLock]))] {
+            ctrlKey(code, ch, flags); spin(0.1)
+            let n = [padCodes[2]: 3, rowCodes[3]: 4, rowCodes[1]: 2][code]!
+            let want = expected(n, size)
+            check("\(name) ⌃\(n) on the \(label) key places the panel", abs(p.frame.minX - want.x) < 0.5 && abs(p.frame.minY - want.y) < 0.5, "\(p.frame) wanted \(want)")
+        }
+        // performKeyEquivalent takes it too (the checks and any caller that asks the panel for key equivalents)
+        digitKey(rowCodes[0], .control, "1"); spin(0.1)
+        check("\(name) ⌃1 through performKeyEquivalent is taken and places the panel", abs(p.frame.minX - vis.minX) < 0.5 && abs(p.frame.minY - (vis.minY + gap)) < 0.5)
+        // what is not ours: ⌃7, ⌃⇧1, a letter key — nothing moves
+        let before = p.frame
+        ctrlKey(26, "7"); ctrlKey(rowCodes[2], "#", [.control, .shift]); ctrlKey(9, "v")
+        spin(0.1)
+        check("\(name): ⌃7, ⌃⇧3 and ⌃V move nothing", p.frame == before, "\(p.frame)")
+        // a move is no resize by hand: the size the user's logic keeps is the same one afterwards (fit() leaves the frame alone)
+        chat.fit(); spin(0.3); spinQuiet(p)
+        check("\(name): after a move fit() keeps the size", p.frame.size == size, "\(p.frame.size) vs \(size)")
+        // a hidden panel isn't moved
+        chat.hide()
+        let hidden = p.frame
+        ctrlKey(rowCodes[5], "6"); spin(0.1)
+        check("\(name): a hidden panel stays", p.frame == hidden)
+    }
+    // growth: the bar's top edge is held where it is, wherever the user (or ⌃) put it (QuickChat.fit): at the top it grows down,
+    // at the bottom it grows down into the gap and then, stopped by the visible frame's bottom, up. It never leaves the screen.
+    chat.hide(); m.newChat(); m.field = ""; chat.open(); spin(0.5); spinQuiet(p)
+    for i in [2, 5] {
+        ctrlKey(rowCodes[i - 1], String(i)); spin(0.2); spinQuiet(p)
+        m.field = ""; spinQuiet(p)
+        let base = p.frame
+        m.field = Array(repeating: "line", count: 6).joined(separator: "\n"); spin(0.4); spinQuiet(p)
+        check("bar at \(i == 2 ? "the bottom" : "the top"): the field's growth keeps the bar on the screen", vis.contains(p.frame) && p.frame.height > base.height, "\(base) -> \(p.frame)")
+        // (at the bottom the growth first goes down into the gap, then the visible frame's bottom stops it and the bar rises)
+        check("bar at \(i == 2 ? "the bottom" : "the top"): the top edge is held, or the bottom stopped at the frame's, as after a drag",
+              abs(p.frame.maxY - base.maxY) < 0.5 || (i == 2 && abs(p.frame.minY - vis.minY) < 0.5 && p.frame.maxY > base.maxY), "\(base) -> \(p.frame)")
+        m.field = ""; spinQuiet(p)
+        check("bar at \(i == 2 ? "the bottom" : "the top"): back to its own height with the field", abs(p.frame.height - base.height) < 0.5, "\(base) -> \(p.frame)")
+    }
+    chat.hide(); m.newChat(); m.field = ""
+}
+
 // A recorded shortcut is named by its key as printed, never by the Shift character (⌃⇧1 is "⌃⇧1", not "⌃⇧!")
 do {
     if let us = QuickChatShortcut.layoutData(id: "com.apple.keylayout.US") {
