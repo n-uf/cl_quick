@@ -4,7 +4,7 @@
 // rest to the menu: the arrow keys highlight it, Return picks it (the item's action), a click picks it.
 //
 // The rule for addresses: blurred on screen everywhere, masked only as words (VoiceOver, an item's title, the checks).
-// This file draws them blurred in the menus (QCProfileMenuRow, QCSwitchMenuRow) and in an alert's accessory view
+// This file draws them blurred in the menus (QCProfileMenuRow, QCStandbyMenuRow) and in an alert's accessory view
 // (QCAddressLabel); the chat's views do it in AddressViews.swift.
 
 import AppKit
@@ -120,17 +120,12 @@ final class QCProfileMenuRow: NSView {
             RunLoop.main.add(t, forMode: .common)
             return
         }
-        enclosingMenuItem?.menu?.cancelTracking()
-        // once the menu has closed, not inside its tracking loop
-        let pick = self.pick
-        DispatchQueue.main.async { pick() }
+        closeMenuThen(pick)
     }
 
     /// VoiceOver's press picks the profile, as a click does.
     override func accessibilityPerformPress() -> Bool {
-        enclosingMenuItem?.menu?.cancelTracking()
-        let pick = self.pick
-        DispatchQueue.main.async { pick() }
+        closeMenuThen(pick)
         return true
     }
 
@@ -232,11 +227,26 @@ final class QCProfileMenuRow: NSView {
     }
 }
 
-/// A line of a profile's Switch account › submenu: "Switch to " + the standby account's address + "…", drawn by hand
-/// like QCProfileMenuRow (and with its blur): the address is blurred at rest and sharp while the line is highlighted
-/// (the menu's highlight follows the pointer and the arrow keys). A click closes the menu and runs the switch, as the
-/// item's action does for Return. While a sign-in for the profile is waited for the line is dimmed and does nothing.
-final class QCSwitchMenuRow: NSView {
+extension NSView {
+    /// A click on a menu item's view: closes the menu, then runs `pick` once it has closed (not inside the menu's
+    /// tracking loop, where a modal question or a window would not take the keyboard).
+    func closeMenuThen(_ pick: @escaping () -> Void) {
+        enclosingMenuItem?.menu?.cancelTracking()
+        DispatchQueue.main.async { pick() }
+    }
+
+    /// The release of a click is on the view: a release outside it (the press was on it) is no click.
+    func releasedOn(_ e: NSEvent) -> Bool { bounds.contains(convert(e.locationInWindow, from: nil)) }
+}
+
+/// A profile's standby account as a row of its group in the menu: under the block of the profile (its account in use
+/// and the bars), dimmed, a hollow lamp, the address and "· standby", laid out as the block's account line is (the same
+/// lamp column, address x and fonts). It shows no usage. Drawn by hand like the block and QCProfileMenuRow: the
+/// address is blurred at rest and sharp while the row is highlighted (the menu's highlight follows the pointer and the
+/// arrow keys), and a quiet "Switch…" shows at the right then. A click anywhere on it closes the menu and asks the
+/// switch question (the item's action does the same for Return). While a sign-in for the profile is waited for the
+/// row is dimmed further, never lit, and does nothing.
+final class QCStandbyMenuRow: NSView {
     /// The whole address, for drawing only; the words and the accessibility label hold it masked.
     let address: String
     let enabled: Bool
@@ -244,15 +254,20 @@ final class QCSwitchMenuRow: NSView {
     /// For pictures: drawn as if the menu highlighted it.
     var highlighted = false
 
-    static let font = NSFont.menuFont(ofSize: 0)
+    static let tag = " · standby", hint = "Switch…"
+    /// As the block's account line: the lamp's column, the address's x, the fonts.
+    static let lampX = QCMenuUsageBlock.padX, addressX = QCMenuUsageBlock.padX + QCMenuUsageBlock.textGap
+    static let addressFont = QCProfileMenuRow.addressFont, tagFont = QCMenuUsageBlock.accountFont
+    static let hintGap: CGFloat = 18
     /// As tall as the blurred address's picture (the text's height and the blur's reach above and below), so the blur
-    /// is never cut; a little taller than a native item.
-    static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: font]).height) + 2 * QCProfileMenuRow.blurPad
-    static let lead: CGFloat = 14, trailing: CGFloat = 14
-    static let before = "Switch to ", after = "…"
+    /// is never cut; the highlight is a native item's height, centred.
+    static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: addressFont]).height) + 2 * QCProfileMenuRow.blurPad
+    static let highlightH: CGFloat = 22
 
-    /// The line as words (VoiceOver, the item's title): the address masked.
-    static func words(_ address: String) -> String { before + AddressPrivacy.words(address) + after }
+    /// The item's title (type-ahead, Return): the address masked, and that it stands by.
+    static func title(_ address: String) -> String { AddressPrivacy.words(address) + tag }
+    /// What VoiceOver reads: the address masked, "standby", "switch" (the action).
+    static func spoken(_ address: String) -> String { AddressPrivacy.words(address) + ", standby, switch" }
 
     init(address: String, enabled: Bool, pick: @escaping () -> Void) {
         self.address = address; self.enabled = enabled; self.pick = pick
@@ -260,20 +275,22 @@ final class QCSwitchMenuRow: NSView {
         autoresizingMask = [.width]
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
-        setAccessibilityLabel(Self.words(address))
+        setAccessibilityLabel(Self.spoken(address))
         setAccessibilityEnabled(enabled)
     }
     required init?(coder: NSCoder) { fatalError("not from a nib") }
 
     override var isFlipped: Bool { true }
 
-    private static func w(_ s: String) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: font]).width) }
-    /// The least width that shows the line: the address is as wide blurred as it is sharp.
-    static func width(_ address: String) -> CGFloat { lead + w(before) + w(address) + w(after) + trailing }
+    private static func w(_ s: String, _ f: NSFont) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: f]).width) }
+    /// The least width that shows it all (nothing is cut): the address (as wide blurred as sharp), its tag and "Switch…".
+    static func width(_ address: String) -> CGFloat {
+        addressX + w(address, addressFont) + w(tag, tagFont) + hintGap + w(hint, tagFont) + QCMenuUsageBlock.padX
+    }
 
-    /// Whether the line is lit by the menu (the address is sharp then); a dimmed line never is.
+    /// Whether the row is lit by the menu (the address is sharp then); a dimmed row never is.
     var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
-    /// The address is drawn readable: the line is lit, or addresses are not blurred (AddressPrivacy).
+    /// The address is drawn readable: the row is lit, or addresses are not blurred (AddressPrivacy).
     var sharp: Bool { lit || !AddressPrivacy.shared.blur }
 
     override func updateTrackingAreas() {
@@ -283,18 +300,12 @@ final class QCSwitchMenuRow: NSView {
     }
     override func mouseEntered(with e: NSEvent) { needsDisplay = true }
     override func mouseExited(with e: NSEvent) { needsDisplay = true }
-    /// A click is a release on the row: one released outside it (the press was on it) does nothing.
-    override func mouseUp(with e: NSEvent) {
-        guard bounds.contains(convert(e.locationInWindow, from: nil)) else { return }
-        press()
-    }
+    override func mouseUp(with e: NSEvent) { if releasedOn(e) { press() } }
 
-    /// A click: closes the menu, then runs the switch (not inside the menu's tracking loop). Nothing while dimmed.
+    /// A click anywhere on the row: closes the menu, then runs the switch question. Nothing while dimmed.
     func press() {
         guard enabled else { return }
-        enclosingMenuItem?.menu?.cancelTracking()
-        let pick = self.pick
-        DispatchQueue.main.async { pick() }
+        closeMenuThen(pick)
     }
 
     /// VoiceOver's press does the same.
@@ -307,25 +318,25 @@ final class QCSwitchMenuRow: NSView {
     override func draw(_ dirty: NSRect) {
         let on = lit
         if on {
-            // a native item's height, centred (the row is taller, for the blur)
             NSColor.selectedContentBackgroundColor.setFill()
-            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - 11, width: bounds.width - 10, height: 22), xRadius: 4, yRadius: 4).fill()
+            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - Self.highlightH / 2, width: bounds.width - 10, height: Self.highlightH), xRadius: 4, yRadius: 4).fill()
         }
-        let fg: NSColor = !enabled ? .disabledControlTextColor : on ? .selectedMenuItemTextColor : .labelColor
-        let attrs: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: fg]
-        func put(_ s: String, at x: CGFloat) {
-            let h = (s as NSString).size(withAttributes: attrs).height
-            (s as NSString).draw(at: NSPoint(x: x, y: bounds.midY - h / 2), withAttributes: attrs)
-        }
-        var x = Self.lead
-        put(Self.before, at: x); x += Self.w(Self.before)
+        // dimmed (a step below the account in use), dimmed further while a sign-in is waited for, light on the highlight
+        let fg: NSColor = on ? .selectedMenuItemTextColor : enabled ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.14)
+        let sub: NSColor = on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.75) : fg
+        let mid = bounds.midY
+        QCMenuUsageBlock.drawLamp(on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.85) : fg, hollow: true, midY: mid)
+        let width = Self.w(address, Self.addressFont)
         if sharp {
-            put(address, at: x)
+            QCMenuUsageBlock.drawText(address, Self.addressFont, sub, x: Self.addressX, midY: mid)
         } else if let img = blurredAddress(fg) {
-            img.draw(in: NSRect(x: x - QCProfileMenuRow.blurPad, y: bounds.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
+            img.draw(in: NSRect(x: Self.addressX - QCProfileMenuRow.blurPad, y: mid - img.size.height / 2, width: img.size.width, height: img.size.height))
         }
-        x += Self.w(address)
-        put(Self.after, at: x)
+        QCMenuUsageBlock.drawText(Self.tag, Self.tagFont, sub, x: Self.addressX + width, midY: mid)
+        if on {
+            let hintW = Self.w(Self.hint, Self.tagFont)
+            QCMenuUsageBlock.drawText(Self.hint, Self.tagFont, sub, x: bounds.maxX - QCMenuUsageBlock.padX - hintW, midY: mid)
+        }
     }
 
     /// The blurred address, made once for the look it is drawn in (the lit look never shows it), made again if the
@@ -333,7 +344,7 @@ final class QCSwitchMenuRow: NSView {
     private var blurCache: NSImage?
     private func blurredAddress(_ color: NSColor) -> NSImage? {
         if let blurCache { return blurCache }
-        blurCache = QCProfileMenuRow.blurred(address, color: color, font: Self.font)
+        blurCache = QCProfileMenuRow.blurred(address, color: color, font: Self.addressFont)
         return blurCache
     }
     override func viewDidChangeEffectiveAppearance() {

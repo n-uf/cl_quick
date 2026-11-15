@@ -197,42 +197,93 @@ check("the menu: the blocks are all as wide as the widest", Set(blocks.map(\.fra
 blocks.last?.press(); spin(0.1)
 check("the menu: a click picks that profile", chosen == ["work"])
 
-// ── Switch account ›, for a profile with standby accounts, through the switch path that exists ─────────
+// ── standby accounts: a row each, in their profile's group, through the switch path that exists ─────────
+// (sample addresses only: example.com / example.org)
 var switched: [String] = []
-let withSwitch = QCStatusMenu.items(infos, now: now, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") }) { _ in }
-let subs = withSwitch.filter { $0.submenu != nil }
-check("switch: one Switch account › item, for the profile with a standby account only, right under its block",
-      withSwitch.count == 4 && subs.count == 1 && subs.first?.title == "Switch account" && withSwitch.firstIndex(of: subs[0]) == 1 && withSwitch[2].isSeparatorItem,
-      "\(withSwitch.map { $0.title })")
-let lines = subs.first?.submenu?.items ?? []
-// each line is a drawn row that holds the whole address for drawing; its words, title and VoiceOver label hold it masked
-let swMasked = "Switch to \(maskEmail("zed@example.com"))…"
-let swRows = lines.compactMap { $0.view as? QCSwitchMenuRow }
-check("switch: its line is a drawn row with the standby account's whole address for drawing", swRows.count == 1 && lines.count == 1 && swRows[0].address == "zed@example.com")
-check("switch: its title and VoiceOver label name the account masked, never in full",
-      lines.map(\.title) == [swMasked] && !lines.map(\.title).joined().contains("zed") && swRows.first?.accessibilityLabel() == swMasked, "\(lines.map(\.title))")
-if let row = swRows.first {
-    row.frame = NSRect(x: 0, y: 0, width: row.frame.width, height: QCSwitchMenuRow.height)
-    // the row's size: as wide as its words need, as tall as the blurred picture, so none of the blur is cut
-    check("switch: the row is as wide as its words need, and a longer address needs more",
-          row.frame.width == QCSwitchMenuRow.width("zed@example.com") && QCSwitchMenuRow.width("zed@example.com") > QCSwitchMenuRow.width("z@e.co"))
-    let blurPicture = QCProfileMenuRow.blurred("zed@example.com", color: .labelColor, font: QCSwitchMenuRow.font)
-    check("switch: the row is as tall as the whole blurred picture of the address, so the blur is not cut",
-          blurPicture != nil && blurPicture!.size.height <= QCSwitchMenuRow.height && QCSwitchMenuRow.height >= 28, "\(String(describing: blurPicture?.size)) in \(QCSwitchMenuRow.height)")
-    check("switch: at rest the line is not lit", !row.lit)
+let yan = KnownAccount(uuid: "u8", email: "yan.old@example.org")
+let zedAddress = "zed@example.com", zedMasked = maskEmail(zedAddress)
+func standbyMenu(_ infos: [QCStatusMenu.Info], switching: @escaping (Profile) -> Bool = { _ in false }, live: ((Profile) -> QCStatusMenu.Info)? = nil) -> [NSMenuItem] {
+    QCStatusMenu.items(infos, now: now, live: live, switching: switching, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") }) { _ in }
+}
+/// The menu's shape in one string: B a profile's block, R a standby row, - a separator.
+func shape(_ items: [NSMenuItem]) -> String {
+    items.map { $0.isSeparatorItem ? "-" : $0.view is QCMenuUsageBlock ? "B" : $0.view is QCStandbyMenuRow ? "R" : "?" }.joined()
+}
+let mainOne = QCStatusMenu.Info(profile: main, level: level(five: 13, week: 88), address: mainAddress, problem: nil, standby: [KnownAccount(uuid: "u9", email: zedAddress)])
+let mainTwo = QCStatusMenu.Info(profile: main, level: level(five: 13, week: 88), address: mainAddress, problem: nil, standby: [KnownAccount(uuid: "u9", email: zedAddress), yan])
+let workNone = QCStatusMenu.Info(profile: work2, level: nil, address: "ultra-2@example.com", problem: nil, standby: [])
+let workOne = QCStatusMenu.Info(profile: work2, level: nil, address: "ultra-2@example.com", problem: nil, standby: [KnownAccount(uuid: "w1", email: "kim.studio@example.org")])
+let oneProfile = standbyMenu([mainOne])
+check("order: one profile with 1 standby: its block, then the standby row, and nothing else", shape(oneProfile) == "BR", shape(oneProfile))
+let withRows = standbyMenu(infos)
+check("order: a profile with no standby account has just its block", shape(withRows) == "BR-B", shape(withRows))
+let twoProfiles = standbyMenu([mainTwo, workNone])
+check("order: two profiles, 2 standby + none: the block and both rows, a line, the other block", shape(twoProfiles) == "BRR-B", shape(twoProfiles))
+check("order: standby accounts are in the store's order (most recently seen first as given)",
+      (twoProfiles[1].view as? QCStandbyMenuRow)?.address == zedAddress && (twoProfiles[2].view as? QCStandbyMenuRow)?.address == yan.email)
+check("grouping: lines go between profiles only, never between a block and its rows or between rows",
+      shape(standbyMenu([mainTwo, workOne])) == "BRR-BR" && shape(standbyMenu([workNone, mainOne, workNone])) == "B-BR-B")
+check("grouping: the menu's own items have no Switch account item and no submenu",
+      (withRows + twoProfiles + oneProfile).allSatisfy { $0.submenu == nil && $0.title != "Switch account" })
+check("grouping: without a switch path there are no rows", shape(items) == "B-B" && items.allSatisfy { $0.submenu == nil })
+check("grouping: a block still opens the quick chat on its profile, with the rows around it",
+      (withRows[0].view as? QCMenuUsageBlock) != nil && withRows[0].representedObject as? String == "main" && (withRows[3].view as? QCMenuUsageBlock) != nil)
+let groupBlock = withRows[0].view as! QCMenuUsageBlock, loneBlock = withRows[3].view as! QCMenuUsageBlock
+check("grouping: a block with rows after it ends closer to them than one with none",
+      groupBlock.frame.height == QCMenuUsageBlock.height(groupBlock.model, joined: true) && loneBlock.frame.height == QCMenuUsageBlock.height(loneBlock.model)
+      && QCMenuUsageBlock.height(groupBlock.model, joined: true) < QCMenuUsageBlock.height(groupBlock.model))
+check("live: a block's numbers follow the store while the menu is open (a provider), a standby row is as built",
+      (standbyMenu([mainOne], live: { _ in mainOne })[0].view as? QCMenuUsageBlock)?.provider != nil && (oneProfile[0].view as? QCMenuUsageBlock)?.provider == nil)
+
+// each row is a drawn view that holds the whole address for drawing; its words, title and VoiceOver label hold it masked
+let rows = twoProfiles.compactMap { $0.view as? QCStandbyMenuRow }
+check("words: the row holds the standby account's whole address for drawing", rows.map(\.address) == [zedAddress, yan.email])
+let zedItem = oneProfile[1], zedRow = oneProfile[1].view as! QCStandbyMenuRow
+check("words: its title and VoiceOver label are the address masked, 'standby' and 'switch', never in full",
+      zedItem.title == zedMasked + " · standby" && zedRow.accessibilityLabel() == zedMasked + ", standby, switch"
+      && !zedItem.title.contains("zed") && !(zedRow.accessibilityLabel() ?? "").contains("zed"), "\(zedItem.title) / \(String(describing: zedRow.accessibilityLabel()))")
+check("words: the row is a menu item for VoiceOver, enabled; the item takes Return and type-ahead (a title, an action)",
+      zedRow.accessibilityRole() == .menuItem && zedRow.isAccessibilityEnabled() && zedItem.isEnabled && zedItem.action != nil && !zedItem.title.isEmpty)
+check("words: a row shows no usage (no number, no bar) and the menu text names no standby address", !QCStandbyMenuRow.title(zedAddress).contains("%") && !menuText.contains("zed"))
+
+// widths and places: every block and row as wide as the widest, laid out as the block's account line is
+let longAddress = "a-very-long-standby-account-address-for-a-wide-row@example.org"
+let wide = standbyMenu([mainOne, .init(profile: work2, level: nil, address: "ultra-2@example.com", problem: nil, standby: [KnownAccount(uuid: "L", email: longAddress)])])
+let wideViews = wide.compactMap { $0.view }
+check("widths: every block and row is as wide as the widest", Set(wideViews.map(\.frame.width)).count == 1 && wideViews.count == 4, "\(wideViews.map(\.frame.width))")
+check("widths: a long address widens them all (nothing is cut)", QCStandbyMenuRow.width(longAddress) > 300 && wideViews[0].frame.width == QCStandbyMenuRow.width(longAddress),
+      "\(wideViews.map(\.frame.width)) \(QCStandbyMenuRow.width(longAddress))")
+check("widths: the rows are as wide as the blocks in a plain menu too", Set(twoProfiles.compactMap { $0.view?.frame.width }).count == 1)
+check("widths: a longer address needs more", QCStandbyMenuRow.width(zedAddress) > QCStandbyMenuRow.width("z@e.co"))
+let groupBlockOfTwo = twoProfiles[0].view as! QCMenuUsageBlock
+check("places: the lamp column, the address's x and the font are the block's account line's",
+      QCStandbyMenuRow.lampX == QCMenuUsageBlock.padX && QCStandbyMenuRow.addressX == groupBlockOfTwo.addressRect.minX
+      && QCStandbyMenuRow.addressFont === QCProfileMenuRow.addressFont && QCStandbyMenuRow.tagFont === QCMenuUsageBlock.accountFont)
+let blurPicture = QCProfileMenuRow.blurred(zedAddress, color: .labelColor, font: QCStandbyMenuRow.addressFont)
+check("places: the row is as tall as the whole blurred picture of the address, so the blur is not cut",
+      blurPicture != nil && blurPicture!.size.height <= QCStandbyMenuRow.height && QCStandbyMenuRow.height >= QCStandbyMenuRow.highlightH, "\(String(describing: blurPicture?.size)) in \(QCStandbyMenuRow.height)")
+
+do {
+    let row = zedRow
+    row.frame = NSRect(x: 0, y: 0, width: max(row.frame.width, 340), height: QCStandbyMenuRow.height)
+    check("light: at rest the row is not lit", !row.lit)
     row.highlighted = true
-    check("switch: highlighted, the line is lit", row.lit)
+    check("light: highlighted, the row is lit", row.lit)
     row.highlighted = false
-    check("switch: highlight gone, it is not lit", !row.lit)
-    // what is drawn where the address is: blurred at rest (every neighbouring pixel pair close), sharp lit (a hard step)
-    func steepest(lit: Bool) -> (steep: Double, ink: Double) {
+    check("light: highlight gone, it is not lit", !row.lit)
+    func picture(lit: Bool) -> NSBitmapImageRep? {
         row.highlighted = lit
         defer { row.highlighted = false }
-        guard let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds) else { return (0, 0) }
+        guard let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds) else { return nil }
         row.cacheDisplay(in: row.bounds, to: rep)
+        return rep
+    }
+    // what is drawn where the address is: blurred at rest (every neighbouring pixel pair close), sharp lit (a hard step)
+    func steepest(lit: Bool) -> (steep: Double, ink: Double) {
+        guard let rep = picture(lit: lit) else { return (0, 0) }
         let scale = Double(rep.pixelsWide) / Double(row.bounds.width)
-        let x0 = Int(Double(QCSwitchMenuRow.lead + ceil(("Switch to " as NSString).size(withAttributes: [.font: QCSwitchMenuRow.font]).width)) * scale) + 2
-        let x1 = Int(Double(QCSwitchMenuRow.lead + ceil(("Switch to zed@example.com" as NSString).size(withAttributes: [.font: QCSwitchMenuRow.font]).width)) * scale) - 2
+        let x0 = Int(Double(QCStandbyMenuRow.addressX) * scale) + 2
+        let x1 = Int(Double(QCStandbyMenuRow.addressX + ceil((zedAddress as NSString).size(withAttributes: [.font: QCStandbyMenuRow.addressFont]).width)) * scale) - 2
         // each pixel's grey as seen over a mid grey (what the menu's own background would be under it)
         func seen(_ x: Int, _ y: Int) -> (grey: Double, alpha: Double) {
             guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0.5, 0) }
@@ -248,44 +299,91 @@ if let row = swRows.first {
         return (steep, ink)
     }
     let restLook = steepest(lit: false), litLook = steepest(lit: true)
-    check("switch: at rest the address region holds blurred ink only (no hard edge), and some ink",
-          restLook.ink > 0 && restLook.steep < 0.2, "\(restLook)")
-    check("switch: lit, the same region holds the address sharp (a hard edge between the letters and the highlight)",
+    check("blur: at rest the address region holds blurred ink only (no hard edge), and some ink", restLook.ink > 0 && restLook.steep < 0.2, "\(restLook)")
+    check("blur: lit, the same region holds the address sharp (a hard edge between the letters and the highlight)",
           litLook.steep > 2 * restLook.steep && litLook.steep > 0.3, "rest \(restLook) lit \(litLook)")
+    // "Switch…" shows at the right only while the row is lit: the pixels there differ from the highlight's own, and at rest there are none
+    func marks(in rep: NSBitmapImageRep?, from x0: CGFloat, to x1: CGFloat) -> Int {
+        guard let rep else { return -1 }
+        let scale = Double(rep.pixelsWide) / Double(row.bounds.width)
+        let xs = Int(Double(x0) * scale), xe = Int(Double(x1) * scale)
+        let base = rep.colorAt(x: xs, y: rep.pixelsHigh / 2)
+        var n = 0
+        for y in 0..<rep.pixelsHigh { for x in xs..<xe where rep.colorAt(x: x, y: y) != base { n += 1 } }
+        return n
+    }
+    let hintW = ceil((QCStandbyMenuRow.hint as NSString).size(withAttributes: [.font: QCStandbyMenuRow.tagFont]).width)
+    let hintFrom = row.bounds.maxX - QCMenuUsageBlock.padX - hintW - 2, hintTo = row.bounds.maxX - QCMenuUsageBlock.padX + 2
+    check("hint: 'Switch…' shows at the right while the row is lit, and not at rest",
+          marks(in: picture(lit: true), from: hintFrom, to: hintTo) > 0 && marks(in: picture(lit: false), from: hintFrom, to: hintTo) == 0,
+          "\(marks(in: picture(lit: true), from: hintFrom, to: hintTo)) / \(marks(in: picture(lit: false), from: hintFrom, to: hintTo))")
+    check("hint: the words are Switch…", QCStandbyMenuRow.hint == "Switch…")
+    let lampTo = QCStandbyMenuRow.lampX + QCMenuUsageBlock.dotSize
+    let lampRest = picture(lit: false)
+    let lampScale = Double(lampRest?.pixelsWide ?? 0) / Double(row.bounds.width)
+    check("lamp: a hollow lamp in the lamp column (ring pixels at its edge, none at its centre)",
+          marks(in: lampRest, from: QCStandbyMenuRow.lampX, to: lampTo) > 0
+          && lampRest?.colorAt(x: Int(Double(QCStandbyMenuRow.lampX + QCMenuUsageBlock.dotSize / 2) * lampScale), y: Int(Double(row.bounds.midY) * lampScale))?.alphaComponent == 0)
+
     // a click is a release on the row: one released outside it does nothing
-    let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 80), styleMask: [.borderless], backing: .buffered, defer: true)   // never shown
-    host.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+    let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 80), styleMask: [.borderless], backing: .buffered, defer: true)   // never shown
+    host.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 80))
     host.contentView?.addSubview(row)
     row.frame.origin = NSPoint(x: 20, y: 20)
-    check("switch: the row sits in a window of its own for the release checks", row.window === host)
+    check("click: the row sits in a window of its own for the release checks", row.window === host)
     /// A release at a point of the row's own coordinates, as the window would report it.
     func release(atRow p: NSPoint) -> NSEvent? {
         NSEvent.mouseEvent(with: .leftMouseUp, location: row.convert(p, to: nil), modifierFlags: [], timestamp: 0, windowNumber: host.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
     }
     switched = []
-    if let out = release(atRow: NSPoint(x: row.bounds.maxX + 30, y: row.bounds.midY)), let inside = release(atRow: NSPoint(x: 10, y: row.bounds.midY)) {
-        row.mouseUp(with: out); spin(0.1)
-        check("switch: a release outside the row picks nothing", switched.isEmpty, "\(switched)")
-        row.mouseUp(with: inside); spin(0.1)
-        check("switch: a release on the row picks it (after the menu closes)", switched == ["main:u9"],
-              "\(switched) at \(row.convert(inside.locationInWindow, from: nil)) in \(row.bounds), enabled \(row.enabled), window \(String(describing: row.window))")
-    } else { check("switch: mouse events for the release checks", false) }
+    if let out = release(atRow: NSPoint(x: row.bounds.maxX + 30, y: row.bounds.midY)), let above = release(atRow: NSPoint(x: 60, y: -6)) {
+        row.mouseUp(with: out); row.mouseUp(with: above); spin(0.1)
+        check("click: a release outside the row picks nothing", switched.isEmpty, "\(switched)")
+    } else { check("click: mouse events for the release checks", false) }
+    // anywhere on the row: on the lamp, the address, the tag, the empty middle, the hint's place
+    for (name, x) in [("the lamp", 17.0), ("the address", QCStandbyMenuRow.addressX + 30), ("the empty middle", row.bounds.maxX - 90), ("the hint's place", row.bounds.maxX - 20), ("the left edge", 3.0)] {
+        switched = []
+        if let inside = release(atRow: NSPoint(x: x, y: row.bounds.midY)) {
+            row.mouseUp(with: inside); spin(0.1)
+            check("click: a release on \(name) picks the account, once, with its profile (after the menu closes)", switched == ["main:u9"], "\(switched) at \(x) in \(row.bounds)")
+        } else { check("click: mouse event for \(name)", false) }
+    }
     row.removeFromSuperview()
 }
-check("switch: the submenu holds no hover delegate and no widened minimum", subs.first?.submenu?.delegate == nil && (subs.first?.submenu?.minimumWidth ?? 0) == 0)
 switched = []
-if let line = lines.first, let t = line.target, let a = line.action { _ = t.perform(a, with: line) }
-check("switch: the item's own action (Return) goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")
-let waitingItems = QCStatusMenu.items(infos, now: now, switching: { $0.id == "main" }, switchTo: { _, _ in }) { _ in }
-let waitingLines = waitingItems.first { $0.submenu != nil }?.submenu?.items ?? []
-check("switch: while a sign-in is waited for, its lines are off", !waitingLines.isEmpty && waitingLines.allSatisfy { !$0.isEnabled })
-if let w = waitingLines.first?.view as? QCSwitchMenuRow {
-    var fired = 0
-    let dim = QCSwitchMenuRow(address: "zed@example.com", enabled: false) { fired += 1 }
-    w.highlighted = true; dim.highlighted = true; dim.press(); spin(0.1)
-    check("switch: a dimmed row is never lit, does nothing on a click and is disabled for VoiceOver",
-          !w.lit && !dim.lit && fired == 0 && !dim.isAccessibilityEnabled() && !dim.accessibilityPerformPress())
-} else { check("switch: a waiting row is still a drawn row", false) }
+if let t = zedItem.target, let a = zedItem.action { _ = t.perform(a, with: zedItem) }
+check("click: the item's own action (Return) goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")
+switched = []
+_ = zedRow.accessibilityPerformPress(); spin(0.1)
+check("click: VoiceOver's press does the same", switched == ["main:u9"], "\(switched)")
+switched = []
+(twoProfiles[2].view as? QCStandbyMenuRow)?.press(); spin(0.1)
+check("click: the second row picks its own account", switched == ["main:u8"], "\(switched)")
+
+// while a sign-in for a profile is waited for, its rows are dimmed further and inert; another profile's are not
+do {
+    let waitingMenu = standbyMenu([mainOne, workOne], switching: { $0.id == "main" })
+    let waitMain = waitingMenu[1], waitWork = waitingMenu[4]
+    let wRow = waitMain.view as! QCStandbyMenuRow, oRow = waitWork.view as! QCStandbyMenuRow
+    check("waiting: the waiting profile's rows are off (the item too) and the other profile's are on", !waitMain.isEnabled && !wRow.enabled && waitWork.isEnabled && oRow.enabled)
+    wRow.highlighted = true; oRow.highlighted = true
+    switched = []
+    wRow.press(); _ = wRow.accessibilityPerformPress(); spin(0.1)
+    check("waiting: a dimmed row is never lit, does nothing on a click or a VoiceOver press, and is disabled for VoiceOver",
+          !wRow.lit && oRow.lit && switched.isEmpty && !wRow.isAccessibilityEnabled() && oRow.isAccessibilityEnabled(), "\(switched)")
+    wRow.highlighted = false; oRow.highlighted = false
+    wRow.frame.size.width = 340
+    func ink(_ v: NSView) -> Double {
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return 0 }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        var total = 0.0
+        for y in 0..<rep.pixelsHigh { for x in 0..<rep.pixelsWide { total += Double(rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) } }
+        return total
+    }
+    oRow.frame.size.width = 340
+    check("waiting: a dimmed row is drawn fainter than a standby row at rest", ink(wRow) < ink(oRow) && ink(wRow) > 0, "\(ink(wRow)) vs \(ink(oRow))")
+    check("waiting: the block of the waiting profile still opens the chat", (waitingMenu[0].view as? QCMenuUsageBlock) != nil && waitingMenu[0].isEnabled)
+}
 
 // ── Settings ▸ Blur addresses: on (the default) blurs at rest; off draws every address in full and sharp, and the words hold
 // it in full too; it applies to what is built or drawn next ──────────────────────────────────────────────
@@ -295,19 +393,19 @@ do {
         v.cacheDisplay(in: v.bounds, to: rep)
         return rep.tiffRepresentation
     }
-    func build() -> (block: QCMenuUsageBlock, row: QCSwitchMenuRow?, item: NSMenuItem?) {
+    func build() -> (block: QCMenuUsageBlock, row: QCStandbyMenuRow?, item: NSMenuItem?) {
         let its = QCStatusMenu.items(infos, now: now, switchTo: { _, _ in }) { _ in }
         let b = its.compactMap { $0.view as? QCMenuUsageBlock }.first!
-        let line = its.compactMap { $0.submenu }.first?.items.first
-        return (b, line?.view as? QCSwitchMenuRow, line)
+        let line = its.first { $0.view is QCStandbyMenuRow }
+        return (b, line?.view as? QCStandbyMenuRow, line)
     }
     check("blur setting: on by default (the shared state and a settings file with no such key)",
           AddressPrivacy.shared.blur && QuickChatSettings().blurAddresses)
     let on = build()
     let onBlock = picture(on.block), onRow = on.row.flatMap(picture)
-    check("blur setting: on, the usage block's address is blurred at rest and masked as words, the switch row too",
+    check("blur setting: on, the usage block's address is blurred at rest and masked as words, the standby row too",
           !on.block.sharp && on.block.model.lines[1] == maskEmail(mainAddress) + " · in use" && on.row?.sharp == false
-          && on.item?.title == swMasked && on.row?.accessibilityLabel() == swMasked)
+          && on.item?.title == zedMasked + " · standby" && on.row?.accessibilityLabel() == zedMasked + ", standby, switch")
 
     var offSettings = QuickChatSettings(); offSettings.blurAddresses = false
     AddressPrivacy.shared.apply(offSettings)
@@ -316,19 +414,18 @@ do {
     check("blur setting: off, the block's words and VoiceOver label hold the full address, no mask",
           off.block.model.lines[1] == mainAddress + " · in use" && off.block.model.spoken.contains(mainAddress) && !off.block.model.spoken.contains("•")
           && (off.block.accessibilityLabel() ?? "").contains(mainAddress), "\(off.block.model.lines)")
-    check("blur setting: off, the switch row draws the full address sharp at rest, unlit, and its title and label hold it in full",
+    check("blur setting: off, the standby row draws the full address sharp at rest, unlit, and its title and label hold it in full",
           off.row?.sharp == true && off.row?.lit == false && off.row?.address == "zed@example.com"
-          && off.item?.title == "Switch to zed@example.com…" && off.row?.accessibilityLabel() == "Switch to zed@example.com…")
+          && off.item?.title == "zed@example.com · standby" && off.row?.accessibilityLabel() == "zed@example.com, standby, switch")
     check("blur setting: off, what is drawn differs from the blurred look", picture(off.block) != onBlock && off.row.flatMap(picture) != onRow)
     // a dimmed row shows the address in full too
-    check("blur setting: off, a dimmed row is sharp as well (and still does nothing)", QCSwitchMenuRow(address: "zed@example.com", enabled: false) {}.sharp)
+    check("blur setting: off, a dimmed row is sharp as well (and still does nothing)", QCStandbyMenuRow(address: "zed@example.com", enabled: false) {}.sharp)
 
     AddressPrivacy.shared.apply(QuickChatSettings())
     let back = build()
     check("blur setting: on again, the next menu blurs and masks as before", !back.block.sharp && back.block.model.lines[1] == maskEmail(mainAddress) + " · in use"
-          && back.row?.sharp == false && back.item?.title == swMasked && picture(back.block) == onBlock)
+          && back.row?.sharp == false && back.item?.title == zedMasked + " · standby" && picture(back.block) == onBlock)
 }
-check("switch: without a switch path there is no such item", items.allSatisfy { $0.submenu == nil })
 
 // ── from the store: a standby account's week never shows, the account in use's does ────────────────
 let home = work + "/../menu-home"

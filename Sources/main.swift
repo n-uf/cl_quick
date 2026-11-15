@@ -28,7 +28,8 @@
 //                                       general-recording, general-taken, general-fable, general-haiku,
 //                                       general-nolist, general-noweb)
 //   --render-menu OUT.png STATE [dark]  the menu bar menu's profile blocks in a drawn menu, light or dark (STATE: menu,
-//                                       address (the pointer on the first profile's address), full, one, signedout)
+//                                       address (the pointer on the first profile's address), full, one, signedout;
+//                                       with standby rows: standby, standby-lit, standby-waiting, standby2)
 //   --version
 
 import AppKit
@@ -107,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         store.noteAccounts()
         store.reload()          // off the main thread; the next look at the menu has what changed
         // each profile: its name, the account in use, and that account's two limits (MenuUsage.swift); a click opens the chat on it
-        // (a profile with standby accounts also has Switch account ›: the same question and sign-in as Settings' Switch…)
+        // (a profile's standby accounts are rows under its block: a click asks the same question and sign-in as Settings' Switch…)
         QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) },
                            switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
                            switchTo: { p, a in AccountSwitcher.shared.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .settings) },

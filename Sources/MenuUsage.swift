@@ -192,7 +192,7 @@ final class QCMenuUsageBlock: NSView {
     var sharp: Bool { revealed || !AddressPrivacy.shared.blur }
     private var watch: AnyCancellable?
 
-    static let padX: CGFloat = 14, top: CGFloat = 7, bottom: CGFloat = 8
+    static let padX: CGFloat = 14, top: CGFloat = 7, bottom: CGFloat = 8, joinedBottom: CGFloat = 1
     static let headH: CGFloat = 18, accountH: CGFloat = 17, rowH: CGFloat = 16, rowGap: CGFloat = 3, noteH: CGFloat = 15
     static let dotSize: CGFloat = 7, textGap: CGFloat = 13
     static let labelW: CGFloat = 46, barW: CGFloat = 110, barH: CGFloat = 5, shareW: CGFloat = 36, colGap: CGFloat = 8
@@ -204,9 +204,9 @@ final class QCMenuUsageBlock: NSView {
     static let resetFont = NSFont.systemFont(ofSize: 10.5)
     static let minWidth: CGFloat = 300
 
-    init(_ model: QCMenuProfile, pick: @escaping () -> Void) {
+    init(_ model: QCMenuProfile, joined: Bool = false, pick: @escaping () -> Void) {
         self.model = model; self.pick = pick
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(model), height: Self.height(model)))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(model), height: Self.height(model, joined: joined)))
         autoresizingMask = [.width]
         toolTip = "Open the quick chat on \(model.title.replacingOccurrences(of: "Claude ", with: ""))"
         setAccessibilityElement(true)
@@ -235,12 +235,13 @@ final class QCMenuUsageBlock: NSView {
         return max(minWidth, head, account, rows, note)
     }
 
-    static func height(_ m: QCMenuProfile) -> CGFloat {
+    /// `joined`: standby rows follow the block in its group, which then ends a little closer to them.
+    static func height(_ m: QCMenuProfile, joined: Bool = false) -> CGFloat {
         var h = top + headH + accountH
         if m.noUsage { h += rowGap + rowH }
         if !m.rows.isEmpty { h += 4 + CGFloat(m.rows.count) * rowH + CGFloat(m.rows.count - 1) * rowGap }
         if m.updated != nil { h += 3 + noteH }
-        return h + bottom
+        return h + (joined ? joinedBottom : bottom)
     }
 
     // MARK: where things are
@@ -279,11 +280,7 @@ final class QCMenuUsageBlock: NSView {
     override func mouseUp(with e: NSEvent) { press() }
 
     /// A click: the menu closes and the quick chat opens on the profile.
-    func press() {
-        enclosingMenuItem?.menu?.cancelTracking()
-        let pick = self.pick
-        DispatchQueue.main.async { pick() }      // once the menu has closed, not inside its tracking loop
-    }
+    func press() { closeMenuThen(pick) }
 
     override func accessibilityPerformPress() -> Bool { press(); return true }
 
@@ -309,26 +306,37 @@ final class QCMenuUsageBlock: NSView {
 
     // MARK: drawing
 
-    private func text(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat, midY: CGFloat) {
+    /// A line of text with its middle at `midY` (the standby rows draw theirs the same way).
+    static func drawText(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat, midY: CGFloat) {
         let size = (s as NSString).size(withAttributes: [.font: font])
         (s as NSString).draw(at: NSPoint(x: x, y: midY - size.height / 2), withAttributes: [.font: font, .foregroundColor: color])
     }
+    private func text(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat, midY: CGFloat) { Self.drawText(s, font, color, x: x, midY: midY) }
     private func textRight(_ s: String, _ font: NSFont, _ color: NSColor, right: CGFloat, midY: CGFloat) {
         text(s, font, color, x: right - Self.w(s, font), midY: midY)
     }
 
-    private func lamp(_ color: NSColor, glow: Bool, midY: CGFloat) {
-        let r = NSRect(x: Self.padX, y: midY - Self.dotSize / 2, width: Self.dotSize, height: Self.dotSize)
+    /// A lamp in the lamp column (a standby row draws its hollow one here too).
+    static func drawLamp(_ color: NSColor, glow: Bool = false, hollow: Bool = false, midY: CGFloat) {
+        let r = NSRect(x: padX, y: midY - dotSize / 2, width: dotSize, height: dotSize)
         NSGraphicsContext.saveGraphicsState()
         if glow {
             let s = NSShadow()
             s.shadowColor = color.withAlphaComponent(0.7); s.shadowBlurRadius = 3; s.shadowOffset = .zero
             s.set()
         }
-        color.setFill()
-        NSBezierPath(ovalIn: r).fill()
+        if hollow {
+            color.setStroke()
+            let ring = NSBezierPath(ovalIn: r.insetBy(dx: 0.6, dy: 0.6))
+            ring.lineWidth = 1.2
+            ring.stroke()
+        } else {
+            color.setFill()
+            NSBezierPath(ovalIn: r).fill()
+        }
         NSGraphicsContext.restoreGraphicsState()
     }
+    private func lamp(_ color: NSColor, glow: Bool, midY: CGFloat) { Self.drawLamp(color, glow: glow, midY: midY) }
 
     /// A limit's bar: a faint track and the share in its level's colour, fading in from 70% at its left end (crimson whole).
     private func bar(_ r: NSRect, p: Double?, stale: Bool) {
@@ -428,47 +436,44 @@ enum QCStatusMenu {
         @objc func fire() { run() }
     }
 
-    /// "Switch account ›" for a profile with standby accounts: each one a drawn line (QCSwitchMenuRow) with its address
-    /// blurred until the line is highlighted, that asks the switch question (AccountSwitcher.confirmAndSwitch: what it
-    /// moves, then Claude Code's sign-in in Terminal). Nothing new happens here: it is the path the chat's and
-    /// Settings' Switch… take. Lines are off while a sign-in for the profile is waited for. The item's title and
-    /// action stay for VoiceOver, the menu's type-ahead and Return (the title has the address masked).
-    static func switchItem(_ i: Info, waiting: Bool, switchTo: @escaping (Profile, KnownAccount) -> Void) -> NSMenuItem {
-        let item = NSMenuItem(title: "Switch account", action: nil, keyEquivalent: "")
-        let sub = NSMenu(title: "Switch account")
-        sub.autoenablesItems = false
-        var rows: [QCSwitchMenuRow] = []
-        for a in i.standby {
-            let run = { switchTo(i.profile, a) }
-            let h = Handler(run)
-            let line = NSMenuItem(title: QCSwitchMenuRow.words(a.email), action: #selector(Handler.fire), keyEquivalent: "")
-            line.target = h
-            line.representedObject = h          // the menu item keeps its handler alive
-            line.isEnabled = !waiting
-            let row = QCSwitchMenuRow(address: a.email, enabled: !waiting, pick: run)
-            line.view = row
-            rows.append(row)
-            sub.addItem(line)
-        }
-        // all as wide as the widest (the menu then widens them with itself)
-        let w = rows.map(\.frame.width).max() ?? 0
-        for r in rows { r.setFrameSize(NSSize(width: w, height: QCSwitchMenuRow.height)) }
-        item.submenu = sub
-        return item
+    /// A standby account's row (QCStandbyMenuRow), in its profile's group: a click anywhere on it asks the switch question
+    /// (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing new happens
+    /// here: it is the path the chat's and Settings' Switch… take. Off while a sign-in for the profile is waited for.
+    /// The item's title and action stay for VoiceOver, the menu's type-ahead and Return (the title has the address masked).
+    static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, QCStandbyMenuRow) {
+        let run = { switchTo(p, a) }
+        let h = Handler(run)
+        let item = NSMenuItem(title: QCStandbyMenuRow.title(a.email), action: #selector(Handler.fire), keyEquivalent: "")
+        item.target = h
+        item.representedObject = h          // the menu item keeps its handler alive
+        item.isEnabled = !waiting
+        let row = QCStandbyMenuRow(address: a.email, enabled: !waiting, pick: run)
+        item.view = row
+        return (item, row)
+    }
+
+    /// Every block and row as wide as the widest (the menu then widens them with itself).
+    static func fit(blocks: [QCMenuUsageBlock], rows: [QCStandbyMenuRow]) {
+        let w = max(blocks.map(\.frame.width).max() ?? 0, rows.map(\.frame.width).max() ?? 0)
+        for b in blocks { b.setFrameSize(NSSize(width: w, height: b.frame.height)) }
+        for r in rows { r.setFrameSize(NSSize(width: w, height: r.frame.height)) }
     }
 
     /// The menu's items for the profiles: a block each (its numbers follow the store while the menu is open when `live`),
-    /// under a profile with standby accounts its Switch account › (when `switchTo` is given), a line between profiles.
-    /// `pick` opens the quick chat on a profile.
+    /// under it a row for each standby account (when `switchTo` is given), a line between profiles and none inside a
+    /// profile's group. `pick` opens the quick chat on a profile. The rows stay as built when the menu opened (it is
+    /// built again on every open).
     static func items(_ infos: [Info], now: Date = Date(), live: ((Profile) -> Info)? = nil,
                       switching: (Profile) -> Bool = { _ in false }, switchTo: ((Profile, KnownAccount) -> Void)? = nil,
                       pick: @escaping (String) -> Void) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         var blocks: [QCMenuUsageBlock] = []
+        var rows: [QCStandbyMenuRow] = []
         for (n, i) in infos.enumerated() {
             if n > 0 { items.append(.separator()) }
             let p = i.profile
-            let block = QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: i.level, address: i.address, problem: i.problem, now: now)) { pick(p.id) }
+            let block = QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: i.level, address: i.address, problem: i.problem, now: now),
+                                         joined: switchTo != nil && !i.standby.isEmpty) { pick(p.id) }
             if let live {
                 block.provider = {
                     let j = live(p)
@@ -480,11 +485,16 @@ enum QCStatusMenu {
             item.view = block
             item.representedObject = p.id
             items.append(item)
-            if let switchTo, !i.standby.isEmpty { items.append(switchItem(i, waiting: switching(p), switchTo: switchTo)) }
+            if let switchTo {
+                let waiting = switching(p)
+                for a in i.standby {
+                    let (line, row) = standbyItem(p, a, waiting: waiting, switchTo: switchTo)
+                    rows.append(row)
+                    items.append(line)
+                }
+            }
         }
-        // all as wide as the widest (the menu then widens them with itself)
-        let w = blocks.map(\.frame.width).max() ?? 0
-        for b in blocks { b.setFrameSize(NSSize(width: w, height: b.frame.height)) }
+        fit(blocks: blocks, rows: rows)
         return items
     }
 }
@@ -615,7 +625,10 @@ final class QCMenuUsageRefresher {
 
 /// `--render-menu OUT.png STATE [light|dark]`: the menu's profile blocks in a drawn menu, with sample names and example.com
 /// addresses. STATE: menu (three profiles: plenty left, fuller, no numbers yet), address (the pointer on the first
-/// profile's address), full (a full 5-hour limit), one (a single profile in use), signedout.
+/// profile's address), full (a full 5-hour limit), one (a single profile in use), signedout. With standby accounts:
+/// standby (one profile and one standby row, at rest), standby-lit (the same, the row highlighted: sharp address and
+/// "Switch…"), standby-waiting (a sign-in waited for: the row dimmed further), standby2 (two profiles: Main with two
+/// standby rows, the first highlighted, and Work with none and no recent numbers).
 enum QCMenuRender {
     static func write(to path: String, state: String, dark: Bool) {
         _ = NSApplication.shared
@@ -627,12 +640,24 @@ enum QCMenuRender {
             l.at = now.addingTimeInterval(-ago)
             return l
         }
-        func block(_ id: String, _ name: String, _ level: QuickChatLevel?, _ address: String?, problem: SignInProblem? = nil) -> QCMenuUsageBlock {
+        func block(_ id: String, _ name: String, _ level: QuickChatLevel?, _ address: String?, problem: SignInProblem? = nil, joined: Bool = false) -> QCMenuUsageBlock {
             let p = Profile(id: id, name: name, folder: "~/.claude-\(id)")
-            return QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: level, address: address, problem: problem, now: now)) {}
+            return QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: level, address: address, problem: problem, now: now), joined: joined) {}
+        }
+        func standby(_ address: String, waiting: Bool = false, lit: Bool = false) -> QCStandbyMenuRow {
+            let r = QCStandbyMenuRow(address: address, enabled: !waiting) {}
+            r.highlighted = lit
+            return r
         }
         var blocks: [QCMenuUsageBlock]
+        var standbyRows: [[QCStandbyMenuRow]] = []
         switch state {
+        case "standby", "standby-lit", "standby-waiting":
+            blocks = [block("main", "Main", level(42, 68), "alex@example.com", joined: true)]
+            standbyRows = [[standby("alex.studio@example.com", waiting: state == "standby-waiting", lit: state == "standby-lit")]]
+        case "standby2":
+            blocks = [block("main", "Main", level(42, 68), "alex@example.com", joined: true), block("work", "Work", level(nil, nil, ago: 2 * 3600), "kim.work@example.org")]
+            standbyRows = [[standby("alex.studio@example.com", lit: true), standby("alex.old@example.org")], []]
         case "one": blocks = [block("main", "Main", level(13, 88), "ultra-1@example.com")]
         case "full": blocks = [block("main", "Main", level(100, 64), "ultra-1@example.com"), block("work", "Work", level(31, 52, ago: 7 * 60), "ultra-2@example.com")]
         case "signedout": blocks = [block("main", "Main", level(13, 88), "ultra-1@example.com"), block("spare", "Spare", nil, nil)]
@@ -641,8 +666,8 @@ enum QCMenuRender {
                       block("work", "Work", level(57, 52, ago: 7 * 60), "ultra-2@example.com"),
                       block("spare", "Spare", nil, "ultra-3@example.com")]
         }
+        QCStatusMenu.fit(blocks: blocks, rows: standbyRows.flatMap { $0 })
         let w = max(blocks.map(\.frame.width).max() ?? 0, 300)
-        for b in blocks { b.setFrameSize(NSSize(width: w, height: b.frame.height)) }
         if state == "address", let b = blocks.first { b.hover(at: NSPoint(x: b.addressRect.midX, y: b.addressRect.midY)) }
 
         // a drawn menu around them: Quick chat, the blocks, Settings…, Quit
@@ -661,7 +686,11 @@ enum QCMenuRender {
             return v
         }
         var parts: [NSView] = [line("Quick chat", "⌥Space"), rule()]
-        for (n, b) in blocks.enumerated() { if n > 0 { parts.append(rule()) }; parts.append(b) }
+        for (n, b) in blocks.enumerated() {
+            if n > 0 { parts.append(rule()) }
+            parts.append(b)
+            if n < standbyRows.count { parts += standbyRows[n] }
+        }
         parts += [rule(), line("Settings…", "⌘,"), line("Quit cl_quick", "⌘Q")]
         let pad: CGFloat = 24, menuPad: CGFloat = 5
         let h = parts.reduce(0) { $0 + $1.frame.height } + 2 * menuPad
