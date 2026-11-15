@@ -165,8 +165,11 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
                                        keyCode: [18, 19, 20, 21][i]) else { check("\(name): a ⌘\(i + 1) event can be made", false); continue }
         let taken = p.performKeyEquivalent(with: e)
         spin(0.3)
-        check("\(name): ⌘\(i + 1) is taken, \(have ? "picks \(f.rawValue) and \(th.rawValue) (held to what it takes)" : "\(f.rawValue) isn't on the list: nothing changes")",
-              taken && (have ? m.choice == f && m.thinking == th : m.choice == was && m.thinking == .low), "\(m.choice) \(m.thinking)")
+        // what the step is held to: the nearest one the picked model takes (as effectiveThinking works it out)
+        let held = QuickChatThinking(rawValue: QuickChatModels.clamp(th.rawValue, to: m.thinkingSteps.map(\.rawValue)))
+        check("\(name): ⌘\(i + 1) is taken, \(have ? "picks \(f.rawValue) and \(th.rawValue), shown as the step the model takes" : "\(f.rawValue) isn't on the list: nothing changes")",
+              taken && (have ? m.choice == f && m.thinking == th && m.effectiveThinking == held : m.choice == was && m.thinking == .low),
+              "\(m.choice) \(m.thinking) effective \(m.effectiveThinking) held \(String(describing: held))")
         check("\(name): ⌘\(i + 1) moves nothing", same(frames(), base), moved(base, frames()))
     }
     m.choose(top); m.choose(QuickChatThinking.high); spin(0.3)

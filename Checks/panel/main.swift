@@ -1867,10 +1867,18 @@ do {
     digitKey(rowCodes[2], .command, "3")
     check("⌘3 on an Opus that takes only Low: Opus, and the step held to Low", m.choice == .opus && m.effectiveThinking == .low, "\(m.choice) \(m.effectiveThinking)")
     ModelCatalog.shared.set(full, profile: t.profileID, account: t.accountUUID)
-    // Fable's "uses limits faster" cue follows the choice, as with the controls
+    // Fable's "uses limits faster" cue is the model control's warm tint, worked out as the control does (ChatViews: tint of
+    // the family's cost with the thinking's): after ⌘4 the model control is tinted 1 and the thinking one 0 (High is no cost);
+    // after ⌘1 (Sonnet) both are 0
+    func tints() -> (model: Int, thinking: Int) {
+        let family = QuickChatModels.costly(m.resolvedModel.family), effort = QuickChatModels.costly(effort: m.effectiveThinking.effort)
+        return (QuickChatModels.tint(own: family, other: effort), QuickChatModels.tint(own: effort, other: family))
+    }
     reset(); digitKey(rowCodes[3], .command, "4")
-    check("⌘4 shows Fable's cost cue, ⌘1 takes it off", QuickChatModels.costly(m.resolvedModel.family)
-          && { digitKey(rowCodes[0], .command, "1"); return !QuickChatModels.costly(m.resolvedModel.family) }())
+    let fableTints = tints()
+    digitKey(rowCodes[0], .command, "1")
+    let sonnetTints = tints()
+    check("⌘4 tints the model control warm (1), the thinking control 0; ⌘1 tints neither", fableTints == (1, 0) && sonnetTints == (0, 0), "\(fableTints) \(sonnetTints)")
     // the keys list shows them
     let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
     check("the keys list names ⌘1 to ⌘4 and what they pick", rows.contains("⌘1") && rows.contains("⌘4") && rows.contains("Sonnet") && rows.contains("Fable"), rows)
@@ -1909,7 +1917,7 @@ do {
     check("digits, running chat: ⌘3 is Opus, High", s.choice == .opus && s.thinking == .high)
     check("digits, running chat: the second answer comes", ask("two", 2))
     digitKey(rowCodes[3], .command, "4")
-    check("digits, running chat: ⌘4 is Fable, High, with the cost cue", s.choice == .fable && s.thinking == .high && QuickChatModels.costly(s.resolvedModel.family))
+    check("digits, running chat: ⌘4 is Fable, High (Fable is a costly family)", s.choice == .fable && s.thinking == .high && QuickChatModels.costly(s.resolvedModel.family))
     check("digits, running chat: the third answer comes", ask("three", 3))
     digitKey(rowCodes[0], .command, "1")
     check("digits, running chat: the fourth answer comes", ask("four", 4))
