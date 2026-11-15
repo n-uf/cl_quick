@@ -1673,8 +1673,12 @@ final class QuickChat {
         guard let p = panel, p.isVisible, p.isIdle, let vis = visibleFrame(of: p) else { return }
         let chat = model.isWindow
         let t = size.target(current: p.frame.size, in: vis)
+        // the place by the frame's edges (a big panel flush at a corner is at that corner); the last ⌃ place only settles an
+        // axis the frame fills end to end
+        let spot = QCGeometry.nearest(p.frame, in: vis, hint: lastSpot)
+        lastSpot = spot
         let f = QCGeometry.resized(p.frame, width: t.width, height: chat ? t.height : nil, in: vis,
-                                   minWidth: QuickChatRoot.minWidth, minHeight: chat ? QuickChatRoot.minWindowHeight : 0)
+                                   minWidth: QuickChatRoot.minWidth, minHeight: chat ? QuickChatRoot.minWindowHeight : 0, spot: spot)
         guard f != p.frame else { return }
         p.setFrame(f, display: true)
         p.invalidateShadow()
@@ -1691,10 +1695,18 @@ final class QuickChat {
         var f = p.frame
         f.size = NSSize(width: min(f.width, vis.width), height: min(f.height, vis.height))
         f.origin = QCGeometry.origin(for: spot, size: f.size, in: vis)
+        lastSpot = spot
         guard f != p.frame else { return }
+        let shrunk = abs(f.height - p.frame.height) > 0.5
         p.setFrame(f, display: true)
         p.invalidateShadow()
+        // a chat held to the screen's height has that height now, as after a resize by hand (else the next mode change
+        // would take the old, taller one back)
+        if shrunk, model.isWindow { chatHeight = p.frame.height }
     }
+    /// The place the last ⌃ digit (or ⌃⌥ digit) put the panel at: it only breaks a tie for a panel as tall (or as wide) as
+    /// its screen, which touches both edges (QCGeometry.nearest).
+    private var lastSpot: QCSpot?
 
     /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
     /// side) leaves the panel back inside it, no larger than that frame.
@@ -1841,15 +1853,16 @@ final class QuickChatPanel: NSPanel {
     /// cl_quick has no menu bar of its own, so the Edit keys are handled here: cut, copy, paste, select all, undo and
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
-        // the digit keys (QCDigitKeys), by key code: no ⌘ digit is a text edit, and the key is taken at any step
-        if let action = QCDigitKeys.action(for: e) {
-            if !e.isARepeat { onDigit(action) }
+        // the digit keys (QCDigitKeys), by key code: no ⌘ digit is a text edit, and the key is taken at any step. Only while the
+        // panel is the key window: ⌘1 typed in Settings is Settings', never the chat's model.
+        if isKeyWindow, let action = QCDigitKeys.action(for: e) {
+            takeDigit(action, e)
             return true
         }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model: free in the field (its ⌥ and ⌘ arrows move the caret, ⌥⌘ ones
         // nothing) and not a macOS shortcut. At the last step the key does nothing and is still taken.
-        if flags.intersection([.command, .option, .control, .shift]) == [.command, .option],
+        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command, .option],
            let k = e.charactersIgnoringModifiers?.unicodeScalars.first.map({ Int($0.value) }) {
             switch k {
             case NSUpArrowFunctionKey: onStep(false, 1); return true
@@ -1922,12 +1935,20 @@ final class QuickChatPanel: NSPanel {
         }
     }
 
+    /// A digit key's action: an input method's composition in the field is committed first (the key would otherwise cut it
+    /// short, or be read as part of it), then the action runs. A held key's repeats do nothing.
+    private func takeDigit(_ action: QCDigitAction, _ e: NSEvent) {
+        guard !e.isARepeat else { return }
+        if let tv = firstResponder as? NSTextView, tv.hasMarkedText() { tv.unmarkText() }
+        onDigit(action)
+    }
+
     /// The digit keys without ⌘ (⌃ and ⌃⌥ digits) are no key equivalents AppKit offers performKeyEquivalent first, and the
     /// field would take them as text: they are read here, before the event goes anywhere, and handled as the ⌘ digits are
     /// (QCDigitKeys). Caps Lock off again: a text-input window kept invisible for it is back to normal (macOS may reuse it).
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, !event.modifierFlags.contains(.command), let action = QCDigitKeys.action(for: event) {
-            if !event.isARepeat { onDigit(action) }
+            takeDigit(action, event)
             return
         }
         if event.type == .flagsChanged, !event.modifierFlags.contains(.capsLock) {

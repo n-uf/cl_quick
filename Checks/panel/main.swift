@@ -1882,6 +1882,11 @@ do {
     // the keys list shows them
     let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
     check("the keys list names ⌘1 to ⌘4 and what they pick", rows.contains("⌘1") && rows.contains("⌘4") && rows.contains("Sonnet") && rows.contains("Fable"), rows)
+    // only while the panel is the key window: hidden (so not key), ⌘3 is taken by no one here and changes nothing
+    reset(); m.choice = .sonnet
+    chat.hide()
+    digitKey(rowCodes[2], .command, "3")
+    check("⌘3 with the panel not the key window changes nothing (a ⌘ digit typed elsewhere is not the chat's)", m.choice == .sonnet && m.thinking == .off, "\(m.choice) \(m.thinking)")
     reset(); chat.hide(); m.newChat()
 }
 
@@ -1903,6 +1908,7 @@ do {
     s.target = t
     s.resolveClaude = { $0(stub) }
     s.freshTarget = { _, done in done(t) }
+    chat.hide(); chat.model.newChat(); chat.open(); spin(0.4)          // the panel is the key window: the keys are its own
     let was = p.onDigit
     p.onDigit = { if case .model(let c, let th) = $0 { s.pick(c, thinking: th) } }
     defer { p.onDigit = was; s.shutdown() }
@@ -1995,6 +2001,18 @@ do {
         let hidden = p.frame
         ctrlKey(rowCodes[5], "6"); spin(0.1)
         check("\(name): a hidden panel stays", p.frame == hidden)
+    }
+    // an input method's composition in the field is committed before the key acts (not cut short by it, nor read as part of it)
+    do {
+        chat.hide(); m.newChat(); m.field = ""; chat.open(); spin(0.5); spinQuiet(p)
+        if let tv = p.firstResponder as? NSTextView {
+            tv.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            check("IME: the field has marked text before the key", tv.hasMarkedText())
+            ctrlKey(rowCodes[2], "3"); spin(0.2)
+            check("IME: ⌃3 commits the composition (no marked text, the text stays) and places the panel", !tv.hasMarkedText() && tv.string == "ni"
+                  && abs(p.frame.maxX - vis.maxX) < 0.5, "marked \(tv.hasMarkedText()) text \(tv.string.debugDescription) \(p.frame)")
+        } else { check("IME: the field has the keyboard", false, "\(String(describing: p.firstResponder))") }
+        m.field = ""
     }
     // growth: the bar's top edge is held where it is, wherever the user (or ⌃) put it (QuickChat.fit): at the top it grows down,
     // at the bottom it grows down into the gap and then, stopped by the visible frame's bottom, up. It never leaves the screen.
@@ -2097,6 +2115,17 @@ do {
     m.turns = []; spin(0.5); spinQuiet(p); m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
     check("remembered: a hand-made size still wins afterwards (500 × 600)", near(p.frame.width, 500) && near(p.frame.height, 600), "\(p.frame)")
 
+    // a ⌃ digit on a smaller screen shrinks a chat to it, and the chat keeps that height (chatHeight) like a resize by hand: the
+    // bar and the chat again come back at it, not at the taller one
+    chat.hide(); m.newChat(); m.field = ""; m.turns = [chatTurn()]; chat.open(); spin(0.5); spinQuiet(p)
+    sizeKey(3)
+    QCQuiet.screen = NSRect(x: vis0.minX, y: vis0.minY, width: 700, height: 500)
+    placeKey(1)
+    check("move onto a smaller screen: the chat is held to it (700 × 500)", near(p.frame.width, 700) && near(p.frame.height, 500) && QCQuiet.screen.contains(p.frame), "\(p.frame)")
+    m.turns = []; spin(0.5); spinQuiet(p); m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
+    check("move onto a smaller screen: the chat's remembered height is the held one", near(p.frame.height, 500), "\(p.frame)")
+    QCQuiet.screen = vis0
+
     // a small screen: the size is held to its visible frame, the panel stays on it. Same place as the big one (the far corner of
     // the world), 700 × 500.
     chat.hide(); m.newChat(); m.field = ""
@@ -2108,6 +2137,40 @@ do {
         sizeKey(2)                                                       // 520 wide, so Tall keeps that width
         sizeKey(n)
         check("small screen ⌃⌥\(n): \(Int(w)) × \(Int(h)), held to the screen", near(p.frame.width, CGFloat(w)) && near(p.frame.height, CGFloat(h)) && small.contains(p.frame), "\(p.frame) in \(small)")
+    }
+    QCQuiet.screen = vis0
+    chat.hide(); m.newChat(); m.field = ""
+
+    // a laptop's screen, 1440 × 875: two sizes in a row from a place keep that place each time, however large the panel is (a big
+    // panel at the bottom left has its centre well inside the screen; its place is the edges it touches)
+    let laptop = NSRect(x: vis0.minX, y: vis0.minY, width: 1440, height: 875)
+    QCQuiet.screen = laptop
+    for chatMode in [false, true] {
+        let name = chatMode ? "chat" : "bar"
+        chat.hide(); m.newChat(); m.field = ""
+        if chatMode { m.turns = [chatTurn()] }
+        chat.open(); spin(0.5); spinQuiet(p)
+        func held(_ spot: Int) -> Bool {
+            let f = p.frame
+            switch spot {
+            case 1: return near(f.minX, laptop.minX) && near(f.minY, laptop.minY + 85)
+            case 3: return near(f.maxX, laptop.maxX) && near(f.minY, laptop.minY + 85)
+            default: return near(f.midX, laptop.midX) && near(f.maxY, laptop.maxY)
+            }
+        }
+        for spot in [1, 3, 5] {
+            for (a, b) in [(3, 1), (5, 1), (3, 5), (5, 3), (1, 5)] {
+                placeKey(spot)
+                sizeKey(a)
+                check("laptop screen, \(name): ⌃\(spot), ⌃⌥\(a) keeps the place", held(spot) && laptop.contains(p.frame), "\(p.frame)")
+                sizeKey(b)
+                check("laptop screen, \(name): ⌃\(spot), ⌃⌥\(a), ⌃⌥\(b) keeps the place", held(spot) && laptop.contains(p.frame), "\(p.frame)")
+                if chatMode {
+                    let want = asked(b, cur: 0, laptop)
+                    check("laptop screen, chat: ⌃⌥\(b) after ⌃⌥\(a) is \(Int(want.width)) × \(Int(want.height))", near(p.frame.width, want.width) && near(p.frame.height, want.height), "\(p.frame)")
+                }
+            }
+        }
     }
     QCQuiet.screen = vis0
     chat.hide(); m.newChat(); m.field = ""

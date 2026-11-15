@@ -126,20 +126,39 @@ enum QCGeometry {
         return NSPoint(x: x, y: y)
     }
 
-    /// The nearest of the six places to a frame: its centre's third of the screen across, its half down.
-    static func nearest(_ f: NSRect, in vis: NSRect) -> QCSpot {
-        let across: QCSpot.Across = f.midX < vis.minX + vis.width / 3 ? .left : f.midX > vis.maxX - vis.width / 3 ? .right : .centre
-        return QCSpot(across: across, down: f.midY < vis.midY ? .bottom : .top)
+    /// The nearest of the six places to a frame. A frame that touches an edge of `vis` is at that edge, however large it is
+    /// (a big panel put at the bottom left has its centre well inside the screen): left or right by the side it touches,
+    /// bottom by a bottom edge at or below the first opening's gap (`bottomGap`), top by a top edge at the frame's top.
+    /// Only a frame touching none falls back to its centre's third of the screen across and its half down. A frame that
+    /// touches both ends of an axis (as tall as the screen, as wide) is no place on that axis: `hint`, the last place
+    /// the keys put it at, decides there, else the top and the centre.
+    static func nearest(_ f: NSRect, in vis: NSRect, hint: QCSpot? = nil) -> QCSpot {
+        let eps: CGFloat = 1
+        let left = f.minX <= vis.minX + eps, right = f.maxX >= vis.maxX - eps
+        let top = f.maxY >= vis.maxY - eps, bottom = f.minY <= vis.minY + bottomGap + eps
+        let across: QCSpot.Across
+        if left && right { across = hint?.across ?? .centre }
+        else if left { across = .left }
+        else if right { across = .right }
+        else { across = f.midX < vis.minX + vis.width / 3 ? .left : f.midX > vis.maxX - vis.width / 3 ? .right : .centre }
+        let down: QCSpot.Down
+        if top && bottom { down = hint?.down ?? .top }
+        else if top { down = .top }
+        else if bottom { down = .bottom }
+        else { down = f.midY < vis.midY ? .bottom : .top }
+        return QCSpot(across: across, down: down)
     }
 
     /// `f` at the width and height asked for, held to the least sizes and to `vis` less the app's edge margin
-    /// (QuickChatRoot.margin), the corner or edge centre of its nearest place staying where it is (a bottom-right panel keeps
-    /// its bottom-right corner), and the whole frame inside `vis`. `height` nil: the height stays (the bar's follows its content).
-    static func resized(_ f: NSRect, width: CGFloat, height: CGFloat?, in vis: NSRect, minWidth: CGFloat, minHeight: CGFloat) -> NSRect {
+    /// (QuickChatRoot.margin), the corner or edge centre of its place (`spot`, else its nearest) staying where it is (a
+    /// bottom-right panel keeps its bottom-right corner), and the whole frame inside `vis`. `height` nil: the height stays
+    /// (the bar's follows its content).
+    static func resized(_ f: NSRect, width: CGFloat, height: CGFloat?, in vis: NSRect, minWidth: CGFloat, minHeight: CGFloat,
+                        spot: QCSpot? = nil) -> NSRect {
         let margin = QuickChatRoot.margin
         let w = min(max(width, minWidth), vis.width - 2 * margin)
         let h = min(max(height ?? f.height, minHeight), vis.height - 2 * margin)
-        let spot = nearest(f, in: vis)
+        let spot = spot ?? nearest(f, in: vis)
         var r = NSRect(x: f.minX, y: f.minY, width: w, height: h)
         switch spot.across {
         case .left: r.origin.x = f.minX
