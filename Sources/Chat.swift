@@ -1660,7 +1660,26 @@ final class QuickChat {
         switch action {
         case .model(let c, let t): model.pick(c, thinking: t)
         case .place(let spot): move(to: spot)
+        case .size(let size): resize(to: size)
         }
+    }
+
+    /// ⌃⌥1 … ⌃⌥5: the panel takes that size, as if the user had sized it by hand, and keeps its place: the corner or edge
+    /// centre of the nearest of the six places stays where it is (QCGeometry.resized), the size held to the content's least
+    /// size and to the screen's visible frame, the frame inside it. In the bar only the width changes (its height follows
+    /// its content, and what the user gave it beyond that, barExtra, is left as it is); in the chat both do, and the
+    /// chat's height is remembered (chatHeight) like a hand-made one. The width is the frame's own, for both.
+    func resize(to size: QCPanelSize) {
+        guard let p = panel, p.isVisible, p.isIdle, let vis = visibleFrame(of: p) else { return }
+        let chat = model.isWindow
+        let t = size.target(current: p.frame.size, in: vis)
+        let f = QCGeometry.resized(p.frame, width: t.width, height: chat ? t.height : nil, in: vis,
+                                   minWidth: QuickChatRoot.minWidth, minHeight: chat ? QuickChatRoot.minWindowHeight : 0)
+        guard f != p.frame else { return }
+        p.setFrame(f, display: true)
+        p.invalidateShadow()
+        if chat { chatHeight = p.frame.height }      // what the window really took (the content's least height holds)
+        keepOnScreen(p)
     }
 
     /// ⌃1 … ⌃6: the panel, at the size it has, goes to that corner or edge centre of the visible frame of the screen it is on
@@ -1756,7 +1775,7 @@ final class QuickChat {
 /// that) and does what becoming key does to the panel's own first responder. Off in the app.
 enum QCQuiet {
     static var on = false
-    static let screen = NSRect(x: -24000, y: -24000, width: 2400, height: 1400)
+    static var screen = NSRect(x: -24000, y: -24000, width: 2400, height: 1400)      // a check may try a smaller one
 }
 
 /// A floating panel that takes the keyboard without bringing cl_quick (or anything else) forward, on every Space and
@@ -1778,7 +1797,7 @@ final class QuickChatPanel: NSPanel {
     var onDictate: () -> Void = {}
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
-    /// The digit keys (QCDigitKeys): ⌘ digits the model and thinking, ⌃ digits the place on the screen.
+    /// The digit keys (QCDigitKeys): ⌘ digits the model and thinking, ⌃ digits the place on the screen, ⌃⌥ digits the size.
     var onDigit: (QCDigitAction) -> Void = { _ in }
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of

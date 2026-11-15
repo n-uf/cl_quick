@@ -2006,6 +2006,121 @@ do {
     chat.hide(); m.newChat(); m.field = ""
 }
 
+// ── ⌃⌥1 … ⌃⌥5: the panel's size, its place kept ────────────────────────────────────────────────────────────────────
+do {
+    let m = chat.model
+    let vis0 = QCQuiet.screen
+    func sizeKey(_ n: Int, _ flags: NSEvent.ModifierFlags = [.control, .option]) {
+        // ⌥ digits give symbols ("¡™£¢∞"): the character is never what is matched
+        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                    context: nil, characters: ["¡", "™", "£", "¢", "∞"][n - 1], charactersIgnoringModifiers: String(n), isARepeat: false,
+                                    keyCode: rowCodes[n - 1]) { p.sendEvent(e) }
+        spin(0.15); spinQuiet(p)
+    }
+    func placeKey(_ n: Int) {
+        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0, windowNumber: p.windowNumber,
+                                    context: nil, characters: String(n), charactersIgnoringModifiers: String(n), isARepeat: false, keyCode: rowCodes[n - 1]) { p.sendEvent(e) }
+        spin(0.15); spinQuiet(p)
+    }
+    /// The size each key asks for on screen `vis`, the panel being `cur` wide (nil height: the bar's, which follows its content)
+    func asked(_ n: Int, cur: CGFloat, _ vis: NSRect) -> CGSize {
+        [CGSize(width: 420, height: 440), CGSize(width: 520, height: 580), CGSize(width: 720, height: 760),
+         CGSize(width: cur, height: vis.height), CGSize(width: 960, height: (vis.height * 0.7).rounded())][n - 1]
+    }
+    func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 0.5 }
+    func chatTurn() -> QuickChatTurn { var t = QuickChatTurn(question: "q"); t.answer = "a"; t.phase = .done; return t }
+
+    for chatMode in [false, true] {
+        let name = chatMode ? "chat" : "bar"
+        chat.hide(); m.newChat(); m.field = ""
+        if chatMode { m.turns = [chatTurn()] }
+        chat.open(); spin(0.5); spinQuiet(p)
+        // anchored bottom right (⌃3), then top centre (⌃5): the corner or edge centre stays put through every size
+        for (spotKey, spotName) in [(3, "bottom right"), (5, "top centre")] {
+            placeKey(spotKey)
+            for n in 1...5 {
+                placeKey(spotKey)                                  // back to the place, at the size it has
+                let before = p.frame
+                sizeKey(n)
+                let a = asked(n, cur: before.width, vis0)
+                let wantW = min(a.width, vis0.width), wantH = chatMode ? min(a.height, vis0.height) : before.height
+                check("\(name) ⌃⌥\(n) at \(spotName): width \(wantW)\(chatMode ? ", height \(wantH)" : ", the height stays")",
+                      near(p.frame.width, wantW) && near(p.frame.height, wantH), "\(p.frame) from \(before), asked \(a)")
+                check("\(name) ⌃⌥\(n) at \(spotName): the frame is on the screen", vis0.contains(p.frame), "\(p.frame)")
+                // as tall as the screen, before or after: no vertical anchor can stay (a full-height panel is as much top as bottom)
+                let tallChat = chatMode && (n == 4 || before.height >= vis0.height - 0.5)
+                if spotKey == 3 {
+                    check("\(name) ⌃⌥\(n) at \(spotName): the right edge stays\(tallChat ? "" : ", and the bottom")",
+                          near(p.frame.maxX, before.maxX) && (tallChat || near(p.frame.minY, before.minY)), "\(p.frame) from \(before)")
+                } else {
+                    check("\(name) ⌃⌥\(n) at \(spotName): the centre stays\(tallChat ? "" : ", and the top edge")",
+                          near(p.frame.midX, before.midX) && (tallChat || near(p.frame.maxY, before.maxY)), "\(p.frame) from \(before)")
+                }
+            }
+        }
+        // a key that is not ours: ⌃⌥6 and ⌥1 alone do nothing
+        let before = p.frame
+        // (asked of performKeyEquivalent: a key that is not ours would go on into the field through sendEvent)
+        digitKey(rowCodes[0], [.option], "¡"); digitKey(rowCodes[1], [.control, .option, .shift], "™"); digitKey(rowCodes[2], [.control, .option, .command], "£")
+        spin(0.15); spinQuiet(p)
+        check("\(name): ⌥1, ⌃⌥⇧2 and ⌘⌃⌥3 do not size it", p.frame == before, "\(p.frame)")
+        // the keypad's digit, the same
+        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .option, .numericPad], timestamp: 0, windowNumber: p.windowNumber,
+                                    context: nil, characters: "¡", charactersIgnoringModifiers: "1", isARepeat: false, keyCode: padCodes[0]) { p.sendEvent(e); spin(0.15); spinQuiet(p) }
+        check("\(name): the keypad's ⌃⌥1 sizes it (Small: 420 wide)", near(p.frame.width, 420), "\(p.frame)")
+    }
+
+    // the user's size is the new one afterwards. The chat: Large, then the bar (no turns), then the chat again: it opens at the
+    // size ⌃⌥ set, as it would at a hand-made one; the bar's height after the chat's resize is what it was (barExtra untouched).
+    chat.hide(); m.newChat(); m.field = ""; chat.open(); spin(0.5); spinQuiet(p)
+    let barHeight = p.frame.height
+    m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
+    sizeKey(3)
+    check("remembered: Large in the chat is 720 × 760", near(p.frame.width, 720) && near(p.frame.height, 760), "\(p.frame)")
+    m.turns = []; spin(0.5); spinQuiet(p)
+    check("remembered: back in the bar the width is the new one and the height is the bar's own", near(p.frame.width, 720) && near(p.frame.height, barHeight), "\(p.frame) bar was \(barHeight)")
+    m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
+    check("remembered: the chat comes back at 720 × 760", near(p.frame.width, 720) && near(p.frame.height, 760), "\(p.frame)")
+    sizeKey(1)
+    m.turns = []; spin(0.5); spinQuiet(p); m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
+    check("remembered: a later Small is the chat's size too (420 × 440)", near(p.frame.width, 420) && near(p.frame.height, 440), "\(p.frame)")
+    // a resize by hand after a ⌃⌥ size still works as ever (the live resize's own path)
+    p.beginResize(); p.setFrame(NSRect(x: p.frame.minX, y: p.frame.minY, width: 500, height: 600), display: false); p.endResize(); spin(0.3); spinQuiet(p)
+    m.turns = []; spin(0.5); spinQuiet(p); m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
+    check("remembered: a hand-made size still wins afterwards (500 × 600)", near(p.frame.width, 500) && near(p.frame.height, 600), "\(p.frame)")
+
+    // a small screen: the size is held to its visible frame, the panel stays on it. Same place as the big one (the far corner of
+    // the world), 700 × 500.
+    chat.hide(); m.newChat(); m.field = ""
+    QCQuiet.screen = NSRect(x: vis0.minX, y: vis0.minY, width: 700, height: 500)
+    let small = QCQuiet.screen
+    m.turns = [chatTurn()]; chat.open(); spin(0.5); spinQuiet(p)
+    check("small screen: the chat opens inside it", small.contains(p.frame), "\(p.frame) in \(small)")
+    for (n, w, h) in [(1, 420.0, 440.0), (2, 520.0, 500.0), (3, 700.0, 500.0), (4, 520.0, 500.0), (5, 700.0, 350.0)] {
+        sizeKey(2)                                                       // 520 wide, so Tall keeps that width
+        sizeKey(n)
+        check("small screen ⌃⌥\(n): \(Int(w)) × \(Int(h)), held to the screen", near(p.frame.width, CGFloat(w)) && near(p.frame.height, CGFloat(h)) && small.contains(p.frame), "\(p.frame) in \(small)")
+    }
+    QCQuiet.screen = vis0
+    chat.hide(); m.newChat(); m.field = ""
+
+    // the least sizes and the screen, in the plain function: below the content's least size it is the least; past the screen, the screen
+    let big = NSRect(x: 0, y: 0, width: 2400, height: 1400), cur = NSRect(x: 1000, y: 600, width: 500, height: 400)
+    let least = QCGeometry.resized(cur, width: 100, height: 100, in: big, minWidth: QuickChatRoot.minWidth, minHeight: QuickChatRoot.minWindowHeight)
+    check("clamp: a size below the content's least is the least", near(least.width, QuickChatRoot.minWidth) && near(least.height, QuickChatRoot.minWindowHeight), "\(least)")
+    let most = QCGeometry.resized(cur, width: 5000, height: 5000, in: big, minWidth: QuickChatRoot.minWidth, minHeight: QuickChatRoot.minWindowHeight)
+    check("clamp: a size past the screen is the screen, the frame on it", most == big, "\(most)")
+    let edge = QCGeometry.resized(NSRect(x: 2300, y: 0, width: 100, height: 400), width: 500, height: 600, in: big, minWidth: 320, minHeight: 200)
+    check("clamp: a frame that would run off the screen is pulled back on it", big.contains(edge), "\(edge)")
+    check("nearest place: the centre's third and half", QCGeometry.nearest(NSRect(x: 100, y: 100, width: 200, height: 200), in: big) == QCSpot(across: .left, down: .bottom)
+          && QCGeometry.nearest(NSRect(x: 1100, y: 1000, width: 200, height: 200), in: big) == QCSpot(across: .centre, down: .top)
+          && QCGeometry.nearest(NSRect(x: 2100, y: 900, width: 200, height: 200), in: big) == QCSpot(across: .right, down: .top))
+    // the keys list shows them
+    let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
+    check("the keys list names ⌃1 – ⌃6 and ⌃⌥1 – ⌃⌥5 with the sizes", rows.contains("⌃1") && rows.contains("⌃6") && rows.contains("⌃⌥1") && rows.contains("⌃⌥5")
+          && rows.contains("Small") && rows.contains("Standard") && rows.contains("Large") && rows.contains("Tall") && rows.contains("Wide"), rows)
+}
+
 // A recorded shortcut is named by its key as printed, never by the Shift character (⌃⇧1 is "⌃⇧1", not "⌃⇧!")
 do {
     if let us = QuickChatShortcut.layoutData(id: "com.apple.keylayout.US") {
