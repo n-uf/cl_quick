@@ -154,6 +154,22 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
             check("\(name): \(f.rawValue) / \(l.rawValue) moves nothing", same(frames(), base), moved(base, frames()))
         }
     }
+    // ⌘1 … ⌘4 pick a model and a thinking step together (Sonnet Medium, Opus Medium, Opus High, Fable High): a family the list has
+    // is picked and nothing moves; one it lacks changes nothing, and the key is still taken
+    for (i, (f, th)) in [(QuickChatModelChoice.sonnet, QuickChatThinking.medium), (.opus, .medium), (.opus, .high), (.fable, .high)].enumerated() {
+        m.choose(families[0]); m.choose(QuickChatThinking.low); spin(0.2)
+        let have = families.contains(f)
+        let was = m.choice
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber,
+                                       context: nil, characters: String(i + 1), charactersIgnoringModifiers: String(i + 1), isARepeat: false,
+                                       keyCode: [18, 19, 20, 21][i]) else { check("\(name): a ⌘\(i + 1) event can be made", false); continue }
+        let taken = p.performKeyEquivalent(with: e)
+        spin(0.3)
+        check("\(name): ⌘\(i + 1) is taken, \(have ? "picks \(f.rawValue) and \(th.rawValue) (held to what it takes)" : "\(f.rawValue) isn't on the list: nothing changes")",
+              taken && (have ? m.choice == f && m.thinking == th : m.choice == was && m.thinking == .low), "\(m.choice) \(m.thinking)")
+        check("\(name): ⌘\(i + 1) moves nothing", same(frames(), base), moved(base, frames()))
+    }
+    m.choose(top); m.choose(QuickChatThinking.high); spin(0.3)
     // the window's own hit test, at the real coordinates: a press on any bar or label never starts a move, and the
     // empty gap after the controls does (so the frames are where the window sees them)
     for k in keys + halves + ["keys"] {
