@@ -100,8 +100,12 @@ amber and red by level, each with its share and the time to its reset ("13% in 1
 ("Updated just now"). Numbers count as the account's state for 5 minutes: older ones are grey, as "Last known 12 min
 ago", with no full limit, and ones over an hour old aren't shown ("No recent numbers"); the chat acts only on fresh
 ones (no full-limit notice, Ask on … or switch offer on old numbers). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
-a profile with no numbers yet says "No usage yet". A profile with standby accounts also has **Switch account ›**,
-listing them by their addresses (blurred until the line is highlighted) and asking the same question as Switch… in Settings. The numbers are the ones Claude Code last gave cl_quick, shown at
+a profile with no numbers yet says "No usage yet". A profile's standby accounts are rows in its group, under the
+account in use and its bars: dimmed, with a hollow lamp, the address (blurred until the row is highlighted) and
+"· standby", and no usage. Point at one and it is highlighted, the address turns sharp and a quiet **Switch…** shows at
+the right; a click anywhere on the row asks the same question as Switch… in Settings. While a sign-in for the profile is
+waited for, its standby rows are dimmed further and do nothing. Lines separate profiles only, not a profile's block
+from its rows. The numbers are the ones Claude Code last gave cl_quick, shown at
 once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a
 time is sent `get_usage` and nothing else (no message to a model, no Keychain, no token), at most once every 3
 minutes for a profile.

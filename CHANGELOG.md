@@ -43,10 +43,15 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   with a green lamp (address blurred until the pointer is on it), the 5-hour and week bars with their share and time
   to reset, and how old the numbers are; only the account in use shows usage. Old numbers are asked for again in the
   background when the menu opens (`get_usage` only, one `claude` at a time), nothing else is sent or read. A profile
-  with standby accounts has **Switch account ›** under its block (its lines blur the address until highlighted, the
-  usual switch question).
-- **Addresses blur instead of being masked.** Wherever cl_quick draws an account address (the menu's rows and Switch
-  account lines, the chat's notes and Switch to… button, the switch question) it is blurred and sharp while the pointer is
+  with standby accounts shows them as rows in its group, under the account in use and its bars (see the next item).
+- **Standby accounts as rows of their profile.** In the menu bar menu a profile's standby accounts are rows right under
+  its block, so the menu shows that a profile holds several accounts: dimmed, a hollow lamp, the address and "· standby",
+  no usage. Pointing at one highlights it, sharpens the address and shows a quiet **Switch…**; a click anywhere on the
+  row asks the usual switch question. While a sign-in for the profile is waited for, its rows are dimmed further and
+  inert (VoiceOver reads them as disabled). VoiceOver reads the masked address, "standby" and "switch". Lines separate
+  profiles only. There is no Switch account › item any more.
+- **Addresses blur instead of being masked.** Wherever cl_quick draws an account address (the menu's rows and standby
+  rows, the chat's notes and Switch to… button, the switch question) it is blurred and sharp while the pointer is
   on it; only the words VoiceOver reads keep the masked form. **Settings ▸ General ▸ Blur addresses** (on by default)
   turns it off: addresses then show in full, sharp, everywhere, at once in the chat and the next time a menu opens.
 - **A quiet chat header.** Once the bar has become a chat window, its header shows only the usage meters ("5h" and
