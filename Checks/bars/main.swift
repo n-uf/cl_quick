@@ -154,24 +154,50 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
             check("\(name): \(f.rawValue) / \(l.rawValue) moves nothing", same(frames(), base), moved(base, frames()))
         }
     }
-    // ⌘1 … ⌘4 pick a model and a thinking step together (Sonnet Medium, Opus Medium, Opus High, Fable High): a family the list has
-    // is picked and nothing moves; one it lacks changes nothing, and the key is still taken
-    for (i, (f, th)) in [(QuickChatModelChoice.sonnet, QuickChatThinking.medium), (.opus, .medium), (.opus, .high), (.fable, .high)].enumerated() {
-        m.choose(families[0]); m.choose(QuickChatThinking.low); spin(0.2)
-        let have = families.contains(f)
-        let was = m.choice
-        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber,
-                                       context: nil, characters: String(i + 1), charactersIgnoringModifiers: String(i + 1), isARepeat: false,
-                                       keyCode: [18, 19, 20, 21][i]) else { check("\(name): a ⌘\(i + 1) event can be made", false); continue }
-        let taken = p.performKeyEquivalent(with: e)
-        spin(0.3)
-        // what the step is held to: the nearest one the picked model takes (as effectiveThinking works it out)
-        let held = QuickChatThinking(rawValue: QuickChatModels.clamp(th.rawValue, to: m.thinkingSteps.map(\.rawValue)))
-        check("\(name): ⌘\(i + 1) is taken, \(have ? "picks \(f.rawValue) and \(th.rawValue), shown as the step the model takes" : "\(f.rawValue) isn't on the list: nothing changes")",
-              taken && (have ? m.choice == f && m.thinking == th && m.effectiveThinking == held : m.choice == was && m.thinking == .low),
-              "\(m.choice) \(m.thinking) effective \(m.effectiveThinking) held \(String(describing: held))")
-        check("\(name): ⌘\(i + 1) moves nothing", same(frames(), base), moved(base, frames()))
+    // ⌘ arrows step the model (→ up, ← down) and thinking (↑ up, ↓ down) one at a time among what the list has and the model takes,
+    // are taken at either end too (nothing changes there), and move nothing; ⇧⌘, ⌥⌘ and ⌃⌘ arrows, and the old ⌃⌘ ones, do nothing
+    func arrow(_ f: Int, _ code: UInt16, _ flags: NSEvent.ModifierFlags = .command) -> Bool {
+        let ch = String(UnicodeScalar(UInt16(f))!)
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                       context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
+        return p.performKeyEquivalent(with: e)
     }
+    let right = (Int(NSRightArrowFunctionKey), UInt16(124)), left = (Int(NSLeftArrowFunctionKey), UInt16(123))
+    let up = (Int(NSUpArrowFunctionKey), UInt16(126)), down = (Int(NSDownArrowFunctionKey), UInt16(125))
+    m.choose(families[0]); m.choose(QuickChatThinking.off); spin(0.2)
+    var seenModels: [QuickChatModelChoice] = [m.resolvedModel.family]
+    for _ in families.dropFirst() {
+        check("\(name): ⌘→ is taken", arrow(right.0, right.1))
+        seenModels.append(m.resolvedModel.family)
+    }
+    check("\(name): ⌘→ steps the model up through every family, in order", seenModels == families, "\(seenModels) vs \(families)")
+    check("\(name): ⌘→ at the last family is taken and changes nothing", arrow(right.0, right.1) && m.resolvedModel.family == families.last!, "\(m.resolvedModel.family)")
+    check("\(name): ⌘← steps the model down", arrow(left.0, left.1) && m.resolvedModel.family == (families.count > 1 ? families[families.count - 2] : families[0]), "\(m.resolvedModel.family)")
+    for _ in families { _ = arrow(left.0, left.1) }
+    check("\(name): ⌘← at the first family is taken and changes nothing", arrow(left.0, left.1) && m.resolvedModel.family == families[0], "\(m.resolvedModel.family)")
+    check("\(name): ⌘ arrows step the model and move nothing", same(frames(), base), moved(base, frames()))
+    m.choose(top); m.choose(QuickChatThinking.off); spin(0.2)
+    let steps = m.thinkingSteps
+    var seenSteps: [QuickChatThinking] = [m.effectiveThinking]
+    for _ in steps.dropFirst() {
+        check("\(name): ⌘↑ is taken", arrow(up.0, up.1))
+        seenSteps.append(m.effectiveThinking)
+    }
+    check("\(name): ⌘↑ steps thinking up through every step \(top.rawValue) takes, in order", seenSteps == steps, "\(seenSteps) vs \(steps)")
+    check("\(name): ⌘↑ at the last step is taken and changes nothing", arrow(up.0, up.1) && m.effectiveThinking == steps.last!, "\(m.effectiveThinking)")
+    check("\(name): ⌘↓ steps thinking down", arrow(down.0, down.1) && m.effectiveThinking == (steps.count > 1 ? steps[steps.count - 2] : steps[0]), "\(m.effectiveThinking)")
+    for _ in steps { _ = arrow(down.0, down.1) }
+    check("\(name): ⌘↓ at Off is taken and changes nothing", arrow(down.0, down.1) && m.effectiveThinking == steps[0], "\(m.effectiveThinking)")
+    check("\(name): ⌘ arrows step thinking and move nothing", same(frames(), base), moved(base, frames()))
+    // not ours: ⇧⌘, ⌥⌘, ⌃⌘ (the old keys), ⌘⌃⌥, plain ⌃ and plain arrows
+    m.choose(families[0]); m.choose(QuickChatThinking.off); spin(0.2)
+    let atStart = (m.resolvedModel.family, m.effectiveThinking)
+    for f in [NSEvent.ModifierFlags([.command, .shift]), [.command, .option], [.command, .control], [.command, .control, .option], [.control], []] {
+        for (k, c) in [right, left, up, down] { _ = arrow(k, c, f) }
+    }
+    check("\(name): ⇧⌘, ⌥⌘, ⌃⌘, ⌘⌃⌥, ⌃ and plain arrows step nothing", (m.resolvedModel.family, m.effectiveThinking) == atStart, "\(m.resolvedModel.family) \(m.effectiveThinking)")
+    // the arrow keys' own function and numeric-pad flags are no modifier here
+    check("\(name): ⌘→ with the function flag (as an arrow key gives it) steps", arrow(right.0, right.1, [.command, .function, .numericPad]) && (families.count < 2 || m.resolvedModel.family != atStart.0))
     m.choose(top); m.choose(QuickChatThinking.high); spin(0.3)
     // the window's own hit test, at the real coordinates: a press on any bar or label never starts a move, and the
     // empty gap after the controls does (so the frames are where the window sees them)

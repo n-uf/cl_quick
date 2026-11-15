@@ -941,7 +941,7 @@ struct QCControls: View {
         let choices = model.modelChoices
         let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
         return QCStepControl(
-            what: "Model", key: "m", keys: "⌃⌘← ⌃⌘→",
+            what: "Model", key: "m", keys: "⌘← ⌘→",
             steps: choices.map { .init(title: $0.title, label: letters ? String($0.choice.title.prefix(1)) : $0.choice.title,
                                        costly: QuickChatModels.costly($0.choice)) },
             index: choices.firstIndex { $0.choice == now }, offSlot: false,
@@ -966,7 +966,7 @@ struct QCControls: View {
             switch t { case .off: return "–"; case .xhigh: return "X"; case .max: return "M+"; default: return String(t.title.prefix(1)) }
         }
         return QCStepControl(
-            what: "Thinking", key: "t", keys: "⌃⌘↓ ⌃⌘↑",
+            what: "Thinking", key: "t", keys: "⌘↓ ⌘↑",
             steps: all.map { t in
                 .init(title: t == .off ? "Thinking off" : t.title, label: label(t),
                       costly: QuickChatModels.costly(effort: t.effort), takes: takes.contains(t))
@@ -988,7 +988,7 @@ struct QCControls: View {
 /// own (5 pt drawn in an 8 × 28 pt column; the columns touch, a control: a press there never moves the window): a click
 /// picks that step. Thinking's Off is a dash before the bars. The pointer on a bar lights it and the label shows its
 /// short name; nothing pops up (the keys are under the row's keys button, VoiceOver has the full names); the scroll
-/// wheel and the ⌃⌘ arrows step it. A click on the label's right half picks the next value it takes, on its left half
+/// wheel and the ⌘ arrows step it. A click on the label's right half picks the next value it takes, on its left half
 /// the one before, going round past either end; the pointer on a half lights it. The control is as wide for every
 /// step: its label is sized for the longest short name, so nothing in it or the row moves when the value changes. While the step in use costs more
 /// (Fable, Extra, Max) the control is warm (warmer when both controls are).
@@ -1311,8 +1311,8 @@ struct QCKeysView: View {
     /// The rows, key and what it does (a check reads them).
     static func rows(opener: String) -> [(String, String)] {
         let before: [(String, String)] = [
-            ("⌃⌘↑  ⌃⌘↓", "Thinking up, down"),
-            ("⌃⌘→  ⌃⌘←", "Model up, down"),
+            ("⌘↑  ⌘↓", "Thinking up, down"),
+            ("⌘→  ⌘←", "Model up, down"),
         ]
         let after: [(String, String)] = [
             ("Click a label", "Right half: up; left half: down"),
