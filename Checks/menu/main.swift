@@ -213,28 +213,66 @@ check("switch: its title and VoiceOver label name the account masked, never in f
       lines.map(\.title) == [swMasked] && !lines.map(\.title).joined().contains("zed") && swRows.first?.accessibilityLabel() == swMasked, "\(lines.map(\.title))")
 if let row = swRows.first {
     row.frame = NSRect(x: 0, y: 0, width: row.frame.width, height: QCSwitchMenuRow.height)
-    check("switch: at rest the address is blurred (not lit), and drawn as wide as it reads", !row.lit && row.frame.width >= QCSwitchMenuRow.width("zed@example.com"))
+    // the row's size: as wide as its words need, as tall as the blurred picture, so none of the blur is cut
+    check("switch: the row is as wide as its words need, and a longer address needs more",
+          row.frame.width == QCSwitchMenuRow.width("zed@example.com") && QCSwitchMenuRow.width("zed@example.com") > QCSwitchMenuRow.width("z@e.co"))
+    let blurPicture = QCProfileMenuRow.blurred("zed@example.com", color: .labelColor, font: QCSwitchMenuRow.font)
+    check("switch: the row is as tall as the whole blurred picture of the address, so the blur is not cut",
+          blurPicture != nil && blurPicture!.size.height <= QCSwitchMenuRow.height && QCSwitchMenuRow.height >= 28, "\(String(describing: blurPicture?.size)) in \(QCSwitchMenuRow.height)")
+    check("switch: at rest the line is not lit", !row.lit)
     row.highlighted = true
-    check("switch: highlighted, the address is sharp", row.lit)
+    check("switch: highlighted, the line is lit", row.lit)
     row.highlighted = false
-    check("switch: highlight gone, it is blurred again", !row.lit)
-    // the drawn picture: at rest it holds a blurred address (an image), lit it is plain text; neither throws or comes out empty
-    func picture(_ lit: Bool) -> NSBitmapImageRep? {
+    check("switch: highlight gone, it is not lit", !row.lit)
+    // what is drawn where the address is: blurred at rest (every neighbouring pixel pair close), sharp lit (a hard step)
+    func steepest(lit: Bool) -> (steep: Double, ink: Double) {
         row.highlighted = lit
-        guard let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds) else { return nil }
+        defer { row.highlighted = false }
+        guard let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds) else { return (0, 0) }
         row.cacheDisplay(in: row.bounds, to: rep)
-        return rep
+        let scale = Double(rep.pixelsWide) / Double(row.bounds.width)
+        let x0 = Int(Double(QCSwitchMenuRow.lead + ceil(("Switch to " as NSString).size(withAttributes: [.font: QCSwitchMenuRow.font]).width)) * scale) + 2
+        let x1 = Int(Double(QCSwitchMenuRow.lead + ceil(("Switch to zed@example.com" as NSString).size(withAttributes: [.font: QCSwitchMenuRow.font]).width)) * scale) - 2
+        // each pixel's grey as seen over a mid grey (what the menu's own background would be under it)
+        func seen(_ x: Int, _ y: Int) -> (grey: Double, alpha: Double) {
+            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0.5, 0) }
+            let a = Double(c.alphaComponent), g = Double(c.redComponent + c.greenComponent + c.blueComponent) / 3
+            return (g * a + 0.5 * (1 - a), a)
+        }
+        var steep = 0.0, ink = 0.0
+        for y in 0..<rep.pixelsHigh { for x in x0..<x1 {
+            let a = seen(x, y), b = seen(x + 1, y)
+            steep = max(steep, abs(a.grey - b.grey))
+            ink += a.alpha
+        } }
+        return (steep, ink)
     }
-    func differs(_ a: NSBitmapImageRep?, _ b: NSBitmapImageRep?) -> Bool { a?.tiffRepresentation != b?.tiffRepresentation }
-    let rest = picture(false), lit = picture(true)
-    check("switch: the lit line is drawn differently from the resting one", differs(rest, lit))
-    row.highlighted = false
+    let restLook = steepest(lit: false), litLook = steepest(lit: true)
+    check("switch: at rest the address region holds blurred ink only (no hard edge), and some ink",
+          restLook.ink > 0 && restLook.steep < 0.2, "\(restLook)")
+    check("switch: lit, the same region holds the address sharp (a hard edge between the letters and the highlight)",
+          litLook.steep > 2 * restLook.steep && litLook.steep > 0.3, "rest \(restLook) lit \(litLook)")
+    // a click is a release on the row: one released outside it does nothing
+    let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 80), styleMask: [.borderless], backing: .buffered, defer: true)   // never shown
+    host.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+    host.contentView?.addSubview(row)
+    row.frame.origin = NSPoint(x: 20, y: 20)
+    check("switch: the row sits in a window of its own for the release checks", row.window === host)
+    /// A release at a point of the row's own coordinates, as the window would report it.
+    func release(atRow p: NSPoint) -> NSEvent? {
+        NSEvent.mouseEvent(with: .leftMouseUp, location: row.convert(p, to: nil), modifierFlags: [], timestamp: 0, windowNumber: host.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
+    }
+    switched = []
+    if let out = release(atRow: NSPoint(x: row.bounds.maxX + 30, y: row.bounds.midY)), let inside = release(atRow: NSPoint(x: 10, y: row.bounds.midY)) {
+        row.mouseUp(with: out); spin(0.1)
+        check("switch: a release outside the row picks nothing", switched.isEmpty, "\(switched)")
+        row.mouseUp(with: inside); spin(0.1)
+        check("switch: a release on the row picks it (after the menu closes)", switched == ["main:u9"],
+              "\(switched) at \(row.convert(inside.locationInWindow, from: nil)) in \(row.bounds), enabled \(row.enabled), window \(String(describing: row.window))")
+    } else { check("switch: mouse events for the release checks", false) }
+    row.removeFromSuperview()
 }
 check("switch: the submenu holds no hover delegate and no widened minimum", subs.first?.submenu?.delegate == nil && (subs.first?.submenu?.minimumWidth ?? 0) == 0)
-check("switch: a click on its row closes the menu path and picks (after the menu closes)", {
-    swRows.first?.press(); spin(0.1)
-    return switched == ["main:u9"]
-}(), "\(switched)")
 switched = []
 if let line = lines.first, let t = line.target, let a = line.action { _ = t.perform(a, with: line) }
 check("switch: the item's own action (Return) goes to the switch path with that profile and account", switched == ["main:u9"], "\(switched)")

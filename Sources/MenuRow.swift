@@ -96,7 +96,12 @@ final class QCProfileMenuRow: NSView {
         needsDisplay = true
     }
 
-    override func mouseUp(with e: NSEvent) { press(at: convert(e.locationInWindow, from: nil)) }
+    /// A click is a release on the row: one released outside it (the press was on it) does nothing.
+    override func mouseUp(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        guard bounds.contains(p) else { return }
+        press(at: p)
+    }
 
     /// A click at a point of the row: on the copy glyph it copies the address and says "Copied" (the menu stays open);
     /// anywhere else it closes the menu and picks the profile.
@@ -239,8 +244,10 @@ final class QCSwitchMenuRow: NSView {
     /// For pictures: drawn as if the menu highlighted it.
     var highlighted = false
 
-    static let height: CGFloat = 22
     static let font = NSFont.menuFont(ofSize: 0)
+    /// As tall as the blurred address's picture (the text's height and the blur's reach above and below), so the blur
+    /// is never cut; a little taller than a native item.
+    static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: font]).height) + 2 * QCProfileMenuRow.blurPad
     static let lead: CGFloat = 14, trailing: CGFloat = 14
     static let before = "Switch to ", after = "…"
 
@@ -276,7 +283,11 @@ final class QCSwitchMenuRow: NSView {
     }
     override func mouseEntered(with e: NSEvent) { needsDisplay = true }
     override func mouseExited(with e: NSEvent) { needsDisplay = true }
-    override func mouseUp(with e: NSEvent) { press() }
+    /// A click is a release on the row: one released outside it (the press was on it) does nothing.
+    override func mouseUp(with e: NSEvent) {
+        guard bounds.contains(convert(e.locationInWindow, from: nil)) else { return }
+        press()
+    }
 
     /// A click: closes the menu, then runs the switch (not inside the menu's tracking loop). Nothing while dimmed.
     func press() {
@@ -296,8 +307,9 @@ final class QCSwitchMenuRow: NSView {
     override func draw(_ dirty: NSRect) {
         let on = lit
         if on {
+            // a native item's height, centred (the row is taller, for the blur)
             NSColor.selectedContentBackgroundColor.setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 5, dy: 0), xRadius: 4, yRadius: 4).fill()
+            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - 11, width: bounds.width - 10, height: 22), xRadius: 4, yRadius: 4).fill()
         }
         let fg: NSColor = !enabled ? .disabledControlTextColor : on ? .selectedMenuItemTextColor : .labelColor
         let attrs: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: fg]
