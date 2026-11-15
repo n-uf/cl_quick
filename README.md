@@ -69,7 +69,8 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
 
 ### Switching accounts
 
-- cl_quick asks first: "Switch Main to p•••@example.com?" The question says that Claude Code in Terminal and editors on
+- cl_quick asks first: "Switch Main to this account?", with the account's address under it (blurred until the pointer
+  is on it, while Blur addresses is on). The question says that Claude Code in Terminal and editors on
   that folder (for a folder other than `~/.claude`, Claude Code pointed at it with `CLAUDE_CONFIG_DIR`) moves to the new
   account, sessions running now included, and that the Claude app keeps its own sign-in. It's not just the quick chat.
 - Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. The
