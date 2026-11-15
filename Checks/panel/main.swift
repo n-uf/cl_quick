@@ -1801,14 +1801,37 @@ do {
     check("Cyrillic ⌘⇧Z (Я) names z", letter("Я", 6, [.command, .shift]) == "z")
     check("Ukrainian keys that are no edit key stay as they are", letter("і", 1) == "і" && letter("ї", 30) == "ї" && letter("ґ", 42) == "ґ")
     check("a digit, a symbol and an ASCII capital keep their letter", letter("1", 18) == "1" && letter(",", 43) == "," && letter("V", 9) == "v")
-    // ⌥⌘ arrows are function keys, the same on every layout (here with a Cyrillic layout's modifiers-ignored characters)
+    // ⌃⌘ arrows are function keys, the same on every layout (the characters a Cyrillic layout gives them are the same, and a real
+    // arrow key carries the function flag, which the keypad's arrows also give the numeric-pad flag: neither is a modifier here)
     var steps: [(Bool, Int)] = []
     let oldStep = p.onStep
     p.onStep = { steps.append(($0, $1)) }
     let L = String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!), U = String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!)
-    _ = cmdKey(L, 123, [.command, .option]); _ = cmdKey(U, 126, [.command, .option])
+    let R = String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!), D = String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)
+    let cc: NSEvent.ModifierFlags = [.command, .control]
+    let t1 = cmdKey(L, 123, cc), t2 = cmdKey(U, 126, cc)
+    check("⌃⌘← and ⌃⌘↑ step the model down and thinking up, and are taken", t1 && t2 && steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
+    steps = []
+    let t3 = cmdKey(R, 124, cc), t4 = cmdKey(D, 125, cc)
+    check("⌃⌘→ and ⌃⌘↓ step the model up and thinking down, and are taken", t3 && t4 && steps.count == 2 && steps[0] == (true, 1) && steps[1] == (false, -1), "\(steps)")
+    steps = []
+    _ = cmdKey(U, 126, [.command, .control, .function]); _ = cmdKey(R, 124, [.command, .control, .function, .numericPad])
+    check("⌃⌘ arrows with the function and numeric-pad flags (as the arrow keys give them) still step", steps.count == 2 && steps[0] == (false, 1) && steps[1] == (true, 1), "\(steps)")
+    steps = []
+    _ = cmdKey(L, 123, [.command, .option]); _ = cmdKey(U, 126, [.command, .option]); _ = cmdKey(R, 124, [.command, .option]); _ = cmdKey(D, 125, [.command, .option])
+    check("the old ⌥⌘ arrows step nothing", steps.isEmpty, "\(steps)")
+    _ = cmdKey(L, 123, [.command, .control, .shift]); _ = cmdKey(U, 126, [.command, .control, .shift])
+    _ = cmdKey(R, 124, [.command, .control, .option]); _ = cmdKey(D, 125, [.command, .control, .option, .shift])
+    _ = cmdKey(L, 123, .command); _ = cmdKey(U, 126, .control); _ = cmdKey(R, 124, [.command, .shift])
+    check("⇧⌃⌘, ⌃⌥⌘, ⌘, ⌃ and ⇧⌘ arrows step nothing", steps.isEmpty, "\(steps)")
+    // the panel not the key window (hidden): a ⌃⌘ arrow typed elsewhere is not the chat's
+    chat.hide()
+    _ = cmdKey(U, 126, cc)
+    check("⌃⌘↑ with the panel not the key window steps nothing", steps.isEmpty, "\(steps)")
     p.onStep = oldStep
-    check("⌥⌘← and ⌥⌘↑ still step the model and thinking", steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
+    chat.open(); spin(0.3)
+    let arrowRows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
+    check("the keys list names the ⌃⌘ arrows and no ⌥⌘ ones", arrowRows.contains("⌃⌘↑") && arrowRows.contains("⌃⌘→") && !arrowRows.contains("⌥⌘"), arrowRows)
     pb.clearContents()
     if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
 }
