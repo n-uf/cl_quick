@@ -129,6 +129,7 @@ final class QCDragView: NSView {
     @objc private func windowShownOrHidden() {
         guard let w = window else { return }
         if !w.isVisible { Self.dropHand() }
+        if !w.isVisible || !w.occlusionState.contains(.visible) { AddressPrivacy.shared.endHover() }     // hidden or covered: no exit comes
         onHover?(w.isVisible && bounds.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil)))
     }
 }

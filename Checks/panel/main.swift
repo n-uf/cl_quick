@@ -729,6 +729,25 @@ do {
         r.press(at: NSPoint(x: 50, y: 12)); spin(0.1)
         check("menu: a click elsewhere on the row picks the profile (after the menu closes)", picked == ["main"], "\(picked)")
     }
+    // a click is a release on the row: one released outside it picks nothing
+    do {
+        var pickedHere = 0
+        let row = QCProfileMenuRow(title: "Main", detail: "week 40%", dot: nil, on: false, address: "ultra-1@example.com", pick: { pickedHere += 1 })
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 120), styleMask: [.borderless], backing: .buffered, defer: true)   // never shown
+        host.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 120))
+        host.contentView?.addSubview(row)
+        row.frame.origin = NSPoint(x: 20, y: 20)
+        /// A release at a point of the row's own coordinates, as the window would report it.
+        func release(atRow x: CGFloat, _ y: CGFloat) -> NSEvent? {
+            NSEvent.mouseEvent(with: .leftMouseUp, location: row.convert(NSPoint(x: x, y: y), to: nil), modifierFlags: [], timestamp: 0, windowNumber: host.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
+        }
+        if let out = release(atRow: row.bounds.maxX + 40, 12), let above = release(atRow: 50, -20), let inside = release(atRow: 50, 12) {
+            row.mouseUp(with: out); row.mouseUp(with: above); spin(0.1)
+            check("menu: a release outside the profile row (right of it, above it) picks nothing", pickedHere == 0, "\(pickedHere)")
+            row.mouseUp(with: inside); spin(0.1)
+            check("menu: a release on the profile row picks it", pickedHere == 1, "\(pickedHere)")
+        } else { check("menu: mouse events for the release checks", false) }
+    }
     // Return on a highlighted row: the menu sends the item's own action
     if let item = menu.items.first(where: { $0.view === rows.first }), let a = item.action {
         NSApp.sendAction(a, to: item.target, from: item)
@@ -779,6 +798,39 @@ do {
     check("address chat: the note keeps its layout (as wide and as high as the plain sentence)",
           abs(blurredDraw.size.width - sharpDraw.size.width) <= 2 && abs(blurredDraw.size.height - sharpDraw.size.height) <= 2, "\(blurredDraw.size) \(sharpDraw.size)")
 
+    // narrow: the note's two-line limit holds with the address among the words, and nothing overflows sideways
+    func height(_ w: QCWords, limit: Int?, width: CGFloat) -> CGFloat {
+        MainActor.assumeIsolated {
+            let r = ImageRenderer(content: QCSentence(words: w, size: 12.5, color: QCColor.muted, lineLimit: limit).font(.system(size: 12.5)).frame(width: width, alignment: .leading))
+            r.scale = 2
+            return r.nsImage?.size.height ?? 0
+        }
+    }
+    let plainWords = QCWords("Main is on \(a) now.")
+    let plain2 = height(plainWords, limit: 2, width: 120), plain1 = height(plainWords, limit: 1, width: 120)
+    let flow2 = height(note, limit: 2, width: 120), flowAll = height(note, limit: nil, width: 120)
+    check("narrow: the sentence with an address stops at the note's two lines, as the plain text does (\(flow2) vs \(plain2))",
+          plain2 > plain1 * 1.5 && abs(flow2 - plain2) <= 2 && flowAll > flow2 + 4, "\(plain1) \(plain2) \(flow2) \(flowAll)")
+    let overflow: String? = MainActor.assumeIsolated {
+        // the sentence offered 90 pt, over a blue field 150 pt wide: past its right edge (plus the blur's reach) nothing but blue
+        let r = ImageRenderer(content: ZStack(alignment: .topLeading) {
+            Color(.sRGB, red: 0, green: 0, blue: 1).frame(width: 150, height: 80)
+            QCSentence(words: note, size: 12.5, color: QCColor.text, lineLimit: 2).font(.system(size: 12.5)).frame(width: 90, alignment: .leading)
+        }.environment(\.colorScheme, .dark))
+        r.scale = 2
+        guard let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return "no picture" }
+        // (the field's own colour as the picture holds it: read from its far corner, not assumed)
+        guard let field = rep.colorAt(x: rep.pixelsWide - 1, y: rep.pixelsHigh - 1)?.usingColorSpace(.sRGB) else { return "no field" }
+        for y in 0..<rep.pixelsHigh { for x in 220..<rep.pixelsWide {
+            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+            if abs(c.redComponent - field.redComponent) > 0.03 || abs(c.greenComponent - field.greenComponent) > 0.03 || abs(c.blueComponent - field.blueComponent) > 0.03 {
+                return "pixel \(x),\(y) of \(rep.pixelsWide)x\(rep.pixelsHigh): \(c) vs \(field)"
+            }
+        } }
+        return nil
+    }
+    check("narrow: an address wider than the line is cut at its width, never overflowing sideways", overflow == nil, overflow ?? "")
+
     // the switch question: its words never hold the address; it sits under them in an accessory, blurred until hovered
     let alert = AccountSwitcher.confirmAlert(Profile(id: "main", name: "Main", folder: "~/.claude"), email: "kim@example.org")
     check("alert: the message and the text name no address (\"this account\"), whole or masked",
@@ -795,11 +847,45 @@ do {
             return rep.tiffRepresentation
         }
         let rest = look()
-        label.reveal(true)
-        check("alert: the pointer on it makes it readable", label.revealed && look() != rest)
-        label.reveal(false)
-        check("alert: the pointer gone, blurred again", !label.revealed && look() == rest)
+        // the tracking area's own handlers, called with real enter and exit events
+        func crossing(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)
+        }
+        if let enter = crossing(.mouseEntered), let leave = crossing(.mouseExited) {
+            label.mouseEntered(with: enter)
+            check("alert: the pointer entering the address makes it readable", label.revealed && look() != rest)
+            label.mouseExited(with: leave)
+            check("alert: the pointer leaving it blurs it again, as at rest", !label.revealed && look() == rest)
+        } else { check("alert: enter and exit events for the hover checks", false) }
     } else { check("alert: the address is in an accessory view", false) }
+
+    // a hover cut short (the panel hidden under the pointer, a modal alert, the window covered) sends no mouse-exit: the
+    // revealed address goes blurred again when the hover-ended count changes, and stays so until the pointer enters anew
+    var gate = QCHoverGate()
+    gate.pointer(true)
+    gate.sync(AddressPrivacy.shared.hoverEnded)
+    check("hover: the pointer on an address reveals it, and nothing else changes that", gate.on)
+    let ended0 = AddressPrivacy.shared.hoverEnded
+    let wasVisible = p.isVisible
+    if !wasVisible { chat.open(); spin(0.2) }
+    p.orderOut(nil)
+    check("hover: hiding the panel ends a hover (the count moves)", AddressPrivacy.shared.hoverEnded > ended0, "\(ended0) \(AddressPrivacy.shared.hoverEnded)")
+    gate.sync(AddressPrivacy.shared.hoverEnded)
+    check("hover: …and the revealed address is blurred again, though no exit came", !gate.on)
+    gate.sync(AddressPrivacy.shared.hoverEnded)
+    check("hover: …and stays so until the pointer enters again", !gate.on)
+    gate.pointer(true)
+    check("hover: …when it enters, it reveals again", gate.on)
+    if wasVisible { chat.open(); spin(0.2) }
+    let ended1 = AddressPrivacy.shared.hoverEnded
+    let keepAlert = AccountSwitcher.runAlert
+    var asked = 0
+    AccountSwitcher.runAlert = { _ in asked += 1; return .alertSecondButtonReturn }
+    AccountSwitcher.shared.confirmAndSwitch(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), uuid: "u2", email: a, origin: .chat)
+    AccountSwitcher.runAlert = keepAlert
+    gate.sync(AddressPrivacy.shared.hoverEnded)
+    check("hover: the switch question closed (Cancel) ends a hover and begins no switch",
+          asked == 1 && AddressPrivacy.shared.hoverEnded > ended1 && !gate.on && AccountSwitcher.shared.waiting["main"] == nil, "\(asked) \(ended1) \(AddressPrivacy.shared.hoverEnded)")
 
     // Settings ▸ Blur addresses: on by default, a key missing or wrong is on; off draws every address in full and sharp
     check("blur setting: on by default, and when the key is missing or not a Bool",

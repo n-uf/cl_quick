@@ -66,9 +66,17 @@ final class AccountSwitcher {
 
     /// "Switch to …": asks first, in plain words, then opens Claude Code's sign-in and watches the folder.
     func confirmAndSwitch(_ p: Profile, uuid: String?, email: String, origin: SwitchGoal.Origin) {
-        NSApp.activate(ignoringOtherApps: true)
-        guard Self.confirmAlert(p, email: email).runModal() == .alertFirstButtonReturn else { return }
+        let answer = Self.runAlert(Self.confirmAlert(p, email: email))
+        // the alert took the pointer: whatever was under it (the Switch to … button) got no exit, so its address goes blurred
+        AddressPrivacy.shared.endHover()
+        guard answer == .alertFirstButtonReturn else { return }
         begin(p, uuid: uuid, email: email, origin: origin)
+    }
+
+    /// Shows a question modally (the checks replace it: nothing is shown, cl_quick is never activated).
+    static var runAlert: (NSAlert) -> NSApplication.ModalResponse = { alert in
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal()
     }
 
     /// The switch question. An alert's text can't blur, so the address is not in it: the words say "this account" and the

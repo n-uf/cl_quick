@@ -1595,13 +1595,14 @@ struct QCButton: View {
     var after = ""
     var ghost = false
     let action: () -> Void
-    @State private var hover = false
+    @State private var gate = QCHoverGate()
+    @ObservedObject private var privacy = AddressPrivacy.shared
     var body: some View {
         Button(action: action) {
             HStack(spacing: 0) {
                 Text(title)
                 if let address {
-                    QCBlurredAddress(address: address, revealed: hover)
+                    QCBlurredAddress(address: address, revealed: gate.on)
                     Text(after)
                 }
             }
@@ -1612,7 +1613,8 @@ struct QCButton: View {
             .qcControl()
         }
         .buttonStyle(.plain)
-        .onHover { hover = $0 }
+        .onHover { gate.pointer($0) }
+        .onChange(of: privacy.hoverEnded) { gate.sync($0) }
         .accessibilityLabel(address.map { title + AddressPrivacy.words($0) + after } ?? title)
     }
 }

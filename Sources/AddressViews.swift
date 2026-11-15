@@ -13,6 +13,12 @@ final class AddressPrivacy: ObservableObject {
     static let shared = AddressPrivacy()
     @Published var blur = true
 
+    /// Counts the times a pointer's hover was cut short without a mouse-exit: the panel ordered out under the pointer
+    /// (it gets no exit), a modal alert that took the pointer, the window covered. Views that reveal an address on hover
+    /// drop it when this changes (QCHoverGate).
+    @Published private(set) var hoverEnded = 0
+    func endHover() { hoverEnded += 1 }
+
     /// Takes the setting (as the app starts and whenever Settings changes it).
     func apply(_ s: QuickChatSettings) { if blur != s.blurAddresses { blur = s.blurAddresses } }
 
@@ -56,6 +62,19 @@ struct QCWords: Equatable {
     var isEmpty: Bool { pieces.isEmpty }
 }
 
+/// Whether the pointer is on something that reveals an address. SwiftUI's onHover reports only enters and exits, and a
+/// window hidden or covered under the pointer, or a modal alert, sends no exit: so the hover also ends when
+/// `AddressPrivacy.hoverEnded` changes, and is not taken up again until the pointer enters anew.
+struct QCHoverGate: Equatable {
+    private(set) var on = false
+    private var seen: Int
+    init(seen: Int = AddressPrivacy.shared.hoverEnded) { self.seen = seen }
+    /// The pointer entered (true) or left (false).
+    mutating func pointer(_ inside: Bool) { on = inside }
+    /// The counter's value now: a change ends the hover.
+    mutating func sync(_ ended: Int) { if ended != seen { seen = ended; on = false } }
+}
+
 /// An address that is blurred at rest and sharp while the pointer is on it (or while `revealed`, when a button around
 /// it carries the pointer). Its accessibility label is the masked address. The blur is the menu's: a Gaussian blur of
 /// about a fifth of the text size (the menu's is 2.4 pt on 11.5 pt text).
@@ -63,7 +82,7 @@ struct QCBlurredAddress: View {
     let address: String
     var size: CGFloat = 12.5
     var revealed = false
-    @State private var hover = false
+    @State private var gate = QCHoverGate()
     @ObservedObject private var privacy = AddressPrivacy.shared
 
     /// The blur radius for a text size: none while the address is meant to be read (or the blur is turned off).
@@ -73,10 +92,11 @@ struct QCBlurredAddress: View {
 
     var body: some View {
         Text(address)
-            .fixedSize()
-            .blur(radius: Self.blurRadius(size: size, revealed: hover || revealed, blur: privacy.blur))
+            .lineLimit(1)
+            .blur(radius: Self.blurRadius(size: size, revealed: gate.on || revealed, blur: privacy.blur))
             .contentShape(Rectangle())
-            .onHover { hover = $0 }
+            .onHover { gate.pointer($0) }
+            .onChange(of: privacy.hoverEnded) { gate.sync($0) }
             .accessibilityLabel(AddressPrivacy.words(address))
     }
 }
@@ -87,22 +107,34 @@ private extension CGFloat {
 
 /// Lays tokens out in lines that wrap at the width given, a space between them: the way text wraps, for a sentence
 /// that holds a view (the blurred address) among its words.
+/// At most `maxRows` lines (like Text's lineLimit): what doesn't fit is placed far outside the layout, for QCSentence to
+/// clip away. A token wider than the width offered takes that width, so its text truncates instead of overflowing.
 struct QCFlow: Layout {
     var gap: CGFloat
+    var maxRows: Int? = nil
+    /// Where tokens that don't fit are put: past anything a sentence's clip shows.
+    static let away: CGFloat = 400
 
-    private func lines(_ subviews: Subviews, width: CGFloat) -> (rows: [[(index: Int, size: CGSize)]], height: CGFloat, widest: CGFloat) {
-        var rows: [[(Int, CGSize)]] = [[]]
+    typealias Row = [(index: Int, size: CGSize)]
+    private func lines(_ subviews: Subviews, width: CGFloat) -> (rows: [Row], cut: [Int], height: CGFloat, widest: CGFloat) {
+        var rows: [Row] = [[]]
+        var cut: [Int] = []
         var x: CGFloat = 0, widest: CGFloat = 0
         for (i, s) in subviews.enumerated() {
-            let size = s.sizeThatFits(.unspecified)
-            let need = (rows[rows.count - 1].isEmpty ? 0 : gap) + size.width
-            if !rows[rows.count - 1].isEmpty, x + need > width { rows.append([]); x = 0 }
+            if !cut.isEmpty { cut.append(i); continue }
+            var size = s.sizeThatFits(.unspecified)
+            size.width = min(size.width, width)
+            let first = rows[rows.count - 1].isEmpty
+            if !first, x + gap + size.width > width {
+                if let m = maxRows, rows.count >= m { cut.append(i); continue }
+                rows.append([]); x = 0
+            }
             x += (rows[rows.count - 1].isEmpty ? 0 : gap) + size.width
-            rows[rows.count - 1].append((i, size))
+            rows[rows.count - 1].append((index: i, size: size))
             widest = max(widest, x)
         }
-        let height = rows.reduce(CGFloat(0)) { $0 + ($1.map(\.1.height).max() ?? 0) }
-        return (rows.map { $0.map { (index: $0.0, size: $0.1) } }, height, widest)
+        let height = rows.reduce(CGFloat(0)) { $0 + ($1.map(\.size.height).max() ?? 0) }
+        return (rows, cut, height, widest)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -122,6 +154,7 @@ struct QCFlow: Layout {
             }
             y += h
         }
+        for i in l.cut { subviews[i].place(at: CGPoint(x: bounds.maxX + Self.away, y: bounds.minY), anchor: .topLeading, proposal: .zero) }
     }
 }
 
@@ -135,6 +168,8 @@ struct QCSentence: View {
     var strongColor: Color = QCColor.text
     var lineLimit: Int? = nil
     @ObservedObject private var privacy = AddressPrivacy.shared
+
+    static let bleed: CGFloat = 10
 
     private func styled(_ p: QCWords.Piece) -> Text {
         p.strong ? Text(p.text).fontWeight(.semibold).foregroundColor(strongColor) : Text(p.text).foregroundColor(color)
@@ -150,7 +185,8 @@ struct QCSentence: View {
             if p.isAddress { tokens[tokens.count - 1].append(p); continue }
             for (i, part) in p.text.split(separator: " ", omittingEmptySubsequences: false).enumerated() {
                 if i > 0 { tokens.append([]) }
-                if !part.isEmpty { tokens[tokens.count - 1].append(QCWords.Piece(text: String(part), strong: p.strong)) }            }
+                if !part.isEmpty { tokens[tokens.count - 1].append(QCWords.Piece(text: String(part), strong: p.strong)) }
+            }
         }
         return tokens.filter { !$0.isEmpty }
     }
@@ -161,16 +197,19 @@ struct QCSentence: View {
             words.pieces.reduce(Text("")) { $0 + styled($1) }.lineLimit(lineLimit)
         } else {
             let spaceW = (" " as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width
-            QCFlow(gap: spaceW) {
+            QCFlow(gap: spaceW, maxRows: lineLimit) {
                 ForEach(Array(Self.tokens(words).enumerated()), id: \.offset) { _, token in
                     HStack(spacing: 0) {
                         ForEach(Array(token.enumerated()), id: \.offset) { _, p in
                             if p.isAddress { blurred(p) }
-                            else { styled(p).fixedSize() }
+                            else { styled(p).lineLimit(1) }
                         }
                     }
                 }
             }
+            // what the line limit cuts is far outside; the clip is wider than the sentence by the blur's reach, so it
+            // doesn't cut the blurred address at the top and bottom
+            .padding(Self.bleed).clipped().padding(-Self.bleed)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(words.spoken)
         }
