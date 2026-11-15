@@ -721,16 +721,6 @@ final class QuickChatModel: ObservableObject {
         thinking = t
         return true
     }
-    /// ⌘1 … ⌘4: a model and a thinking step together, from the next message on, as the controls set them (the running
-    /// `claude` is told then: set_model, apply_flag_settings). A family the account's list lacks is no choice the controls
-    /// offer, so the key changes nothing (false). A step the model doesn't take is held to the nearest one it takes, as
-    /// when the model is changed with that step chosen (effectiveThinking). The keyboard stays where it is.
-    @discardableResult func pick(_ c: QuickChatModelChoice, thinking t: QuickChatThinking) -> Bool {
-        guard modelChoices.contains(where: { $0.choice == c }) else { return false }
-        choice = c
-        thinking = t
-        return true
-    }
     /// A click on a control's label: its right half the next family (or level the model takes), its left half the one
     /// before, going round past either end. Like a click on a bar, it hands the keyboard to the field.
     @discardableResult func cycleModel(_ by: Int) -> Bool {
@@ -1658,13 +1648,12 @@ final class QuickChat {
     /// A digit key (Sources/DigitKeys.swift) asks for something.
     func digit(_ action: QCDigitAction) {
         switch action {
-        case .model(let c, let t): model.pick(c, thinking: t)
         case .place(let spot): move(to: spot)
         case .size(let size): resize(to: size)
         }
     }
 
-    /// ⌃⌥1 … ⌃⌥5: the panel takes that size, as if the user had sized it by hand, and keeps its place: the corner or edge
+    /// ⌘1 … ⌘5: the panel takes that size, as if the user had sized it by hand, and keeps its place: the corner or edge
     /// centre of the nearest of the six places stays where it is (QCGeometry.resized), the size held to the content's least
     /// size and to the screen's visible frame, the frame inside it. In the bar only the width changes (its height follows
     /// its content, and what the user gave it beyond that, barExtra, is left as it is); in the chat both do, and the
@@ -1704,7 +1693,7 @@ final class QuickChat {
         // would take the old, taller one back)
         if shrunk, model.isWindow { chatHeight = p.frame.height }
     }
-    /// The place the last ⌃ digit (or ⌃⌥ digit) put the panel at: it only breaks a tie for a panel as tall (or as wide) as
+    /// The place the last ⌃ digit (or ⌘ digit) put the panel at: it only breaks a tie for a panel as tall (or as wide) as
     /// its screen, which touches both edges (QCGeometry.nearest).
     private var lastSpot: QCSpot?
 
@@ -1809,7 +1798,7 @@ final class QuickChatPanel: NSPanel {
     var onDictate: () -> Void = {}
     /// ⌃⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
-    /// The digit keys (QCDigitKeys): ⌘ digits the model and thinking, ⌃ digits the place on the screen, ⌃⌥ digits the size.
+    /// The digit keys (QCDigitKeys): ⌘ digits the size, ⌃ digits the place on the screen.
     var onDigit: (QCDigitAction) -> Void = { _ in }
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
@@ -1854,7 +1843,7 @@ final class QuickChatPanel: NSPanel {
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
         // the digit keys (QCDigitKeys), by key code: no ⌘ digit is a text edit, and the key is taken at any step. Only while the
-        // panel is the key window: ⌘1 typed in Settings is Settings', never the chat's model.
+        // panel is the key window: ⌘1 typed in Settings is Settings', never the chat's size.
         if isKeyWindow, let action = QCDigitKeys.action(for: e) {
             takeDigit(action, e)
             return true
@@ -1945,7 +1934,7 @@ final class QuickChatPanel: NSPanel {
         onDigit(action)
     }
 
-    /// The digit keys without ⌘ (⌃ and ⌃⌥ digits) are no key equivalents AppKit offers performKeyEquivalent first, and the
+    /// The digit keys without ⌘ (⌃ digits) are no key equivalents AppKit offers performKeyEquivalent first, and the
     /// field would take them as text: they are read here, before the event goes anywhere, and handled as the ⌘ digits are
     /// (QCDigitKeys). Caps Lock off again: a text-input window kept invisible for it is back to normal (macOS may reuse it).
     override func sendEvent(_ event: NSEvent) {

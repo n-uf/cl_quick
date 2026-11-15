@@ -1313,9 +1313,9 @@ struct QCKeysView: View {
         let before: [(String, String)] = [
             ("⌃⌘↑  ⌃⌘↓", "Thinking up, down"),
             ("⌃⌘→  ⌃⌘←", "Model up, down"),
-            ("Click a label", "Right half: up; left half: down"),
         ]
         let after: [(String, String)] = [
+            ("Click a label", "Right half: up; left half: down"),
             ("Return", "Send"),
             ("⇧Return", "New line"),
             ("⌘N", "New chat"),

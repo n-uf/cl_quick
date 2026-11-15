@@ -1,7 +1,6 @@
-// The digit keys of the chat panel, one table: ⌘ digits pick the model and its thinking, ⌃ digits place the panel on its
-// screen, ⌃⌥ digits size it. They are matched by KEY CODE (the
-// number row and the keypad), never by the character, so they work on every layout (Cyrillic and the rest) and with
-// Caps Lock. The panel (QuickChatPanel) reads the table, QuickChat does what a key says, and the keys list
+// The digit keys of the chat panel, one table: ⌘ digits size the panel, ⌃ digits place it on its screen. They are matched
+// by KEY CODE (the number row and the keypad), never by the character, so they work on every layout (Cyrillic and the
+// rest) and with Caps Lock. The panel (QuickChatPanel) reads the table, QuickChat does what a key says, and the keys list
 // (QCKeysView) is drawn from the same rows.
 
 import AppKit
@@ -15,7 +14,7 @@ struct QCSpot: Equatable {
     var down: Down
 }
 
-/// The panel's size (⌃⌥1 … ⌃⌥5).
+/// The panel's size (⌘1 … ⌘5).
 enum QCPanelSize: Equatable, CaseIterable {
     case small, standard, large, tall, wide
 
@@ -43,7 +42,6 @@ enum QCPanelSize: Equatable, CaseIterable {
 }
 
 enum QCDigitAction: Equatable {
-    case model(QuickChatModelChoice, QuickChatThinking)
     case place(QCSpot)
     case size(QCPanelSize)
 }
@@ -67,12 +65,9 @@ enum QCDigitKeys {
     }
 
     static let groups: [Group] = [
-        // ⌘ digits: the model and how long it thinks
+        // ⌘ digits: the panel's size
         Group(flags: [.command], actions: [
-            1: .model(.sonnet, .medium),
-            2: .model(.opus, .medium),
-            3: .model(.opus, .high),
-            4: .model(.fable, .high),
+            1: .size(.small), 2: .size(.standard), 3: .size(.large), 4: .size(.tall), 5: .size(.wide),
         ]),
         // ⌃ digits: the panel's place on its screen, bottom row first
         Group(flags: [.control], actions: [
@@ -82,10 +77,6 @@ enum QCDigitKeys {
             4: .place(QCSpot(across: .left, down: .top)),
             5: .place(QCSpot(across: .centre, down: .top)),
             6: .place(QCSpot(across: .right, down: .top)),
-        ]),
-        // ⌃⌥ digits: the panel's size
-        Group(flags: [.control, .option], actions: [
-            1: .size(.small), 2: .size(.standard), 3: .size(.large), 4: .size(.tall), 5: .size(.wide),
         ]),
     ]
 
@@ -100,10 +91,8 @@ enum QCDigitKeys {
 
     /// The keys list's rows for these keys, in the order of the groups.
     static let rows: [(String, String)] = [
-        ("⌘1  ⌘2", "Sonnet, Opus: Medium"),
-        ("⌘3  ⌘4", "Opus, Fable: High"),
+        ("⌘1 – ⌘5", "Size: " + QCPanelSize.allCases.map(\.title).joined(separator: ", ")),
         ("⌃1 – ⌃6", "Place: bottom row, top row (left, centre, right)"),
-        ("⌃⌥1 – ⌃⌥5", "Size: " + QCPanelSize.allCases.map(\.title).joined(separator: ", ")),
     ]
 }
 

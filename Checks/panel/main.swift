@@ -1847,124 +1847,7 @@ func digitKey(_ code: UInt16, _ flags: NSEvent.ModifierFlags, _ ch: String = "1"
                                    context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
     return p.performKeyEquivalent(with: e)
 }
-do {
-    let m = chat.model
-    chat.hide(); m.newChat(); chat.open(); spin(0.4)
-    guard let t = m.target else { print("FAIL digit keys: no target"); exit(1) }
-    let entry = { (v: String, n: String, e: [String]?) in QuickChatModelEntry(value: v, displayName: n, description: nil, efforts: e) }
-    let all = ["low", "medium", "high", "xhigh", "max"]
-    let full = [entry("opus", "Opus 5.5", all), entry("claude-fable-5-2", "Fable 5.2", all), entry("sonnet", "Sonnet 5.5", ["low", "medium", "high", "xhigh"]), entry("haiku", "Haiku 5.5", nil)]
-    ModelCatalog.shared.set(full, profile: t.profileID, account: t.accountUUID)
-    func reset() { m.choice = .haiku; m.thinking = .off }
-    let wanted: [(QuickChatModelChoice, QuickChatThinking)] = [(.sonnet, .medium), (.opus, .medium), (.opus, .high), (.fable, .high)]
-    for (i, (c, th)) in wanted.enumerated() {
-        reset()
-        let taken = digitKey(rowCodes[i], .command, String(i + 1))
-        check("⌘\(i + 1): taken, \(c.title) \(th.title)", taken && m.choice == c && m.thinking == th && m.effectiveThinking == th, "\(m.choice) \(m.thinking) \(taken)")
-        // the keypad's digit (its key code, the numeric-pad flag on), the Russian layout (digits on the number row), Caps Lock,
-        // and AZERTY (the number row gives "&é\"'" without Shift: no digit in the character at all)
-        for (label, code, flags, ch) in [("keypad", padCodes[i], NSEvent.ModifierFlags([.command, .numericPad]), String(i + 1)),
-                                         ("Cyrillic layout", rowCodes[i], NSEvent.ModifierFlags([.command]), String(i + 1)),
-                                         ("Caps Lock", rowCodes[i], NSEvent.ModifierFlags([.command, .capsLock]), String(i + 1)),
-                                         ("AZERTY", rowCodes[i], NSEvent.ModifierFlags([.command]), ["&", "é", "\"", "'"][i])] {
-            reset()
-            let ok = digitKey(code, flags, ch)
-            check("⌘\(i + 1) on the \(label) key: taken, \(c.title) \(th.title)", ok && m.choice == c && m.thinking == th, "\(m.choice) \(m.thinking)")
-        }
-    }
-    // what is not ours is left alone: another digit, Shift or Option with ⌘, a letter key that gives a digit-looking character
-    reset(); m.choice = .opus; m.thinking = .low
-    digitKey(rowCodes[4], .command, "5"); digitKey(rowCodes[0], [.command, .shift], "!"); digitKey(rowCodes[0], [.command, .option], "1")
-    digitKey(29, .command, "0"); digitKey(9, .command, "1")
-    check("⌘5, ⌘⇧1, ⌥⌘1, ⌘0 and a letter key leave the model and thinking alone", m.choice == .opus && m.thinking == .low, "\(m.choice) \(m.thinking)")
-    // a family the account's list doesn't have is no choice the controls offer: nothing changes, the key is still taken
-    let noFable = Array(full.filter { $0.value != "claude-fable-5-2" })
-    ModelCatalog.shared.set(noFable, profile: t.profileID, account: t.accountUUID)
-    m.choice = .opus; m.thinking = .low
-    let took = digitKey(rowCodes[3], .command, "4")
-    check("⌘4 with no Fable on the account: taken, nothing changes", took && m.choice == .opus && m.thinking == .low, "\(m.choice) \(m.thinking)")
-    check("⌘1 on the same account still picks Sonnet", digitKey(rowCodes[0], .command, "1") && m.choice == .sonnet && m.thinking == .medium)
-    // a step the model doesn't take is held to the nearest it takes, as a model change does with that step chosen
-    ModelCatalog.shared.set([entry("opus", "Opus 5.5", ["low"]), entry("sonnet", "Sonnet 5.5", all)], profile: t.profileID, account: t.accountUUID)
-    reset()
-    digitKey(rowCodes[2], .command, "3")
-    check("⌘3 on an Opus that takes only Low: Opus, and the step held to Low", m.choice == .opus && m.effectiveThinking == .low, "\(m.choice) \(m.effectiveThinking)")
-    ModelCatalog.shared.set(full, profile: t.profileID, account: t.accountUUID)
-    // Fable's "uses limits faster" cue is the model control's warm tint, worked out as the control does (ChatViews: tint of
-    // the family's cost with the thinking's): after ⌘4 the model control is tinted 1 and the thinking one 0 (High is no cost);
-    // after ⌘1 (Sonnet) both are 0
-    func tints() -> (model: Int, thinking: Int) {
-        let family = QuickChatModels.costly(m.resolvedModel.family), effort = QuickChatModels.costly(effort: m.effectiveThinking.effort)
-        return (QuickChatModels.tint(own: family, other: effort), QuickChatModels.tint(own: effort, other: family))
-    }
-    reset(); digitKey(rowCodes[3], .command, "4")
-    let fableTints = tints()
-    digitKey(rowCodes[0], .command, "1")
-    let sonnetTints = tints()
-    check("⌘4 tints the model control warm (1), the thinking control 0; ⌘1 tints neither", fableTints == (1, 0) && sonnetTints == (0, 0), "\(fableTints) \(sonnetTints)")
-    // the keys list shows them
-    let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
-    check("the keys list names ⌘1 to ⌘4 and what they pick", rows.contains("⌘1") && rows.contains("⌘4") && rows.contains("Sonnet") && rows.contains("Fable"), rows)
-    // only while the panel is the key window: hidden (so not key), ⌘3 is taken by no one here and changes nothing
-    reset(); m.choice = .sonnet
-    chat.hide()
-    digitKey(rowCodes[2], .command, "3")
-    check("⌘3 with the panel not the key window changes nothing (a ⌘ digit typed elsewhere is not the chat's)", m.choice == .sonnet && m.thinking == .off, "\(m.choice) \(m.thinking)")
-    reset(); chat.hide(); m.newChat()
-}
-
-// ⌘ digits in a running chat (stand-in `claude`): the next message carries set_model and the thinking, in order
-do {
-    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
-    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("digit-check")
-    try? FileManager.default.removeItem(at: dir)
-    let folder = dir.appendingPathComponent("folder"), work = dir.appendingPathComponent("work")
-    try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-    signedInFolder(folder, uuid: "u-digit", email: "alex@example.com")
-    let args = dir.appendingPathComponent("args.txt").path
-    try? "args=\(args)\n".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
-    var t = QuickChatTarget(Profile(id: "digit-check", name: "Main", folder: folder.path))
-    t.workFolder = work.path; t.accountUUID = "u-digit"; t.email = "alex@example.com"
-    // a chat model of its own talks to the stand-in (as the copy check's does); the keys reach it through the panel's own
-    // key handling, only the last step (what the controller does with the action) is pointed at it
-    let s = QuickChatModel()
-    s.target = t
-    s.resolveClaude = { $0(stub) }
-    s.freshTarget = { _, done in done(t) }
-    chat.hide(); chat.model.newChat(); chat.open(); spin(0.4)          // the panel is the key window: the keys are its own
-    let was = p.onDigit
-    p.onDigit = { if case .model(let c, let th) = $0 { s.pick(c, thinking: th) } }
-    defer { p.onDigit = was; s.shutdown() }
-    func ask(_ q: String, _ n: Int) -> Bool {
-        s.field = q; s.send()
-        return spinUntil(20) { s.turns.count == n && s.turns.last?.phase == .done }
-    }
-    check("digits, running chat: the first answer comes", ask("one", 1), "\(String(describing: s.turns.last))")
-    spinUntil(10) { s.modelList != nil }
-    check("digits, running chat: the stand-in's models are known", s.modelList != nil)
-    digitKey(rowCodes[2], .command, "3")
-    check("digits, running chat: ⌘3 is Opus, High", s.choice == .opus && s.thinking == .high)
-    check("digits, running chat: the second answer comes", ask("two", 2))
-    digitKey(rowCodes[3], .command, "4")
-    check("digits, running chat: ⌘4 is Fable, High (Fable is a costly family)", s.choice == .fable && s.thinking == .high && QuickChatModels.costly(s.resolvedModel.family))
-    check("digits, running chat: the third answer comes", ask("three", 3))
-    digitKey(rowCodes[0], .command, "1")
-    check("digits, running chat: the fourth answer comes", ask("four", 4))
-    let log = (try? String(contentsOfFile: args + ".ctl", encoding: .utf8)) ?? ""
-    let lines = log.split(separator: "\n").map(String.init)
-    func at(_ s: String) -> Int? { lines.firstIndex { $0.contains(s) } }
-    let o = at("CTRL set_model model=opus"), f = at("CTRL set_model model=claude-fable-5-2"), so = at("CTRL set_model model=sonnet")
-    let u2 = at("USER 2"), u3 = at("USER 3"), u4 = at("USER 4")
-    check("digits, running chat: ⌘3 sent set_model opus and High before message 2", o != nil && u2 != nil && o! < u2!, log)
-    check("digits, running chat: ⌘4 sent set_model for Fable before message 3", f != nil && u3 != nil && f! < u3!, log)
-    check("digits, running chat: ⌘1 sent set_model sonnet before message 4", so != nil && u4 != nil && so! < u4!, log)
-    let efforts = lines.compactMap { l -> String? in
-        guard l.contains("CTRL apply_flag_settings"), let r = l.range(of: "\"effortLevel\":\"") else { return nil }
-        return String(l[r.upperBound...].prefix { $0 != "\"" })
-    }
-    check("digits, running chat: apply_flag_settings carried High, then Medium", efforts == ["high", "medium"], "\(efforts)")
-    try? FileManager.default.removeItem(at: dir)
-}
+// (⌘ digits are the sizes: their checks are with ⌘1 … ⌘5 below)
 
 // ── ⌃1 … ⌃6: the panel goes to a corner or an edge centre of its screen's visible frame, its size unchanged ───────────
 do {
@@ -2055,16 +1938,15 @@ do {
     chat.hide(); m.newChat(); m.field = ""
 }
 
-// ── ⌃⌥1 … ⌃⌥5: the panel's size, its place kept ────────────────────────────────────────────────────────────────────
+// ── ⌘1 … ⌘5: the panel's size, its place kept ────────────────────────────────────────────────────────────────────
 do {
     let m = chat.model
     let vis0 = QCQuiet.screen
-    func sizeKey(_ n: Int, _ flags: NSEvent.ModifierFlags = [.control, .option]) {
-        // ⌥ digits give symbols ("¡™£¢∞"): the character is never what is matched
-        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
-                                    context: nil, characters: ["¡", "™", "£", "¢", "∞"][n - 1], charactersIgnoringModifiers: String(n), isARepeat: false,
-                                    keyCode: rowCodes[n - 1]) { p.sendEvent(e) }
+    func sizeKey(_ n: Int) {
+        // a ⌘ key comes to the panel as a key equivalent (the key code is what is matched, never the character)
+        let taken = digitKey(rowCodes[n - 1], .command, String(n))
         spin(0.15); spinQuiet(p)
+        if !taken { check("⌘\(n) is taken", false) }
     }
     func placeKey(_ n: Int) {
         if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0, windowNumber: p.windowNumber,
@@ -2093,34 +1975,53 @@ do {
                 sizeKey(n)
                 let a = asked(n, cur: before.width, vis0)
                 let wantW = min(a.width, vis0.width), wantH = chatMode ? min(a.height, vis0.height) : before.height
-                check("\(name) ⌃⌥\(n) at \(spotName): width \(wantW)\(chatMode ? ", height \(wantH)" : ", the height stays")",
+                check("\(name) ⌘\(n) at \(spotName): width \(wantW)\(chatMode ? ", height \(wantH)" : ", the height stays")",
                       near(p.frame.width, wantW) && near(p.frame.height, wantH), "\(p.frame) from \(before), asked \(a)")
-                check("\(name) ⌃⌥\(n) at \(spotName): the frame is on the screen", vis0.contains(p.frame), "\(p.frame)")
+                check("\(name) ⌘\(n) at \(spotName): the frame is on the screen", vis0.contains(p.frame), "\(p.frame)")
                 // as tall as the screen, before or after: no vertical anchor can stay (a full-height panel is as much top as bottom)
                 let tallChat = chatMode && (n == 4 || before.height >= vis0.height - 0.5)
                 if spotKey == 3 {
-                    check("\(name) ⌃⌥\(n) at \(spotName): the right edge stays\(tallChat ? "" : ", and the bottom")",
+                    check("\(name) ⌘\(n) at \(spotName): the right edge stays\(tallChat ? "" : ", and the bottom")",
                           near(p.frame.maxX, before.maxX) && (tallChat || near(p.frame.minY, before.minY)), "\(p.frame) from \(before)")
                 } else {
-                    check("\(name) ⌃⌥\(n) at \(spotName): the centre stays\(tallChat ? "" : ", and the top edge")",
+                    check("\(name) ⌘\(n) at \(spotName): the centre stays\(tallChat ? "" : ", and the top edge")",
                           near(p.frame.midX, before.midX) && (tallChat || near(p.frame.maxY, before.maxY)), "\(p.frame) from \(before)")
                 }
             }
         }
-        // a key that is not ours: ⌃⌥6 and ⌥1 alone do nothing
+        // a key that is not ours does nothing: ⌘6, ⌘0, ⌘⇧1, ⌘⌥1, ⌃⌘2, a letter key with ⌘ and the old ⌃⌥ digits (through both
+        // entries: a key that is not ours would go on into the field through sendEvent)
         let before = p.frame
-        // (asked of performKeyEquivalent: a key that is not ours would go on into the field through sendEvent)
-        digitKey(rowCodes[0], [.option], "¡"); digitKey(rowCodes[1], [.control, .option, .shift], "™"); digitKey(rowCodes[2], [.control, .option, .command], "£")
+        digitKey(rowCodes[5], .command, "6"); digitKey(29, .command, "0"); digitKey(rowCodes[0], [.command, .shift], "!")
+        digitKey(rowCodes[0], [.command, .option], "¡"); digitKey(rowCodes[1], [.command, .control], "2"); digitKey(9, .command, "1")
+        for n in 1...5 {
+            let ch = ["¡", "™", "£", "¢", "∞"][n - 1]
+            digitKey(rowCodes[n - 1], [.control, .option], ch)
+            if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .option], timestamp: 0, windowNumber: p.windowNumber,
+                                        context: nil, characters: ch, charactersIgnoringModifiers: String(n), isARepeat: false,
+                                        keyCode: rowCodes[n - 1]) { p.sendEvent(e) }
+        }
         spin(0.15); spinQuiet(p)
-        check("\(name): ⌥1, ⌃⌥⇧2 and ⌘⌃⌥3 do not size it", p.frame == before, "\(p.frame)")
-        // the keypad's digit, the same
-        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .option, .numericPad], timestamp: 0, windowNumber: p.windowNumber,
-                                    context: nil, characters: "¡", charactersIgnoringModifiers: "1", isARepeat: false, keyCode: padCodes[0]) { p.sendEvent(e); spin(0.15); spinQuiet(p) }
-        check("\(name): the keypad's ⌃⌥1 sizes it (Small: 420 wide)", near(p.frame.width, 420), "\(p.frame)")
+        check("\(name): ⌘6, ⌘0, ⌘⇧1, ⌥⌘1, ⌃⌘2, a letter with ⌘ and ⌃⌥1 – ⌃⌥5 do not size it", p.frame == before, "\(p.frame) from \(before)")
+        // the keypad's digit, the same, the number row, Caps Lock, and AZERTY (the key gives an apostrophe: the key code is what counts)
+        digitKey(padCodes[0], [.command, .numericPad], "1"); spin(0.15); spinQuiet(p)
+        check("\(name): the keypad's ⌘1 sizes it (Small: 420 wide)", near(p.frame.width, 420), "\(p.frame)")
+        digitKey(rowCodes[1], .command, "2"); spin(0.15); spinQuiet(p)
+        check("\(name): ⌘2 on the number row sizes it (Standard: 520 wide)", near(p.frame.width, 520), "\(p.frame)")
+        digitKey(padCodes[4], [.command, .numericPad, .capsLock], "5"); spin(0.15); spinQuiet(p)
+        check("\(name): the keypad's ⌘5 with Caps Lock sizes it (Wide: 960 wide)", near(p.frame.width, min(960, vis0.width)), "\(p.frame)")
+        digitKey(rowCodes[3], .command, "'"); spin(0.15); spinQuiet(p)
+        check("\(name): ⌘4 on AZERTY sizes it (Tall)\(chatMode ? ": the screen's height" : ", the width stays")",
+              chatMode ? near(p.frame.height, vis0.height) : near(p.frame.width, 960), "\(p.frame)")
+        // a hidden panel is not the key window: a ⌘ digit is not taken and sizes nothing
+        chat.hide()
+        let hidden = p.frame
+        let took = digitKey(rowCodes[0], .command, "1"); spin(0.15)
+        check("\(name): a hidden panel ignores ⌘1 (not taken, no size)", !took && p.frame == hidden, "\(p.frame) \(took)")
     }
 
     // the user's size is the new one afterwards. The chat: Large, then the bar (no turns), then the chat again: it opens at the
-    // size ⌃⌥ set, as it would at a hand-made one; the bar's height after the chat's resize is what it was (barExtra untouched).
+    // size ⌘ digits set, as it would at a hand-made one; the bar's height after the chat's resize is what it was (barExtra untouched).
     chat.hide(); m.newChat(); m.field = ""; chat.open(); spin(0.5); spinQuiet(p)
     let barHeight = p.frame.height
     m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
@@ -2133,7 +2034,7 @@ do {
     sizeKey(1)
     m.turns = []; spin(0.5); spinQuiet(p); m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
     check("remembered: a later Small is the chat's size too (420 × 440)", near(p.frame.width, 420) && near(p.frame.height, 440), "\(p.frame)")
-    // a resize by hand after a ⌃⌥ size still works as ever (the live resize's own path)
+    // a resize by hand after a ⌘ digit's size still works as ever (the live resize's own path)
     p.beginResize(); p.setFrame(NSRect(x: p.frame.minX, y: p.frame.minY, width: 500, height: 600), display: false); p.endResize(); spin(0.3); spinQuiet(p)
     m.turns = []; spin(0.5); spinQuiet(p); m.turns = [chatTurn()]; spin(0.5); spinQuiet(p)
     check("remembered: a hand-made size still wins afterwards (500 × 600)", near(p.frame.width, 500) && near(p.frame.height, 600), "\(p.frame)")
@@ -2159,7 +2060,7 @@ do {
     for (n, w, h) in [(1, 420.0, 440.0), (2, 520.0, 500.0), (3, 700.0, 500.0), (4, 520.0, 500.0), (5, 700.0, 350.0)] {
         sizeKey(2)                                                       // 520 wide, so Tall keeps that width
         sizeKey(n)
-        check("small screen ⌃⌥\(n): \(Int(w)) × \(Int(h)), held to the screen", near(p.frame.width, CGFloat(w)) && near(p.frame.height, CGFloat(h)) && small.contains(p.frame), "\(p.frame) in \(small)")
+        check("small screen ⌘\(n): \(Int(w)) × \(Int(h)), held to the screen", near(p.frame.width, CGFloat(w)) && near(p.frame.height, CGFloat(h)) && small.contains(p.frame), "\(p.frame) in \(small)")
     }
     QCQuiet.screen = vis0
     chat.hide(); m.newChat(); m.field = ""
@@ -2185,12 +2086,12 @@ do {
             for (a, b) in [(3, 1), (5, 1), (3, 5), (5, 3), (1, 5)] {
                 placeKey(spot)
                 sizeKey(a)
-                check("laptop screen, \(name): ⌃\(spot), ⌃⌥\(a) keeps the place", held(spot) && laptop.contains(p.frame), "\(p.frame)")
+                check("laptop screen, \(name): ⌃\(spot), ⌘\(a) keeps the place", held(spot) && laptop.contains(p.frame), "\(p.frame)")
                 sizeKey(b)
-                check("laptop screen, \(name): ⌃\(spot), ⌃⌥\(a), ⌃⌥\(b) keeps the place", held(spot) && laptop.contains(p.frame), "\(p.frame)")
+                check("laptop screen, \(name): ⌃\(spot), ⌘\(a), ⌘\(b) keeps the place", held(spot) && laptop.contains(p.frame), "\(p.frame)")
                 if chatMode {
                     let want = asked(b, cur: 0, laptop)
-                    check("laptop screen, chat: ⌃⌥\(b) after ⌃⌥\(a) is \(Int(want.width)) × \(Int(want.height))", near(p.frame.width, want.width) && near(p.frame.height, want.height), "\(p.frame)")
+                    check("laptop screen, chat: ⌘\(b) after ⌘\(a) is \(Int(want.width)) × \(Int(want.height))", near(p.frame.width, want.width) && near(p.frame.height, want.height), "\(p.frame)")
                 }
             }
         }
@@ -2211,8 +2112,10 @@ do {
           && QCGeometry.nearest(NSRect(x: 2100, y: 900, width: 200, height: 200), in: big) == QCSpot(across: .right, down: .top))
     // the keys list shows them
     let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
-    check("the keys list names ⌃1 – ⌃6 and ⌃⌥1 – ⌃⌥5 with the sizes", rows.contains("⌃1") && rows.contains("⌃6") && rows.contains("⌃⌥1") && rows.contains("⌃⌥5")
-          && rows.contains("Small") && rows.contains("Standard") && rows.contains("Large") && rows.contains("Tall") && rows.contains("Wide"), rows)
+    check("the keys list names ⌘1 – ⌘5 with the sizes, then ⌃1 – ⌃6, and no ⌘1 – ⌘4 presets or ⌃⌥ digits",
+          rows.contains("⌘1 – ⌘5") && rows.contains("⌃1 – ⌃6") && !rows.contains("⌃⌥") && !rows.contains("Sonnet, Opus") && !rows.contains("Fable: High")
+          && rows.contains("Small") && rows.contains("Standard") && rows.contains("Large") && rows.contains("Tall") && rows.contains("Wide")
+          && rows.range(of: "⌘1 – ⌘5")!.lowerBound < rows.range(of: "⌃1 – ⌃6")!.lowerBound, rows)
 }
 
 // A recorded shortcut is named by its key as printed, never by the Shift character (⌃⇧1 is "⌃⇧1", not "⌃⇧!")
