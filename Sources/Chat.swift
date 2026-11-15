@@ -721,6 +721,16 @@ final class QuickChatModel: ObservableObject {
         thinking = t
         return true
     }
+    /// ⌘1 … ⌘4: a model and a thinking step together, from the next message on, as the controls set them (the running
+    /// `claude` is told then: set_model, apply_flag_settings). A family the account's list lacks is no choice the controls
+    /// offer, so the key changes nothing (false). A step the model doesn't take is held to the nearest one it takes, as
+    /// when the model is changed with that step chosen (effectiveThinking). The keyboard stays where it is.
+    @discardableResult func pick(_ c: QuickChatModelChoice, thinking t: QuickChatThinking) -> Bool {
+        guard modelChoices.contains(where: { $0.choice == c }) else { return false }
+        choice = c
+        thinking = t
+        return true
+    }
     /// A click on a control's label: its right half the next family (or level the model takes), its left half the one
     /// before, going round past either end. Like a click on a bar, it hands the keyboard to the field.
     @discardableResult func cycleModel(_ by: Int) -> Bool {
@@ -1555,6 +1565,7 @@ final class QuickChat {
             guard let m = self?.model else { return }
             if model { m.stepModel(by) } else { m.stepThinking(by) }
         }
+        p.onDigit = { [weak self] action in self?.digit(action) }
         p.onResized = { [weak self] in
             guard let self, let p = self.panel, let host = self.host else { return }
             // the user finished sizing it (macOS's live resize): the chat keeps its height; the bar keeps the height it
@@ -1642,6 +1653,13 @@ final class QuickChat {
         // the chat is the user's from here on, once it really has its height (else the next change tries again)
         if chat { sizedForChat = abs(p.frame.height - h) <= 0.5 }
         p.invalidateShadow()
+    }
+
+    /// A digit key (Sources/DigitKeys.swift) asks for something.
+    func digit(_ action: QCDigitAction) {
+        switch action {
+        case .model(let c, let t): model.pick(c, thinking: t)
+        }
     }
 
     /// After the user sized it: an edge dragged past the screen's visible frame (under the menu bar, over the Dock, off a
@@ -1746,6 +1764,8 @@ final class QuickChatPanel: NSPanel {
     var onDictate: () -> Void = {}
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
+    /// The digit keys (QCDigitKeys): ⌘ digits the model and thinking.
+    var onDigit: (QCDigitAction) -> Void = { _ in }
 
     // MOVING and SIZING are the user's. Moving is the drag surface's performDrag (DragSurface.swift) from any empty area of
     // the card, the header's included (under the hidden title bar, which itself never drags: the hosting view covers it
@@ -1788,6 +1808,11 @@ final class QuickChatPanel: NSPanel {
     /// cl_quick has no menu bar of its own, so the Edit keys are handled here: cut, copy, paste, select all, undo and
     /// redo go to whatever has the keyboard (the field, or a selected answer); ⌘N starts a new chat, ⌘W hides.
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
+        // the digit keys (QCDigitKeys), by key code: no ⌘ digit is a text edit, and the key is taken at any step
+        if let action = QCDigitKeys.action(for: e) {
+            if !e.isARepeat { onDigit(action) }
+            return true
+        }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model: free in the field (its ⌥ and ⌘ arrows move the caret, ⌥⌘ ones
         // nothing) and not a macOS shortcut. At the last step the key does nothing and is still taken.

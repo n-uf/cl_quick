@@ -1813,6 +1813,122 @@ do {
     if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
 }
 
+// ── The digit keys (Sources/DigitKeys.swift): ⌘ digits pick the model and thinking ─────────────────────────────────
+/// The number row's key codes for 1…6, and the keypad's.
+let rowCodes: [UInt16] = [18, 19, 20, 21, 23, 22], padCodes: [UInt16] = [83, 84, 85, 86, 87, 88]
+/// A digit key press as a layout makes it: the character the layout gives the key (a digit on a US or Cyrillic layout,
+/// "&é\"'(§" on AZERTY), and the key's physical code. Returns whether the panel took it.
+@discardableResult
+func digitKey(_ code: UInt16, _ flags: NSEvent.ModifierFlags, _ ch: String = "1") -> Bool {
+    guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                   context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
+    return p.performKeyEquivalent(with: e)
+}
+do {
+    let m = chat.model
+    chat.hide(); m.newChat(); chat.open(); spin(0.4)
+    guard let t = m.target else { print("FAIL digit keys: no target"); exit(1) }
+    let entry = { (v: String, n: String, e: [String]?) in QuickChatModelEntry(value: v, displayName: n, description: nil, efforts: e) }
+    let all = ["low", "medium", "high", "xhigh", "max"]
+    let full = [entry("opus", "Opus 5.5", all), entry("claude-fable-5-2", "Fable 5.2", all), entry("sonnet", "Sonnet 5.5", ["low", "medium", "high", "xhigh"]), entry("haiku", "Haiku 5.5", nil)]
+    ModelCatalog.shared.set(full, profile: t.profileID, account: t.accountUUID)
+    func reset() { m.choice = .haiku; m.thinking = .off }
+    let wanted: [(QuickChatModelChoice, QuickChatThinking)] = [(.sonnet, .medium), (.opus, .medium), (.opus, .high), (.fable, .high)]
+    for (i, (c, th)) in wanted.enumerated() {
+        reset()
+        let taken = digitKey(rowCodes[i], .command, String(i + 1))
+        check("⌘\(i + 1): taken, \(c.title) \(th.title)", taken && m.choice == c && m.thinking == th && m.effectiveThinking == th, "\(m.choice) \(m.thinking) \(taken)")
+        // the keypad's digit (its key code, the numeric-pad flag on), the Russian layout (digits on the number row), Caps Lock,
+        // and AZERTY (the number row gives "&é\"'" without Shift: no digit in the character at all)
+        for (label, code, flags, ch) in [("keypad", padCodes[i], NSEvent.ModifierFlags([.command, .numericPad]), String(i + 1)),
+                                         ("Cyrillic layout", rowCodes[i], NSEvent.ModifierFlags([.command]), String(i + 1)),
+                                         ("Caps Lock", rowCodes[i], NSEvent.ModifierFlags([.command, .capsLock]), String(i + 1)),
+                                         ("AZERTY", rowCodes[i], NSEvent.ModifierFlags([.command]), ["&", "é", "\"", "'"][i])] {
+            reset()
+            let ok = digitKey(code, flags, ch)
+            check("⌘\(i + 1) on the \(label) key: taken, \(c.title) \(th.title)", ok && m.choice == c && m.thinking == th, "\(m.choice) \(m.thinking)")
+        }
+    }
+    // what is not ours is left alone: another digit, Shift or Option with ⌘, a letter key that gives a digit-looking character
+    reset(); m.choice = .opus; m.thinking = .low
+    digitKey(rowCodes[4], .command, "5"); digitKey(rowCodes[0], [.command, .shift], "!"); digitKey(rowCodes[0], [.command, .option], "1")
+    digitKey(29, .command, "0"); digitKey(9, .command, "1")
+    check("⌘5, ⌘⇧1, ⌥⌘1, ⌘0 and a letter key leave the model and thinking alone", m.choice == .opus && m.thinking == .low, "\(m.choice) \(m.thinking)")
+    // a family the account's list doesn't have is no choice the controls offer: nothing changes, the key is still taken
+    let noFable = Array(full.filter { $0.value != "claude-fable-5-2" })
+    ModelCatalog.shared.set(noFable, profile: t.profileID, account: t.accountUUID)
+    m.choice = .opus; m.thinking = .low
+    let took = digitKey(rowCodes[3], .command, "4")
+    check("⌘4 with no Fable on the account: taken, nothing changes", took && m.choice == .opus && m.thinking == .low, "\(m.choice) \(m.thinking)")
+    check("⌘1 on the same account still picks Sonnet", digitKey(rowCodes[0], .command, "1") && m.choice == .sonnet && m.thinking == .medium)
+    // a step the model doesn't take is held to the nearest it takes, as a model change does with that step chosen
+    ModelCatalog.shared.set([entry("opus", "Opus 5.5", ["low"]), entry("sonnet", "Sonnet 5.5", all)], profile: t.profileID, account: t.accountUUID)
+    reset()
+    digitKey(rowCodes[2], .command, "3")
+    check("⌘3 on an Opus that takes only Low: Opus, and the step held to Low", m.choice == .opus && m.effectiveThinking == .low, "\(m.choice) \(m.effectiveThinking)")
+    ModelCatalog.shared.set(full, profile: t.profileID, account: t.accountUUID)
+    // Fable's "uses limits faster" cue follows the choice, as with the controls
+    reset(); digitKey(rowCodes[3], .command, "4")
+    check("⌘4 shows Fable's cost cue, ⌘1 takes it off", QuickChatModels.costly(m.resolvedModel.family)
+          && { digitKey(rowCodes[0], .command, "1"); return !QuickChatModels.costly(m.resolvedModel.family) }())
+    // the keys list shows them
+    let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
+    check("the keys list names ⌘1 to ⌘4 and what they pick", rows.contains("⌘1") && rows.contains("⌘4") && rows.contains("Sonnet") && rows.contains("Fable"), rows)
+    reset(); chat.hide(); m.newChat()
+}
+
+// ⌘ digits in a running chat (stand-in `claude`): the next message carries set_model and the thinking, in order
+do {
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("digit-check")
+    try? FileManager.default.removeItem(at: dir)
+    let folder = dir.appendingPathComponent("folder"), work = dir.appendingPathComponent("work")
+    try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+    signedInFolder(folder, uuid: "u-digit", email: "alex@example.com")
+    let args = dir.appendingPathComponent("args.txt").path
+    try? "args=\(args)\n".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+    var t = QuickChatTarget(Profile(id: "digit-check", name: "Main", folder: folder.path))
+    t.workFolder = work.path; t.accountUUID = "u-digit"; t.email = "alex@example.com"
+    // a chat model of its own talks to the stand-in (as the copy check's does); the keys reach it through the panel's own
+    // key handling, only the last step (what the controller does with the action) is pointed at it
+    let s = QuickChatModel()
+    s.target = t
+    s.resolveClaude = { $0(stub) }
+    s.freshTarget = { _, done in done(t) }
+    let was = p.onDigit
+    p.onDigit = { if case .model(let c, let th) = $0 { s.pick(c, thinking: th) } }
+    defer { p.onDigit = was; s.shutdown() }
+    func ask(_ q: String, _ n: Int) -> Bool {
+        s.field = q; s.send()
+        return spinUntil(20) { s.turns.count == n && s.turns.last?.phase == .done }
+    }
+    check("digits, running chat: the first answer comes", ask("one", 1), "\(String(describing: s.turns.last))")
+    spinUntil(10) { s.modelList != nil }
+    check("digits, running chat: the stand-in's models are known", s.modelList != nil)
+    digitKey(rowCodes[2], .command, "3")
+    check("digits, running chat: ⌘3 is Opus, High", s.choice == .opus && s.thinking == .high)
+    check("digits, running chat: the second answer comes", ask("two", 2))
+    digitKey(rowCodes[3], .command, "4")
+    check("digits, running chat: ⌘4 is Fable, High, with the cost cue", s.choice == .fable && s.thinking == .high && QuickChatModels.costly(s.resolvedModel.family))
+    check("digits, running chat: the third answer comes", ask("three", 3))
+    digitKey(rowCodes[0], .command, "1")
+    check("digits, running chat: the fourth answer comes", ask("four", 4))
+    let log = (try? String(contentsOfFile: args + ".ctl", encoding: .utf8)) ?? ""
+    let lines = log.split(separator: "\n").map(String.init)
+    func at(_ s: String) -> Int? { lines.firstIndex { $0.contains(s) } }
+    let o = at("CTRL set_model model=opus"), f = at("CTRL set_model model=claude-fable-5-2"), so = at("CTRL set_model model=sonnet")
+    let u2 = at("USER 2"), u3 = at("USER 3"), u4 = at("USER 4")
+    check("digits, running chat: ⌘3 sent set_model opus and High before message 2", o != nil && u2 != nil && o! < u2!, log)
+    check("digits, running chat: ⌘4 sent set_model for Fable before message 3", f != nil && u3 != nil && f! < u3!, log)
+    check("digits, running chat: ⌘1 sent set_model sonnet before message 4", so != nil && u4 != nil && so! < u4!, log)
+    let efforts = lines.compactMap { l -> String? in
+        guard l.contains("CTRL apply_flag_settings"), let r = l.range(of: "\"effortLevel\":\"") else { return nil }
+        return String(l[r.upperBound...].prefix { $0 != "\"" })
+    }
+    check("digits, running chat: apply_flag_settings carried High, then Medium", efforts == ["high", "medium"], "\(efforts)")
+    try? FileManager.default.removeItem(at: dir)
+}
+
 // A recorded shortcut is named by its key as printed, never by the Shift character (⌃⇧1 is "⌃⇧1", not "⌃⇧!")
 do {
     if let us = QuickChatShortcut.layoutData(id: "com.apple.keylayout.US") {

@@ -1308,11 +1308,14 @@ struct QCKeysButton: View {
 /// The keys list's look: cl_quick's keys, each with what it does.
 struct QCKeysView: View {
     let opener: String
-    var body: some View {
-        let rows: [(String, String)] = [
+    /// The rows, key and what it does (a check reads them).
+    static func rows(opener: String) -> [(String, String)] {
+        let before: [(String, String)] = [
             ("⌥⌘↑  ⌥⌘↓", "Thinking up, down"),
             ("⌥⌘→  ⌥⌘←", "Model up, down"),
             ("Click a label", "Right half: up; left half: down"),
+        ]
+        let after: [(String, String)] = [
             ("Return", "Send"),
             ("⇧Return", "New line"),
             ("⌘N", "New chat"),
@@ -1321,6 +1324,10 @@ struct QCKeysView: View {
             ("Esc  ⌘W", "Hide"),
             (opener, "Open cl_quick"),
         ]
+        return before + QCDigitKeys.rows + after
+    }
+    var body: some View {
+        let rows = Self.rows(opener: opener)
         VStack(alignment: .leading, spacing: 6) {
             Text("Keys").font(.system(size: 12, weight: .semibold)).foregroundColor(QCColor.text)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
