@@ -59,7 +59,7 @@ This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
   name and no address. The window resizes from its edges and moves from any empty area.
 - **Model and thinking as bar controls**, always visible in one outlined group, Haiku and thinking off by default; every
   answer says which model gave it. Click a bar to pick it; click the right or left half of a label to step up or
-  down, wrapping round; the scroll wheel and ⌥⌘ arrow keys step too. A keys button lists the shortcuts. A warm tint
+  down, wrapping round; the scroll wheel and ⌃⌘ arrow keys step too. A keys button lists the shortcuts. A warm tint
   marks Fable and thinking at Extra or Max. The model bars are the newest Haiku, Sonnet, Opus and Fable the account
   has, as Claude Code itself lists them.
 - **Live usage in the bar.** The bar's usage indicator is a label ("5h" or "wk", whichever is fuller), two thin

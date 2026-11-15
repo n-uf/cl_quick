@@ -123,7 +123,7 @@ minutes for a profile.
   a new chat goes back to the defaults.
   - Model and thinking are rows of bars. Click a bar to pick it. Click the right half of a control's label for the next
     value up and the left half for the one before, wrapping round past either end. The scroll wheel steps too, and so
-    do ⌥⌘↑ and ⌥⌘↓ (thinking) and ⌥⌘→ and ⌥⌘← (model).
+    do ⌃⌘↑ and ⌃⌘↓ (thinking) and ⌃⌘→ and ⌃⌘← (model).
   - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
   - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
   - **Digit keys** work while the panel has the keyboard, in the bar and in the chat window:
@@ -141,7 +141,7 @@ minutes for a profile.
       screen's height. In the bar only the width changes (its height follows its content); in the chat window both
       do, and the chat keeps that size afterwards. The panel stays where it is: the corner or edge centre of its
       nearest place (as ⌃1–⌃6 name them) holds still, and a size larger than the screen is cut to it.
-  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, the digit keys, Return,
+  - The keys button opens a list of the shortcuts: the ⌃⌘ arrow keys, the label halves, the digit keys, Return,
     ⇧Return, ⌘N, ⌘D (Dictation on/off), ⌘⇧C (copy the last answer), Esc and ⌘W, and the shortcut that opens cl_quick.
     A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
