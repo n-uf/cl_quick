@@ -6,6 +6,9 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 
+- **Digit keys in the chat.** ⌘1 to ⌘4 pick the model and thinking (Sonnet and Opus with Medium, Opus and Fable with
+  High), ⌃1 to ⌃6 place the panel at a bottom or top corner or centre of its screen, ⌃⌥1 to ⌃⌥5 size it (Small,
+  Standard, Large, Tall, Wide); all on any keyboard layout, and in the keys list. macOS can take ⌃1–⌃6 for Desktop switching.
 - **A floating Claude chat on a shortcut.** A bar first; the first message turns it into a chat window that stays
   floating on every Space until Esc hides it. Your own Claude Code answers, on the profile's account in use, and it
   counts against that account's limits.

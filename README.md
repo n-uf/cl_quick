@@ -122,8 +122,24 @@ minutes for a profile.
     do ⌥⌘↑ and ⌥⌘↓ (thinking) and ⌥⌘→ and ⌥⌘← (model).
   - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
   - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
-  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, Return, ⇧Return, ⌘N, ⌘D
-    (Dictation on/off), ⌘⇧C (copy the last answer), Esc and ⌘W, and the shortcut that opens cl_quick. A click elsewhere or Esc closes it.
+  - **Digit keys** work while the panel has the keyboard, in the bar and in the chat window:
+    - **⌘1 to ⌘4 pick the model and thinking together:** ⌘1 Sonnet with Medium, ⌘2 Opus with Medium, ⌘3 Opus with
+      High, ⌘4 Fable with High. They set what the controls set (a running chat is told with the next message; Fable
+      shows its warm tint). A model the account's Claude Code list lacks is no choice the controls offer, so its key
+      changes nothing; a step the model doesn't take becomes the nearest one it takes.
+    - **⌃1 to ⌃6 place the panel on its screen,** at the size it has: ⌃1, ⌃2, ⌃3 bottom left, centre, right; ⌃4, ⌃5,
+      ⌃6 top left, centre, right. The place is within the screen's visible frame (the menu bar and the Dock stay clear;
+      the bottom keeps the 85 pt gap the first opening has, so ⌃2 is that place). The bar keeps growing as it does
+      wherever you drag it. macOS can take ⌃1–⌃6 for itself: when "Switch to Desktop N" is turned on in System
+      Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Mission Control, cl_quick never sees those keys.
+    - **⌃⌥1 to ⌃⌥5 size the panel,** as if you had sized it by hand: Small 420 × 440, Standard 520 × 580 (the first
+      size), Large 720 × 760, Tall (the width it has, the screen's full visible height), Wide 960 × 70% of the
+      screen's height. In the bar only the width changes (its height follows its content); in the chat window both
+      do, and the chat keeps that size afterwards. The panel stays where it is: the corner or edge centre of its
+      nearest place (as ⌃1–⌃6 name them) holds still, and a size larger than the screen is cut to it.
+  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the label halves, the digit keys, Return,
+    ⇧Return, ⌘N, ⌘D (Dictation on/off), ⌘⇧C (copy the last answer), Esc and ⌘W, and the shortcut that opens cl_quick.
+    A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
     fuller), two thin stacked bars (the 5-hour window over the week) and the share of the fuller window, such as
     "5h ▬ 78%" ("full" when a limit is full). On a narrow bar it drops the share, then the label.
@@ -144,7 +160,8 @@ minutes for a profile.
   it. Text already in the field stays above the quote; a selection over 20,000 characters is cut there, with a line
   saying so. No Accessibility permission: macOS hands the selection over. Nothing about it is kept.
 - **Keyboard layouts.** The chat's shortcuts and paste (⌘V, ⌘C, ⌘X, ⌘A, ⌘Z, ⌘N, ⌘W, ⌘D, ⌘⇧C) work on Cyrillic
-  layouts such as Russian and Ukrainian too: on a layout whose letters aren't Latin they follow the key's place.
+  layouts such as Russian and Ukrainian too: on a layout whose letters aren't Latin they follow the key's place. The
+  digit keys (⌘, ⌃ and ⌃⌥ with 1 to 6) follow the key too, on the number row and the keypad, on any layout.
 - **Images.** ⌘V with a screenshot or picture on the clipboard (⌃⇧⌘4 copies one), or with image files copied in Finder,
   attaches it; so does dropping image files or a picture from a page on the bar or the chat window. Each shows as a
   small thumbnail over the field with a ✕ (Delete in an empty field removes the last one); up to 5 go with a message,
