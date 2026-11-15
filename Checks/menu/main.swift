@@ -200,6 +200,10 @@ check("the menu: a click picks that profile", chosen == ["work"])
 // ── standby accounts: a row each, in their profile's group, through the switch path that exists ─────────
 // (sample addresses only: example.com / example.org)
 var switched: [String] = []
+// (the sample profiles here are not in the store: the click's own rule, still-standby and not waiting, is checked
+// below against stored ones; here it lets every click through)
+let realAllow = QCStatusMenu.allowSwitch
+QCStatusMenu.allowSwitch = { _, _ in true }
 let yan = KnownAccount(uuid: "u8", email: "yan.old@example.org")
 let zedAddress = "zed@example.com", zedMasked = maskEmail(zedAddress)
 func standbyMenu(_ infos: [QCStatusMenu.Info], switching: @escaping (Profile) -> Bool = { _ in false }, live: ((Profile) -> QCStatusMenu.Info)? = nil) -> [NSMenuItem] {
@@ -232,8 +236,10 @@ let groupBlock = withRows[0].view as! QCMenuUsageBlock, loneBlock = withRows[3].
 check("grouping: a block with rows after it ends closer to them than one with none",
       groupBlock.frame.height == QCMenuUsageBlock.height(groupBlock.model, joined: true) && loneBlock.frame.height == QCMenuUsageBlock.height(loneBlock.model)
       && QCMenuUsageBlock.height(groupBlock.model, joined: true) < QCMenuUsageBlock.height(groupBlock.model))
-check("live: a block's numbers follow the store while the menu is open (a provider), a standby row is as built",
+check("live: a block follows the store while the menu is open (a provider) only when the menu is given a live source",
       (standbyMenu([mainOne], live: { _ in mainOne })[0].view as? QCMenuUsageBlock)?.provider != nil && (oneProfile[0].view as? QCMenuUsageBlock)?.provider == nil)
+check("live: a standby row has nothing to follow: no provider, built once for the menu that opened",
+      (oneProfile[1].view as? QCStandbyMenuRow) != nil && (standbyMenu([mainOne], live: { _ in mainOne })[1].view as? QCStandbyMenuRow)?.address == zedAddress)
 
 // each row is a drawn view that holds the whole address for drawing; its words, title and VoiceOver label hold it masked
 let rows = twoProfiles.compactMap { $0.view as? QCStandbyMenuRow }
@@ -384,6 +390,59 @@ do {
     check("waiting: a dimmed row is drawn fainter than a standby row at rest", ink(wRow) < ink(oRow) && ink(wRow) > 0, "\(ink(wRow)) vs \(ink(oRow))")
     check("waiting: the block of the waiting profile still opens the chat", (waitingMenu[0].view as? QCMenuUsageBlock) != nil && waitingMenu[0].isEnabled)
 }
+// a waiting item stays off on its own, not only because the menu doesn't validate its items: with autoenablesItems on
+// (the default of a menu) it is still off, and its action does nothing
+do {
+    let m = NSMenu()
+    m.autoenablesItems = true
+    standbyMenu([mainOne, workOne], switching: { $0.id == "main" }).forEach(m.addItem)
+    m.update()
+    let off = m.items[1], on = m.items[4]
+    switched = []
+    if let t = off.target, let a = off.action { _ = t.perform(a, with: off) }
+    spin(0.1)
+    check("waiting: with autoenablesItems on, the waiting item is still off and its action does nothing",
+          !off.isEnabled && on.isEnabled && switched.isEmpty, "\(off.isEnabled) \(on.isEnabled) \(switched)")
+    if let t = on.target, let a = on.action { _ = t.perform(a, with: on) }
+    check("waiting: with autoenablesItems on, another profile's item still works", switched == ["work:w1"], "\(switched)")
+}
+
+// a click on the block is a release on it: one released outside it does nothing
+do {
+    var opened = 0
+    let b = QCMenuUsageBlock(rich) { opened += 1 }
+    let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.borderless], backing: .buffered, defer: true)   // never shown
+    host.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+    host.contentView?.addSubview(b)
+    b.frame.origin = NSPoint(x: 20, y: 20)
+    func release(_ p: NSPoint) -> NSEvent? {
+        NSEvent.mouseEvent(with: .leftMouseUp, location: b.convert(p, to: nil), modifierFlags: [], timestamp: 0, windowNumber: host.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
+    }
+    if let out = release(NSPoint(x: b.bounds.maxX + 40, y: b.bounds.midY)), let above = release(NSPoint(x: 50, y: -8)), let inside = release(NSPoint(x: 50, y: b.bounds.midY)) {
+        b.mouseUp(with: out); b.mouseUp(with: above); spin(0.1)
+        check("block: a release outside the block opens nothing", opened == 0, "\(opened)")
+        b.mouseUp(with: inside); spin(0.1)
+        check("block: a release on the block opens the chat on its profile (after the menu closes)", opened == 1, "\(opened)")
+    } else { check("block: mouse events for the release checks", false) }
+}
+
+// the account in use changes while the menu is open: the block's old address picture is dropped
+do {
+    let first = make(level(five: 13, week: 88), address: "aaa-one@example.com")
+    let second = make(level(five: 13, week: 88), address: "bbb-two@example.com")
+    let open = QCMenuUsageBlock(first) {}, fresh = QCMenuUsageBlock(second) {}
+    for v in [open, fresh] { v.setFrameSize(NSSize(width: 340, height: v.frame.height)) }
+    func picture(_ v: NSView) -> Data? {
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return nil }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        return rep.tiffRepresentation
+    }
+    let before = picture(open)          // draws the first address blurred, and keeps its picture
+    open.reload(second)
+    check("live: another account in use is taken in place", open.model.account == second.account)
+    check("live: and it is drawn blurred as its own address, not as the old one's kept picture",
+          before != nil && picture(open) != before && picture(open) == picture(fresh))
+}
 
 // ── Settings ▸ Blur addresses: on (the default) blurs at rest; off draws every address in full and sharp, and the words hold
 // it in full too; it applies to what is built or drawn next ──────────────────────────────────────────────
@@ -419,7 +478,10 @@ do {
           && off.item?.title == "zed@example.com · standby" && off.row?.accessibilityLabel() == "zed@example.com, standby, switch")
     check("blur setting: off, what is drawn differs from the blurred look", picture(off.block) != onBlock && off.row.flatMap(picture) != onRow)
     // a dimmed row shows the address in full too
-    check("blur setting: off, a dimmed row is sharp as well (and still does nothing)", QCStandbyMenuRow(address: "zed@example.com", enabled: false) {}.sharp)
+    var dimmedFired = 0
+    let dimmedRow = QCStandbyMenuRow(address: "zed@example.com", enabled: false) { dimmedFired += 1 }
+    dimmedRow.press(); _ = dimmedRow.accessibilityPerformPress(); spin(0.1)
+    check("blur setting: off, a dimmed row is sharp as well (and still does nothing)", dimmedRow.sharp && dimmedFired == 0)
 
     AddressPrivacy.shared.apply(QuickChatSettings())
     let back = build()
@@ -551,6 +613,27 @@ do {
     check("switched: the menu shows B in use, with no numbers (A's week is A's), no full note",
           info.address == "gamma-b@example.com" && info.level == nil && b.noUsage && b.fullNote == nil && !b.lines.joined().contains("100"), "\(b.lines)")
     check("switched: A is on standby", info.standby.map(\.uuid) == ["ug-a"])
+    // a click on A's standby row (built while A was on standby) asks the question only while A is still on standby and no
+    // switch is waited for: the rule itself, then through a row after another sign-in moved the folder to A
+    let ugA = KnownAccount(uuid: "ug-a", email: "gamma-a@example.com"), ugB = KnownAccount(uuid: "ug-b", email: "gamma-b@example.com")
+    check("click rule: a standby account may start the switch; the account in use, an unknown one, or any while waiting, may not",
+          QCStatusMenu.mayStartSwitch(pg, ugA, store: store, waiting: { _ in false }) && !QCStatusMenu.mayStartSwitch(pg, ugB, store: store, waiting: { _ in false })
+          && !QCStatusMenu.mayStartSwitch(pg, KnownAccount(uuid: "nobody", email: "nobody@example.com"), store: store, waiting: { _ in false })
+          && !QCStatusMenu.mayStartSwitch(pg, ugA, store: store, waiting: { $0.id == "gamma" }) && QCStatusMenu.mayStartSwitch(pg, ugA, store: store, waiting: { $0.id == "other" }))
+    check("click rule: the real rule is the one rows are built with (no switch is waited for here)", QCStatusMenu.mayStartSwitch(pg, ugA, store: store))
+    QCStatusMenu.allowSwitch = realAllow
+    switched = []
+    let (staleItem, staleRow) = QCStatusMenu.standbyItem(pg, ugA, waiting: false, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") })
+    staleRow.press(); spin(0.1)
+    check("click rule: while A is on standby a click asks the question", switched == ["gamma:ug-a"], "\(switched)")
+    signIn("gamma-a@example.com", "ug-a")          // a sign-in finished while the menu was open: A is now in use
+    switched = []
+    staleRow.press(); _ = staleRow.accessibilityPerformPress()
+    if let t = staleItem.target, let a = staleItem.action { _ = t.perform(a, with: staleItem) }
+    spin(0.1)
+    check("click rule: once A is the account in use the row's click, VoiceOver press and Return do nothing", switched.isEmpty, "\(switched)")
+    signIn("gamma-b@example.com", "ug-b")
+    QCStatusMenu.allowSwitch = { _, _ in true }
     // the refresh asks B's numbers and keeps them under B
     try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
     let r = QCMenuUsageRefresher()

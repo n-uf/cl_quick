@@ -277,7 +277,8 @@ final class QCMenuUsageBlock: NSView {
         needsDisplay = true
     }
 
-    override func mouseUp(with e: NSEvent) { press() }
+    /// A click is a release on the block: one released outside it (the press was on it) does nothing.
+    override func mouseUp(with e: NSEvent) { if releasedOn(e) { press() } }
 
     /// A click: the menu closes and the quick chat opens on the profile.
     func press() { closeMenuThen(pick) }
@@ -299,6 +300,8 @@ final class QCMenuUsageBlock: NSView {
     /// and it still fits the width the menu gave it (a header note that grew would be cut).
     func reload(_ m: QCMenuProfile) {
         guard m != model, m.shape == model.shape, Self.width(m) <= frame.width else { return }
+        // another account in use (a sign-in finished while the menu is open): the old address's picture goes
+        if m.account != model.account { blurCache = nil }
         model = m
         setAccessibilityLabel(m.spoken)
         needsDisplay = true
@@ -429,20 +432,33 @@ enum QCStatusMenu {
              standby: store.standby(p))
     }
 
-    /// A menu item's action: a closure.
-    private final class Handler: NSObject {
+    /// A menu item's action: a closure. An item built off (`enabled` false) stays off whatever the menu does: the menu's
+    /// own validation (autoenablesItems) asks here, and the action itself checks too.
+    private final class Handler: NSObject, NSMenuItemValidation {
         let run: () -> Void
-        init(_ run: @escaping () -> Void) { self.run = run }
-        @objc func fire() { run() }
+        let enabled: Bool
+        init(enabled: Bool = true, _ run: @escaping () -> Void) { self.enabled = enabled; self.run = run }
+        @objc func fire() { if enabled { run() } }
+        func validateMenuItem(_ item: NSMenuItem) -> Bool { enabled }
     }
+
+    /// Whether a click on a standby row may start the switch now: the account is still a standby one of the profile (a
+    /// sign-in that finished while the menu was open may have made it the one in use) and no switch is waited for.
+    static func mayStartSwitch(_ p: Profile, _ a: KnownAccount, store: ProfileStore = .shared,
+                               waiting: (Profile) -> Bool = { AccountSwitcher.shared.waiting[$0.id] != nil }) -> Bool {
+        !waiting(p) && store.standby(p).contains { $0.uuid == a.uuid }
+    }
+    /// The rule a click is held to (a seam: the checks replace it).
+    static var allowSwitch: (Profile, KnownAccount) -> Bool = { mayStartSwitch($0, $1) }
 
     /// A standby account's row (QCStandbyMenuRow), in its profile's group: a click anywhere on it asks the switch question
     /// (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing new happens
     /// here: it is the path the chat's and Settings' Switch… take. Off while a sign-in for the profile is waited for.
     /// The item's title and action stay for VoiceOver, the menu's type-ahead and Return (the title has the address masked).
     static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, QCStandbyMenuRow) {
-        let run = { switchTo(p, a) }
-        let h = Handler(run)
+        // the menu was built some time ago: the question is asked only if the account is still on standby
+        let run = { if allowSwitch(p, a) { switchTo(p, a) } }
+        let h = Handler(enabled: !waiting, run)
         let item = NSMenuItem(title: QCStandbyMenuRow.title(a.email), action: #selector(Handler.fire), keyEquivalent: "")
         item.target = h
         item.representedObject = h          // the menu item keeps its handler alive
