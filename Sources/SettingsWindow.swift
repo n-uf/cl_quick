@@ -16,11 +16,9 @@ enum SettingsPage: Hashable {
 final class SettingsState: ObservableObject {
     @Published var page: SettingsPage = .general
     @Published var settings = QuickChat.shared.settings
-    /// Folders being signed in (Sign in another account…): the box says so until Claude Code has signed them in.
+    /// Folders being signed in (Sign in another account…): the box says so until their sign-in (ClaudeSignIn) has ended.
     @Published var signingIn: Set<String> = []
     @Published var tick = 0
-    private var timer: Timer?
-    private var since = Date()
     private var switchWatch: NSObjectProtocol?
 
     init() {
@@ -66,24 +64,19 @@ final class SettingsState: ObservableObject {
         monitor = nil
     }
 
-    /// While a sign-in is under way, its folder is looked at every 2 s; after 10 minutes it's given up.
-    func watchSignIns() {
-        timer?.invalidate()
-        since = Date()
-        guard !signingIn.isEmpty else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            // the folders' files are parsed off the main thread; then judged here (the look finds the parse done)
-            ClaudeFolder.reload(Array(self.signingIn)) { [weak self] _ in
-                guard let self else { return }
-                ProfileStore.shared.noteAccounts()
-                let used = Set(ProfileStore.shared.profiles.map(\.path))
-                self.signingIn = self.signingIn.filter { ClaudeFolder.email($0) == nil && used.contains($0) }
-                if Date().timeIntervalSince(self.since) > 600 { self.signingIn = [] }
-                self.tick += 1
-                if self.signingIn.isEmpty { self.timer?.invalidate() }
-            }
-        }
+    /// Claude Code's sign-in on a folder that has no account to wait for (a signed-out folder, a folder found, a new one):
+    /// the folder is "signing in" from when its window opens until the sign-in ends, however it ends (ClaudeSignIn
+    /// follows it, 10 minutes at most). `opened` and `couldNotStart` as AccountSwitcher.signIn has them.
+    func signIn(folder: String, opened: @escaping () -> Void = {}, couldNotStart: ((String) -> Void)? = nil) {
+        let key = expand(folder)
+        AccountSwitcher.shared.signIn(folder: folder, opened: { [weak self] in
+            self?.signingIn.insert(key)
+            opened()
+        }, couldNotStart: couldNotStart ?? { AccountSwitcher.tell($0) }, ended: { [weak self] _ in
+            ProfileStore.shared.noteAccounts()
+            self?.signingIn.remove(key)
+            self?.tick += 1
+        })
     }
 
     func save() { QuickChat.shared.settingsChanged(settings) }
@@ -701,14 +694,10 @@ struct ProfilePage: View {
             remove: { confirmRemove() })
     }
 
-    /// Sign in again… on a folder with no account: Claude Code's sign-in in Terminal, and the folder is watched until an
-    /// account is in it (the same watch a new folder gets), 10 minutes at most.
+    /// Sign in again… on a folder with no account: Claude Code's sign-in in Terminal, "signing in" until it ends (the same
+    /// as a new folder), 10 minutes at most.
     private func signInSignedOut() {
-        SignIn.open(folder: profile.path) { why in
-            if let why { SignIn.tell(why); return }
-            state.signingIn.insert(profile.path)
-            state.watchSignIns()
-        }
+        state.signIn(folder: profile.path)
     }
 
     /// The account in use first, then the standby ones.
@@ -771,6 +760,7 @@ struct ProfilePage: View {
         a.addButton(withTitle: "Remove"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         switcher.drop(profile.id)
+        switcher.stop(folder: profile.path)          // a sign-in of the signed-out folder too
         store.remove(profile.id)
         QuickChat.shared.refresh()          // a chat on the removed profile ends with its claude
         state.signingIn.remove(profile.path)
@@ -904,14 +894,7 @@ struct AddPage: View {
     /// A folder found that isn't signed in: Claude Code's sign-in on it in Terminal, then it's a profile, "signing in",
     /// until an account is in it (10 minutes at most).
     private func signInFound(_ f: String) {
-        SignIn.open(folder: f) { why in
-            if let why { problem = why; return }
-            add(f)
-            if store.uses(f) {
-                state.signingIn.insert(expand(f))
-                state.watchSignIns()
-            }
-        }
+        state.signIn(folder: f, opened: { add(f) }, couldNotStart: { problem = $0 })
     }
 
     private func add(_ folder: String, name: String? = nil) {
@@ -955,26 +938,16 @@ struct AddPage: View {
     }
 
     private func startSignIn(name n: String, folder: String, claude: String?) {
-        guard let claude else { problem = ClaudeInstall.missing + "."; return }
+        // no claude: no folder made for nothing
+        guard claude != nil else { problem = ClaudeInstall.missing + "."; return }
+        // the new profile's one folder, made here first (ClaudeSignIn never makes one)
         do { try FileManager.default.createDirectory(atPath: expand(folder), withIntermediateDirectories: true) } catch {
             problem = "\(folder) can't be made: \(error.localizedDescription)"; return
         }
-        func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-        let script = Files.folder.appendingPathComponent("sign-in.command")
-        let text = "#!/bin/zsh\n# cl_quick: Claude Code on \(folder), to sign in. Close this window when it says you're signed in.\n"
-            // a key or another provider from the shell's own settings would sign it in some other way: not here
-            + "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY\n"
-            + "export CLAUDE_CONFIG_DIR=\(q(expand(folder)))\nexec \(q(claude))\n"
-        do {
-            try FileManager.default.createDirectory(at: Files.folder, withIntermediateDirectories: true)
-            try text.write(to: script, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
-        } catch { problem = "The sign-in couldn't start: \(error.localizedDescription)"; return }
-        NSWorkspace.shared.open(script)
-        add(folder, name: n)
-        state.signingIn.insert(expand(folder))
-        state.watchSignIns()
-        newName = ""
+        state.signIn(folder: folder, opened: {
+            add(folder, name: n)
+            newName = ""
+        }, couldNotStart: { problem = $0 })
     }
 }
 

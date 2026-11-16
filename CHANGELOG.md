@@ -9,6 +9,17 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   cells. Columns fit their content and wrap in a narrow panel; a table with too many columns to fit scrolls sideways
   inside its own frame. While an answer streams, the table shows as soon as its alignment row is in and rows appear as
   they arrive. Copy and ⌘⇧C still copy the Markdown source.
+- **One sign-in window, closed after it.** Every sign-in (Switch…, Sign in again…, a folder found, a new account in a
+  new folder) goes through the sign-in shared with cl_audit (ClaudeAuth's ClaudeSignIn). Its Terminal window closes by
+  itself on a sign-in, a wrong account, Stop and the 10-minute timeout; one that was declined or failed stays open to be
+  read until Return, the next sign-in or Stop. Stop and the timeout now end Claude Code's `claude auth login` in that
+  window too, and a new sign-in ends the one before it.
+- **Two guards.** A sign-in doesn't start while a `claude auth login` already runs on the folder, or while another app
+  (cl_audit) holds the folder's sign-in lock.
+- **The account is confirmed by Claude Code itself.** After a sign-in a short `claude` on the folder says which account
+  it is (its `initialize` answer); the folder's `.claude.json` is only a guess until then. Still no Keychain: cl_quick
+  doesn't even build the Keychain reader.
+- A new account in a new folder now runs `claude auth login` instead of a whole `claude` session.
 
 ## 26.11.0 — 2026-11-15
 

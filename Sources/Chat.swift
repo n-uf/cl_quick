@@ -1317,8 +1317,8 @@ final class QuickChat {
             if let id = self?.model.target?.profileID { self?.switcher.drop(id) }
         }
         model.signIn = { [weak self] id in
-            guard let p = self?.store.profile(id) else { return }
-            SignIn.open(folder: p.path) { why in if let why { SignIn.tell(why) } }
+            guard let self, let p = self.store.profile(id) else { return }
+            self.switcher.signIn(folder: p.path)
         }
         model.freshTarget = { [weak self] id, done in
             guard let self, let p = self.store.profile(id) else { done(nil); return }

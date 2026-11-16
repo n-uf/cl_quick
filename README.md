@@ -75,8 +75,11 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   account, sessions running now included, and that the Claude app keeps its own sign-in. It's not just the quick chat.
 - Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. The
   browser's claude.ai session decides which account actually signs in, so cl_quick checks the result: it looks at the
-  folder's `.claude.json` every 2 seconds, for at most 10 minutes, until the account changes. It never sees a password or
-  a token and never touches the Keychain.
+  folder's `.claude.json` every 2 seconds, for at most 10 minutes, and once the login ends (or the file names another
+  account) a short `claude` on the folder says which account it is. It never sees a password or a token and never
+  touches the Keychain. The sign-in is the one shared with cl_audit (`Shared/ClaudeAuth+SignIn/`): one window at a time,
+  closed after a sign-in, a wrong account, Stop or the timeout (Stop and the timeout end `claude auth login` too); one
+  declined or failed stays open to be read until Return, the next sign-in or Stop.
 - If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
   to try again. After 10 minutes with no change it stops looking and says "No sign-in in 10 minutes." (in the chat, and
   on the profile's page in Settings), with a way to try again and Dismiss (OK in Settings).
@@ -278,7 +281,9 @@ minutes for a profile.
 
 ## With cl_audit
 
-cl_quick runs with or without [cl_audit](https://github.com/n-uf/cl_audit) and shares nothing with it while running.
+cl_quick runs with or without [cl_audit](https://github.com/n-uf/cl_audit) and shares nothing with it while running
+but a folder's sign-in lock (`~/Library/Caches/n-uf/signin-*.lock`), so the two never sign one folder in at once. It
+compiles cl_audit's shared modules from source (`Vendor/`).
 On its first run it copies cl_audit's old quick chat settings (the shortcut, model and thinking), if there are any.
 
 ## Checks
@@ -295,6 +300,11 @@ shows the limit closest to full with its label before the bars on that window's 
 `Checks/menu.sh` checks the menu bar menu's profile blocks (their words, level colours, the address blurred until the
 pointer is on it, no usage for a standby account, "No usage yet") and the background refresh of old numbers against
 the stand-in `claude`: one at a time, throttled, only `get_usage` asked.
+`Checks/signin.sh` checks the sign-in (ClaudeSignIn and the switch on it) against a stand-in Terminal and a stand-in
+`claude auth login`: each outcome, a wrong account by id and by address and organisation, Stop and a new sign-in ending
+the login, the lock and the process guard, a folder that isn't ready; first its lint that nothing cl_quick compiles can
+read the Keychain. `Checks/vendor.sh` runs cl_audit's own checks of the shared modules (`Vendor/`) on what cl_quick
+compiles.
 `Checks/real.sh` asks one real question on a throwaway, signed-out folder; with `QC_CONFIG=<folder>` it uses that
 folder's account (a little of its usage) and checks the incognito chat end to end: a multi-turn conversation in one
 `claude` still remembers, Stop keeps the conversation, the model changes in the running chat, and no transcript
