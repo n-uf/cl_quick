@@ -4,7 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
-Nothing pending.
+- **Tables in answers.** A Markdown table in an answer is drawn as a grid, not as raw text with pipes: a semibold
+  header, thin row separators, columns aligned as the alignment row says, and bold, italics, `code` and links inside the
+  cells. Columns fit their content and wrap in a narrow panel; a table with too many columns to fit scrolls sideways
+  inside its own frame. While an answer streams, the table shows as soon as its alignment row is in and rows appear as
+  they arrive. Copy and ⌘⇧C still copy the Markdown source.
 
 ## 26.11.0 — 2026-11-15
 
