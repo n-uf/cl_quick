@@ -69,15 +69,22 @@ final class SettingsState: ObservableObject {
     /// follows it, 10 minutes at most). `opened` and `couldNotStart` as AccountSwitcher.signIn has them.
     func signIn(folder: String, opened: @escaping () -> Void = {}, couldNotStart: ((String) -> Void)? = nil) {
         let key = expand(folder)
+        // the folder's latest sign-in: an earlier one's end (it comes later, after a reload) never takes the newer one's
+        // "signing in" away
+        let ticket = UUID()
+        signInTickets[key] = ticket
         AccountSwitcher.shared.signIn(folder: folder, opened: { [weak self] in
             self?.signingIn.insert(key)
             opened()
         }, couldNotStart: couldNotStart ?? { AccountSwitcher.tell($0) }, ended: { [weak self] _ in
             ProfileStore.shared.noteAccounts()
-            self?.signingIn.remove(key)
-            self?.tick += 1
+            guard let self, self.signInTickets[key] == ticket else { return }
+            self.signInTickets[key] = nil
+            self.signingIn.remove(key)
+            self.tick += 1
         })
     }
+    private var signInTickets: [String: UUID] = [:]
 
     func save() { QuickChat.shared.settingsChanged(settings) }
 }

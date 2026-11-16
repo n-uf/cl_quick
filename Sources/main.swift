@@ -92,7 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if firstRun { SettingsWindow.shared.show(profile: nil, firstRun: true) }
     }
 
-    func applicationWillTerminate(_ note: Notification) { chat.shutdown() }
+    func applicationWillTerminate(_ note: Notification) {
+        AccountSwitcher.shared.stopForQuit()          // a sign-in under way: its login and its window end with cl_quick
+        chat.shutdown()
+    }
 
     /// The menu: Quick chat with its shortcut, each profile's week as last reported, Settings… and Quit.
     func menuNeedsUpdate(_ menu: NSMenu) {

@@ -68,6 +68,9 @@ final class AccountSwitcher {
     var onOutcome: (SwitchGoal, SwitchOutcome) -> Void = { _, _ in }
     /// The sign-in under way (one at a time: ClaudeSignIn ends the earlier one when another starts), and its folder.
     private(set) var active: (folder: String, signIn: ClaudeSignIn)?
+    /// A sign-in asked for while claude is looked for: its folder, its ticket, and how it ends if another one is asked for
+    /// meanwhile (stopped, as when a new sign-in ends the one under way).
+    private var pending: (folder: String, ticket: UUID, superseded: () -> Void)?
 
     /// Where `claude` is (off the main thread), and how a sign-in is made: the checks put stand-ins here (no Terminal, a
     /// stand-in claude, folders under build/).
@@ -149,9 +152,17 @@ final class AccountSwitcher {
     func signIn(folder: String, wanted: SignedInAccount? = nil, opened: @escaping () -> Void = {},
                 couldNotStart: @escaping (String) -> Void = { AccountSwitcher.tell($0) },
                 ended: @escaping (ClaudeSignIn.Outcome) -> Void = { _ in }) {
+        // claude is looked for first, off the main thread; a drop or a stop meanwhile (or another sign-in asked for) takes
+        // the ticket away, and nothing starts
+        let ticket = UUID()
+        let earlier = pending
+        pending = (folder, ticket, { ended(.stopped) })
+        earlier?.superseded()
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let claude = findClaude()
             DispatchQueue.main.async { [self] in
+                guard pending?.ticket == ticket else { return }
+                pending = nil
                 guard let claude else { return couldNotStart(ClaudeInstall.missing + ".") }
                 let s = makeSignIn(folder, wanted, claude)
                 active = (folder, s)
@@ -181,31 +192,44 @@ final class AccountSwitcher {
         }
     }
 
-    /// A switch's sign-in ended. A stop (Stop, or another sign-in began) leaves the switch to whoever stopped it; the rest are
-    /// today's notes: the account wanted, another one, or none came (the timeout's note, also when the login ended without
-    /// one).
+    /// A switch's sign-in ended, on today's notes: the account wanted (only when Claude Code confirmed it), another one, or
+    /// none (the timeout's note "the account in use hasn't changed", also for a login that ended without one, one that
+    /// Claude Code didn't confirm, and one ended by another profile's sign-in). Stop (`drop`) has already taken its note.
     private func finished(_ goal: SwitchGoal, _ outcome: ClaudeSignIn.Outcome) {
         guard waiting[goal.profileID] == goal else { return }           // dropped, or begun again, meanwhile
         switch outcome {
         case .signedIn(let a): end(goal.profileID, goal, .reached, signedIn: a.email)
         case .wrongAccount(let a, _): end(goal.profileID, goal, .other(email: a.email ?? ClaudeFolder.email(goal.folder) ?? ""))
-        case .timedOut, .declined, .failed: end(goal.profileID, goal, .timedOut)
-        case .stopped: drop(goal.profileID)
+        case .timedOut, .declined, .failed, .unverified, .stopped: end(goal.profileID, goal, .timedOut)
         }
     }
 
     /// Stops waiting for a profile's sign-in (and ends it: its `claude auth login` and its window), and dismisses a switch
     /// that ended on another account or timed out, or the "Signed in again" line.
     func drop(_ id: String) {
-        if let goal = waiting[id], let a = active, a.folder == goal.folder { a.signIn.stop(); active = nil }
+        if let goal = waiting[id] { stop(folder: goal.folder) }
         guard waiting[id] != nil || ended[id] != nil || signedAgain[id] != nil else { return }
         waiting[id] = nil; ended[id] = nil; signedAgain[id] = nil
         changed()
     }
 
-    /// Ends the sign-in under way on a folder (a profile removed while it signs in).
+    /// Ends the sign-in under way on a folder, or the one about to start (a profile removed while it signs in, Stop).
     func stop(folder: String) {
-        if let a = active, a.folder == folder { a.signIn.stop(); active = nil }
+        if let p = pending, Self.sameFolder(p.folder, folder) { pending = nil }
+        if let a = active, Self.sameFolder(a.folder, folder) { a.signIn.stop(); active = nil }
+    }
+
+    /// cl_quick is quitting: the sign-in under way ends now, its login and window with it (nothing waits for an outcome).
+    func stopForQuit() {
+        pending = nil
+        active?.signIn.stopNow()
+        active = nil
+    }
+
+    /// Two spellings of one folder (~ or the full path, a trailing slash, a link to it).
+    static func sameFolder(_ a: String, _ b: String) -> Bool {
+        func key(_ s: String) -> String { URL(fileURLWithPath: expand(s)).standardizedFileURL.resolvingSymlinksInPath().path }
+        return key(a) == key(b)
     }
 
     private func end(_ id: String, _ goal: SwitchGoal, _ outcome: SwitchOutcome, signedIn: String? = nil) {
