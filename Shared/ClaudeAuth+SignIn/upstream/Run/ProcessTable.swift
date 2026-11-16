@@ -19,8 +19,9 @@ public enum ProcessTable {
         public var exe: String
         public var args: [String]
         public var configDir: String?
-        /// The kernel gave the process's environment. macOS 27 gives none for another process (even the same user's; `ps -E`
-        /// shows none either): then a nil `configDir` says nothing, and the folder a `claude` runs on can't be told from it.
+        /// The kernel gave the process's environment. It gives none for Apple's platform binaries (/bin/bash, /bin/sleep: a
+        /// shell a stand-in or a script runs in), while it does for Claude Code's own program and other ad-hoc or
+        /// developer-signed ones. Without it a nil `configDir` says nothing: the folder can't be told from it.
         public var environmentRead: Bool
 
         public init(exe: String, args: [String], configDir: String?, environmentRead: Bool = true) {

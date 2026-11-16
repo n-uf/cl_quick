@@ -40,12 +40,11 @@ that file out.
   plus: `Entry.ppid`; `isClaudeCode(_:)` (the folder-free half of `Processes.isCode`); `Launch.environmentRead`; and `runs`
   no longer counts a zombie as running. cl_audit's `Processes` would then read the table through it and keep its app
   parts.
-- **Finding for cl_audit (affects 6bce89f as it is):** on macOS 27.3 (26C5035r) `KERN_PROCARGS2` gives no environment for
-  another process, even the same user's (`ps -E` shows none either; checked with stand-ins `CLAUDE_CONFIG_DIR=… sleep`).
-  `Processes.parse` then reads `configDir` as nil for every `claude`, so `codeRuns(codeDir:)` takes every Claude Code for
-  the default folder: a custom folder looks free while Claude Code runs on it, and `~/.claude` looks busy whenever any
-  folder's Claude Code runs. `Launch.environmentRead` lets a caller tell "not set" from "not readable"; ClaudeSignIn uses
-  it (below). cl_audit's own callers need the same decision.
+- **A caveat for stand-ins (corrected; an earlier draft wrongly said the environment was hidden for every process).**
+  `KERN_PROCARGS2` gives no environment for Apple's platform binaries (`/bin/sleep`, `/bin/bash`), which checks often use
+  as stand-ins; it does for Claude Code's own program and for ad-hoc built ones. A check whose stand-in `claude` is a bash
+  script therefore reads `configDir` as nil, as if the default folder. `Launch.environmentRead` tells "not set" from "not
+  readable"; ClaudeSignIn uses it, and its checks use an ad-hoc compiled stand-in for the environment branch.
 
 ## 4. ClaudeSignIn (new, `Auth/ClaudeSignIn.swift`)
 
@@ -62,9 +61,17 @@ The file table (StoredSignIn, Keychain's new role, Runs' additions, ClaudeSignIn
 - **Matching an account wanted without an organisation.** `SignedInAccount.match` treats no organisation id as the empty
   one when both sides have account ids, so an account wanted by its id alone never matched a seat in an organisation.
   cl_quick keeps accounts by id (and address) only, so `ClaudeSignIn` compares without the organisation when the account
-  wanted names none (`ClaudeSignIn.same`). cl_audit, which keeps seats, should pass the organisation id it knows.
-- **The process guard on macOS 27.** With no environment readable, a `claude auth login` is tied to a folder only through
-  its parent script's name (`sign-in-<lock key>.command`, any app using ClaudeSignIn); a bare one (a terminal's) can't be
-  told and counts as running on every folder (refused rather than guessed).
-- **The `.terminal` route** (`Window.settingsFile`) is verified by content only; opening one may also add a profile to
-  Terminal's list (to be seen in the live try). `.scripted` (AppleScript) is there as the fallback, untried.
+  wanted names none (`ClaudeSignIn.judge`). cl_audit, which keeps seats, should pass the organisation id it knows. An
+  account wanted by its id is compared by ids only: a word that names no id (a running claude's) takes the record's id,
+  and only when the record agrees with the word; otherwise the sign-in ends `unverified`.
+- **The process guard fails closed.** A `claude auth login` is tied to a folder by its CLAUDE_CONFIG_DIR where the
+  environment is readable (unset: the default folder; an absolute path: compared as a folder; empty, relative or `~`:
+  can't be told) and by the ClaudeSignIn script it runs under (`sign-in-<lock key>.command`, any app's). Either naming
+  this folder refuses; neither at all, or an environment that can't be told, refuses too; a hidden process refuses all.
+- **`unverified`.** A login that ended but whose account the app's word didn't confirm after `confirmTries` (3) asks ends
+  `unverified(account)`, never `signedIn`. While the login still runs, nothing ends on a guess or on the word and the record
+  disagreeing; only the two agreeing on another account than the one wanted ends it early (`wrongAccount`).
+- **The `.terminal` route** (`Window.settingsFile`) is verified by content only. Whether Terminal adds the opened
+  settings file to its profile list can't be told without opening one; each sign-in's profile has a name of its own
+  (`<title> <8 hex>`), so a kept one never stands for a later sign-in, but if Terminal does keep them they pile up, one
+  per sign-in (the live try settles it; then `.scripted`, AppleScript, is the fallback, untried).

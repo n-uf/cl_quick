@@ -14,9 +14,13 @@
 // - One sign-in window per app: starting a sign-in ends the app's earlier one, window and all (also one an earlier run of
 //   the app left: its script's pid is in the app's own work folder).
 // - Two guards against two sign-ins on one folder: any `claude auth login` running on the folder, whoever started it (the
-//   process table; one whose folder can't be told counts too, see `isLogin`), and a lock every app takes (`flock` on
+//   process table: its CLAUDE_CONFIG_DIR where the kernel gives its environment, and the ClaudeSignIn script it runs under;
+//   one whose folder can't be told counts too, see `isLogin`), and a lock every app takes (`flock` on
 //   ~/Library/Caches/n-uf/signin-<8 hex of the folder's real path's SHA-256>.lock), which closes the race between two apps
 //   starting at once.
+// - The account: the record is a guess until the app's word confirms it. A login still running is never ended on a guess
+//   or on two sources that disagree; once it ended, the word is asked again a few times, and a sign-in it never confirms
+//   ends `unverified`, never `signedIn`.
 // - The window closes on a sign-in, a wrong account, a stop and a timeout. One that was declined or failed stays open to be
 //   read, until Return, the next start or a stop.
 // - The window: a Terminal settings file (`.terminal`: the command, run inside the login shell with `exec`, and "close if the
@@ -24,8 +28,8 @@
 //   AppleScript, which asks for that permission) is there for a Mac where the settings file doesn't work.
 //
 // No app's screens, words or global state: the folder, the account wanted, the tools, the verified word, the app's work
-// folder and the window's title are parameters. One queue for every sign-in of the process; the callbacks come on the main
-// queue.
+// folder and the window's title are parameters. One queue for every sign-in of the process (the verified word is asked off
+// it, so a stop never waits for it); the callbacks come on the main queue.
 
 import Foundation
 import ProfileCore
@@ -48,7 +52,7 @@ public final class ClaudeSignIn {
         case alreadySigningIn
         /// The running processes couldn't be read (or one that may be Claude Code couldn't be): nothing started.
         case processesUnreadable
-        /// The script or the window couldn't be written or opened.
+        /// The script or the window couldn't be written or opened, or the script never started (`startGrace`).
         case notOpened
         /// Claude Code's login ended without a sign-in (its exit status).
         case loginFailed(status: Int32)
@@ -59,11 +63,15 @@ public final class ClaudeSignIn {
     }
 
     public enum Outcome: Equatable {
-        /// The folder is signed in to the account wanted (or to someone, when none was): verified when the app's word said so
-        /// (`account.source`), else guessed from the record.
+        /// The folder is signed in to the account wanted (or to someone, when none was), as the app's word confirmed it.
         case signedIn(SignedInAccount)
-        /// Another account signed in (the browser was signed in as someone else), by SignedInAccount.match.
+        /// Another account signed in (the browser was signed in as someone else), by SignedInAccount.match, as the app's word
+        /// confirmed it.
         case wrongAccount(signedIn: SignedInAccount, wanted: SignedInAccount)
+        /// The login ended well, but the app's word never confirmed which account it is (it didn't answer, it named another
+        /// one than the record, or it named no id where the account wanted is known by its id and the record doesn't agree).
+        /// The account is the best guess (the word's, else the record's). Never taken for the account wanted.
+        case unverified(SignedInAccount)
         /// The person declined in the browser (Claude Code said so in the window).
         case declined
         case failed(Failure)
@@ -73,9 +81,9 @@ public final class ClaudeSignIn {
         case timedOut
     }
 
-    /// The app's verified word on the folder's account now, or nil when it can't tell (then the record is taken, as a
-    /// guess). Blocks; called off the main thread. cl_audit: its Keychain read and Anthropic's reply (`server`); cl_quick: a
-    /// short `claude` on the folder and its `initialize` account (`process`).
+    /// The app's verified word on the folder's account now, or nil when it can't tell. Blocks; called on a queue of its own,
+    /// never the sign-in's. cl_audit: its Keychain read and Anthropic's reply (`server`); cl_quick: a short `claude` on the
+    /// folder and its `initialize` account (`process`).
     public typealias Confirm = (AuthFolder) -> SignedInAccount?
 
     /// How the window is opened.
@@ -104,6 +112,10 @@ public final class ClaudeSignIn {
     private let locks: URL
     private let poll: TimeInterval
     private let work: URL
+    private let startGrace: TimeInterval
+    /// This sign-in's own mark, in its window's profile name: a profile Terminal kept from an earlier sign-in never has
+    /// this name, so it can't stand for this one's (nor run an older command).
+    let runID = String(format: "%08x", UInt32.random(in: 0...UInt32.max))
 
     // the sign-in's files, all in the app's own work folder (owner only). The script is named after the folder's lock key:
     // its shell's command line then says which folder its `claude auth login` signs in, to any app (`isLogin`).
@@ -117,13 +129,16 @@ public final class ClaudeSignIn {
     /// `folder`: the profile's one folder (made by the app beforehand when it is new). `wanted`: the account it should end on
     /// (by id, or by address and organisation), nil for a brand-new folder. `claude`: Claude Code's program. `work`: the app's
     /// own folder for the sign-in's files (never the Claude Code folder). `title`: the window's name. `shown`: the folder as
-    /// the script's first line names it. `locks` and `poll` (how often the folder is looked at) are parameters for the checks.
+    /// the script's first line names it. `startGrace`: how long the script may take to start once the window was asked for
+    /// (then `failed(.notOpened)`). `locks`, `poll` (how often the folder is looked at) and `confirmTries` (how often the
+    /// word is asked after the login ended) are parameters for the checks.
     public init(folder: AuthFolder, wanted: SignedInAccount?, timeout: TimeInterval = 600, tools: AuthTools, claude: String,
                 confirm: @escaping Confirm, work: URL, window: Window = .settingsFile, title: String = "Claude Code sign-in",
-                shown: String? = nil, locks: URL = ClaudeSignIn.sharedLocks, poll: TimeInterval = 2) {
+                shown: String? = nil, startGrace: TimeInterval = 25, locks: URL = ClaudeSignIn.sharedLocks, poll: TimeInterval = 2,
+                confirmTries: Int = 3) {
         self.folder = folder; self.wanted = wanted; self.timeout = timeout
         self.claude = claude; self.confirm = confirm; self.work = work; self.window = window; self.title = title
-        self.shown = shown; self.locks = locks; self.poll = poll
+        self.shown = shown; self.startGrace = startGrace; self.locks = locks; self.poll = poll; self.confirmTries = confirmTries
         auth = Authenticator(folder, tools: tools)
     }
 
@@ -143,8 +158,15 @@ public final class ClaudeSignIn {
     private var started = Date()
     private var watch = SignInChangeWatch()
     private var startAccount: SignedInAccount?
-    private var undecided = 0
     private var windowID: String?
+    private let confirmTries: Int
+    /// The verified word: being asked (on its own queue), how often after the login ended, and the generation a late answer
+    /// is checked against (it moves on every ask and at the end, so an answer for an older ask or a finished sign-in is
+    /// dropped).
+    private var asking = false
+    private var askedAfterEnd = 0
+    private var generation = 0
+    private static let confirmQueue = DispatchQueue(label: "n-uf.claude-auth.sign-in.confirm", attributes: .concurrent)
 
     /// Starts it: the app's earlier sign-in ends, the guards are asked, the window opens, and the folder is looked at every
     /// `poll` seconds. `onState` and `onEnd` come on the main queue; `onEnd` once.
@@ -155,6 +177,10 @@ public final class ClaudeSignIn {
     /// Ends it: the `claude auth login` in its window and the window. After a declined or failed sign-in, closes the window
     /// left open to be read. Nothing when it never started.
     public func stop() { Self.queue.async { self.end(.stopped) } }
+
+    /// `stop()`, done before it returns: for an app that is quitting (its main queue won't run `onEnd`). Blocks for as long
+    /// as ending the login takes (a few seconds at most); never waits for the verified word.
+    public func stopNow() { Self.queue.sync { self.end(.stopped) } }
 
     private func end(_ outcome: Outcome) {
         switch phase {
@@ -181,7 +207,7 @@ public final class ClaudeSignIn {
         }
         emit(.opening)
         guard makeWork() else { return finish(.failed(.notOpened)) }
-        for u in [statusURL, declinedURL, pidURL, settingsURL] { try? FileManager.default.removeItem(at: u) }
+        for u in [statusURL, declinedURL, pidURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
         started = Date()
         _ = watch.look(stamp: auth.recordStamp()) { auth.record() }
         startAccount = watch.seen
@@ -210,57 +236,96 @@ public final class ClaudeSignIn {
         if FileManager.default.fileExists(atPath: declinedURL.path) { return finish(.declined) }
         let status = loginStatus()
         if let s = status, s != 0 { return finish(.failed(.loginFailed(status: s))) }
+        // the script never started (Terminal didn't open it): it won't now either (finish removes it)
+        if !FileManager.default.fileExists(atPath: pidURL.path), status == nil, Date().timeIntervalSince(started) >= startGrace {
+            return finish(.failed(.notOpened))
+        }
         let changed = watch.look(stamp: auth.recordStamp()) { auth.record() } || (startAccount == nil && watch.seen != nil)
-        if status == 0 || changed || undecided > 0 { return decide(loginEnded: status == 0) }
+        if status == 0 || changed { return ask() }
         // the window closed while the login ran (Terminal hung its shell up: it ended cleanly, before writing a status)
         if let pid = scriptPid(), !ProcessTable.runs(pid), loginStatus() == nil, !FileManager.default.fileExists(atPath: declinedURL.path) {
             finish(.failed(.windowClosed))
         }
     }
 
-    /// The folder's account now, by the app's verified word over the record, against the account wanted.
-    private func decide(loginEnded: Bool) {
-        let record = auth.record()
-        let answer = FolderSignIn.answer(record: record, verified: confirm(folder))
-        // the verified word and the record name two accounts: Claude Code is between its two writes; a few looks more
-        if answer.verdict == .differs && undecided < 3 { undecided += 1; return }
-        guard let account = answer.account else {
-            if loginEnded { finish(.failed(.noAccount)) } else { undecided = 0 }
-            return
+    /// Asks the app's word, on its own queue (a stop or the next start never waits for it); its answer comes back here.
+    private func ask() {
+        guard !asking else { return }
+        asking = true
+        generation += 1
+        let g = generation, confirm = self.confirm, folder = self.folder
+        Self.confirmQueue.async { [weak self] in
+            let word = confirm(folder)
+            Self.queue.async { self?.answered(word, generation: g) }
         }
-        undecided = 0
-        guard let wanted else { return finish(.signedIn(account)) }
-        finish(Self.same(account, wanted, record: record) ? .signedIn(account) : .wrongAccount(signedIn: account, wanted: wanted))
     }
 
-    /// The account signed in is the one wanted, by SignedInAccount.match. An account wanted with no organisation named (an
-    /// app that keeps accounts by their id or address only) is compared without the organisation: none named there isn't
-    /// "no organisation". An account wanted by its id alone can't be compared with a verified word that names no id (a
-    /// running claude's): the record's id is taken then, when the record is that same address.
-    static func same(_ account: SignedInAccount, _ wanted: SignedInAccount, record: SignedInAccount?) -> Bool {
-        let anyOrganisation = wanted.organizationID == nil && wanted.organizationName == nil
-        func asWanted(_ a: SignedInAccount) -> SignedInAccount {
-            var a = a
-            if anyOrganisation { a.organizationID = nil; a.organizationName = nil }
-            return a
+    /// The word came: the folder's account now, by the word over the record, against the account wanted.
+    private func answered(_ word: SignedInAccount?, generation g: Int) {
+        guard phase == .running, g == generation else { return }
+        asking = false
+        let loginEnded = loginStatus() == 0
+        let record = auth.record()
+        let answer = FolderSignIn.answer(record: record, verified: word)
+        let judged = Self.judge(answer, wanted: wanted, record: record)
+        guard loginEnded else {
+            // a login still running is never ended on a guess, nor on two sources that disagree (Claude Code writes the
+            // record before its sign-in): only on the word and the record agreeing on another account than the one wanted
+            if case .wrong(let a) = judged, answer.verdict == .verified, answer.record != nil, let wanted {
+                finish(.wrongAccount(signedIn: a, wanted: wanted))
+            }
+            return
         }
-        if asWanted(account).match(wanted) != .different { return true }
-        guard wanted.email == nil, wanted.accountID != nil, account.accountID == nil,
-              let r = record, r.match(account) != .different else { return false }
-        return asWanted(r).match(wanted) != .different
+        askedAfterEnd += 1
+        switch judged {
+        case .match(let a): finish(.signedIn(a))
+        case .wrong(let a): finish(.wrongAccount(signedIn: a, wanted: wanted!))
+        case .unsure(let a):
+            if askedAfterEnd < confirmTries { return ask() }              // the word, or the record, may still catch up
+            if let a { finish(.unverified(a)) } else { finish(.failed(.noAccount)) }
+        }
+    }
+
+    enum Judged: Equatable {
+        /// The word confirms the account wanted (or someone, when none was wanted).
+        case match(SignedInAccount)
+        /// The word confirms another account.
+        case wrong(SignedInAccount)
+        /// Not confirmed: no word, the word and the record disagree, or the account wanted is known by its id and neither
+        /// the word nor a record agreeing with it names one. The best guess, if any.
+        case unsure(SignedInAccount?)
+    }
+
+    /// One answer judged against the account wanted. An account wanted with no organisation named (an app that keeps
+    /// accounts by their id or address only) is compared without the organisation: none named there isn't "no organisation".
+    /// An account wanted by its id is compared by ids only: a word that names no id (a running claude's) takes the record's,
+    /// and only when the record is the same seat or address as the word.
+    static func judge(_ answer: FolderSignIn, wanted: SignedInAccount?, record: SignedInAccount?) -> Judged {
+        guard answer.verdict == .verified, var account = answer.account else { return .unsure(answer.account ?? record) }
+        guard let wanted else { return .match(account) }
+        if wanted.organizationID == nil && wanted.organizationName == nil { account.organizationID = nil; account.organizationName = nil }
+        if wanted.accountID != nil && account.accountID == nil {
+            guard let r = record, r.accountID != nil, r.match(answer.account!) != .different else { return .unsure(answer.account) }
+            account.accountID = r.accountID
+            if account.organizationID == nil && (wanted.organizationID != nil) { account.organizationID = r.organizationID }
+        }
+        var signedIn = answer.account!
+        if signedIn.accountID == nil { signedIn.accountID = account.accountID }
+        return account.match(wanted) != .different ? .match(signedIn) : .wrong(signedIn)
     }
 
     private func finish(_ outcome: Outcome) {
         guard phase == .running else { return }
         phase = .ended
+        generation += 1                                                    // a word still on its way is dropped
         timer?.cancel(); timer = nil
         switch outcome {
-        case .signedIn, .wrongAccount, .stopped, .timedOut: endScript(shell: true)
+        case .signedIn, .wrongAccount, .unverified, .stopped, .timedOut: endScript(shell: true)
         // left open to be read: only the login ends (one still waiting after a decline), the script then holds its window
         case .declined, .failed: endScript(shell: false)
         }
         releaseLock()
-        for u in [statusURL, declinedURL, settingsURL] { try? FileManager.default.removeItem(at: u) }
+        for u in [statusURL, declinedURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
         let done = onEnd
         DispatchQueue.main.async { done(outcome) }
     }
@@ -305,16 +370,34 @@ public final class ClaudeSignIn {
     }
 
     /// Whether a process is Claude Code's `claude auth login` on this folder: true, false (not a login, or another folder's),
-    /// or nil (a login whose folder can't be told). The folder is its CLAUDE_CONFIG_DIR (the default folder when it isn't
-    /// set) where the kernel gives the environment; macOS 27 gives none for another process, and then a login started by a
-    /// ClaudeSignIn (this app's or another's) is told by its script's name (`sign-in-<lock key>.command`) among its parents.
+    /// or nil (a login whose folder can't be told: refused like one on this folder). Two signals, failing closed:
+    /// - its CLAUDE_CONFIG_DIR, where the kernel gives the process's environment (it does for Claude Code's own program; it
+    ///   doesn't for Apple's platform binaries, such as a shell a stand-in runs in): unset is the default folder, an absolute
+    ///   path is compared as a folder, anything else (empty, relative, ~) can't be told;
+    /// - the ClaudeSignIn script it runs under (`sign-in-<lock key>.command`, any app's), among its parents.
+    /// Either one naming this folder is enough; neither one at all, or an environment that can't be told, is nil.
     func isLogin(_ e: ProcessTable.Entry, in table: [ProcessTable.Entry]) -> Bool? {
         guard let l = e.launch, ProcessTable.isClaudeCode(l),
               zip(l.args, l.args.dropFirst()).contains(where: { $0 == "auth" && $1 == "login" }) else { return false }
+        let here = AuthFolder.canonical(folder.path, home: folder.home)
+        var byEnvironment: Bool?, undecidable = false
         if l.environmentRead {
-            let on = l.configDir ?? (folder.home + "/.claude")
-            return AuthFolder.canonical(on, home: folder.home) == AuthFolder.canonical(folder.path, home: folder.home)
+            if let dir = l.configDir {
+                if dir.hasPrefix("/") { byEnvironment = AuthFolder.canonical(dir, home: folder.home) == here } else { undecidable = true }
+            } else {
+                byEnvironment = AuthFolder.canonical(folder.home + "/.claude", home: folder.home) == here
+            }
         }
+        let byScript = scriptFolder(above: e, in: table)
+        if byEnvironment == true || byScript == true { return true }
+        if undecidable { return nil }
+        if byEnvironment == false || byScript == false { return false }
+        return nil
+    }
+
+    /// The ClaudeSignIn script a process runs under (its parents, a few up): true when it is this folder's, false another
+    /// folder's, nil when there is none.
+    private func scriptFolder(above e: ProcessTable.Entry, in table: [ProcessTable.Entry]) -> Bool? {
         var parent = e.ppid, hops = 0
         while let p = parent, p > 1, hops < 4, let up = table.first(where: { $0.pid == p }) {
             for a in up.launch?.args ?? [] {
@@ -334,19 +417,27 @@ public final class ClaudeSignIn {
 
     // MARK: the window
 
+    /// The work folder: made owner only, or one already there made owner only; never a link.
     private func makeWork() -> Bool {
         guard (try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true,
                                                         attributes: [.posixPermissions: 0o700])) != nil else { return false }
-        return true
+        var st = stat()
+        guard lstat(work.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR, st.st_uid == getuid() else { return false }
+        return (st.st_mode & 0o777) == 0o700 || chmod(work.path, 0o700) == 0
     }
 
     /// What the window runs: the script, in place of the login shell Terminal starts (so its clean end is the shell's).
     var command: String { "exec " + SignInScript.q(scriptURL.path) }
 
+    /// The window's profile name: the app's title and this sign-in's own mark (`runID`).
+    public var profileName: String { "\(title) \(runID)" }
+
     /// The Terminal settings file: the command run inside the login shell, and the window closed when the shell exits cleanly
     /// (Terminal's `shellExitAction` 1, "Close if the shell exited cleanly"; `RunCommandAsShell` false is "Run inside shell").
+    /// Its name is this sign-in's own (`profileName`): if Terminal keeps the profile it opens, no later sign-in finds one of
+    /// its name with an older command in it.
     func settings() -> Data? {
-        let plist: [String: Any] = ["type": "Window Settings", "name": title, "ProfileCurrentVersion": 2.09,
+        let plist: [String: Any] = ["type": "Window Settings", "name": profileName, "ProfileCurrentVersion": 2.09,
                                     "CommandString": command, "RunCommandAsShell": false, "shellExitAction": 1]
         return try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
     }

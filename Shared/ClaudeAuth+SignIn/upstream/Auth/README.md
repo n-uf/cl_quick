@@ -18,7 +18,7 @@ moves to its own repository with ProfileCore and cl_quick compiles it from sourc
 | `Watch.swift` | `RecordStamp` and `SignInChangeWatch`: another account signed in to the folder since the last look (signing out isn't a change) |
 | `Runs.swift` | `ClaudeCommand`, `AuthRun` (renew's "Reply with OK." on Haiku, `claude auth logout`, the real runner), `SignInScript` (`claude auth login --claudeai --email` in Terminal; `Watch`, the files ClaudeSignIn follows; `write`, the owner-only file writer) |
 | `Authenticator.swift` | `Authenticator`: one folder's sign-in behind one type, with every tool in `AuthTools` (the stored sign-in reader, the runner, Terminal, the launch guard, the record reader, the environment); `RecordFile`, the bounded record read |
-| `ClaudeSignIn.swift` | `ClaudeSignIn`: a sign-in in a Terminal window, followed to its outcome (signed in, verified or guessed; wrong account; declined; failed; stopped; timed out) and its window closed after it; one per app; the process guard and the folder's lock (`~/Library/Caches/n-uf/signin-<8 hex>.lock`); the app's verified word passed in (`Confirm`) |
+| `ClaudeSignIn.swift` | `ClaudeSignIn`: a sign-in in a Terminal window, followed to its outcome (signed in or wrong account, as the app's word confirmed; unverified; declined; failed; stopped; timed out) and its window closed after it; one per app; the process guard and the folder's lock (`~/Library/Caches/n-uf/signin-<8 hex>.lock`); the app's verified word passed in (`Confirm`) |
 
 ## Rules
 
