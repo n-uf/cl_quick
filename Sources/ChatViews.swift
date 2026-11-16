@@ -593,6 +593,8 @@ struct QCAnswer: View, Equatable {
             QCCodeBlock(language: lang, code: code)
         case .rule:
             Rectangle().fill(QCColor.line).frame(height: 1)
+        case .table(let header, let align, let rows):
+            QCTableView(header: header, align: align, rows: rows)
         }
     }
 
@@ -2380,6 +2382,7 @@ enum QuickChatRender {
         case "reading": var t = t1; t.answer = "I'll open the page."; t.phase = .streaming; t.activity = "Reading example.com…"; m.turns = [t]
         case "searching": var t = t1; t.answer = ""; t.phase = .waiting; t.activity = "Searching the web for “swift concurrency actors”…"; m.turns = [t]
         case "answer": m.turns = [t1]
+        case _ where state.hasPrefix("table"): m.turns = [QCTableRender.turn(state)]       // TableView.swift
         case "copied": m.turns = [t1]; m.copied = t1.id          // after ⌘⇧C or a click on Copy: the tick and "Copied"
         case "failed": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .failed
             t.problem = .stopped(detail: "claude exited with code 1: API Error: Connection error."); m.turns = [t]

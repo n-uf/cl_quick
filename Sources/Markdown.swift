@@ -1,5 +1,5 @@
 // QuickChatMarkdown: an answer's Markdown as blocks the chat window draws (QuickChatViews.swift). Paragraphs, headings,
-// lists, quotes, rules and fenced code; the inline part (bold, italics, `code`, links) is left to Foundation's own
+// lists, quotes, rules, tables and fenced code; the inline part (bold, italics, `code`, links) is left to Foundation's own
 // Markdown. While an answer streams, a fence that isn't closed yet is still a code block, so code never flashes as text.
 
 import Foundation
@@ -12,7 +12,12 @@ enum QuickChatBlock: Equatable {
     case quote(String)
     case code(language: String, text: String)
     case rule
+    /// A GitHub-style table: the header's cells, how each column is aligned, and the body rows. Every row has as many
+    /// cells as the header; a cell is still Markdown source (the inline part is drawn by the view).
+    case table(header: [String], align: [QuickChatAlign], rows: [[String]])
 }
+
+enum QuickChatAlign: Equatable { case left, center, right }
 
 enum QuickChatMarkdown {
     static func blocks(_ source: String) -> [QuickChatBlock] {
@@ -43,6 +48,24 @@ enum QuickChatMarkdown {
             }
             if t.isEmpty { flush(); i += 1; continue }
             if let h = Self.heading(t) { flush(); out.append(.heading(level: h.level, text: h.text)); i += 1; continue }
+            // a header row followed by an alignment row; a run of | lines without one stays text
+            if t.contains("|"), i + 1 < lines.count, let align = Self.tableAlignment(lines[i + 1]) {
+                let header = Self.cells(t)
+                if header.count == align.count {
+                    flush()
+                    var rows: [[String]] = []
+                    i += 2
+                    while i < lines.count {
+                        let r = lines[i].trimmingCharacters(in: .whitespaces)
+                        if !r.contains("|") || Self.fence(r) != nil || Self.heading(r) != nil { break }
+                        let row = Array((Self.cells(r) + Array(repeating: "", count: header.count)).prefix(header.count))
+                        if row.contains(where: { !$0.isEmpty }) { rows.append(row) }      // a row that is only pipes (still streaming) isn't one yet
+                        i += 1
+                    }
+                    out.append(.table(header: header, align: align, rows: rows))
+                    continue
+                }
+            }
             if t == "---" || t == "***" || t == "___" { flush(); out.append(.rule); i += 1; continue }
             if t.hasPrefix(">") {
                 if !para.isEmpty || !bullets.isEmpty || !numbered.isEmpty { flush() }
@@ -64,6 +87,68 @@ enum QuickChatMarkdown {
             para.append(t); i += 1
         }
         flush()
+        return out
+    }
+
+    /// A table row's cells, trimmed, without the outer pipes. A pipe splits unless it's escaped (`\|`, which is a plain
+    /// pipe in the cell) or inside an inline `code` span.
+    static func cells(_ line: String) -> [String] {
+        let s = Array(line.trimmingCharacters(in: .whitespaces))
+        var out: [String] = [], cur = ""
+        var i = 0
+        while i < s.count {
+            let c = s[i]
+            if c == "\\", i + 1 < s.count {
+                if s[i + 1] == "|" { cur.append("|") } else { cur.append(c); cur.append(s[i + 1]) }
+                i += 2; continue
+            }
+            if c == "`" {
+                var n = 0
+                while i + n < s.count, s[i + n] == "`" { n += 1 }
+                // the code span runs to the next run of exactly as many backticks; none, and these are plain characters
+                var j = i + n, close: Int? = nil
+                while j < s.count {
+                    if s[j] == "`" {
+                        var m = 0
+                        while j + m < s.count, s[j + m] == "`" { m += 1 }
+                        if m == n { close = j; break }
+                        j += m
+                    } else { j += 1 }
+                }
+                if let close {
+                    cur += String(s[i..<(close + n)]).replacingOccurrences(of: "\\|", with: "|")
+                    i = close + n
+                } else {
+                    cur += String(s[i..<(i + n)]); i += n
+                }
+                continue
+            }
+            if c == "|" { out.append(cur); cur = ""; i += 1; continue }
+            cur.append(c); i += 1
+        }
+        out.append(cur)
+        if s.first == "|" { out.removeFirst() }
+        if s.last == "|", out.last == "" { out.removeLast() }
+        return out.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// The alignment of each column when this line is a table's alignment row (`---`, `:---`, `---:`, `:---:`, outer
+    /// pipes or not); nil when it isn't one.
+    static func tableAlignment(_ line: String) -> [QuickChatAlign]? {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        guard t.contains("|"), t.allSatisfy({ "|-: \t".contains($0) }) else { return nil }
+        let cs = cells(t)
+        guard !cs.isEmpty else { return nil }
+        var out: [QuickChatAlign] = []
+        for cell in cs {
+            var d = Substring(cell)
+            let lead = d.hasPrefix(":")
+            if lead { d.removeFirst() }
+            let trail = d.hasSuffix(":")
+            if trail { d.removeLast() }
+            guard !d.isEmpty, d.allSatisfy({ $0 == "-" }) else { return nil }
+            out.append(lead && trail ? .center : trail ? .right : .left)
+        }
         return out
     }
 

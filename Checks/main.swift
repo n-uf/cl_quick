@@ -302,6 +302,71 @@ check("quote", QuickChatMarkdown.blocks("> a\n> b\nc") == [.quote("a\nb"), .para
 check("rule", QuickChatMarkdown.blocks("a\n\n---\n\nb") == [.paragraph("a"), .rule, .paragraph("b")])
 check("empty", QuickChatMarkdown.blocks("") == [])
 check("a year is not a list", QuickChatMarkdown.blocks("2026. A year.") == [.paragraph("2026. A year.")])
+// tables
+let tableSample = """
+| | **Individual** | **Organization** |
+|---|---|---|
+| **Who it's for** | One person, under their own legal name | A company, nonprofit, or other legal entity |
+| **Team members** | Only you | Can invite members with roles (Admin, Developer, etc.) |
+| **Fee** | Same annual fee | Same annual fee
+"""
+let tableSampleBlock = B.table(
+    header: ["", "**Individual**", "**Organization**"], align: [.left, .left, .left],
+    rows: [["**Who it's for**", "One person, under their own legal name", "A company, nonprofit, or other legal entity"],
+           ["**Team members**", "Only you", "Can invite members with roles (Admin, Developer, etc.)"],
+           ["**Fee**", "Same annual fee", "Same annual fee"]])
+check("table", QuickChatMarkdown.blocks(tableSample) == [tableSampleBlock], QuickChatMarkdown.blocks(tableSample))
+check("table, alignments", QuickChatMarkdown.blocks("| a | b | c | d |\n|---|:---|---:|:---:|\n| 1 | 2 | 3 | 4 |")
+      == [.table(header: ["a", "b", "c", "d"], align: [.left, .left, .right, .center], rows: [["1", "2", "3", "4"]])])
+check("table, alignment with spaces and long dashes", QuickChatMarkdown.blocks("|a|b|\n|  :------:  |  -  |\n|1|2|")
+      == [.table(header: ["a", "b"], align: [.center, .left], rows: [["1", "2"]])])
+check("table, no outer pipes", QuickChatMarkdown.blocks("a | b\n---|---:\n1 | 2\n3 | 4")
+      == [.table(header: ["a", "b"], align: [.left, .right], rows: [["1", "2"], ["3", "4"]])])
+check("table, escaped pipe", QuickChatMarkdown.blocks("| a | b |\n|---|---|\n| x \\| y | z |")
+      == [.table(header: ["a", "b"], align: [.left, .left], rows: [["x | y", "z"]])])
+check("table, pipe in code", QuickChatMarkdown.blocks("| cmd | what |\n|---|---|\n| `a | b` | pipes |\n| ``x | `y` | z`` | two |")
+      == [.table(header: ["cmd", "what"], align: [.left, .left], rows: [["`a | b`", "pipes"], ["``x | `y` | z``", "two"]])])
+check("table, escaped pipe in code", QuickChatMarkdown.blocks("| a | b |\n|---|---|\n| `x \\| y` | z |")
+      == [.table(header: ["a", "b"], align: [.left, .left], rows: [["`x | y`", "z"]])])
+check("table, an open backtick is a plain character", QuickChatMarkdown.blocks("| a | b |\n|---|---|\n| ` | z |")
+      == [.table(header: ["a", "b"], align: [.left, .left], rows: [["`", "z"]])])
+check("table, ragged rows are padded and trimmed", QuickChatMarkdown.blocks("| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 | 5 |\n| 1 | 2 |")
+      == [.table(header: ["a", "b", "c"], align: [.left, .left, .left], rows: [["1", "", ""], ["1", "2", "3"], ["1", "2", ""]])])
+check("table, spaces around everything", QuickChatMarkdown.blocks("   |  a  |  b  |   \n   |  --- | ---  |  \n\t|  1  |  2  |  ")
+      == [.table(header: ["a", "b"], align: [.left, .left], rows: [["1", "2"]])])
+check("table, empty cells", QuickChatMarkdown.blocks("| a | b |\n|---|---|\n| | 2 |\n| 1 | |")
+      == [.table(header: ["a", "b"], align: [.left, .left], rows: [["", "2"], ["1", ""]])])
+check("table right after a paragraph", QuickChatMarkdown.blocks("Compare:\n| a | b |\n|---|---|\n| 1 | 2 |\nThen text.\n\nMore.")
+      == [.paragraph("Compare:"), .table(header: ["a", "b"], align: [.left, .left], rows: [["1", "2"]]), .paragraph("Then text."), .paragraph("More.")])
+check("table between blocks", QuickChatMarkdown.blocks("## T\n| a |\n|---|\n| 1 |\n\n- x")
+      == [.heading(level: 2, text: "T"), .table(header: ["a"], align: [.left], rows: [["1"]]), .bullets(["x"])])
+check("table with no body rows", QuickChatMarkdown.blocks("| a | b |\n|---|---|") == [.table(header: ["a", "b"], align: [.left, .left], rows: [])])
+check("pipes without an alignment row stay text", QuickChatMarkdown.blocks("| a | b |\n| 1 | 2 |") == [.paragraph("| a | b |\n| 1 | 2 |")])
+check("an alignment row of another width stays text", QuickChatMarkdown.blocks("| a | b |\n|---|\n| 1 | 2 |")
+      == [.paragraph("| a | b |\n|---|\n| 1 | 2 |")], QuickChatMarkdown.blocks("| a | b |\n|---|\n| 1 | 2 |"))
+check("a rule under a line is not a table", QuickChatMarkdown.blocks("a\n---\nb") == [.paragraph("a"), .rule, .paragraph("b")])
+check("a table in a fence is code", QuickChatMarkdown.blocks("```\n| a |\n|---|\n```") == [.code(language: "", text: "| a |\n|---|")])
+check("a table in a quote stays a quote", QuickChatMarkdown.blocks("> | a |\n> |---|") == [.quote("| a |\n|---|")])
+// streaming: every prefix of the answer parses; from the alignment row on, the table is there and stays the last block
+var tableSeen = false, tableLost = false, lastIsTable = true
+for n in 0...tableSample.count {
+    let parsed = QuickChatMarkdown.blocks(String(tableSample.prefix(n)))
+    let isTable: Bool = { if case .table = parsed.last { return true }; return false }()
+    if isTable { tableSeen = true } else if tableSeen { tableLost = true }
+    if n == tableSample.count { lastIsTable = isTable }
+}
+check("streaming: once the table shows it stays, and the whole answer ends as the table", tableSeen && !tableLost && lastIsTable, "\(tableSeen) \(tableLost) \(lastIsTable)")
+var streamedBeforeAlignment = true
+for n in 0..<(tableSample.components(separatedBy: "\n")[0].count + 1 + 3) {      // the header, its newline and "|--"
+    if case .table = QuickChatMarkdown.blocks(String(tableSample.prefix(n))).last { streamedBeforeAlignment = false }
+}
+check("streaming: before the alignment row is whole the lines are text", streamedBeforeAlignment)
+let halfRow = QuickChatMarkdown.blocks("| a | b |\n|---|---|\n| 1 | 2 |\n| **x")
+check("streaming: a half row is a row", halfRow == [.table(header: ["a", "b"], align: [.left, .left], rows: [["1", "2"], ["**x", ""]])], halfRow)
+check("streaming: a row that is only a pipe isn't one yet", QuickChatMarkdown.blocks("| a | b |\n|---|---|\n| 1 | 2 |\n|")
+      == [.table(header: ["a", "b"], align: [.left, .left], rows: [["1", "2"]])])
+check("streaming: stray pipes and dashes don't crash", ["|", "||", "|||\n|", "|\n|-", "|\n||", "\\", "`", "|`\n|-|", "a|\n:|", "| a |\n| :", "|a|\n|:-:|\n|\\", "|a|\n|-|\n|`|"]
+      .allSatisfy { _ = QuickChatMarkdown.blocks($0); return true })
 check("inline code", QuickChatMarkdown.inline("use `ls`").runs.contains { $0.inlinePresentationIntent?.contains(.code) == true })
 let links = QuickChatMarkdown.inline("[web](https://example.com) [mail](mailto:a@example.com) [file](file:///etc/hosts) [app](sample-app://x)")
 let kept = links.runs.compactMap { $0.link?.scheme }
