@@ -51,3 +51,9 @@ jobs:
 
       - name: Checks/menu.sh
         run: Checks/menu.sh
+
+      - name: Checks/signin.sh
+        run: Checks/signin.sh
+
+      - name: Checks/vendor.sh
+        run: Checks/vendor.sh

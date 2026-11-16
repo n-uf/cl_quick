@@ -25,7 +25,8 @@ and a new commit is vendored here:
 - a file the patch adds is compiled too (Run/ProcessTable.swift, Auth/StoredSignIn.swift);
 - `Shared/ClaudeAuth+SignIn/ClaudeSignIn.swift` is compiled into ClaudeAuth (it moves to cl_audit's `Auth/` upstream);
 - **`Auth/Keychain.swift` is left out.** cl_quick never reads the Keychain (a standing rule): with the patch, ClaudeAuth
-  reaches a stored sign-in only through `StoredSignInReader`, which cl_quick never passes.
+  reaches a stored sign-in only through `StoredSignInReader`, which cl_quick never passes. `Checks/signin.sh` holds it.
 
 `scripts/modules.sh` does this for `build.sh` and every `Checks/*.sh` (static libraries in their layers, ProfileCore, then
-Runs, then ClaudeAuth, the way cl_audit's own build.sh builds them).
+Runs, then ClaudeAuth, the way cl_audit's own build.sh builds them). `Checks/vendor.sh` runs cl_audit's own three suites on
+the same sources in cl_audit's shape (Keychain.swift in, with their fake Keychain tool).
