@@ -3,7 +3,7 @@
 #   ProfileCore  Vendor/cl_audit-6bce89f/Core/*.swift                 (Foundation only)
 #   Runs         Vendor/cl_audit-6bce89f/Run/*.swift                  + the proposed upstream patch's new files
 #   ClaudeAuth   Vendor/cl_audit-6bce89f/Auth/*.swift, each replaced by its patched copy where the proposed upstream patch
-#                has one (Shared/ClaudeAuth+SignIn/upstream/), + the patch's new files.
+#                has one (Shared/ClaudeAuth+SignIn/upstream/), + the patch's new files + Shared/ClaudeAuth+SignIn/ClaudeSignIn.swift.
 #                cl_quick leaves Auth/Keychain.swift out: it never reads the Keychain.
 # The vendored copy is never edited here (Vendor/README.md); the patch is what cl_audit is asked to take.
 #
@@ -12,6 +12,7 @@
 
 modules_vendor="$repo/Vendor/cl_audit-6bce89f"
 modules_patch="$repo/Shared/ClaudeAuth+SignIn/upstream"
+modules_signin="$repo/Shared/ClaudeAuth+SignIn/ClaudeSignIn.swift"
 
 # module_sources DIR [left-out file names...]: DIR's vendored sources, the patched copy in place of each one the patch has,
 # then the patch's new files; one path per line
@@ -42,6 +43,7 @@ build_modules() {
   else
     while IFS= read -r f; do auth+=("$f"); done < <(module_sources Auth Keychain.swift)
   fi
+  auth+=("$modules_signin")
   mkdir -p "$out"
   rm -f "$out"/libProfileCore.a "$out"/libRuns.a "$out"/libClaudeAuth.a
   swiftc "${common[@]}" -module-name ProfileCore \

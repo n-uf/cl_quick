@@ -18,10 +18,12 @@ they are there (`git archive 6bce89f Core Auth Run`), with that commit's own che
 ## What cl_quick builds: vendor plus the proposed patch
 
 cl_quick compiles the three modules from this folder **plus the proposed upstream patch** in
-`Shared/ClaudeAuth+SignIn/upstream/`, until cl_audit takes the patch and a new commit is vendored here:
+`Shared/ClaudeAuth+SignIn/upstream/` (see `Shared/ClaudeAuth+SignIn/UPSTREAM-PATCHES.md`), until cl_audit takes the patch
+and a new commit is vendored here:
 
 - a file the patch changes is compiled from the patch, in place of the vendored one;
-- a file the patch adds is compiled too (Auth/StoredSignIn.swift);
+- a file the patch adds is compiled too (Run/ProcessTable.swift, Auth/StoredSignIn.swift);
+- `Shared/ClaudeAuth+SignIn/ClaudeSignIn.swift` is compiled into ClaudeAuth (it moves to cl_audit's `Auth/` upstream);
 - **`Auth/Keychain.swift` is left out.** cl_quick never reads the Keychain (a standing rule): with the patch, ClaudeAuth
   reaches a stored sign-in only through `StoredSignInReader`, which cl_quick never passes.
 
