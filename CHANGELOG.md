@@ -4,6 +4,10 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+Nothing pending.
+
+## 26.11.0 — 2026-11-15
+
 This is 26.11.0, the first release: cl_audit's quick chat as an app of its own.
 
 - **Digit keys in the chat.** ⌘1 to ⌘5 size the panel (Small, Standard, Large, Tall, Wide), ⌃1 to ⌃6 place it at a
