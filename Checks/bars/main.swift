@@ -32,6 +32,33 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
     if ok { passed += 1 } else { failed += 1; print("FAIL \(name) \(detail())") }
 }
 func spin(_ s: TimeInterval = 0.12) { RunLoop.current.run(until: Date().addingTimeInterval(s)); CheckQuiet.verify("after a spin") }
+/// Pumps the run loop until `done()` holds, for `ceiling` s at most: a slow runner (a CI virtual Mac, a Mac under load) gets
+/// the time its deferred layout passes need, and a condition that never comes ends at the ceiling, where the check that
+/// follows fails with its own detail. Returns whether `done()` held. (As in Checks/panel.)
+@discardableResult
+func spinUntil(_ ceiling: TimeInterval = 20, _ done: () -> Bool) -> Bool {
+    let end = Date().addingTimeInterval(ceiling)
+    while !done(), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    CheckQuiet.verify("after a spin")
+    return done()
+}
+/// Pumps the run loop until `window` has made `turns` turns in a row without a resize or a changed frame (its deferred
+/// layout passes and fit() tries are over), for `ceiling` s at most. Counted in turns, not in seconds: a pass waiting in the
+/// main queue runs in the first turn that comes, however slow the machine. Returns whether it settled. (As in Checks/panel.)
+@discardableResult
+func spinQuiet(_ window: NSWindow, turns: Int = 15, ceiling: TimeInterval = 20) -> Bool {
+    var resizes = 0
+    let watch = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: nil) { _ in resizes += 1 }
+    defer { NotificationCenter.default.removeObserver(watch) }
+    let end = Date().addingTimeInterval(ceiling)
+    var quiet = 0, seen = resizes, frame = window.frame
+    while quiet < turns, Date() < end {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        if resizes == seen && window.frame == frame { quiet += 1 } else { quiet = 0; seen = resizes; frame = window.frame }
+    }
+    CheckQuiet.verify("after a spin")
+    return quiet >= turns
+}
 let m = chat.model
 let targets = QCStepTargets.shared
 
@@ -353,9 +380,14 @@ spin(0.6)
 for w in [CGFloat(320), 440, 640] {
     width(w)
     var first: (ui: CGRect, five: CGRect, week: CGRect)?
+    var barHeight: CGFloat?         // the panel's height with no notice above the field (the first state's)
     for (five, week) in [(78.0, 20.0), (30.0, 85.0), (9.0, 9.5), (100.0, 64.0), (0.0, 100.0), (55.0, 54.9)] {
         var l = QuickChatLevel(); l.fiveHour = five; l.fiveHourResets = Date().addingTimeInterval(7200); l.week = week
-        l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin()
+        // a full limit opens its notice above the field and the panel grows with it (the row 71 pt lower); a limit with room
+        // takes it away again and the panel shrinks back, in fit() on a later turn of the run loop: what is measured is the
+        // layout of the level set, once the window has stopped changing
+        l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin(); spinQuiet(p)
+        if first == nil { barHeight = p.frame.height }
         let higher = l.binding()?.id ?? "-"
         let ui = targets.marks["usage"] ?? .zero, label = targets.marks["usage-label"] ?? .zero, share = targets.marks["usage-share"] ?? .zero
         let row = targets.marks["usage-\(higher)"] ?? .zero
@@ -401,10 +433,15 @@ for w in [CGFloat(320), 440, 640] {
     // no 5-hour number yet: its track is an outline in the very same place (not a bar of its own elsewhere), and the
     // week's label sits on the week's track
     var l = QuickChatLevel(); l.week = 21; l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin()
+    // the state before this one was a full week (a notice above the field, the panel 71 pt taller): wait for the notice to go
+    // and the panel to be back at the bar's own height, then for the window to stop changing, before the tracks are read
+    spinUntil { abs(p.frame.height - (barHeight ?? p.frame.height)) < 0.5 }
+    spinQuiet(p)
     let five = targets.marks["usage-5h"] ?? .zero, wk = targets.marks["usage-wk"] ?? .zero, ui = targets.marks["usage"] ?? .zero
     if let f = first {
         check("usage at \(Int(w)), no 5h number: both tracks where they always are", five != .zero && wk != .zero
-              && five == f.five && wk == f.week && ui.minX == f.ui.minX, "\(five) \(wk) vs \(f)")
+              && five == f.five && wk == f.week && ui.minX == f.ui.minX,
+              "\(five) \(wk) vs \(f) (panel \(p.frame.height) pt, the bar's \(barHeight.map { "\($0)" } ?? "-"))")
     }
     if abs(ui.width - QCUsageView.width(.bars)) > 0.5 {
         let label = targets.marks["usage-label"]
