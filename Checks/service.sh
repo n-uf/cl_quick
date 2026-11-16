@@ -26,9 +26,12 @@ if plutil -extract NSServices.0.NSReturnTypes raw -o - "$plist" >/dev/null 2>&1;
 want LSUIElement true
 echo "service plist checks: passed"
 
+. "$repo/scripts/modules.sh"          # the shared modules the app imports (ClaudeAuth and below), built first
+build_modules "$out/modules-service" no-keychain -Onone
+link=(); while IFS= read -r f; do link+=("$f"); done < <(modules_link "$out/modules-service")
 sources=()
 for f in "$repo"/Sources/*.swift; do [ "$(basename "$f")" = main.swift ] || sources+=("$f"); done
-swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/service" "${sources[@]}" "$here/quiet.swift" "$here/service/main.swift" \
+swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/service" "${sources[@]}" "$here/quiet.swift" "$here/service/main.swift" "${link[@]}" \
   -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
 chmod +x "$here/stub-claude"
 QC_STUB_PATH="$here/stub-claude" "$out/service"

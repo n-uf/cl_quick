@@ -10,9 +10,12 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 out="$repo/build/checks"
 mkdir -p "$out"
+. "$repo/scripts/modules.sh"          # the shared modules the app imports (ClaudeAuth and below), built first
+build_modules "$out/modules-menu" no-keychain -Onone
+link=(); while IFS= read -r f; do link+=("$f"); done < <(modules_link "$out/modules-menu")
 sources=()
 for f in "$repo"/Sources/*.swift; do [ "$(basename "$f")" = main.swift ] || sources+=("$f"); done
-swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/menu" "${sources[@]}" "$here/menu/main.swift" \
+swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/menu" "${sources[@]}" "$here/menu/main.swift" "${link[@]}" \
   -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
 chmod +x "$here/stub-claude"
 QC_STUB_PATH="$here/stub-claude" QC_WORK="$out/menu-work" "$out/menu"

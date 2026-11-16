@@ -17,8 +17,15 @@ version="$(tr -d '[:space:]' < "$here/VERSION")"
 build="$(git -C "$here" rev-list --count HEAD 2>/dev/null || echo 1)"
 
 rm -rf "$out"; mkdir -p "$out"
+# The shared modules (ProfileCore, Runs, ClaudeAuth with ClaudeSignIn) from cl_audit's vendored copy and the proposed
+# upstream patch, built first as static libraries (scripts/modules.sh); never the Keychain read.
+repo="$here"
+. "$here/scripts/modules.sh"
+echo "compiling the shared modules…"
+build_modules "$out/modules" no-keychain -O
+link=(); while IFS= read -r f; do link+=("$f"); done < <(modules_link "$out/modules")
 echo "compiling…"
-swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$out/$name" "$here"/Sources/*.swift \
+swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$out/$name" "$here"/Sources/*.swift "${link[@]}" \
   -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
 
 app="$out/$name.app"
