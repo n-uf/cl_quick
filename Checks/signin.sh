@@ -52,7 +52,10 @@ for f in "$repo"/Sources/*.swift; do [ "$(basename "$f")" = main.swift ] || sour
 swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/signin" "${sources[@]}" "$here/signin/main.swift" "${link[@]}" \
   -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
 chmod +x "$here/signin/bin/claude" "$here/stub-claude"
+# the ad-hoc stand-in for the environment branch (bash, a platform binary, shows the kernel no environment)
+mkdir -p "$out/signin-adhoc"
+clang -O0 -o "$out/signin-adhoc/claude" "$here/signin/adhoc.c"
 status=0
-QC_SIGNIN_CLAUDE="$here/signin/bin/claude" QC_SIGNIN_WORK="$out/signin-work" "$out/signin" || status=$?
+QC_SIGNIN_CLAUDE="$here/signin/bin/claude" QC_SIGNIN_ADHOC="$out/signin-adhoc/claude" QC_SIGNIN_WORK="$out/signin-work" "$out/signin" || status=$?
 [ "$lint" = 0 ] || status=1
 exit "$status"

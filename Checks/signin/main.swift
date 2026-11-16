@@ -7,6 +7,7 @@
 
 import AppKit
 import ClaudeAuth
+import Runs
 
 Files.readOnly = true
 _ = NSApplication.shared
@@ -47,11 +48,14 @@ final class FakeTerminal {
     private var inputs: [Pipe] = []
     var settings: [String: Any] = [:]
     let conf: URL
+    /// Says it opened the file, but never runs it (a Terminal that never started the script).
+    var neverStarts = false
     init(conf: URL) { self.conf = conf }
 
     func open(_ url: URL) -> Bool {
         lock.lock(); defer { lock.unlock() }
         opened.append(url)
+        if neverStarts { return true }
         guard let d = try? Data(contentsOf: url),
               let p = (try? PropertyListSerialization.propertyList(from: d, format: nil)) as? [String: Any],
               let cmd = p["CommandString"] as? String else { return false }
@@ -103,9 +107,10 @@ final class Case {
     }
 
     @discardableResult
-    func start(wanted: SignedInAccount?, timeout: TimeInterval = 20, confirm: @escaping ClaudeSignIn.Confirm = { _ in nil }) -> ClaudeSignIn {
+    func start(wanted: SignedInAccount?, timeout: TimeInterval = 20, startGrace: TimeInterval = 10,
+               confirm: @escaping ClaudeSignIn.Confirm = { _ in nil }) -> ClaudeSignIn {
         signIn = ClaudeSignIn(folder: authFolder, wanted: wanted, timeout: timeout, tools: tools(), claude: claude, confirm: confirm,
-                              work: work, title: "Sample sign-in", locks: locks, poll: 0.2)
+                              work: work, title: "Sample sign-in", startGrace: startGrace, locks: locks, poll: 0.2)
         signIn.start(onState: { [weak self] in self?.states.append($0) }, onEnd: { [weak self] in self?.outcome = $0 })
         return signIn
     }
@@ -139,6 +144,8 @@ check("the stand-in claude is there", fm.isExecutableFile(atPath: claude), claud
 
 // ── the window: its settings file and its script ─────────────────────────────────────────────────────
 do {
+    // the app's work folder already there, open to others: it is made owner only
+    try? fm.createDirectory(at: base.appendingPathComponent("work"), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
     let c = Case("window", login: ["login": "hang"])
     let s = c.start(wanted: SignedInAccount(email: "o'neil@example.com", origin: .record))
     spin(until: { c.states.contains(.waitingForBrowser) })
@@ -149,7 +156,11 @@ do {
     let script = c.work.appendingPathComponent("sign-in-\(ClaudeSignIn.lockKey(c.authFolder)).command")
     check("window: its command execs the script (named after the folder's lock key) in place of the login shell",
           p["CommandString"] as? String == "exec '\(script.path)'", "\(String(describing: p["CommandString"]))")
-    check("window: its name is the app's", p["name"] as? String == "Sample sign-in")
+    let name = p["name"] as? String ?? ""
+    check("window: its profile name is the app's title and this sign-in's own mark (never an earlier one's)",
+          name.hasPrefix("Sample sign-in ") && name.count == "Sample sign-in ".count + 8 && name == s.profileName
+          && ClaudeSignIn(folder: c.authFolder, wanted: nil, tools: c.tools(), claude: claude, confirm: { _ in nil }, work: c.work,
+                          title: "Sample sign-in").profileName != name, name)
     check("window: states opening, then waiting for the browser", c.states == [.opening, .waitingForBrowser], "\(c.states)")
     let login = c.waitLogin()
     let args = (try? String(contentsOfFile: c.conf.path + ".args", encoding: .utf8)) ?? ""
@@ -157,7 +168,7 @@ do {
     check("script: on this folder only, no key from the shell", args.contains("ENV CLAUDE_CONFIG_DIR=\(c.folder.path)") && args.contains("ENV KEY=<unset>"), args)
     check("script: it removed itself once started (it holds the address)", !fm.fileExists(atPath: script.path))
     let mode = ((try? fm.attributesOfItem(atPath: c.work.path))?[.posixPermissions] as? NSNumber)?.intValue
-    check("work folder: owner only", mode == 0o700, "\(String(describing: mode))")
+    check("work folder: one already there (0755) is made owner only", mode == 0o700, "\(String(describing: mode))")
     let lines = SignInScript.lines(claude: "/sample/claude", folder: c.authFolder, email: nil, removesItself: true,
                                    watch: .init(pid: URL(fileURLWithPath: "/w/p"), status: URL(fileURLWithPath: "/w/s"), declined: URL(fileURLWithPath: "/w/d")))
     check("script: ends cleanly when asked to (TERM, HUP)", lines.contains("trap 'exit 0' TERM HUP"))
@@ -195,10 +206,97 @@ do {
 }
 do {
     let c = Case("guessed", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51)])
-    c.start(wanted: SignedInAccount(email: "Ann@Example.com", origin: .record))
-    if case .signedIn(let a)? = c.waitEnd() {
-        check("signed in: no word from the app, the record is a guess", a.source == .guessed && a.accountID == uuid(1), "\(a)")
-    } else { check("signed in (guessed)", false, "\(String(describing: c.outcome))") }
+    var asked = 0
+    c.start(wanted: SignedInAccount(email: "Ann@Example.com", origin: .record), confirm: { _ in asked += 1; return nil })
+    if case .unverified(let a)? = c.waitEnd() {
+        check("no word from the app: the record's guess ends unverified, never signed in", a.source == .guessed && a.accountID == uuid(1), "\(a)")
+    } else { check("unverified (no word)", false, "\(String(describing: c.outcome))") }
+    check("…after the word was asked again (3 times in all once the login ended)", asked == 3, "\(asked)")
+    check("…and its window closed", c.shellEnded() == 0)
+    c.cleanUp()
+}
+do {
+    // the word disagrees with the record at first (the record a step behind), then agrees: confirmed after the retries
+    let c = Case("catchup", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
+    var asked = 0
+    c.start(wanted: wantedID(uuid(1)), confirm: { _ in asked += 1; return SignedInAccount.process(["email": asked < 3 ? "bob@example.com" : "ann@example.com", "organization": "Sample Org"]) })
+    if case .signedIn(let a)? = c.waitEnd() { check("the word catching up with the record: signed in on the third ask", a.accountID == uuid(1) && asked == 3, "\(a) \(asked)") }
+    else { check("catch-up", false, "\(String(describing: c.outcome)) \(asked)") }
+    c.cleanUp()
+}
+do {
+    // the word keeps naming another account than the record (stale): never a match, unverified
+    let c = Case("stale", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
+    c.start(wanted: wantedID(uuid(1)), confirm: said("bob@example.com"))
+    if case .unverified(let a)? = c.waitEnd() { check("the word and a stale record never agreeing: unverified, the word's account", a.email == "bob@example.com", "\(a)") }
+    else { check("stale record", false, "\(String(describing: c.outcome))") }
+    c.cleanUp()
+}
+do {
+    // the same address in another organisation, the word without an id: the id wanted is compared with the record's only
+    // when the record agrees with the word; here it doesn't (the record is the wanted seat's, the word another's)
+    let c = Case("seat", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
+    c.start(wanted: SignedInAccount(accountID: uuid(1), email: "ann@example.com", origin: .record), confirm: said("ann@example.com", "Other Org"))
+    if case .unverified? = c.waitEnd() { check("a same-address seat in another organisation, the record disagreeing: not taken for the one wanted", true) }
+    else { check("same-address seat", false, "\(String(describing: c.outcome))") }
+    c.cleanUp()
+    // …and where the record agrees with the word (the other seat's own id), it is the wrong account
+    let d = Case("seat2", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(9), "org": uuid(59), "orgName": "Other Org"])
+    d.start(wanted: SignedInAccount(accountID: uuid(1), email: "ann@example.com", origin: .record), confirm: said("ann@example.com", "Other Org"))
+    if case .wrongAccount(let a, _)? = d.waitEnd() { check("…the record agreeing names the other seat's id: wrong account", a.accountID == uuid(9), "\(a)") }
+    else { check("same-address seat, record agreeing", false, "\(String(describing: d.outcome))") }
+    d.cleanUp()
+}
+do {
+    // the record changes while the login still runs, and the word disagrees: nothing ends it (its sign-in isn't written yet)
+    let c = Case("running", login: ["login": "hang"])
+    c.start(wanted: wantedID(uuid(1)), confirm: said("ann@example.com"))
+    let login = c.waitLogin()
+    c.record("bob@example.com", uuid(2))
+    spin(2)
+    check("a login still running is never ended on the word and the record disagreeing", c.outcome == nil && pidAlive(login), "\(String(describing: c.outcome))")
+    c.signIn.stop(); c.waitEnd()
+    c.cleanUp()
+    // …but when the word and the record agree on another account, it ends at once: the wrong account
+    let d = Case("running2", login: ["login": "hang"])
+    d.start(wanted: wantedID(uuid(1)), confirm: said("bob@example.com"))
+    let login2 = d.waitLogin()
+    d.record("bob@example.com", uuid(2))
+    if case .wrongAccount(let a, _)? = d.waitEnd() { check("…the word and the record agreeing on another account: wrong account early", a.accountID == uuid(2), "\(a)") }
+    else { check("early wrong account", false, "\(String(describing: d.outcome))") }
+    check("…and its login is ended", spin(until: { !pidAlive(login2) }, max: 5))
+    d.cleanUp()
+}
+do {
+    // the word blocks for long: Stop doesn't wait for it, and its late answer is dropped
+    let c = Case("slowword", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
+    let gate = DispatchSemaphore(value: 0)
+    c.start(wanted: wantedID(uuid(1)), confirm: { _ in _ = gate.wait(timeout: .now() + 20); return SignedInAccount.process(["email": "ann@example.com"]) })
+    spin(until: { fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.status").path) }, max: 10)
+    spin(0.5)
+    let t = Date()
+    c.signIn.stop()
+    check("a word that blocks: Stop ends it at once (stopped)", c.waitEnd(5) == .stopped && Date().timeIntervalSince(t) < 4, "\(String(describing: c.outcome))")
+    gate.signal(); spin(0.5)
+    check("…and the word's late answer changes nothing", c.outcome == .stopped)
+    c.cleanUp()
+}
+do {
+    let c = Case("nostart", login: ["login": "hang"])
+    c.terminal.neverStarts = true
+    c.start(wanted: wantedID(uuid(1)), startGrace: 1)
+    check("Terminal never started the script: failed, not opened", c.waitEnd() == .failed(.notOpened), "\(String(describing: c.outcome))")
+    let left = ((try? fm.contentsOfDirectory(atPath: c.work.path)) ?? []).filter { $0.hasSuffix(".command") }
+    check("…and its script is gone (a late Terminal finds nothing to run)", left.isEmpty, "\(left)")
+}
+do {
+    let c = Case("quit", login: ["login": "hang"])
+    c.start(wanted: wantedID(uuid(1)))
+    let login = c.waitLogin()
+    spin(until: { fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.pid").path) }, max: 5)
+    c.signIn.stopNow()
+    check("quit mid-sign-in (stopNow): the login is ended before it returns", !pidAlive(login))
+    check("…and the window's shell ends cleanly", c.shellEnded(3) == 0)
     c.cleanUp()
 }
 do {
@@ -297,6 +395,8 @@ do {
     if let s = c.terminal.last { kill(s.processIdentifier, SIGHUP) }
     kill(login, SIGHUP)
     check("window closed while the login ran: failed, window closed", c.waitEnd() == .failed(.windowClosed), "\(String(describing: c.outcome))")
+    check("…the hung-up login is gone, and no status was written", !pidAlive(login)
+          && !fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.status").path))
     c.cleanUp()
 }
 
@@ -359,16 +459,57 @@ do {
           "\(String(describing: d.outcome))")
     d.signIn.stop(); d.waitEnd()
     endOther(other)
-    // a bare login (a terminal's): its folder is its CLAUDE_CONFIG_DIR where the kernel says it; where it doesn't (macOS 27),
-    // it can't be told, and it refuses rather than guesses
+    // a bare login run by a platform binary (the bash stand-in): the kernel gives no environment for it and there is no
+    // ClaudeSignIn script above it, so its folder can't be told: it refuses rather than guesses (any folder)
     let bare = otherLogin(c, viaScript: false)
+    check("the bash stand-in's environment isn't readable (a platform binary)",
+          ProcessTable.launch(of: bare.login).map { !$0.environmentRead } == true)
     let e = Case("guard-bare", login: ["login": "hang"])
-    c.outcome = nil
-    let s = ClaudeSignIn(folder: c.authFolder, wanted: nil, tools: c.tools(), claude: claude, confirm: { _ in nil }, work: c.work, locks: locks, poll: 0.2)
-    s.start { c.outcome = $0 }
-    check("process guard: a terminal's login on the folder: refused", c.waitEnd() == .failed(.alreadySigningIn), "\(String(describing: c.outcome))")
+    e.start(wanted: wantedID(uuid(1)))
+    check("process guard: a login whose folder can't be told: refused", e.waitEnd() == .failed(.alreadySigningIn), "\(String(describing: e.outcome))")
     endOther(bare)
     c.cleanUp(); d.cleanUp(); e.cleanUp()
+}
+// the environment branch: an ad-hoc built stand-in `claude` (not a platform binary: the kernel gives its environment), started
+// bare with CLAUDE_CONFIG_DIR as given
+do {
+    let adhoc = env["QC_SIGNIN_ADHOC"] ?? ""
+    check("the ad-hoc stand-in claude is there", fm.isExecutableFile(atPath: adhoc), adhoc)
+    func bareLogin(_ dir: String?) -> Process {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: adhoc); p.arguments = ["auth", "login", "--claudeai"]
+        var e = ["PATH": "/usr/bin:/bin", "HOME": home.path]
+        if let dir { e["CLAUDE_CONFIG_DIR"] = dir }
+        p.environment = e
+        try? p.run()
+        spin(until: { ProcessTable.launch(of: p.processIdentifier) != nil }, max: 3)
+        return p
+    }
+    func attempt(_ name: String) -> ClaudeSignIn.Outcome? {
+        let c = Case(name, login: ["login": "hang"])
+        c.start(wanted: wantedID(uuid(1)))
+        spin(until: { c.states.contains(.waitingForBrowser) || c.outcome != nil })
+        let o = c.outcome
+        if o == nil { c.signIn.stop(); c.waitEnd() }
+        c.cleanUp()
+        return o
+    }
+    let target = home.appendingPathComponent(".claude-env-same")
+    let same = bareLogin(target.path)
+    let l = ProcessTable.launch(of: same.processIdentifier)
+    check("the ad-hoc stand-in's environment is read: its CLAUDE_CONFIG_DIR", l?.environmentRead == true && l?.configDir == target.path,
+          "\(String(describing: l))")
+    check("environment: a login on this folder (by its CLAUDE_CONFIG_DIR): refused", attempt("env-same") == .failed(.alreadySigningIn))
+    check("environment: …another folder's isn't", attempt("env-other") == nil)
+    same.terminate(); same.waitUntilExit()
+    for (what, dir) in [("relative", "rel/.claude-x"), ("empty", ""), ("~-led", "~/.claude-env-same")] {
+        let p = bareLogin(dir)
+        check("environment: a CLAUDE_CONFIG_DIR that can't be told (\(what)): refused for any folder", attempt("env-\(what)") == .failed(.alreadySigningIn))
+        p.terminate(); p.waitUntilExit()
+    }
+    let unset = bareLogin(nil)
+    check("environment: CLAUDE_CONFIG_DIR unset is the default folder: another folder isn't refused", attempt("env-unset") == nil)
+    unset.terminate(); unset.waitUntilExit()
 }
 do {
     let c = Case("lock", login: ["login": "hang"])
@@ -495,7 +636,68 @@ do {
     spin(until: { told.count > before }, max: 10)
     check("switch: a folder that isn't there: the sign-in couldn't start, said; no note left",
           told.count == before + 1 && sw.waiting[gone.name] == nil && told.last?.contains("isn't there") == true, "\(told)")
-    for c in [ok, wrong, none, declined, stop] { c.cleanUp() }
+
+    // Claude Code doesn't confirm the account (its `initialize` names nobody): not reached, the account-unchanged note
+    try? "account=none\n".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)
+    let unconfirmed = Case("sw-unconfirmed", login: ["login": "ok", "email": "kim@example.com", "uuid": uuid(7), "org": uuid(51), "orgName": "Sample Org"])
+    unconfirmed.record("ann@example.com", uuid(1))
+    check("switch: a sign-in Claude Code never confirmed is not reached (the account-unchanged note)",
+          run(unconfirmed, uuid: uuid(7), email: "kim@example.com") == .timedOut && sw.ended[unconfirmed.name]?.signedIn == nil, "\(outcomes)")
+    try? "".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)
+
+    // Stop while claude is still looked for: nothing starts afterwards
+    let early = Case("sw-early", login: ["login": "hang"])
+    last = early
+    sw.findClaude = { usleep(800_000); return claude }
+    sw.begin(profile(early), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.drop(early.name)
+    spin(2)
+    check("switch: Stop before the sign-in started: none starts afterwards", early.terminal.count == 0 && sw.active == nil && sw.waiting[early.name] == nil)
+    sw.findClaude = { claude }
+
+    // a sign-in on another profile ends this one, and this one's note says so (the account-unchanged note), never silently
+    let first = Case("sw-first", login: ["login": "hang"])
+    first.record("ann@example.com", uuid(1))
+    last = first
+    sw.begin(profile(first), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    let firstLogin = first.waitLogin()
+    let second = Case("sw-second", login: ["login": "hang"])
+    last = second
+    sw.begin(profile(second), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    spin(until: { sw.ended[first.name] != nil }, max: 10)
+    check("switch: another profile's sign-in ends this one with its note, not silently",
+          sw.waiting[first.name] == nil && sw.ended[first.name]?.signedIn == nil && !pidAlive(firstLogin))
+    spin(until: { second.states.contains(.waitingForBrowser) }, max: 10)
+    // stop(folder:) finds the sign-in however the folder is spelled
+    let secondLogin = second.waitLogin()
+    sw.stop(folder: second.folder.path + "/")
+    check("switch: stop(folder:) with another spelling of the folder ends it", spin(until: { !pidAlive(secondLogin) }, max: 5) && sw.active == nil)
+    check("switch: two spellings of one folder are one", AccountSwitcher.sameFolder(second.folder.path, second.folder.path + "/./")
+          && !AccountSwitcher.sameFolder(second.folder.path, first.folder.path))
+    sw.drop(second.name)
+    for c in [ok, wrong, none, declined, stop, unconfirmed, first, second] { c.cleanUp() }
+}
+
+// ── Settings' "signing in": an earlier sign-in's late end never takes the newer one's away ─────────────
+do {
+    let sw = AccountSwitcher.shared
+    let c = Case("st-folder", login: ["login": "hang"])
+    sw.makeSignIn = { folder, wanted, cl in
+        ClaudeSignIn(folder: AuthFolder(path: folder, isDefault: false, home: home.path), wanted: wanted, timeout: 30, tools: c.tools(), claude: cl,
+                     confirm: { _ in nil }, work: c.work, locks: locks, poll: 0.2)
+    }
+    let state = SettingsState()
+    state.signIn(folder: c.folder.path)
+    spin(until: { state.signingIn.contains(c.folder.path) }, max: 10)
+    let firstLogin = c.waitLogin()
+    state.signIn(folder: c.folder.path)               // a new sign-in on the same folder ends the first (stopped)
+    spin(until: { !pidAlive(firstLogin) }, max: 8)
+    spin(1.5)
+    check("settings: the first sign-in's end doesn't take the second's \"signing in\" away", state.signingIn.contains(c.folder.path))
+    sw.stop(folder: c.folder.path)
+    spin(until: { !state.signingIn.contains(c.folder.path) }, max: 10)
+    check("settings: …the second's own end does", !state.signingIn.contains(c.folder.path))
+    c.cleanUp()
 }
 
 print(failed == 0 ? "signin checks: \(passed)/\(passed) passed" : "signin checks: \(failed) failed, \(passed) passed")
