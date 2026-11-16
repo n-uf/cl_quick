@@ -21,8 +21,8 @@ window then says "This chat ended after 15 minutes idle. Nothing was saved." and
 
 ## Install
 
-Once the first release is published, download it from [GitHub Releases](https://github.com/n-uf/cl_quick/releases),
-open the disk image and drag cl_quick to Applications. Until then, build it from source (below). It needs an Apple silicon Mac,
+Download `cl_quick.dmg` from the [latest release](https://github.com/n-uf/cl_quick/releases/latest), open the disk image
+and drag cl_quick to Applications (or use `cl_quick.zip`, the same app), or build it from source (below). It needs an Apple silicon Mac,
 macOS 13 or later and [Claude Code](https://code.claude.com/docs/en/setup), signed in. cl_quick isn't signed with an
 Apple Developer ID yet, so the first time macOS says it can't verify the app: open System Settings ▸ Privacy &
 Security and click **Open Anyway** (once).
@@ -307,9 +307,9 @@ cl_quick uses calendar versions, `YY.M.R`, like the other n-uf projects:
 - `M` is the month of the release date, without a leading zero: a release made in November 2026 is `26.11.x`.
 - `R` counts releases within that month and starts again at `0` in a new month.
 
-Releases are tagged `vX.Y.Z` (for example `v26.11.0`). The number lives in `VERSION`; no release has been made yet, and
-`26.11.0` is the number the first one will carry. Changes go into [CHANGELOG.md](CHANGELOG.md) under "Unreleased" as
-they land. Releases will be published on [GitHub Releases](https://github.com/n-uf/cl_quick/releases) as
+Releases are tagged `vX.Y.Z` (for example `v26.11.0`, the first). The number lives in `VERSION`. Changes go into
+[CHANGELOG.md](CHANGELOG.md) under "Unreleased" as they land. Releases are published on
+[GitHub Releases](https://github.com/n-uf/cl_quick/releases) as
 `cl_quick.dmg` and `cl_quick.zip`, the same app. To release, from a clean `main`:
 
 ```bash
