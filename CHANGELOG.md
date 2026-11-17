@@ -14,6 +14,15 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   itself on a sign-in, a wrong account, Stop and the 10-minute timeout; one that was declined or failed stays open to be
   read until Return, the next sign-in or Stop. Stop and the timeout now end Claude Code's `claude auth login` in that
   window too, and a new sign-in ends the one before it.
+- **Clearer switching.** The switch question says the browser must be signed in to claude.ai as that account first. While
+  the sign-in waits, a short checklist says what to check in the browser ("Logged in as" before Authorize, Switch account if
+  it's wrong), with the address blurred. After a wrong account the note says the browser was signed in as B, not A, that
+  Main is on B now, and whether B is also in use on another profile, with **Try again as A** and **Keep B**. A sign-in
+  declined in the browser, one Claude Code didn't confirm, and each way a sign-in can fail have their own words, and a
+  window Terminal never ran is the "couldn't start" alert.
+- **No Terminal profiles left behind.** Terminal keeps a profile for every settings file it opens, with its dead command;
+  cl_quick now names its settings file "cl_quick sign-in" and removes the kept profiles that ran its own sign-ins, at every
+  sign-in's start and once its window is gone (never a profile Terminal uses as default or at startup).
 - **Two guards.** A sign-in doesn't start while a `claude auth login` already runs on the folder, or while another app
   (cl_audit) holds the folder's sign-in lock.
 - **The account is confirmed by Claude Code itself.** After a sign-in a short `claude` on the folder says which account

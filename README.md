@@ -73,23 +73,34 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   is on it, while Blur addresses is on). The question says that Claude Code in Terminal and editors on
   that folder (for a folder other than `~/.claude`, Claude Code pointed at it with `CLAUDE_CONFIG_DIR`) moves to the new
   account, sessions running now included, and that the Claude app keeps its own sign-in. It's not just the quick chat.
-- Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. The
+  Its last line says the browser must be signed in to claude.ai as that account, and to switch it there first if it's on
+  another one.
+- Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. While it
+  waits, a short checklist says what to do there: finish it in the browser; before pressing Authorize, check that "Logged
+  in as" at the bottom of the page shows the address; if it doesn't, use Switch account there. The
   browser's claude.ai session decides which account actually signs in, so cl_quick checks the result: it looks at the
   folder's `.claude.json` every 2 seconds, for at most 10 minutes, and once the login ends (or the file names another
   account) a short `claude` on the folder says which account it is. It never sees a password or a token and never
   touches the Keychain. The sign-in is the one shared with cl_audit (`Shared/ClaudeAuth+SignIn/`): one window at a time,
   closed after a sign-in, a wrong account, Stop or the timeout (Stop and the timeout end `claude auth login` too); one
   declined or failed stays open to be read until Return, the next sign-in or Stop.
-- If another account signed in, the chat says so ("Signed in as m•••@example.com, not p•••@example.com") and offers
-  to try again. After 10 minutes with no change it stops looking and says "No sign-in in 10 minutes." (in the chat, and
-  on the profile's page in Settings), with a way to try again and Dismiss (OK in Settings).
+- A switch that ends without the account wanted says what happened, in the chat and on the profile's page in Settings,
+  each way in its own words. If another account signed in: "The browser was signed in as b•••@example.com, not
+  a•••@example.com. Main is on b•••@example.com now." (and "b•••@example.com is also in use on Work." when it is), with two
+  compact keys, **Try again as** the account wanted (the same switch again) and **Keep** the one it is on now. Declined in
+  the browser: "The sign-in was declined in the browser. The account in use hasn't changed." Signed in but Claude Code
+  didn't confirm which account: "Signed in, but Claude Code didn't confirm which account. Check the account line in the
+  menu." (the folder may have changed, so it never says "hasn't changed"). After 10 minutes with no change it stops looking
+  and says "No sign-in in 10 minutes." A login that failed, ended on nobody or lost its Terminal window has its own line
+  too; a sign-in that couldn't start at all (the folder isn't there, one already open, Terminal didn't run it) is the
+  "The sign-in couldn't start" alert. The others can be dismissed (Dismiss in the chat, OK in Settings).
 - Limits belong to the account: after a switch the chat's new `claude` is asked for the new account's limits at once,
   and the new account's own numbers show, never the old account's. They are kept per account (its id in Claude Code's
   file), not per organization. The account in use is the folder's `.claude.json` as it is at that moment (read again
   whenever it changed), so a sign-in made outside cl_quick (`claude auth login`, /login, another app) counts at once.
   Numbers are kept only for the account the answering `claude` says it is (its `initialize` answer) and only while the
   folder is still on that account: an answer that arrives after the folder moved to another account is dropped.
-- Addresses are in full in Settings. Everywhere else they are blurred until the pointer is on them (the switch question's
+- Addresses are in full in Settings' account rows, and blurred in its switch notes. Everywhere else they are blurred until the pointer is on them (the switch question's
   alert holds it under its words, in an accessory view); the words VoiceOver reads have them masked (p•••@example.com). In
   the chat's header there is none; the profile menu's rows have the address of the account in use (never a standby
   one's), with a copy button beside it, and the chat's notes about an account change blur it too. **Settings ▸ General ▸
