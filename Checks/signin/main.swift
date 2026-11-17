@@ -701,6 +701,7 @@ do {
     let sw = AccountSwitcher.shared
     var last: Case!
     var outcomes: [SwitchOutcome] = []
+    var switchGrace: TimeInterval = 10
     sw.onOutcome = { _, o in outcomes.append(o) }
     sw.findClaude = { claude }
     sw.makeSignIn = { folder, wanted, cl in
@@ -708,7 +709,7 @@ do {
         t.mayLaunch = { _, f in f.isReady }
         return ClaudeSignIn(folder: AuthFolder(path: folder, isDefault: false, home: home.path), wanted: wanted, timeout: 3, tools: t, claude: cl,
                             confirm: SignInWord.confirm(claude: cl, workFolder: base.appendingPathComponent("confirm/work").path),
-                            work: last.work, terminalProfiles: prefs.tool, lateSweep: 0.3, locks: locks, poll: 0.2)
+                            work: last.work, startGrace: switchGrace, terminalProfiles: prefs.tool, lateSweep: 0.3, locks: locks, poll: 0.2)
     }
     try? "".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)
 
@@ -760,6 +761,41 @@ do {
     spin(until: { told.count > before }, max: 10)
     check("switch: a folder that isn't there: the sign-in couldn't start, said; no note left",
           told.count == before + 1 && sw.waiting[gone.name] == nil && told.last?.contains("isn't there") == true, "\(told)")
+
+    // Terminal opens the sign-in but never runs it: the "couldn't start" alert (not the account-unchanged note), and the
+    // sign-in that had opened is over for the caller too
+    let nostart = Case("sw-nostart", login: ["login": "hang"])
+    nostart.terminal.neverStarts = true
+    nostart.record("ann@example.com", uuid(1))
+    last = nostart
+    switchGrace = 1
+    let toldBefore = told.count, outcomesBefore = outcomes.count
+    sw.begin(profile(nostart), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    spin(until: { told.count > toldBefore }, max: 10)
+    spin(0.5)
+    switchGrace = 10
+    check("switch: a window Terminal never ran is the \"couldn't start\" alert, with its own line",
+          told.count == toldBefore + 1 && told.last == "Terminal didn't open the sign-in. Try again.", "\(told)")
+    check("switch: …and no note is left (not \"hasn't changed\"), nothing waits", sw.waiting[nostart.name] == nil && sw.ended[nostart.name] == nil
+          && outcomes.count == outcomesBefore, "\(outcomes)")
+    // every way a sign-in fails has its own plain line
+    let failures: [ClaudeSignIn.Failure] = [.folderNotReady, .locked, .alreadySigningIn, .processesUnreadable, .notOpened,
+                                            .loginFailed(status: 2), .noAccount, .windowClosed]
+    let lines = failures.map { SignInWords.failure($0, folder: "~/.claude-x") }
+    check("failures: each has a line of its own, none the generic one", Set(lines.map(\.lead)).count == failures.count
+          && lines.allSatisfy { !($0.lead + $0.rest).contains("hasn't changed") && !$0.lead.isEmpty && !$0.rest.isEmpty }, "\(lines)")
+    check("failures: the ones that stop a start are alerts, in the same words as the lines; the others are notes",
+          failures.prefix(5).allSatisfy { AccountSwitcher.why($0, folder: "~/.claude-x") == SignInWords.failure($0, folder: "~/.claude-x").lead + " " + SignInWords.failure($0, folder: "~/.claude-x").rest }
+          && failures.suffix(3).allSatisfy { AccountSwitcher.why($0, folder: "~/.claude-x") == nil })
+    check("failures: the lines", lines.map { $0.lead + " " + $0.rest } == [
+        "~/.claude-x isn't there as a plain folder. cl_quick didn't open a sign-in.",
+        "Another sign-in for ~/.claude-x is starting. Wait a moment, then try again.",
+        "Claude Code's sign-in is already open for ~/.claude-x. Finish it, or close its Terminal window, then try again.",
+        "cl_quick couldn't tell whether Claude Code's sign-in is already open for ~/.claude-x. It didn't open one. Try again.",
+        "Terminal didn't open the sign-in. Try again.",
+        "Claude Code's sign-in failed. It ended with an error (status 2); its Terminal window shows why.",
+        "The sign-in ended, but no account is signed in to this folder. Try again.",
+        "The Terminal window was closed before the sign-in ended. Try again."], "\(lines)")
 
     // Claude Code doesn't confirm the account (its `initialize` names nobody): not reached, the account-unchanged note
     try? "account=none\n".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)

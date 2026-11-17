@@ -171,7 +171,12 @@ final class AccountSwitcher {
                     if state == .waitingForBrowser { open = true; opened() }
                 }, onEnd: { [weak self] outcome in
                     if let a = self?.active, a.signIn === s { self?.active = nil }
-                    if !open, case .failed(let f) = outcome, let why = Self.why(f, folder: folder) { return couldNotStart(why) }
+                    // never opened, or opened but never started (Terminal ran nothing): the "couldn't start" alert, not a
+                    // note on an account that "hasn't changed". The one that was open is also ended for the caller.
+                    if case .failed(let f) = outcome, let why = Self.why(f, folder: folder) {
+                        couldNotStart(why)
+                        if !open { return }
+                    }
                     ClaudeFolder.reload([folder]) { _ in
                         ProfileStore.shared.reload()
                         ended(outcome)
@@ -181,13 +186,13 @@ final class AccountSwitcher {
         }
     }
 
-    /// A sign-in that never opened, said plainly; nil for a failure that only comes after it opened.
+    /// A sign-in that didn't start, said plainly (the "couldn't start" alert); nil for a failure that only comes after the
+    /// sign-in was under way (a login that failed, ended on nobody, or lost its window), which is a note on the account.
     static func why(_ f: ClaudeSignIn.Failure, folder: String) -> String? {
         switch f {
-        case .folderNotReady: return "\(tilde(expand(folder))) isn't there as a folder."
-        case .locked, .alreadySigningIn: return "Claude Code's sign-in is already open for \(tilde(expand(folder)))."
-        case .processesUnreadable: return "cl_quick couldn't tell whether Claude Code's sign-in is already open for \(tilde(expand(folder)))."
-        case .notOpened: return "Terminal couldn't open it."
+        case .folderNotReady, .locked, .alreadySigningIn, .processesUnreadable, .notOpened:
+            let w = SignInWords.failure(f, folder: folder)
+            return w.lead + " " + w.rest
         case .loginFailed, .noAccount, .windowClosed: return nil
         }
     }
@@ -257,6 +262,25 @@ final class AccountSwitcher {
         a.informativeText = why
         a.addButton(withTitle: "OK")
         a.runModal()
+    }
+}
+
+/// What every way a sign-in can fail says, in plain words: what happened, then what to do. One line each, never the
+/// generic "hasn't changed": the ones that stop a sign-in from starting are said in the "couldn't start" alert, the others
+/// in the note on the profile.
+enum SignInWords {
+    static func failure(_ f: ClaudeSignIn.Failure, folder: String) -> (lead: String, rest: String) {
+        let path = tilde(expand(folder))
+        switch f {
+        case .folderNotReady: return ("\(path) isn't there as a plain folder.", "cl_quick didn't open a sign-in.")
+        case .locked: return ("Another sign-in for \(path) is starting.", "Wait a moment, then try again.")
+        case .alreadySigningIn: return ("Claude Code's sign-in is already open for \(path).", "Finish it, or close its Terminal window, then try again.")
+        case .processesUnreadable: return ("cl_quick couldn't tell whether Claude Code's sign-in is already open for \(path).", "It didn't open one. Try again.")
+        case .notOpened: return ("Terminal didn't open the sign-in.", "Try again.")
+        case .loginFailed(let status): return ("Claude Code's sign-in failed.", "It ended with an error (status \(status)); its Terminal window shows why.")
+        case .noAccount: return ("The sign-in ended, but no account is signed in to this folder.", "Try again.")
+        case .windowClosed: return ("The Terminal window was closed before the sign-in ended.", "Try again.")
+        }
     }
 }
 
