@@ -105,6 +105,27 @@ private extension CGFloat {
     func rounded(toPlaces n: Int) -> CGFloat { let m = pow(10, CGFloat(n)); return (self * m).rounded() / m }
 }
 
+/// The label of a key with an address in it ("Try again as <address>"): the address is blurred until the pointer is on the
+/// key, and masked in the key's accessibility label. The key's own style sets the font and colour.
+struct QCAddressKeyLabel: View {
+    let title: String
+    let address: String
+    var size: CGFloat = 11.5
+    @State private var gate = QCHoverGate()
+    @ObservedObject private var privacy = AddressPrivacy.shared
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(title)
+            QCBlurredAddress(address: address, size: size, revealed: gate.on)
+        }
+        .onHover { gate.pointer($0) }
+        .onChange(of: privacy.hoverEnded) { gate.sync($0) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title + AddressPrivacy.words(address))
+    }
+}
+
 /// Lays tokens out in lines that wrap at the width given, a space between them: the way text wraps, for a sentence
 /// that holds a view (the blurred address) among its words.
 /// At most `maxRows` lines (like Text's lineLimit): what doesn't fit is placed far outside the layout, for QCSentence to

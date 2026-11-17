@@ -731,19 +731,41 @@ do {
 
     let wrong = Case("sw-wrong", login: ["login": "ok", "email": "bob@example.com", "uuid": uuid(8), "org": uuid(51), "orgName": "Sample Org"])
     wrong.record("ann@example.com", uuid(1))
-    check("switch: another account is the wrong-account note", run(wrong, uuid: uuid(7), email: "kim@example.com") == .other(email: "bob@example.com")
+    check("switch: another account is the wrong-account note (bob signed in, in use nowhere else)",
+          run(wrong, uuid: uuid(7), email: "kim@example.com") == .ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))
           && sw.ended[wrong.name]?.signedIn == "bob@example.com", "\(outcomes) \(String(describing: sw.ended[wrong.name]))")
+    // …and when that account is also in use on another profile, the note says which
+    let elsewhere = Case("sw-elsewhere", login: ["login": "hang"])
+    elsewhere.record("bob@example.com", uuid(8))
+    ProfileStore.shared.save([profile(ok), profile(elsewhere)])
+    let wrong2 = Case("sw-wrong2", login: ["login": "ok", "email": "bob@example.com", "uuid": uuid(8), "org": uuid(51), "orgName": "Sample Org"])
+    wrong2.record("ann@example.com", uuid(1))
+    check("switch: the account that signed in is also in use on another profile: the note names it",
+          run(wrong2, uuid: uuid(7), email: "kim@example.com") == .ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: "sw-elsewhere")), "\(outcomes)")
+    check("switch: its words say so, the addresses apart from them (blurred)", {
+        guard let e = sw.ended[wrong2.name] else { return false }
+        let w = SwitchWords.ended(e)
+        return w.rest.spoken.hasSuffix(" \(maskEmail("bob@example.com")) is also in use on sw-elsewhere.") && w.rest.addresses == ["bob@example.com", "bob@example.com"]
+    }(), "\(String(describing: sw.ended[wrong2.name]))")
+    ProfileStore.shared.save([profile(ok)])
 
     let none = Case("sw-none", login: ["login": "hang"])
     none.record("ann@example.com", uuid(1))
-    check("switch: no sign-in is the timeout's note", run(none, uuid: uuid(7), email: "kim@example.com") == .timedOut
+    check("switch: no sign-in is the timeout's note", run(none, uuid: uuid(7), email: "kim@example.com") == .ended(.timedOut)
           && sw.ended[none.name] != nil && sw.ended[none.name]?.signedIn == nil)
     check("switch: …and its login is ended", spin(until: { !pidAlive(none.loginPid) }, max: 5))
 
     let declined = Case("sw-declined", login: ["login": "declined"])
     declined.record("ann@example.com", uuid(1))
-    check("switch: a declined sign-in is the account-unchanged note (as a timeout's, sooner)",
-          run(declined, uuid: uuid(7), email: "kim@example.com") == .timedOut && sw.ended[declined.name]?.signedIn == nil)
+    check("switch: a declined sign-in has its own note, at once (not the timeout's)",
+          run(declined, uuid: uuid(7), email: "kim@example.com") == .ended(.declined) && sw.ended[declined.name]?.signedIn == nil
+          && sw.ended[declined.name].map { SwitchWords.ended($0).lead.spoken != SwitchWords.ended(SwitchEnded(goal: $0.goal, reason: .timedOut)).lead.spoken } == true)
+
+    let failedLogin = Case("sw-failed", login: ["login": "fail"])
+    failedLogin.record("ann@example.com", uuid(1))
+    check("switch: a login that fails says so (its status), not \"hasn't changed\"",
+          run(failedLogin, uuid: uuid(7), email: "kim@example.com") == .ended(.failed(.loginFailed(status: 2)))
+          && sw.ended[failedLogin.name].map { SwitchWords.ended($0).lead.spoken + SwitchWords.ended($0).rest.spoken } == "Claude Code's sign-in failed. It ended with an error (status 2); its Terminal window shows why.")
 
     let stop = Case("sw-stop", login: ["login": "hang"])
     stop.record("ann@example.com", uuid(1))
@@ -801,8 +823,10 @@ do {
     try? "account=none\n".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)
     let unconfirmed = Case("sw-unconfirmed", login: ["login": "ok", "email": "kim@example.com", "uuid": uuid(7), "org": uuid(51), "orgName": "Sample Org"])
     unconfirmed.record("ann@example.com", uuid(1))
-    check("switch: a sign-in Claude Code never confirmed is not reached (the account-unchanged note)",
-          run(unconfirmed, uuid: uuid(7), email: "kim@example.com") == .timedOut && sw.ended[unconfirmed.name]?.signedIn == nil, "\(outcomes)")
+    check("switch: a sign-in Claude Code never confirmed is not reached, and has its own line (the folder may have changed)",
+          run(unconfirmed, uuid: uuid(7), email: "kim@example.com") == .ended(.unverified) && sw.ended[unconfirmed.name]?.signedIn == nil
+          && sw.ended[unconfirmed.name].map { SwitchWords.ended($0).lead.spoken + SwitchWords.ended($0).rest.spoken }
+              == "Signed in, but Claude Code didn't confirm which account. Check the account line in the menu.", "\(outcomes)")
     try? "".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)
 
     // Stop while claude is still looked for: nothing starts afterwards
@@ -825,8 +849,8 @@ do {
     last = second
     sw.begin(profile(second), uuid: uuid(7), email: "kim@example.com", origin: .settings)
     spin(until: { sw.ended[first.name] != nil }, max: 10)
-    check("switch: another profile's sign-in ends this one with its note, not silently",
-          sw.waiting[first.name] == nil && sw.ended[first.name]?.signedIn == nil && !pidAlive(firstLogin))
+    check("switch: another profile's sign-in ends this one with its own note, not silently",
+          sw.waiting[first.name] == nil && sw.ended[first.name]?.reason == .replaced && !pidAlive(firstLogin))
     spin(until: { second.states.contains(.waitingForBrowser) }, max: 10)
     // stop(folder:) finds the sign-in however the folder is spelled
     let secondLogin = second.waitLogin()
@@ -835,7 +859,62 @@ do {
     check("switch: two spellings of one folder are one", AccountSwitcher.sameFolder(second.folder.path, second.folder.path + "/./")
           && !AccountSwitcher.sameFolder(second.folder.path, first.folder.path))
     sw.drop(second.name)
-    for c in [ok, wrong, none, declined, stop, unconfirmed, first, second] { c.cleanUp() }
+    for c in [ok, wrong, wrong2, elsewhere, none, declined, failedLogin, nostart, stop, unconfirmed, first, second] { c.cleanUp() }
+}
+
+// ── the words a switch ends on (the same in the chat and in Settings) ────────────────────────────────
+do {
+    func goal(again: Bool = false) -> SwitchGoal {
+        SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: uuid(7), wantedEmail: "kim@example.com",
+                   fromUUID: again ? uuid(7) : uuid(1), fromEmail: "alex@example.com", origin: .settings)
+    }
+    func ended(_ r: SwitchEndReason, again: Bool = false) -> SwitchEnded { SwitchEnded(goal: goal(again: again), reason: r) }
+    func line(_ e: SwitchEnded) -> String { let w = SwitchWords.ended(e); return w.lead.spoken + w.rest.spoken }
+    let b = maskEmail("bob@example.com"), k = maskEmail("kim@example.com")
+    check("words: a wrong account says the browser was signed in as B, not A, and Main is on B now",
+          line(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))) == "The browser was signed in as \(b), not \(k). Main is on \(b) now.")
+    check("words: …and that B is also in use on the other profile, when it is",
+          line(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: "Work"))) == "The browser was signed in as \(b), not \(k). Main is on \(b) now. \(b) is also in use on Work.")
+    let w = SwitchWords.ended(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: "Work")))
+    check("words: the addresses are pieces of their own (blurred), never in the plain words",
+          w.lead.addresses == ["bob@example.com", "kim@example.com"] && w.rest.addresses == ["bob@example.com", "bob@example.com"]
+          && !w.lead.pieces.filter { !$0.isAddress }.contains { $0.text.contains("@") })
+    AddressPrivacy.shared.blur = false
+    check("words: with Blur addresses off the words hold them in full", line(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil)))
+          == "The browser was signed in as bob@example.com, not kim@example.com. Main is on bob@example.com now.")
+    AddressPrivacy.shared.blur = true
+    check("words: declined is its own note, at once", line(ended(.declined)) == "The sign-in was declined in the browser. The account in use hasn't changed.")
+    check("words: a timeout says no sign-in came", line(ended(.timedOut)) == "No sign-in in 10 minutes. The account in use hasn't changed.")
+    check("words: unconfirmed doesn't say the account hasn't changed (the folder may have)",
+          line(ended(.unverified)) == "Signed in, but Claude Code didn't confirm which account. Check the account line in the menu."
+          && !line(ended(.unverified)).contains("hasn't changed"))
+    check("words: one ended by another sign-in", line(ended(.replaced)) == "Another sign-in started, so this one ended. The account in use hasn't changed.")
+    check("words: a failed login, a login that ended on nobody, a window that was closed: their own lines",
+          line(ended(.failed(.noAccount))) == "The sign-in ended, but no account is signed in to this folder. Try again."
+          && line(ended(.failed(.windowClosed))) == "The Terminal window was closed before the sign-in ended. Try again."
+          && line(ended(.failed(.loginFailed(status: 1)))).hasPrefix("Claude Code's sign-in failed."))
+    let reasons: [SwitchEndReason] = [.wrongAccount(signedIn: "bob@example.com", alsoOn: nil), .timedOut, .declined, .unverified, .replaced,
+                                      .failed(.loginFailed(status: 1)), .failed(.noAccount), .failed(.windowClosed)]
+    check("words: every way a switch ends has a lead of its own", Set(reasons.map { SwitchWords.ended(ended($0)).lead.spoken }).count == reasons.count)
+    // the keys
+    let wrongKeys = (SwitchWords.retry(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))), SwitchWords.keep(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))))
+    check("keys: after a wrong account: \"Try again as A\" (the same switch) and \"Keep B\"",
+          wrongKeys.0.title == "Try again as " && wrongKeys.0.address == "kim@example.com" && wrongKeys.1?.title == "Keep " && wrongKeys.1?.address == "bob@example.com")
+    check("keys: other endings keep their one dismiss (no Keep), and retry as the account wanted",
+          SwitchWords.keep(ended(.declined)) == nil && SwitchWords.retry(ended(.declined)).address == "kim@example.com")
+    check("keys: a sign-in again that never came is just Sign in again; a wrong account on one is still Try again as A",
+          SwitchWords.retry(ended(.timedOut, again: true)).title == "Sign in again" && SwitchWords.retry(ended(.timedOut, again: true)).address == nil
+          && SwitchWords.retry(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil), again: true)).address == "kim@example.com")
+    // "also in use on": another profile, by id or address, never the profile itself
+    let main = Profile(id: "main", name: "Main", folder: "/x/main"), work = Profile(id: "work", name: "Work", folder: "/x/work")
+    let onBob: (Profile) -> (uuid: String, email: String)? = { _ in (uuid(8), "Bob@Example.com") }
+    let onWork: (Profile) -> (uuid: String, email: String)? = { $0.id == "work" ? onBob($0) : nil }
+    check("also in use: the profile itself doesn't count",
+          AccountSwitcher.profileAlsoUsing(("u", "bob@example.com"), besides: "main", profiles: [main], account: onBob) == nil)
+    check("also in use: another profile on the same account (by address, in any case) is named",
+          AccountSwitcher.profileAlsoUsing((uuid(9), "bob@example.com"), besides: "main", profiles: [main, work], account: onWork) == "Work")
+    check("also in use: another profile on a different account isn't",
+          AccountSwitcher.profileAlsoUsing((uuid(9), "carl@example.com"), besides: "main", profiles: [main, work], account: onWork) == nil)
 }
 
 // ── Settings' "signing in": an earlier sign-in's late end never takes the newer one's away ─────────────

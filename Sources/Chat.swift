@@ -198,10 +198,9 @@ struct QuickChatSwitchOffer: Equatable {
 enum QuickChatSwitchNotice: Equatable {
     /// Claude Code's sign-in is open in Terminal; the folder is looked at every 2 s.
     case waiting(wanted: String)
-    /// The browser signed in as someone else.
-    case wrong(signedIn: String, wanted: String)
-    /// No sign-in came in 10 minutes.
-    case timedOut(wanted: String)
+    /// It ended without the account wanted (the browser signed in as someone else, no sign-in in 10 minutes, declined, not
+    /// confirmed, failed): each has its own note.
+    case ended(SwitchEnded)
 }
 
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
@@ -1393,9 +1392,7 @@ final class QuickChat {
         // in use
         let standby = store.standby(p).first.map { QuickChatSwitchOffer(uuid: $0.uuid, email: $0.email) }
         let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }
-            ?? switcher.ended[id].map { e in
-                e.signedIn.map { .wrong(signedIn: $0, wanted: e.goal.wantedEmail) } ?? .timedOut(wanted: e.goal.wantedEmail)
-            }
+            ?? switcher.ended[id].map { .ended($0) }
         // only fresh numbers: older ones never draw the account full or offer elsewhere (warm() asks for new ones)
         model.update(target: now, level: store.shownLevel(of: p), offer: others.first,
                      switchOffer: standby, notice: notice)

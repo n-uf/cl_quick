@@ -7,7 +7,8 @@
 //                                       streaming, reading, searching (the line while a web tool runs), answer, failed,
 //                                       notsigned, thinking, full, level95; with accounts:
 //                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
-//                                       wrong (another account signed in), timedout (no sign-in in 10 minutes),
+//                                       wrong, wrong-also (another account signed in; also in use on Work),
+//                                       timedout (no sign-in in 10 minutes), declined, unverified,
 //                                       switched (the new chat's first line); incognito: ended-idle, ended-stopped,
 //                                       ended-failed, ended-closed (the line under a chat that ended)); the model and
 //                                       thinking controls: models3, models2 (three or two families), haiku (levels it
@@ -21,7 +22,8 @@
 //                                       profilemenu-copied, profilemenu-highlight; the mic button: dictating,
 //                                       dictation-off
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
-//                                       accounts-two, accounts-switching, accounts-wrong, accounts-timedout,
+//                                       accounts-two, accounts-switching, accounts-wrong, accounts-wrong-also,
+//                                       accounts-timedout, accounts-declined, accounts-unverified, accounts-failed,
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
 //                                       accounts-other, accounts-forget), Add a profile (add, first, add-refused,
 //                                       add-empty) and General (general, general-clash, general-off,

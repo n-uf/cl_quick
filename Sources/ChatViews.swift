@@ -762,9 +762,9 @@ struct QCProblemView: View {
     private func retry() { if model.isWindow { model.again() } else { model.barProblem = nil; model.send() } }
 }
 
-/// A switch of the profile to another account: while Claude Code's sign-in is open, when the browser signed in as
-/// someone else, or when no sign-in came in 10 minutes (the last two can be dismissed). Drawn in place of the full
-/// limit's notice.
+/// A switch of the profile to another account: while Claude Code's sign-in is open, and when it ended without the account
+/// wanted (the browser signed in as someone else, no sign-in in 10 minutes, declined, not confirmed, failed: each says
+/// what happened, SwitchWords.ended; they can be dismissed). Drawn in place of the full limit's notice.
 struct QCSwitchView: View {
     @ObservedObject var model: QuickChatModel
 
@@ -778,10 +778,14 @@ struct QCSwitchView: View {
                     QCSentence(words: title(n).strong + more(n), size: 13, color: QCColor.soft)
                         .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
-                        if waiting { QCButton(title: "Stop waiting", ghost: true) { model.dropSwitch() } }
-                        else {
-                            QCButton(title: "Sign in again") { model.signInAgain() }
-                            QCButton(title: "Dismiss", ghost: true) { model.dropSwitch() }
+                        switch n {
+                        case .waiting: QCButton(title: "Stop waiting", ghost: true) { model.dropSwitch() }
+                        case .ended(let e):
+                            // the same switch again; after a wrong account, keep the account it is on now
+                            let retry = SwitchWords.retry(e)
+                            QCButton(title: retry.title, address: retry.address) { model.signInAgain() }
+                            if let keep = SwitchWords.keep(e) { QCButton(title: keep.title, address: keep.address, ghost: true) { model.dropSwitch() } }
+                            else { QCButton(title: "Dismiss", ghost: true) { model.dropSwitch() } }
                         }
                     }
                 }
@@ -796,17 +800,14 @@ struct QCSwitchView: View {
     private func title(_ n: QuickChatSwitchNotice) -> QCWords {
         switch n {
         case .waiting: return QCWords("Waiting for the sign-in…")
-        case .wrong(let signedIn, let wanted):
-            return .text("Signed in as ") + .address(signedIn) + .text(", not ") + .address(wanted) + .text(".")
-        case .timedOut: return QCWords("No sign-in in 10 minutes.")
+        case .ended(let e): return SwitchWords.ended(e).lead
         }
     }
 
     private func more(_ n: QuickChatSwitchNotice) -> QCWords {
         switch n {
         case .waiting(let wanted): return .text(" Finish it in Terminal and the browser as ") + .address(wanted) + .text(".")
-        case .wrong: return QCWords()
-        case .timedOut: return QCWords(" The account in use hasn't changed.")
+        case .ended(let e): return SwitchWords.ended(e).rest
         }
     }
 }
@@ -2425,15 +2426,21 @@ enum QuickChatRender {
             level.week = 100; level.weekResets = Date().addingTimeInterval(3 * 86400)
             level.fiveHour = 12; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level
             var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull; m.turns = [t]
-        case "switch", "switching", "wrong", "timedout":
+        case "switch", "switching", "wrong", "wrong-also", "timedout", "declined", "unverified":
             // a full week, with the profile's standby account offered besides Ask on …
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
             m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
             m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com")
+            let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2", wantedEmail: "ultra-2@example.com",
+                                  fromUUID: "u1", fromEmail: "ultra-1@example.com", origin: .chat)
+            func ended(_ r: SwitchEndReason) -> QuickChatSwitchNotice { .ended(SwitchEnded(goal: goal, reason: r)) }
             if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
-            if state == "wrong" { m.switchNotice = .wrong(signedIn: "ultra-3@example.com", wanted: "ultra-2@example.com") }
-            if state == "timedout" { m.switchNotice = .timedOut(wanted: "ultra-2@example.com") }
+            if state == "wrong" { m.switchNotice = ended(.wrongAccount(signedIn: "ultra-3@example.com", alsoOn: nil)) }
+            if state == "wrong-also" { m.switchNotice = ended(.wrongAccount(signedIn: "ultra-3@example.com", alsoOn: "Work")) }
+            if state == "timedout" { m.switchNotice = ended(.timedOut) }
+            if state == "declined" { m.switchNotice = ended(.declined) }
+            if state == "unverified" { m.switchNotice = ended(.unverified) }
         case "switched":
             // after a switch: a new chat on the same profile, the typed question sent, one line on where it is
             var t = QuickChatTurn(question: q1); t.phase = .waiting

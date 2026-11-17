@@ -294,18 +294,41 @@ struct LimitBars: View {
 struct NoticeBox<Keys: View>: View {
     enum Tone { case ok, waiting, bad }
     let tone: Tone
-    let title: String
+    var title: String = ""
     var text: String = ""
+    /// A sentence with an account address in it, instead of `title` and `text`: the address is blurred until the pointer is
+    /// on it (Blur addresses), like everywhere but the account rows.
+    var words: QCWords? = nil
+    /// Short lines under it, numbered.
+    var steps: [QCWords] = []
     @ViewBuilder let keys: Keys
     @Environment(\.face) private var face
 
     var body: some View {
         let c = tone == .ok ? face.ok : tone == .waiting ? face.caution : face.danger
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                LED(color: c, size: 7).alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
-                (Text(title).fontWeight(.semibold).foregroundColor(face.text) + Text(text.isEmpty ? "" : " " + text).foregroundColor(face.soft))
-                    .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+            if let words {
+                HStack(alignment: .top, spacing: 8) {
+                    LED(color: c, size: 7).padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 4) {
+                        QCSentence(words: words, size: 12, color: face.soft, strongColor: face.text)
+                            .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                        ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text("\(i + 1).").foregroundColor(face.muted).frame(width: 14, alignment: .trailing)
+                                QCSentence(words: step, size: 12, color: face.soft, strongColor: face.text)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .font(.system(size: 12))
+                        }
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    LED(color: c, size: 7).alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
+                    (Text(title).fontWeight(.semibold).foregroundColor(face.text) + Text(text.isEmpty ? "" : " " + text).foregroundColor(face.soft))
+                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                }
             }
             HStack(spacing: 6) { keys }.buttonStyle(.sentenceKey()).padding(.leading, 15)
         }
@@ -442,14 +465,13 @@ enum ForgetWords {
 }
 
 /// At the top of a profile's accounts, one notice at a time: a sign-in being waited for (Show Terminal, Stop), a switch
-/// that ended without the account wanted, because another one signed in or because 10 minutes passed (Try … again…,
-/// OK), or a sign-in again that worked (OK).
+/// that ended without the account wanted, each way with its own words (SwitchWords.ended; Try again as …, and Keep … or
+/// OK), or a sign-in again that worked (OK). Addresses in the notes are blurred until the pointer is on them.
 struct SwitchNotice: View {
     var waiting: SwitchGoal?
     var ended: SwitchEnded?
     /// The address a sign-in again just ended on: the same account.
     var signedAgain: String?
-    var profileName = ""
     var showTerminal: () -> Void = {}
     var drop: () -> Void = {}
     var retry: (SwitchGoal) -> Void = { _ in }
@@ -462,14 +484,19 @@ struct SwitchNotice: View {
                 Button("Stop", action: drop)
             }
         } else if let m = ended {
-            NoticeBox(tone: .bad,
-                      title: m.signedIn.map { "\($0) signed in, not \(m.goal.wantedEmail)." } ?? "No sign-in in 10 minutes.",
-                      text: m.signedIn.map { "The browser was signed in as someone else. \(profileName) is on \($0) now." }
-                        ?? "The account in use hasn't changed.") {
-                // named after the account the switch was for, so it doesn't read as the in-use account's own Sign in again…;
-                // a sign-in again that never came is just that again
-                Button(m.goal.again && m.signedIn == nil ? "Sign in again…" : "Try \(m.goal.wantedEmail) again…") { retry(m.goal) }
-                Button("OK", action: drop)
+            let words = SwitchWords.ended(m)
+            NoticeBox(tone: .bad, words: words.lead.strong + words.rest) {
+                // the same switch again, named after the account it was for, so it doesn't read as the in-use account's own
+                // Sign in again…; after a wrong account, Keep the one it is on now
+                let again = SwitchWords.retry(m)
+                Button { retry(m.goal) } label: {
+                    if let a = again.address { QCAddressKeyLabel(title: again.title, address: a) } else { Text(again.title + "…") }
+                }
+                if let keep = SwitchWords.keep(m) {
+                    Button(action: drop) { QCAddressKeyLabel(title: keep.title, address: keep.address) }
+                } else {
+                    Button("OK", action: drop)
+                }
             }
         } else if let signedAgain {
             NoticeBox(tone: .ok, title: "Signed in again as \(signedAgain).") {
@@ -535,7 +562,7 @@ struct ProfileContent<Name: View, Add: View>: View {
                   + (ClaudeFolder.isDefault(model.path) ? "Claude Code in Terminal and editors" : "Claude Code pointed at \(tilde(model.path))")
                   + " to the other account, sessions running now included; the Claude app keeps its own sign-in.") {
                 VStack(alignment: .leading, spacing: 8) {
-                    SwitchNotice(waiting: model.waiting, ended: model.ended, signedAgain: model.signedAgain, profileName: model.name,
+                    SwitchNotice(waiting: model.waiting, ended: model.ended, signedAgain: model.signedAgain,
                                  showTerminal: actions.showTerminal, drop: actions.drop, retry: actions.retry)
                     if model.folderSignedOut {
                         SignedOutBox(path: model.path, profileName: model.name, signing: model.folderSigning, busy: model.waiting != nil,
@@ -1239,14 +1266,19 @@ enum SettingsRender {
             var k = kim; k.signing = true
             tiles[0] = .init(id: "main", name: "Main", sub: "default · switching…", lamp: .waiting)
             view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [alex, k], waiting: goal, isDefault: true))
-        case "accounts-wrong":
-            // the browser signed in someone else: robin is in use now, alex went to standby
+        case "accounts-wrong", "accounts-wrong-also":
+            // the browser signed in someone else: robin is in use now, alex went to standby (and robin is also in use on Work)
             let robin = AccountEntry(id: "u4", email: "robin@example.net", plan: "Pro", inUse: true, level: nil)
             var a = alex; a.inUse = false; a.plan = nil; a.level = nil; a.lastSeen = now.addingTimeInterval(-30)
             tiles[0] = .init(id: "main", name: "Main", sub: "default · robin@example.net", lamp: .ok)
-            view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [robin, a, kim], ended: SwitchEnded(goal: goal, signedIn: "robin@example.net"), isDefault: true))
-        case "accounts-timedout":
-            view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [alex, kim], ended: SwitchEnded(goal: goal, signedIn: nil), isDefault: true))
+            let also: String? = page == "accounts-wrong-also" ? "Work" : nil
+            view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [robin, a, kim],
+                                        ended: SwitchEnded(goal: goal, reason: .wrongAccount(signedIn: "robin@example.net", alsoOn: also)), isDefault: true))
+        case "accounts-timedout", "accounts-declined", "accounts-unverified", "accounts-failed":
+            // no sign-in in 10 minutes; declined in the browser; signed in but not confirmed; Claude Code's login failed
+            let reason: SwitchEndReason = page == "accounts-declined" ? .declined : page == "accounts-unverified" ? .unverified
+                : page == "accounts-failed" ? .failed(.loginFailed(status: 1)) : .timedOut
+            view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [alex, kim], ended: SwitchEnded(goal: goal, reason: reason), isDefault: true))
         case "accounts-again":
             view = profile(ProfileModel(name: "Main", path: "~/.claude", entries: [alex, kim], signedAgain: "alex@example.com", isDefault: true))
         case "accounts-stopped":

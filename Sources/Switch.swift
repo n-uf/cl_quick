@@ -36,20 +36,36 @@ struct SwitchGoal: Equatable {
 }
 
 enum SwitchOutcome: Equatable {
-    /// The folder is on the account wanted.
+    /// The folder is on the account wanted (Claude Code confirmed it).
     case reached
-    /// The folder changed account, but to another one (the browser was signed in as someone else).
-    case other(email: String)
-    /// No sign-in came: ten minutes passed, or Claude Code's login ended without one (declined in the browser, failed, its
-    /// window closed).
-    case timedOut
+    /// It ended without the account wanted, and why.
+    case ended(SwitchEndReason)
 }
 
-/// A switch that ended without reaching the account wanted: another one signed in, or none did.
+/// Why a switch ended without reaching the account wanted. Each has its own note.
+enum SwitchEndReason: Equatable {
+    /// The folder changed account, but to another one (the browser was signed in as someone else): the address it is on now,
+    /// and the name of another profile that account is also in use on, if there is one.
+    case wrongAccount(signedIn: String, alsoOn: String?)
+    /// No sign-in came in ten minutes.
+    case timedOut
+    /// The person declined in the browser.
+    case declined
+    /// The login ended well, but Claude Code didn't confirm which account it is: the folder may have changed.
+    case unverified
+    /// Another sign-in (another profile's, or this one asked for again) ended it.
+    case replaced
+    /// Claude Code's login failed, ended on nobody, or lost its window.
+    case failed(ClaudeSignIn.Failure)
+}
+
+/// A switch that ended without reaching the account wanted.
 struct SwitchEnded: Equatable {
     var goal: SwitchGoal
-    /// The address that signed in instead; nil: no sign-in came.
-    var signedIn: String?
+    var reason: SwitchEndReason
+
+    /// The address that signed in instead, when another account did.
+    var signedIn: String? { if case .wrongAccount(let a, _) = reason { return a } else { return nil } }
 }
 
 final class AccountSwitcher {
@@ -197,16 +213,34 @@ final class AccountSwitcher {
         }
     }
 
-    /// A switch's sign-in ended, on today's notes: the account wanted (only when Claude Code confirmed it), another one, or
-    /// none (the timeout's note "the account in use hasn't changed", also for a login that ended without one, one that
-    /// Claude Code didn't confirm, and one ended by another profile's sign-in). Stop (`drop`) has already taken its note.
+    /// A switch's sign-in ended: the account wanted (only when Claude Code confirmed it), another one (and whether that one
+    /// is also in use on another profile), or none, each with its own note (SwitchWords.ended): no sign-in in 10 minutes,
+    /// declined in the browser, signed in but not confirmed, a login that failed, ended on nobody or lost its window, or one
+    /// ended by another sign-in. Stop (`drop`) has already taken its note.
     private func finished(_ goal: SwitchGoal, _ outcome: ClaudeSignIn.Outcome) {
         guard waiting[goal.profileID] == goal else { return }           // dropped, or begun again, meanwhile
         switch outcome {
         case .signedIn(let a): end(goal.profileID, goal, .reached, signedIn: a.email)
-        case .wrongAccount(let a, _): end(goal.profileID, goal, .other(email: a.email ?? ClaudeFolder.email(goal.folder) ?? ""))
-        case .timedOut, .declined, .failed, .unverified, .stopped: end(goal.profileID, goal, .timedOut)
+        case .wrongAccount(let a, _):
+            let email = a.email ?? ClaudeFolder.email(goal.folder) ?? ""
+            // the folder was read again before this: it is on the account that signed in
+            let uuid = ClaudeFolder.account(goal.folder).flatMap { $0.email.lowercased() == email.lowercased() ? $0.uuid : nil } ?? a.accountID ?? "email:" + email
+            let also = Self.profileAlsoUsing((uuid, email), besides: goal.profileID, profiles: ProfileStore.shared.profiles,
+                                             account: { ClaudeFolder.account($0.path) })
+            end(goal.profileID, goal, .ended(.wrongAccount(signedIn: email, alsoOn: also)))
+        case .timedOut: end(goal.profileID, goal, .ended(.timedOut))
+        case .declined: end(goal.profileID, goal, .ended(.declined))
+        case .unverified: end(goal.profileID, goal, .ended(.unverified))
+        case .stopped: end(goal.profileID, goal, .ended(.replaced))
+        case .failed(let f): end(goal.profileID, goal, .ended(.failed(f)))
         }
+    }
+
+    /// The name of another profile (not `besides`) whose folder is signed in to this account now, if one is: the account
+    /// the browser signed in is then in use there too (one account never makes two profiles).
+    static func profileAlsoUsing(_ account: (uuid: String, email: String), besides id: String, profiles: [Profile],
+                                 account of: (Profile) -> (uuid: String, email: String)?) -> String? {
+        AccountBook.profileUsing(account, among: profiles.filter { $0.id != id }.map { ($0.name, of($0)) })
     }
 
     /// Stops waiting for a profile's sign-in (and ends it: its `claude auth login` and its window), and dismisses a switch
@@ -239,10 +273,13 @@ final class AccountSwitcher {
 
     private func end(_ id: String, _ goal: SwitchGoal, _ outcome: SwitchOutcome, signedIn: String? = nil) {
         waiting[id] = nil
-        if outcome != .timedOut { ProfileStore.shared.signedIn(id) }       // a sign-in landed: an earlier failure is behind it
+        // a sign-in landed (the account wanted, or another one): an earlier failure is behind it
         switch outcome {
-        case .other(let email): ended[id] = SwitchEnded(goal: goal, signedIn: email)
-        case .timedOut: ended[id] = SwitchEnded(goal: goal, signedIn: nil)
+        case .reached, .ended(.wrongAccount): ProfileStore.shared.signedIn(id)
+        case .ended: break
+        }
+        switch outcome {
+        case .ended(let reason): ended[id] = SwitchEnded(goal: goal, reason: reason)
         case .reached:
             ended[id] = nil
             if goal.again { signedAgain[id] = signedIn ?? goal.wantedEmail }
@@ -262,6 +299,49 @@ final class AccountSwitcher {
         a.informativeText = why
         a.addButton(withTitle: "OK")
         a.runModal()
+    }
+}
+
+/// The words of a switch after it ended without the account wanted: a lead and the rest, in pieces so the addresses in them
+/// blur (QCWords), the same in the chat and in Settings. Each way it ended has its own: only a timeout says no sign-in came.
+enum SwitchWords {
+    static func ended(_ e: SwitchEnded) -> (lead: QCWords, rest: QCWords) {
+        let wanted = e.goal.wantedEmail
+        switch e.reason {
+        case .wrongAccount(let signedIn, let also):
+            // the browser was signed in as B, not A, and the profile is on B now (and B is in use elsewhere too, if it is)
+            let b: QCWords = signedIn.isEmpty ? .text("someone else") : .address(signedIn)
+            var rest = QCWords(" ") + QCWords.isOn(e.goal.profileName, address: signedIn.isEmpty ? nil : signedIn)
+            if let also, !signedIn.isEmpty { rest = rest + .text(" ") + .address(signedIn) + .text(" is also in use on \(also).") }
+            return (.text("The browser was signed in as ") + b + .text(", not ") + .address(wanted) + .text("."), rest)
+        case .timedOut: return (QCWords("No sign-in in 10 minutes."), QCWords(" The account in use hasn't changed."))
+        case .declined: return (QCWords("The sign-in was declined in the browser."), QCWords(" The account in use hasn't changed."))
+        case .unverified:
+            return (QCWords("Signed in, but Claude Code didn't confirm which account."), QCWords(" Check the account line in the menu."))
+        case .replaced: return (QCWords("Another sign-in started, so this one ended."), QCWords(" The account in use hasn't changed."))
+        case .failed(let f):
+            let w = SignInWords.failure(f, folder: e.goal.folder)
+            return (QCWords(w.lead), QCWords(" " + w.rest))
+        }
+    }
+
+    /// While the sign-in is open: what to do in the browser, in order.
+    static func steps(wanted: String) -> [QCWords] {
+        [.text("Finish the sign-in in the browser."),
+         .text("Before you press Authorize, check that “Logged in as” at the bottom of the page shows ") + .address(wanted) + .text("."),
+         .text("If it doesn't, use Switch account there.")]
+    }
+    static let foot = "cl_quick looks for it for 10 minutes."
+
+    /// The key that starts the same switch again: "Sign in again" when it was a sign-in again on the account in use and
+    /// nobody else signed in, else "Try again as <address wanted>" (the address blurred by whoever draws it).
+    static func retry(_ e: SwitchEnded) -> (title: String, address: String?) {
+        e.goal.again && e.signedIn == nil ? ("Sign in again", nil) : ("Try again as ", e.goal.wantedEmail)
+    }
+    /// The key that keeps what happened: "Keep <the address it is on>" after a wrong account, else nil (the caller's OK).
+    static func keep(_ e: SwitchEnded) -> (title: String, address: String)? {
+        guard let b = e.signedIn, !b.isEmpty else { return nil }
+        return ("Keep ", b)
     }
 }
 
