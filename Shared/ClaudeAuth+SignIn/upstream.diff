@@ -1,6 +1,6 @@
-diff --color -ruN a/Auth/Authenticator.swift b/Auth/Authenticator.swift
---- a/Auth/Authenticator.swift	2026-11-15 20:40:05
-+++ b/Auth/Authenticator.swift	2026-11-15 20:40:05
+diff -ruN a/Auth/Authenticator.swift b/Auth/Authenticator.swift
+--- a/Auth/Authenticator.swift	2026-11-17 15:28:28
++++ b/Auth/Authenticator.swift	2026-11-17 15:28:28
 @@ -1,15 +1,17 @@
  // ClaudeAuth · the authenticator: one folder's sign-in, behind one type. It answers which account the folder is signed in
 -// to (verified or guessed), reads its Keychain item, and starts a sign-in, a renew or a sign-out on it. Every tool it
@@ -86,10 +86,10 @@ diff --color -ruN a/Auth/Authenticator.swift b/Auth/Authenticator.swift
          return tools.openTerminal(script) ? .done : .failed
      }
  
-diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
+diff -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 --- a/Auth/ClaudeSignIn.swift	1969-12-31 16:00:00
-+++ b/Auth/ClaudeSignIn.swift	2026-11-15 20:40:05
-@@ -0,0 +1,519 @@
++++ b/Auth/ClaudeSignIn.swift	2026-11-17 15:28:28
+@@ -0,0 +1,595 @@
 +// ClaudeAuth · the sign-in: Claude Code's own `claude auth login` for a profile's ONE folder, opened in a Terminal window,
 +// followed until it ends one way or another, and its window closed after it. The person signs in in the browser; nothing
 +// here sees a password or a token.
@@ -118,6 +118,11 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +// - The window: a Terminal settings file (`.terminal`: the command, run inside the login shell with `exec`, and "close if the
 +//   shell exited cleanly"), opened like any document, which needs no permission to control Terminal. `.scripted` (Terminal's
 +//   AppleScript, which asks for that permission) is there for a Mac where the settings file doesn't work.
++// - Terminal keeps the profile of every settings file it opens in its preferences ("Window Settings"), named after the
++//   FILE's base name ("<title> sign-in", then "<title> sign-in 1", 2…), never the plist's `name`. One leftover per sign-in,
++//   each with a dead command. `TerminalProfiles` removes the ones whose command runs in this app's own work folder (nothing
++//   else can match), never a profile Terminal names as its default or startup one: at every start, and after the window
++//   is gone at every end.
 +//
 +// No app's screens, words or global state: the folder, the account wanted, the tools, the verified word, the app's work
 +// folder and the window's title are parameters. One queue for every sign-in of the process (the verified word is asked off
@@ -205,14 +210,15 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +    private let poll: TimeInterval
 +    private let work: URL
 +    private let startGrace: TimeInterval
-+    /// This sign-in's own mark, in its window's profile name: a profile Terminal kept from an earlier sign-in never has
-+    /// this name, so it can't stand for this one's (nor run an older command).
-+    let runID = String(format: "%08x", UInt32.random(in: 0...UInt32.max))
++    private let terminalProfiles: TerminalProfiles
++    private let lateSweep: TimeInterval
 +
 +    // the sign-in's files, all in the app's own work folder (owner only). The script is named after the folder's lock key:
 +    // its shell's command line then says which folder its `claude auth login` signs in, to any app (`isLogin`).
 +    var scriptURL: URL { work.appendingPathComponent("sign-in-\(Self.lockKey(folder)).command") }
-+    var settingsURL: URL { work.appendingPathComponent("sign-in.terminal") }
++    /// The settings file is named after the app ("<title> sign-in.terminal"): Terminal keeps the profile under the file's
++    /// name, so a leftover is recognisable in its list.
++    var settingsURL: URL { work.appendingPathComponent(profileName + ".terminal") }
 +    var pidURL: URL { work.appendingPathComponent("sign-in.pid") }
 +    var statusURL: URL { work.appendingPathComponent("sign-in.status") }
 +    var declinedURL: URL { work.appendingPathComponent("sign-in.declined") }
@@ -222,15 +228,19 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +    /// (by id, or by address and organisation), nil for a brand-new folder. `claude`: Claude Code's program. `work`: the app's
 +    /// own folder for the sign-in's files (never the Claude Code folder). `title`: the window's name. `shown`: the folder as
 +    /// the script's first line names it. `startGrace`: how long the script may take to start once the window was asked for
-+    /// (then `failed(.notOpened)`). `locks`, `poll` (how often the folder is looked at) and `confirmTries` (how often the
-+    /// word is asked after the login ended) are parameters for the checks.
++    /// (then `failed(.notOpened)`). `title`: the app's name; the window's settings file (and so Terminal's profile) is
++    /// "<title> sign-in". `terminalProfiles`: how Terminal's kept profiles are looked at and removed (the real preferences
++    /// unless an app or a check gives its own); `lateSweep`: how long after a sign-in ended its profiles are swept once more,
++    /// for a window that closed itself after it. `locks`, `poll` (how often the folder is looked at) and `confirmTries` (how
++    /// often the word is asked after the login ended) are parameters for the checks.
 +    public init(folder: AuthFolder, wanted: SignedInAccount?, timeout: TimeInterval = 600, tools: AuthTools, claude: String,
-+                confirm: @escaping Confirm, work: URL, window: Window = .settingsFile, title: String = "Claude Code sign-in",
-+                shown: String? = nil, startGrace: TimeInterval = 25, locks: URL = ClaudeSignIn.sharedLocks, poll: TimeInterval = 2,
-+                confirmTries: Int = 3) {
++                confirm: @escaping Confirm, work: URL, window: Window = .settingsFile, title: String = "Claude Code",
++                shown: String? = nil, startGrace: TimeInterval = 25, terminalProfiles: TerminalProfiles = .system,
++                lateSweep: TimeInterval = 6, locks: URL = ClaudeSignIn.sharedLocks, poll: TimeInterval = 2, confirmTries: Int = 3) {
 +        self.folder = folder; self.wanted = wanted; self.timeout = timeout
 +        self.claude = claude; self.confirm = confirm; self.work = work; self.window = window; self.title = title
 +        self.shown = shown; self.startGrace = startGrace; self.locks = locks; self.poll = poll; self.confirmTries = confirmTries
++        self.terminalProfiles = terminalProfiles; self.lateSweep = lateSweep
 +        auth = Authenticator(folder, tools: tools)
 +    }
 +
@@ -278,7 +288,7 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +        switch phase {
 +        case .idle: return
 +        case .running: finish(outcome)
-+        case .ended: endScript(shell: true)
++        case .ended: endScript(shell: true); sweepProfiles(late: true)       // a window left open to be read, now gone
 +        }
 +    }
 +
@@ -290,6 +300,7 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +        if let earlier = Self.current, earlier !== self { earlier.end(.stopped) }
 +        Self.current = self
 +        endScript(shell: true)
++        sweepProfiles()                                                    // what earlier runs left in Terminal's preferences
 +        guard auth.tools.mayLaunch("login", folder) else { return finish(.failed(.folderNotReady)) }
 +        guard takeLock() else { return finish(.failed(.locked)) }
 +        switch loginRuns() {
@@ -418,6 +429,9 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +        }
 +        releaseLock()
 +        for u in [statusURL, declinedURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
++        // Terminal's kept profile goes once the window is gone; a window left open to be read keeps it until it is closed
++        // (a stop, the next start)
++        if !windowIsOpen { sweepProfiles(late: true) }
 +        let done = onEnd
 +        DispatchQueue.main.async { done(outcome) }
 +    }
@@ -521,13 +535,14 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +    /// What the window runs: the script, in place of the login shell Terminal starts (so its clean end is the shell's).
 +    var command: String { "exec " + SignInScript.q(scriptURL.path) }
 +
-+    /// The window's profile name: the app's title and this sign-in's own mark (`runID`).
-+    public var profileName: String { "\(title) \(runID)" }
++    /// The settings file's base name, "<title> sign-in". Terminal names the profile it keeps after the FILE's base name (not
++    /// the plist's `name`), adding " 1", " 2"… to a name it already holds.
++    public var profileName: String { title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + " sign-in" }
 +
 +    /// The Terminal settings file: the command run inside the login shell, and the window closed when the shell exits cleanly
 +    /// (Terminal's `shellExitAction` 1, "Close if the shell exited cleanly"; `RunCommandAsShell` false is "Run inside shell").
-+    /// Its name is this sign-in's own (`profileName`): if Terminal keeps the profile it opens, no later sign-in finds one of
-+    /// its name with an older command in it.
++    /// Terminal opens the command this file holds each time (a profile it kept from an earlier file never runs an older
++    /// command), and keeps the profile in its preferences: `sweepProfiles` removes it.
 +    func settings() -> Data? {
 +        let plist: [String: Any] = ["type": "Window Settings", "name": profileName, "ProfileCurrentVersion": 2.09,
 +                                    "CommandString": command, "RunCommandAsShell": false, "shellExitAction": 1]
@@ -593,6 +608,23 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +        }
 +    }
 +
++    /// Terminal's kept profiles whose command runs in this app's work folder go (`TerminalProfiles`). `late`: once more after
++    /// `lateSweep` seconds, for a window that closed itself after the script ended (not while the app's next sign-in runs: its
++    /// profile is in use). Only for the settings-file window: `.scripted` leaves no profile.
++    private func sweepProfiles(late: Bool = false) {
++        guard window == .settingsFile else { return }
++        let work = self.work.path, profiles = terminalProfiles
++        profiles.remove(commandsRunningIn: work)
++        guard late, lateSweep > 0 else { return }
++        Self.queue.asyncAfter(deadline: .now() + lateSweep) {
++            if Self.current?.windowIsOpen == true { return }
++            profiles.remove(commandsRunningIn: work)
++        }
++    }
++
++    /// The sign-in is under way, or its script still runs in a window left open to be read: its profile is in use.
++    private var windowIsOpen: Bool { phase == .running || (scriptPid().map { ProcessTable.runs($0) } ?? false) }
++
 +    /// The `.scripted` window, once its shell has ended (a settings-file window closes by itself).
 +    private func closeWindow() {
 +        guard window == .scripted, let id = windowID else { return }
@@ -609,9 +641,53 @@ diff --color -ruN a/Auth/ClaudeSignIn.swift b/Auth/ClaudeSignIn.swift
 +        return out
 +    }
 +}
-diff --color -ruN a/Auth/Keychain.swift b/Auth/Keychain.swift
---- a/Auth/Keychain.swift	2026-11-15 20:40:05
-+++ b/Auth/Keychain.swift	2026-11-15 20:40:05
++
++/// Terminal's kept window profiles, in its preferences (`com.apple.Terminal`: "Window Settings", a dictionary of profiles by
++/// name; "Default Window Settings" and "Startup Window Settings" name the profiles Terminal opens by default and at launch).
++/// Terminal keeps the profile of every settings file it opens, under the file's base name, with the file's command: one
++/// leftover per sign-in. `remove(commandsRunningIn:)` takes out the ones whose command runs in a folder only the app's
++/// sign-ins use, and nothing else. Read and write are the only parts that touch the preferences, so an app or a check can
++/// hand in its own (a check must never write this Mac's Terminal preferences).
++public struct TerminalProfiles {
++    /// The profiles by name, and the names Terminal's default and startup settings point at; nil when unreadable.
++    public var read: () -> (profiles: [String: Any], inUse: Set<String>)?
++    /// Sets "Window Settings" to these profiles.
++    public var write: ([String: Any]) -> Void
++
++    public init(read: @escaping () -> (profiles: [String: Any], inUse: Set<String>)?, write: @escaping ([String: Any]) -> Void) {
++        self.read = read; self.write = write
++    }
++
++    /// Removes every profile whose `CommandString` contains `folder` followed by "/" (the folder's own files: how the command
++    /// names its script, quoted or not), unless Terminal's default or startup profile is that one. Nothing is written when
++    /// none matches. Returns the names removed.
++    @discardableResult
++    public func remove(commandsRunningIn folder: String) -> [String] {
++        guard !folder.isEmpty, let now = read() else { return [] }
++        let plain = folder + "/", quoted = String(SignInScript.q(folder).dropLast()) + "/"
++        let gone = now.profiles.filter { name, profile in
++            guard !now.inUse.contains(name), let command = (profile as? [String: Any])?["CommandString"] as? String else { return false }
++            return command.contains(plain) || command.contains(quoted)
++        }.map(\.key).sorted()
++        guard !gone.isEmpty else { return [] }
++        var kept = now.profiles
++        for name in gone { kept[name] = nil }
++        write(kept)
++        return gone
++    }
++
++    /// The real preferences, through the preferences system (never the file).
++    public static let system = TerminalProfiles(
++        read: {
++            guard let d = UserDefaults(suiteName: "com.apple.Terminal"), let all = d.dictionary(forKey: "Window Settings") else { return nil }
++            let inUse = ["Default Window Settings", "Startup Window Settings"].compactMap { d.string(forKey: $0) }
++            return (all, Set(inUse))
++        },
++        write: { UserDefaults(suiteName: "com.apple.Terminal")?.set($0, forKey: "Window Settings") })
++}
+diff -ruN a/Auth/Keychain.swift b/Auth/Keychain.swift
+--- a/Auth/Keychain.swift	2026-11-17 15:28:28
++++ b/Auth/Keychain.swift	2026-11-17 15:28:28
 @@ -4,10 +4,30 @@
  // saves a renewed sign-in). Read only: never written, copied, moved or deleted here (sign-out is Claude Code's own
  // `claude auth logout`). The text read stays in memory: only Login's named fields come out (ProfileCore's Login.parse),
@@ -643,9 +719,9 @@ diff --color -ruN a/Auth/Keychain.swift b/Auth/Keychain.swift
  
  public enum KeychainSignIn {
      /// What runs `security`: arguments in, exit status and output out. The checks pass a fake (no real Keychain).
-diff --color -ruN a/Auth/README.md b/Auth/README.md
---- a/Auth/README.md	2026-11-15 20:40:05
-+++ b/Auth/README.md	2026-11-15 20:40:05
+diff -ruN a/Auth/README.md b/Auth/README.md
+--- a/Auth/README.md	2026-11-17 15:28:28
++++ b/Auth/README.md	2026-11-17 15:28:28
 @@ -13,10 +13,12 @@
  | --- | --- |
  | `Folder.swift` | `AuthFolder`: the folder's path, default or not (`~/.claude` however spelled), its record (`.claude.json`), its Keychain item names (`Claude Code-credentials`, or `-` and 8 hex of the path's SHA-256), the environment a `claude` run on it gets (no key or other provider; `CLAUDE_CONFIG_DIR` set, or unset for the default folder), and `isReady` (there as a plain folder; never made) |
@@ -673,9 +749,9 @@ diff --color -ruN a/Auth/README.md b/Auth/README.md
  `SignedInAccount.process(_:)` takes the `initialize` account, `SignedInAccount.record(_:)` the oauthAccount block
  (cl_quick passes its own `FolderFiles` read through `AuthTools.readRecord`), `FolderSignIn.answer` lets the process's
  word win over the record (`differs` when they disagree), its sign-in script is `SignInScript.lines(..., removesItself:
-diff --color -ruN a/Auth/Runs.swift b/Auth/Runs.swift
---- a/Auth/Runs.swift	2026-11-15 20:40:05
-+++ b/Auth/Runs.swift	2026-11-15 20:40:05
+diff -ruN a/Auth/Runs.swift b/Auth/Runs.swift
+--- a/Auth/Runs.swift	2026-11-17 15:28:28
++++ b/Auth/Runs.swift	2026-11-17 15:28:28
 @@ -60,10 +60,18 @@
      /// in use, where the record doesn't change and so says nothing. `removesItself`: the script deletes its own file
      /// first (it holds the address; zsh keeps reading the file it opened).
@@ -751,9 +827,9 @@ diff --color -ruN a/Auth/Runs.swift b/Auth/Runs.swift
      }
  
      public static let doneWords = "Done. The new sign-in is picked up by itself within seconds."
-diff --color -ruN a/Auth/StoredSignIn.swift b/Auth/StoredSignIn.swift
+diff -ruN a/Auth/StoredSignIn.swift b/Auth/StoredSignIn.swift
 --- a/Auth/StoredSignIn.swift	1969-12-31 16:00:00
-+++ b/Auth/StoredSignIn.swift	2026-11-15 20:40:05
++++ b/Auth/StoredSignIn.swift	2026-11-17 15:28:28
 @@ -0,0 +1,13 @@
 +// ClaudeAuth · the stored sign-in: where an app reads the folder's sign-in itself, behind one protocol. ClaudeAuth never
 +// names the store here: cl_audit passes its Keychain reader (Keychain.swift), cl_quick passes none
@@ -768,9 +844,9 @@ diff --color -ruN a/Auth/StoredSignIn.swift b/Auth/StoredSignIn.swift
 +public protocol StoredSignInReader {
 +    func read(_ folder: AuthFolder, user: String) -> Login
 +}
-diff --color -ruN a/Checks/auth/main.swift b/Checks/auth/main.swift
---- a/Checks/auth/main.swift	2026-11-15 20:40:05
-+++ b/Checks/auth/main.swift	2026-11-15 20:40:05
+diff -ruN a/Checks/auth/main.swift b/Checks/auth/main.swift
+--- a/Checks/auth/main.swift	2026-11-17 15:28:28
++++ b/Checks/auth/main.swift	2026-11-17 15:28:28
 @@ -34,7 +34,7 @@
  }
  /// The tools every section starts from: a Keychain tool, a runner and a Terminal that stop the run if called, so nothing
@@ -808,9 +884,9 @@ diff --color -ruN a/Checks/auth/main.swift b/Checks/auth/main.swift
          }
      }
      let core = repo.appendingPathComponent("Core")
-diff --color -ruN a/Run/ProcessTable.swift b/Run/ProcessTable.swift
+diff -ruN a/Run/ProcessTable.swift b/Run/ProcessTable.swift
 --- a/Run/ProcessTable.swift	1969-12-31 16:00:00
-+++ b/Run/ProcessTable.swift	2026-11-15 20:40:05
++++ b/Run/ProcessTable.swift	2026-11-17 15:28:28
 @@ -0,0 +1,204 @@
 +// Runs · the process table: the processes running on this Mac as the kernel lists them (proc_listallpids, KERN_PROC,
 +// KERN_PROCARGS2, proc_name, proc_pidpath), with no `ps` or `pgrep`, so nothing waits on a helper. Of a process's

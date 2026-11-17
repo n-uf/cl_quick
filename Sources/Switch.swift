@@ -89,7 +89,7 @@ final class AccountSwitcher {
         let f = AuthFolder(path: expand(folder), isDefault: ClaudeFolder.isDefault(folder))
         return ClaudeSignIn(folder: f, wanted: wanted, tools: .system, claude: claude,
                             confirm: SignInWord.confirm(claude: claude, workFolder: Files.work.appendingPathComponent("sign-in").path),
-                            work: Files.folder.appendingPathComponent("sign-in"), shown: tilde(f.path))
+                            work: Files.folder.appendingPathComponent("sign-in"), title: "cl_quick", shown: tilde(f.path))
     }
 
     /// "Switch to …": asks first, in plain words, then opens Claude Code's sign-in and watches the folder.

@@ -37,10 +37,56 @@ for d in [home, zdot] { try? fm.createDirectory(at: d, withIntermediateDirectori
 func uuid(_ n: Int) -> String { "00000000-0000-4000-8000-" + String(format: "%012d", n) }
 func pidAlive(_ pid: pid_t) -> Bool { pid > 0 && kill(pid, 0) == 0 }
 
+// ── the stand-in Terminal preferences ──────────────────────────────────────────────────────────────
+/// What Terminal keeps in its preferences ("Window Settings", and the names its default and startup settings point at), in
+/// memory: this Mac's Terminal preferences are never read or written. Like Terminal, `keep` stores the profile of a settings
+/// file it opens under the FILE's base name (not the plist's `name`), " 1", " 2"… added to a name it already holds.
+final class FakePrefs {
+    private let lock = NSLock()
+    private var profiles: [String: Any] = [:]
+    private var inUse: Set<String> = []
+    private(set) var reads = 0, writes = 0
+    var readable = true
+
+    var tool: TerminalProfiles {
+        TerminalProfiles(read: { [self] in
+            lock.lock(); defer { lock.unlock() }
+            reads += 1
+            return readable ? (profiles, inUse) : nil
+        }, write: { [self] in
+            lock.lock(); defer { lock.unlock() }
+            writes += 1
+            profiles = $0
+        })
+    }
+    func put(_ name: String, command: String, inUse use: Bool = false) {
+        lock.lock(); defer { lock.unlock() }
+        profiles[name] = ["type": "Window Settings", "name": name, "CommandString": command]
+        if use { inUse.insert(name) }
+    }
+    func keep(file: URL, plist: [String: Any]) {
+        lock.lock(); defer { lock.unlock() }
+        let base = file.deletingPathExtension().lastPathComponent
+        var name = base, n = 0
+        while profiles[name] != nil { n += 1; name = "\(base) \(n)" }
+        profiles[name] = plist
+    }
+    var names: [String] { lock.lock(); defer { lock.unlock() }; return profiles.keys.sorted() }
+    func command(_ name: String) -> String? { lock.lock(); defer { lock.unlock() }; return (profiles[name] as? [String: Any])?["CommandString"] as? String }
+    /// The profiles whose command runs in a work folder, but for the ones Terminal's default or startup settings name.
+    func left(in work: URL) -> [String] {
+        lock.lock(); let pinned = inUse; lock.unlock()
+        return names.filter { !pinned.contains($0) && command($0)?.contains(work.path + "/") == true }
+    }
+    func reset() { lock.lock(); profiles = [:]; inUse = []; reads = 0; writes = 0; readable = true; lock.unlock() }
+}
+let prefs = FakePrefs()
+
 // ── the stand-in Terminal ──────────────────────────────────────────────────────────────────────────
 /// Opens a sign-in's window: reads the settings file Terminal would get and runs its command the way Terminal's login shell
 /// runs a command inside it (`/bin/sh -c`); its input stays open, like a window nobody types in. The shell's exit status is
-/// what Terminal would close the window on ("Close if the shell exited cleanly": 0).
+/// what Terminal would close the window on ("Close if the shell exited cleanly": 0). It keeps the profile in `prefs`, as
+/// Terminal does.
 final class FakeTerminal {
     private let lock = NSLock()
     private(set) var opened: [URL] = []
@@ -55,6 +101,9 @@ final class FakeTerminal {
     func open(_ url: URL) -> Bool {
         lock.lock(); defer { lock.unlock() }
         opened.append(url)
+        if let d = try? Data(contentsOf: url), let p = (try? PropertyListSerialization.propertyList(from: d, format: nil)) as? [String: Any] {
+            prefs.keep(file: url, plist: p)
+        }
         if neverStarts { return true }
         guard let d = try? Data(contentsOf: url),
               let p = (try? PropertyListSerialization.propertyList(from: d, format: nil)) as? [String: Any],
@@ -110,7 +159,8 @@ final class Case {
     func start(wanted: SignedInAccount?, timeout: TimeInterval = 20, startGrace: TimeInterval = 10,
                confirm: @escaping ClaudeSignIn.Confirm = { _ in nil }) -> ClaudeSignIn {
         signIn = ClaudeSignIn(folder: authFolder, wanted: wanted, timeout: timeout, tools: tools(), claude: claude, confirm: confirm,
-                              work: work, title: "Sample sign-in", startGrace: startGrace, locks: locks, poll: 0.2)
+                              work: work, title: "Sample app", startGrace: startGrace, terminalProfiles: prefs.tool, lateSweep: 0.3,
+                              locks: locks, poll: 0.2)
         signIn.start(onState: { [weak self] in self?.states.append($0) }, onEnd: { [weak self] in self?.outcome = $0 })
         return signIn
     }
@@ -147,20 +197,34 @@ do {
     // the app's work folder already there, open to others: it is made owner only
     try? fm.createDirectory(at: base.appendingPathComponent("work"), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
     let c = Case("window", login: ["login": "hang"])
+    // Terminal's preferences hold what earlier sign-ins left (a stale command each), and profiles that aren't this app's
+    let workPath = c.work.path
+    prefs.reset()
+    prefs.put("Sample app sign-in", command: "exec '\(workPath)/sign-in-aaaaaaaa.command'")
+    prefs.put("Sample app sign-in 1", command: "exec '\(workPath)/sign-in-bbbbbbbb.command'")
+    prefs.put("Basic", command: "/bin/zsh -l")
+    prefs.put("Other app sign-in", command: "exec '\(base.path)/other-work/sign-in-cccccccc.command'")
+    prefs.put("Lookalike", command: "exec '\(workPath)-2/sign-in-dddddddd.command'")
+    prefs.put("Pinned", command: "exec '\(workPath)/sign-in-eeeeeeee.command'", inUse: true)
     let s = c.start(wanted: SignedInAccount(email: "o'neil@example.com", origin: .record))
     spin(until: { c.states.contains(.waitingForBrowser) })
     let p = c.terminal.settings
+    check("profiles: the start swept the leftovers of earlier sign-ins (this app's work folder, never Terminal's default profile)",
+          prefs.names == ["Basic", "Lookalike", "Other app sign-in", "Pinned", "Sample app sign-in"], "\(prefs.names)")
+    check("profiles: …Terminal kept this sign-in's own profile, named after the settings file", prefs.command("Sample app sign-in")?.contains(workPath + "/sign-in-") == true
+          && prefs.command("Sample app sign-in")?.contains("aaaaaaaa") == false, "\(String(describing: prefs.command("Sample app sign-in")))")
     check("window: a Terminal settings file is opened (no AppleScript)", c.terminal.opened.last?.pathExtension == "terminal", "\(c.terminal.opened)")
+    check("window: the file is named after the app (\"<title> sign-in.terminal\")", c.terminal.opened.last?.lastPathComponent == "Sample app sign-in.terminal", "\(c.terminal.opened)")
     check("window: Window Settings, closed when the shell exits cleanly (shellExitAction 1), run inside the shell",
           p["type"] as? String == "Window Settings" && p["shellExitAction"] as? Int == 1 && p["RunCommandAsShell"] as? Bool == false, "\(p)")
     let script = c.work.appendingPathComponent("sign-in-\(ClaudeSignIn.lockKey(c.authFolder)).command")
     check("window: its command execs the script (named after the folder's lock key) in place of the login shell",
           p["CommandString"] as? String == "exec '\(script.path)'", "\(String(describing: p["CommandString"]))")
     let name = p["name"] as? String ?? ""
-    check("window: its profile name is the app's title and this sign-in's own mark (never an earlier one's)",
-          name.hasPrefix("Sample sign-in ") && name.count == "Sample sign-in ".count + 8 && name == s.profileName
-          && ClaudeSignIn(folder: c.authFolder, wanted: nil, tools: c.tools(), claude: claude, confirm: { _ in nil }, work: c.work,
-                          title: "Sample sign-in").profileName != name, name)
+    check("window: the plist's name is the file's base name (Terminal names the profile after the file)",
+          name == "Sample app sign-in" && name == s.profileName && c.terminal.opened.last?.deletingPathExtension().lastPathComponent == name, name)
+    check("window: a title with a slash or colon makes a plain file name", ClaudeSignIn(folder: c.authFolder, wanted: nil, tools: c.tools(), claude: claude,
+          confirm: { _ in nil }, work: c.work, title: "A/B: app", terminalProfiles: prefs.tool).profileName == "A-B- app sign-in")
     check("window: states opening, then waiting for the browser", c.states == [.opening, .waitingForBrowser], "\(c.states)")
     let login = c.waitLogin()
     let args = (try? String(contentsOfFile: c.conf.path + ".args", encoding: .utf8)) ?? ""
@@ -184,6 +248,9 @@ do {
     check("stop: the outcome is stopped", c.waitEnd() == .stopped, "\(String(describing: c.outcome))")
     check("stop: the claude auth login in the window is ended", spin(until: { !pidAlive(login) }, max: 5), "pid \(login)")
     check("stop: the window's shell ends cleanly (its window closes)", c.shellEnded() == 0)
+    check("profiles: the stop took this sign-in's profile; the others stay (Terminal's default one too)",
+          spin(until: { prefs.names == ["Basic", "Lookalike", "Other app sign-in", "Pinned"] }, max: 3), "\(prefs.names)")
+    check("profiles: …nothing but those removals was written (one write at the start, one at the stop)", prefs.writes == 2, "\(prefs.writes)")
     let left = (try? fm.contentsOfDirectory(atPath: c.work.path)) ?? []
     check("stop: nothing left in the work folder", left.isEmpty, "\(left)")
     let lock = open(locks.appendingPathComponent("signin-\(AuthFolder.sha8(c.folder.resolvingSymlinksInPath().path)).lock").path, O_RDWR)
@@ -202,6 +269,7 @@ do {
               && a.source == .verified, "\(a)")
     } else { check("signed in (verified)", false, "\(String(describing: o))") }
     check("signed in: the window's shell ended cleanly by itself (its window closes)", c.shellEnded() == 0)
+    check("signed in: Terminal's kept profile for it is gone", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
     c.cleanUp()
 }
 do {
@@ -288,14 +356,17 @@ do {
     check("Terminal never started the script: failed, not opened", c.waitEnd() == .failed(.notOpened), "\(String(describing: c.outcome))")
     let left = ((try? fm.contentsOfDirectory(atPath: c.work.path)) ?? []).filter { $0.hasSuffix(".command") }
     check("…and its script is gone (a late Terminal finds nothing to run)", left.isEmpty, "\(left)")
+    check("…and the profile Terminal kept for the window it never ran is gone too", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
 }
 do {
     let c = Case("quit", login: ["login": "hang"])
     c.start(wanted: wantedID(uuid(1)))
     let login = c.waitLogin()
     spin(until: { fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.pid").path) }, max: 5)
+    check("quit: Terminal holds the window's profile while it is open", prefs.left(in: c.work).count == 1, "\(prefs.names)")
     c.signIn.stopNow()
     check("quit mid-sign-in (stopNow): the login is ended before it returns", !pidAlive(login))
+    check("quit: …and Terminal's kept profile is gone before it returns too", prefs.left(in: c.work).isEmpty, "\(prefs.names)")
     check("…and the window's shell ends cleanly", c.shellEnded(3) == 0)
     c.cleanUp()
 }
@@ -322,6 +393,7 @@ do {
         check("wrong account by id: another id signed in", a.accountID == uuid(2) && w.accountID == uuid(1), "\(a) \(w)")
     } else { check("wrong account by id", false, "\(String(describing: c.outcome))") }
     check("wrong account: the window's shell ended cleanly (its window closes)", c.shellEnded() == 0)
+    check("wrong account: Terminal's kept profile is gone", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
     c.cleanUp()
 }
 do {
@@ -348,8 +420,10 @@ do {
     check("declined: Claude Code's refusal in the window is seen", c.waitEnd() == .declined, "\(String(describing: c.outcome))")
     spin(0.5)
     check("declined: the window stays open to be read", c.shellRunning)
+    check("declined: …and its profile stays with it (nothing is taken from an open window)", prefs.left(in: c.work).count == 1, "\(prefs.names)")
     c.signIn.stop()
     check("declined: stop then closes it (a clean end)", c.shellEnded() == 0)
+    check("declined: …and Terminal's kept profile goes with the closed window", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
     c.cleanUp()
 }
 do {
@@ -374,6 +448,8 @@ do {
     n.start(wanted: nil)
     spin(until: { !held.isRunning }, max: 8)
     check("failed: the next sign-in's start closes it (a clean end)", !held.isRunning && held.terminationStatus == 0)
+    check("failed: …and its profile goes at that start (the next one's own is the only one left)",
+          spin(until: { prefs.left(in: n.work).count == 1 }, max: 8) && prefs.names.contains("Sample app sign-in") && !prefs.names.contains("Sample app sign-in 1"), "\(prefs.names)")
     n.signIn.stop(); n.waitEnd()
     c.cleanUp(); n.cleanUp()
 }
@@ -384,6 +460,7 @@ do {
     check("timed out: nothing came within the timeout", c.waitEnd() == .timedOut, "\(String(describing: c.outcome))")
     check("timed out: the login is ended", spin(until: { !pidAlive(login) }, max: 5))
     check("timed out: the window's shell ended cleanly (its window closes)", c.shellEnded() == 0)
+    check("timed out: Terminal's kept profile is gone", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
     c.cleanUp()
 }
 do {
@@ -398,6 +475,52 @@ do {
     check("…the hung-up login is gone, and no status was written", !pidAlive(login)
           && !fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.status").path))
     c.cleanUp()
+}
+
+// ── Terminal's kept profiles: when they are swept, and what is never touched ─────────────────────────────
+do {
+    // the tool alone: only commands in the folder, quoted or not; never the default or startup profile; no write for nothing
+    let t = FakePrefs()
+    let dir = "/sample/app's work", quoted = SignInScript.q(dir + "/sign-in-12345678.command")
+    t.put("mine", command: "exec \(quoted)")
+    t.put("mine plain", command: "exec \(dir)/sign-in-12345678.command")
+    t.put("mine startup", command: "exec \(quoted)", inUse: true)
+    t.put("other", command: "exec '/sample/other/sign-in-12345678.command'")
+    t.put("sibling", command: "exec '\(dir)-2/sign-in-12345678.command'")
+    t.put("no command", command: "")
+    let gone = t.tool.remove(commandsRunningIn: dir)
+    check("profiles tool: removes only the profiles whose command runs in the folder (quoted with an apostrophe, or plain)",
+          gone == ["mine", "mine plain"] && t.names == ["mine startup", "no command", "other", "sibling"], "\(gone) \(t.names)")
+    check("profiles tool: a default or startup profile stays, though its command matches", t.names.contains("mine startup"))
+    check("profiles tool: one write; a second run finds nothing and writes nothing", t.tool.remove(commandsRunningIn: dir).isEmpty && t.writes == 1, "\(t.writes)")
+    check("profiles tool: an empty folder matches nothing", t.tool.remove(commandsRunningIn: "").isEmpty && t.writes == 1)
+    t.readable = false
+    check("profiles tool: preferences that can't be read: nothing removed, nothing written", t.tool.remove(commandsRunningIn: "/sample") == [] && t.writes == 1)
+}
+do {
+    // a sign-in sweeps at its start and at each end; unreadable preferences never stop one
+    prefs.reset()
+    let c = Case("sweeps", login: ["login": "hang"])
+    c.start(wanted: wantedID(uuid(1)))
+    spin(until: { c.states.contains(.waitingForBrowser) })
+    check("profiles: swept at the start", prefs.reads >= 1, "\(prefs.reads)")
+    let atStart = prefs.reads
+    c.signIn.stop(); c.waitEnd()
+    check("profiles: swept at the end (stopped), and once more after the window had closed itself", spin(until: { prefs.reads >= atStart + 2 }, max: 4), "\(prefs.reads) \(atStart)")
+    c.cleanUp()
+    // a refused start (the folder isn't there) sweeps at its start and at its end too
+    prefs.reset()
+    let m = Case("sweeps-missing", login: ["login": "ok"], make: false)
+    m.start(wanted: nil)
+    check("profiles: a start that is refused is swept at its start and at its end", m.waitEnd() == .failed(.folderNotReady) && prefs.reads >= 2, "\(prefs.reads)")
+    // unreadable preferences
+    prefs.reset(); prefs.readable = false
+    let u = Case("sweeps-unreadable", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
+    u.start(wanted: wantedID(uuid(1)), confirm: said("ann@example.com"))
+    if case .signedIn? = u.waitEnd() { check("profiles: Terminal's preferences unreadable: the sign-in goes on, nothing written", prefs.writes == 0, "\(prefs.writes)") }
+    else { check("profiles: unreadable preferences", false, "\(String(describing: u.outcome))") }
+    u.cleanUp()
+    prefs.reset()
 }
 
 // ── one sign-in per app, and the two guards ──────────────────────────────────────────────────────────
@@ -545,7 +668,8 @@ do {
     var guarded = 0
     let g = Case("guarded", login: ["login": "ok"])
     var t = g.tools(); t.mayLaunch = { what, _ in guarded += what == "login" ? 1 : 0; return false }
-    let s = ClaudeSignIn(folder: g.authFolder, wanted: nil, tools: t, claude: claude, confirm: { _ in nil }, work: g.work, locks: locks, poll: 0.2)
+    let s = ClaudeSignIn(folder: g.authFolder, wanted: nil, tools: t, claude: claude, confirm: { _ in nil }, work: g.work,
+                         terminalProfiles: prefs.tool, lateSweep: 0.3, locks: locks, poll: 0.2)
     s.start { g.outcome = $0 }
     check("the app's guard says no (cl_audit's FolderGuard): refused", g.waitEnd() == .failed(.folderNotReady) && guarded == 1 && g.terminal.count == 0)
 }
@@ -584,7 +708,7 @@ do {
         t.mayLaunch = { _, f in f.isReady }
         return ClaudeSignIn(folder: AuthFolder(path: folder, isDefault: false, home: home.path), wanted: wanted, timeout: 3, tools: t, claude: cl,
                             confirm: SignInWord.confirm(claude: cl, workFolder: base.appendingPathComponent("confirm/work").path),
-                            work: last.work, locks: locks, poll: 0.2)
+                            work: last.work, terminalProfiles: prefs.tool, lateSweep: 0.3, locks: locks, poll: 0.2)
     }
     try? "".write(to: base.appendingPathComponent("confirm/stub.conf"), atomically: true, encoding: .utf8)
 
@@ -684,7 +808,7 @@ do {
     let c = Case("st-folder", login: ["login": "hang"])
     sw.makeSignIn = { folder, wanted, cl in
         ClaudeSignIn(folder: AuthFolder(path: folder, isDefault: false, home: home.path), wanted: wanted, timeout: 30, tools: c.tools(), claude: cl,
-                     confirm: { _ in nil }, work: c.work, locks: locks, poll: 0.2)
+                     confirm: { _ in nil }, work: c.work, terminalProfiles: prefs.tool, lateSweep: 0.3, locks: locks, poll: 0.2)
     }
     let state = SettingsState()
     state.signIn(folder: c.folder.path)

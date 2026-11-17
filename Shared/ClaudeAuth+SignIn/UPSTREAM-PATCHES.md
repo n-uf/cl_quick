@@ -71,7 +71,14 @@ The file table (StoredSignIn, Keychain's new role, Runs' additions, ClaudeSignIn
 - **`unverified`.** A login that ended but whose account the app's word didn't confirm after `confirmTries` (3) asks ends
   `unverified(account)`, never `signedIn`. While the login still runs, nothing ends on a guess or on the word and the record
   disagreeing; only the two agreeing on another account than the one wanted ends it early (`wrongAccount`).
-- **The `.terminal` route** (`Window.settingsFile`) is verified by content only. Whether Terminal adds the opened
-  settings file to its profile list can't be told without opening one; each sign-in's profile has a name of its own
-  (`<title> <8 hex>`), so a kept one never stands for a later sign-in, but if Terminal does keep them they pile up, one
-  per sign-in (the live try settles it; then `.scripted`, AppleScript, is the fallback, untried).
+- **The `.terminal` route** (`Window.settingsFile`), measured live on macOS with Terminal running: the window opens, runs the
+  command in the login shell and closes itself about 2 s after the script exits 0. Terminal keeps the profile of every
+  settings file it opens in its preferences (`com.apple.Terminal`, "Window Settings"), named after the FILE's base name
+  (never the plist's `name`), " 1", " 2"… added to a name it holds: one leftover per sign-in, each with a dead command.
+  It runs the new file's command, not the stored one, so only accumulation is the problem. The settings file is therefore
+  named after the app (`<title> sign-in.terminal`, so a leftover is recognisable), and `TerminalProfiles` (read and write
+  injectable, the preferences system by default) removes every kept profile whose `CommandString` runs in the app's own
+  work folder, never one Terminal's default or startup settings name: at every start, and at every end once the window is
+  gone (a window left open to be read keeps its profile until it is closed: a stop, or the next start), with one more
+  sweep `lateSweep` seconds after an end for a window that closed itself. `.scripted` (AppleScript) is the fallback,
+  untried.

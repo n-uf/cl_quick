@@ -26,6 +26,11 @@
 // - The window: a Terminal settings file (`.terminal`: the command, run inside the login shell with `exec`, and "close if the
 //   shell exited cleanly"), opened like any document, which needs no permission to control Terminal. `.scripted` (Terminal's
 //   AppleScript, which asks for that permission) is there for a Mac where the settings file doesn't work.
+// - Terminal keeps the profile of every settings file it opens in its preferences ("Window Settings"), named after the
+//   FILE's base name ("<title> sign-in", then "<title> sign-in 1", 2…), never the plist's `name`. One leftover per sign-in,
+//   each with a dead command. `TerminalProfiles` removes the ones whose command runs in this app's own work folder (nothing
+//   else can match), never a profile Terminal names as its default or startup one: at every start, and after the window
+//   is gone at every end.
 //
 // No app's screens, words or global state: the folder, the account wanted, the tools, the verified word, the app's work
 // folder and the window's title are parameters. One queue for every sign-in of the process (the verified word is asked off
@@ -113,14 +118,15 @@ public final class ClaudeSignIn {
     private let poll: TimeInterval
     private let work: URL
     private let startGrace: TimeInterval
-    /// This sign-in's own mark, in its window's profile name: a profile Terminal kept from an earlier sign-in never has
-    /// this name, so it can't stand for this one's (nor run an older command).
-    let runID = String(format: "%08x", UInt32.random(in: 0...UInt32.max))
+    private let terminalProfiles: TerminalProfiles
+    private let lateSweep: TimeInterval
 
     // the sign-in's files, all in the app's own work folder (owner only). The script is named after the folder's lock key:
     // its shell's command line then says which folder its `claude auth login` signs in, to any app (`isLogin`).
     var scriptURL: URL { work.appendingPathComponent("sign-in-\(Self.lockKey(folder)).command") }
-    var settingsURL: URL { work.appendingPathComponent("sign-in.terminal") }
+    /// The settings file is named after the app ("<title> sign-in.terminal"): Terminal keeps the profile under the file's
+    /// name, so a leftover is recognisable in its list.
+    var settingsURL: URL { work.appendingPathComponent(profileName + ".terminal") }
     var pidURL: URL { work.appendingPathComponent("sign-in.pid") }
     var statusURL: URL { work.appendingPathComponent("sign-in.status") }
     var declinedURL: URL { work.appendingPathComponent("sign-in.declined") }
@@ -130,15 +136,19 @@ public final class ClaudeSignIn {
     /// (by id, or by address and organisation), nil for a brand-new folder. `claude`: Claude Code's program. `work`: the app's
     /// own folder for the sign-in's files (never the Claude Code folder). `title`: the window's name. `shown`: the folder as
     /// the script's first line names it. `startGrace`: how long the script may take to start once the window was asked for
-    /// (then `failed(.notOpened)`). `locks`, `poll` (how often the folder is looked at) and `confirmTries` (how often the
-    /// word is asked after the login ended) are parameters for the checks.
+    /// (then `failed(.notOpened)`). `title`: the app's name; the window's settings file (and so Terminal's profile) is
+    /// "<title> sign-in". `terminalProfiles`: how Terminal's kept profiles are looked at and removed (the real preferences
+    /// unless an app or a check gives its own); `lateSweep`: how long after a sign-in ended its profiles are swept once more,
+    /// for a window that closed itself after it. `locks`, `poll` (how often the folder is looked at) and `confirmTries` (how
+    /// often the word is asked after the login ended) are parameters for the checks.
     public init(folder: AuthFolder, wanted: SignedInAccount?, timeout: TimeInterval = 600, tools: AuthTools, claude: String,
-                confirm: @escaping Confirm, work: URL, window: Window = .settingsFile, title: String = "Claude Code sign-in",
-                shown: String? = nil, startGrace: TimeInterval = 25, locks: URL = ClaudeSignIn.sharedLocks, poll: TimeInterval = 2,
-                confirmTries: Int = 3) {
+                confirm: @escaping Confirm, work: URL, window: Window = .settingsFile, title: String = "Claude Code",
+                shown: String? = nil, startGrace: TimeInterval = 25, terminalProfiles: TerminalProfiles = .system,
+                lateSweep: TimeInterval = 6, locks: URL = ClaudeSignIn.sharedLocks, poll: TimeInterval = 2, confirmTries: Int = 3) {
         self.folder = folder; self.wanted = wanted; self.timeout = timeout
         self.claude = claude; self.confirm = confirm; self.work = work; self.window = window; self.title = title
         self.shown = shown; self.startGrace = startGrace; self.locks = locks; self.poll = poll; self.confirmTries = confirmTries
+        self.terminalProfiles = terminalProfiles; self.lateSweep = lateSweep
         auth = Authenticator(folder, tools: tools)
     }
 
@@ -186,7 +196,7 @@ public final class ClaudeSignIn {
         switch phase {
         case .idle: return
         case .running: finish(outcome)
-        case .ended: endScript(shell: true)
+        case .ended: endScript(shell: true); sweepProfiles(late: true)       // a window left open to be read, now gone
         }
     }
 
@@ -198,6 +208,7 @@ public final class ClaudeSignIn {
         if let earlier = Self.current, earlier !== self { earlier.end(.stopped) }
         Self.current = self
         endScript(shell: true)
+        sweepProfiles()                                                    // what earlier runs left in Terminal's preferences
         guard auth.tools.mayLaunch("login", folder) else { return finish(.failed(.folderNotReady)) }
         guard takeLock() else { return finish(.failed(.locked)) }
         switch loginRuns() {
@@ -326,6 +337,9 @@ public final class ClaudeSignIn {
         }
         releaseLock()
         for u in [statusURL, declinedURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
+        // Terminal's kept profile goes once the window is gone; a window left open to be read keeps it until it is closed
+        // (a stop, the next start)
+        if !windowIsOpen { sweepProfiles(late: true) }
         let done = onEnd
         DispatchQueue.main.async { done(outcome) }
     }
@@ -429,13 +443,14 @@ public final class ClaudeSignIn {
     /// What the window runs: the script, in place of the login shell Terminal starts (so its clean end is the shell's).
     var command: String { "exec " + SignInScript.q(scriptURL.path) }
 
-    /// The window's profile name: the app's title and this sign-in's own mark (`runID`).
-    public var profileName: String { "\(title) \(runID)" }
+    /// The settings file's base name, "<title> sign-in". Terminal names the profile it keeps after the FILE's base name (not
+    /// the plist's `name`), adding " 1", " 2"… to a name it already holds.
+    public var profileName: String { title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + " sign-in" }
 
     /// The Terminal settings file: the command run inside the login shell, and the window closed when the shell exits cleanly
     /// (Terminal's `shellExitAction` 1, "Close if the shell exited cleanly"; `RunCommandAsShell` false is "Run inside shell").
-    /// Its name is this sign-in's own (`profileName`): if Terminal keeps the profile it opens, no later sign-in finds one of
-    /// its name with an older command in it.
+    /// Terminal opens the command this file holds each time (a profile it kept from an earlier file never runs an older
+    /// command), and keeps the profile in its preferences: `sweepProfiles` removes it.
     func settings() -> Data? {
         let plist: [String: Any] = ["type": "Window Settings", "name": profileName, "ProfileCurrentVersion": 2.09,
                                     "CommandString": command, "RunCommandAsShell": false, "shellExitAction": 1]
@@ -501,6 +516,23 @@ public final class ClaudeSignIn {
         }
     }
 
+    /// Terminal's kept profiles whose command runs in this app's work folder go (`TerminalProfiles`). `late`: once more after
+    /// `lateSweep` seconds, for a window that closed itself after the script ended (not while the app's next sign-in runs: its
+    /// profile is in use). Only for the settings-file window: `.scripted` leaves no profile.
+    private func sweepProfiles(late: Bool = false) {
+        guard window == .settingsFile else { return }
+        let work = self.work.path, profiles = terminalProfiles
+        profiles.remove(commandsRunningIn: work)
+        guard late, lateSweep > 0 else { return }
+        Self.queue.asyncAfter(deadline: .now() + lateSweep) {
+            if Self.current?.windowIsOpen == true { return }
+            profiles.remove(commandsRunningIn: work)
+        }
+    }
+
+    /// The sign-in is under way, or its script still runs in a window left open to be read: its profile is in use.
+    private var windowIsOpen: Bool { phase == .running || (scriptPid().map { ProcessTable.runs($0) } ?? false) }
+
     /// The `.scripted` window, once its shell has ended (a settings-file window closes by itself).
     private func closeWindow() {
         guard window == .scripted, let id = windowID else { return }
@@ -516,4 +548,48 @@ public final class ClaudeSignIn {
         }
         return out
     }
+}
+
+/// Terminal's kept window profiles, in its preferences (`com.apple.Terminal`: "Window Settings", a dictionary of profiles by
+/// name; "Default Window Settings" and "Startup Window Settings" name the profiles Terminal opens by default and at launch).
+/// Terminal keeps the profile of every settings file it opens, under the file's base name, with the file's command: one
+/// leftover per sign-in. `remove(commandsRunningIn:)` takes out the ones whose command runs in a folder only the app's
+/// sign-ins use, and nothing else. Read and write are the only parts that touch the preferences, so an app or a check can
+/// hand in its own (a check must never write this Mac's Terminal preferences).
+public struct TerminalProfiles {
+    /// The profiles by name, and the names Terminal's default and startup settings point at; nil when unreadable.
+    public var read: () -> (profiles: [String: Any], inUse: Set<String>)?
+    /// Sets "Window Settings" to these profiles.
+    public var write: ([String: Any]) -> Void
+
+    public init(read: @escaping () -> (profiles: [String: Any], inUse: Set<String>)?, write: @escaping ([String: Any]) -> Void) {
+        self.read = read; self.write = write
+    }
+
+    /// Removes every profile whose `CommandString` contains `folder` followed by "/" (the folder's own files: how the command
+    /// names its script, quoted or not), unless Terminal's default or startup profile is that one. Nothing is written when
+    /// none matches. Returns the names removed.
+    @discardableResult
+    public func remove(commandsRunningIn folder: String) -> [String] {
+        guard !folder.isEmpty, let now = read() else { return [] }
+        let plain = folder + "/", quoted = String(SignInScript.q(folder).dropLast()) + "/"
+        let gone = now.profiles.filter { name, profile in
+            guard !now.inUse.contains(name), let command = (profile as? [String: Any])?["CommandString"] as? String else { return false }
+            return command.contains(plain) || command.contains(quoted)
+        }.map(\.key).sorted()
+        guard !gone.isEmpty else { return [] }
+        var kept = now.profiles
+        for name in gone { kept[name] = nil }
+        write(kept)
+        return gone
+    }
+
+    /// The real preferences, through the preferences system (never the file).
+    public static let system = TerminalProfiles(
+        read: {
+            guard let d = UserDefaults(suiteName: "com.apple.Terminal"), let all = d.dictionary(forKey: "Window Settings") else { return nil }
+            let inUse = ["Default Window Settings", "Startup Window Settings"].compactMap { d.string(forKey: $0) }
+            return (all, Set(inUse))
+        },
+        write: { UserDefaults(suiteName: "com.apple.Terminal")?.set($0, forKey: "Window Settings") })
 }

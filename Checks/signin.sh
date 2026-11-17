@@ -44,6 +44,21 @@ else
 fi
 [ "$lint" = 0 ] && echo "keychain lint: $lintn/$lintn passed"
 
+# ── the Terminal lint: this suite never touches Terminal's real preferences ──
+# every ClaudeSignIn the suite makes is handed a stand-in for them (a sign-in sweeps Terminal's kept profiles at its start
+# and its end; the real ones are only for the app)
+made="$(grep -c 'ClaudeSignIn(' "$here/signin/main.swift" || true)"
+handed="$(grep -c 'terminalProfiles: prefs.tool' "$here/signin/main.swift" || true)"
+if [ "$made" != "$handed" ] || [ "$made" = 0 ]; then
+  echo "FAIL terminal lint: $made ClaudeSignIn(...) in Checks/signin/main.swift, $handed with a stand-in for Terminal's preferences"
+  lint=1
+elif grep -n -E 'com\.apple\.Terminal|TerminalProfiles\.system|\.system\b.*terminalProfiles' "$here/signin/main.swift" | grep -v '^[0-9]*: *//' >/dev/null; then
+  echo "FAIL terminal lint: Checks/signin/main.swift names Terminal's real preferences"
+  lint=1
+else
+  echo "terminal lint: $made/$made sign-ins in the suite are handed Terminal-preferences stand-ins"
+fi
+
 # ── the suite ──
 build_modules "$out/modules-signin" no-keychain -Onone
 link=(); while IFS= read -r f; do link+=("$f"); done < <(modules_link "$out/modules-signin")
