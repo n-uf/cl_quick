@@ -942,6 +942,9 @@ do {
     let sw0 = AccountBook.switchWords(folder: "~/.claude", isDefault: true)
     check("switch words: ~/.claude", sw0.hasPrefix("Claude Code in Terminal and editors on ~/.claude moves to this account, sessions running now included")
           && sw0.contains("the Claude app keeps its own sign-in") && !sw0.contains("@"))
+    check("switch words: the browser must be signed in to claude.ai as that account first (its own paragraph, last)",
+          sw0.hasSuffix("\n\nThe browser must be signed in to claude.ai as this account. If it's on another one, switch it there first.")
+          && AccountBook.browserFirst.contains("claude.ai") && AccountBook.browserFirst.contains("switch it there first"))
     check("switch words: another folder", AccountBook.switchWords(folder: "~/.claude-work", isDefault: false)
           .hasPrefix("Claude Code pointed at ~/.claude-work with CLAUDE_CONFIG_DIR moves to this account"))
     // a standby account's "last in use"

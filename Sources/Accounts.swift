@@ -189,12 +189,16 @@ enum AccountBook {
     /// What a switch affects, for its confirmation: Claude Code on the folder (in Terminal and editors for ~/.claude,
     /// the uses pointed at it with CLAUDE_CONFIG_DIR for any other), sessions running now included; not the Claude app,
     /// which runs its own claude with its own sign-in. The account is "this account": its address is shown apart from
-    /// the words (under them, blurred), never in them.
+    /// the words (under them, blurred), never in them. Its last line: the browser decides which account signs in, so it
+    /// must be on this one first.
     static func switchWords(folder: String, isDefault: Bool) -> String {
         (isDefault ? "Claude Code in Terminal and editors on \(folder)" : "Claude Code pointed at \(folder) with CLAUDE_CONFIG_DIR")
             + " moves to this account, sessions running now included; the Claude app keeps its own sign-in."
-            + " Finish the sign-in in Terminal and the browser as that account."
+            + " Finish the sign-in in Terminal and the browser as that account.\n\n" + browserFirst
     }
+
+    /// The switch question's last line.
+    static let browserFirst = "The browser must be signed in to claude.ai as this account. If it's on another one, switch it there first."
 
     /// "just now", "12 min ago", "3 h ago", "yesterday", "4 days ago", "3 weeks ago".
     static func ago(_ d: Date, now: Date = Date()) -> String {

@@ -880,6 +880,9 @@ do {
           alert.messageText == "Switch Main to this account?" && !alert.messageText.contains("@") && !alert.informativeText.contains("@")
           && !alert.messageText.contains("•") && !alert.informativeText.contains("•") && alert.informativeText.contains("moves to this account"),
           "\(alert.messageText) | \(alert.informativeText)")
+    check("alert: it says the browser must be signed in to claude.ai as this account, and to switch it there first if it's on another",
+          alert.informativeText.hasSuffix(AccountBook.browserFirst) && alert.informativeText.contains("claude.ai")
+          && alert.informativeText.contains("switch it there first"), alert.informativeText)
     check("alert: its buttons are Switch and Cancel", alert.buttons.map(\.title) == ["Switch", "Cancel"])
     if let label = alert.accessoryView as? QCAddressLabel {
         check("alert: the accessory holds the whole address for drawing, blurred at rest", label.address == "kim@example.org" && !label.revealed)
