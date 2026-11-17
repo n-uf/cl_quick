@@ -841,6 +841,37 @@ do {
     check("address chat: the note keeps its layout (as wide and as high as the plain sentence)",
           abs(blurredDraw.size.width - sharpDraw.size.width) <= 2 && abs(blurredDraw.size.height - sharpDraw.size.height) <= 2, "\(blurredDraw.size) \(sharpDraw.size)")
 
+    // the switch notes in Settings (waiting for the sign-in, and a wrong account with its keys) blur their addresses like the
+    // chat's: with the blur on they are less sharp than with it off, and as wide and as high
+    do {
+        let g = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2", wantedEmail: "kim@example.org",
+                           fromUUID: "u1", fromEmail: "alex@example.com", origin: .settings)
+        func look(_ v: SwitchNotice) -> (size: CGSize, edges: Double) {
+            MainActor.assumeIsolated {
+                let r = ImageRenderer(content: v.face(.std).frame(width: 520).background(Color.black))
+                r.scale = 2
+                guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return (.zero, 0) }
+                var e = 0.0
+                func lum(_ x: Int, _ y: Int) -> Double { Double(rep.colorAt(x: x, y: y)?.usingColorSpace(.genericGray)?.whiteComponent ?? 0) }
+                for y in 0..<rep.pixelsHigh { for x in 1..<rep.pixelsWide { e += abs(lum(x, y) - lum(x - 1, y)) } }
+                return (img.size, e)
+            }
+        }
+        let notes: [(String, SwitchNotice)] = [
+            ("waiting", SwitchNotice(waiting: g)),
+            ("wrong account", SwitchNotice(ended: SwitchEnded(goal: g, reason: .wrongAccount(signedIn: "robin@example.net", alsoOn: "Work"))))]
+        for (what, notice) in notes {
+            AddressPrivacy.shared.blur = true
+            let on = look(notice)
+            AddressPrivacy.shared.blur = false
+            let off = look(notice)
+            AddressPrivacy.shared.blur = true
+            check("settings note (\(what)): its addresses are drawn blurred at rest (less sharp than with Blur addresses off)",
+                  on.edges > 0 && on.edges < off.edges * 0.99, "\(on) \(off)")
+            check("settings note (\(what)): …and the note keeps its size", abs(on.size.width - off.size.width) <= 2 && abs(on.size.height - off.size.height) <= 2, "\(on.size) \(off.size)")
+        }
+    }
+
     // narrow: the note's two-line limit holds with the address among the words, and nothing overflows sideways
     func height(_ w: QCWords, limit: Int?, width: CGFloat) -> CGFloat {
         MainActor.assumeIsolated {

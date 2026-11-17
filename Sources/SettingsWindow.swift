@@ -478,8 +478,11 @@ struct SwitchNotice: View {
 
     var body: some View {
         if let waiting {
-            NoticeBox(tone: .waiting, title: waiting.again ? "Signing in again as \(waiting.wantedEmail)." : "Switching to \(waiting.wantedEmail).",
-                      text: "Finish the sign-in in the browser as that address. cl_quick looks for it for 10 minutes.") {
+            // the lead, then what to do in the browser in order (the address blurred in both)
+            NoticeBox(tone: .waiting,
+                      words: (waiting.again ? QCWords.text("Signing in again as ") : .text("Switching to ")).strong
+                        + QCWords.address(waiting.wantedEmail).strong + QCWords.text(".").strong + .text(" " + SwitchWords.foot),
+                      steps: SwitchWords.steps(wanted: waiting.wantedEmail)) {
                 Button("Show Terminal", action: showTerminal)
                 Button("Stop", action: drop)
             }

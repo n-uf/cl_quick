@@ -777,6 +777,18 @@ struct QCSwitchView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     QCSentence(words: title(n).strong + more(n), size: 13, color: QCColor.soft)
                         .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+                    // while it waits: what to do in the browser, in order (the address blurred)
+                    if case .waiting(let wanted) = n {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(Array(SwitchWords.steps(wanted: wanted).enumerated()), id: \.offset) { i, step in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("\(i + 1).").foregroundColor(QCColor.muted).frame(width: 14, alignment: .trailing)
+                                    QCSentence(words: step, size: 13, color: QCColor.soft).fixedSize(horizontal: false, vertical: true)
+                                }
+                                .font(.system(size: 13))
+                            }
+                        }
+                    }
                     HStack(spacing: 8) {
                         switch n {
                         case .waiting: QCButton(title: "Stop waiting", ghost: true) { model.dropSwitch() }
@@ -806,7 +818,7 @@ struct QCSwitchView: View {
 
     private func more(_ n: QuickChatSwitchNotice) -> QCWords {
         switch n {
-        case .waiting(let wanted): return .text(" Finish it in Terminal and the browser as ") + .address(wanted) + .text(".")
+        case .waiting: return QCWords()
         case .ended(let e): return SwitchWords.ended(e).rest
         }
     }

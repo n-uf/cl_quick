@@ -896,6 +896,12 @@ do {
     let reasons: [SwitchEndReason] = [.wrongAccount(signedIn: "bob@example.com", alsoOn: nil), .timedOut, .declined, .unverified, .replaced,
                                       .failed(.loginFailed(status: 1)), .failed(.noAccount), .failed(.windowClosed)]
     check("words: every way a switch ends has a lead of its own", Set(reasons.map { SwitchWords.ended(ended($0)).lead.spoken }).count == reasons.count)
+    // the waiting note: what to do in the browser, in order, the address apart from the words
+    let steps = SwitchWords.steps(wanted: "kim@example.com")
+    check("waiting: finish it in the browser; before Authorize check \"Logged in as\" shows the address; if not, Switch account there",
+          steps.map(\.spoken) == ["Finish the sign-in in the browser.",
+                                  "Before you press Authorize, check that “Logged in as” at the bottom of the page shows \(k).",
+                                  "If it doesn't, use Switch account there."] && steps[1].addresses == ["kim@example.com"] && steps[0].addresses.isEmpty && steps[2].addresses.isEmpty)
     // the keys
     let wrongKeys = (SwitchWords.retry(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))), SwitchWords.keep(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))))
     check("keys: after a wrong account: \"Try again as A\" (the same switch) and \"Keep B\"",
