@@ -165,6 +165,20 @@ final class Case {
         return signIn
     }
 
+    /// A stand-in word that answers only once the login has ended (the script wrote its status 0; up to 5 s, polled every 20 ms;
+    /// the word is asked on its own queue): every ask it counts is then after the end, which is the asks the product counts.
+    func afterEnd(_ answer: @escaping ClaudeSignIn.Confirm) -> ClaudeSignIn.Confirm {
+        let status = work.appendingPathComponent("sign-in.status")
+        return { folder in
+            let until = Date().addingTimeInterval(5)
+            while Date() < until {
+                if let s = try? String(contentsOf: status, encoding: .utf8), Int32(s.trimmingCharacters(in: .whitespacesAndNewlines)) == 0 { break }
+                usleep(20_000)
+            }
+            return answer(folder)
+        }
+    }
+
     @discardableResult
     func waitEnd(_ max: TimeInterval = 15) -> ClaudeSignIn.Outcome? { spin(until: { outcome != nil }, max: max); return outcome }
     /// The stand-in login's pid, once it wrote it.
@@ -275,12 +289,31 @@ do {
 do {
     let c = Case("guessed", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51)])
     var asked = 0
-    c.start(wanted: SignedInAccount(email: "Ann@Example.com", origin: .record), confirm: { _ in asked += 1; return nil })
+    // the stand-in login writes the record and exits before the script writes the status: a tick in that gap asks the word
+    // once before the end, which the product doesn't count, so the stand-in waits for the end before it answers
+    c.start(wanted: SignedInAccount(email: "Ann@Example.com", origin: .record), confirm: c.afterEnd { _ in asked += 1; return nil })
     if case .unverified(let a)? = c.waitEnd() {
         check("no word from the app: the record's guess ends unverified, never signed in", a.source == .guessed && a.accountID == uuid(1), "\(a)")
     } else { check("unverified (no word)", false, "\(String(describing: c.outcome))") }
     check("…after the word was asked again (3 times in all once the login ended)", asked == 3, "\(asked)")
     check("…and its window closed", c.shellEnded() == 0)
+    c.cleanUp()
+}
+do {
+    // an ask before the login ended (the record changed first) doesn't count against the 3 tries: 3 asks after the end, however
+    // many came before
+    let c = Case("early-ask", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51)])
+    let lock = NSLock()
+    var before = 0, after = 0
+    let status = c.work.appendingPathComponent("sign-in.status")
+    c.start(wanted: SignedInAccount(email: "Ann@Example.com", origin: .record), confirm: { _ in
+        let ended = (try? String(contentsOf: status, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } == 0
+        lock.lock(); if ended { after += 1 } else { before += 1 }; lock.unlock()
+        return nil
+    })
+    let o = c.waitEnd()
+    lock.lock(); let (b, a) = (before, after); lock.unlock()
+    check("no word: exactly 3 asks after the login ended, whether or not one came before it (\(b) before)", { if case .unverified? = o { return true } else { return false } }() && a == 3, "\(String(describing: o)) before \(b) after \(a)")
     c.cleanUp()
 }
 do {
