@@ -536,7 +536,9 @@ public final class ClaudeSignIn {
     /// starting (what earlier runs left) or quitting (a declined or failed window left open and closed by hand since, which
     /// no later sign-in would sweep). Nothing while a sign-in of this process runs or its window is still open, nor while a
     /// script of `work` runs from an earlier run of the app (that window's profile is in use). Blocks on the sign-in queue
-    /// (an app calls it off the main thread at its start). Only for the settings-file window (`.scripted` leaves no profile).
+    /// (an app calls it off the main thread at its start). It doesn't know which window kind the app's sign-ins use: an app
+    /// whose sign-ins are `.scripted` leaves no profile, so there is nothing for it to find (the instance's sweep says so
+    /// itself and does nothing for that window).
     public static func sweep(work: URL, terminalProfiles: TerminalProfiles = .system) {
         queue.sync {
             if current?.windowIsOpen == true || scriptRuns(in: work) { return }
@@ -544,8 +546,6 @@ public final class ClaudeSignIn {
         }
     }
 
-    /// The sign-in is under way, or its script still runs in a window left open to be read: its profile is in use.
-    private var windowIsOpen: Bool { phase == .running || (scriptPid().map { ProcessTable.runs($0) } ?? false) }
     /// A sign-in script of `work` (any app run's, any folder's) still runs: the pid in the work folder's `sign-in.pid` is
     /// alive and its command line names `<work>/sign-in-<key>.command`. Its window is open and its profile in use. The one
     /// test for a window no sign-in of this process holds (at start-up, or an earlier run's).
@@ -556,6 +556,8 @@ public final class ClaudeSignIn {
         return l.args.contains { $0.hasPrefix(work.path + "/sign-in-") && $0.hasSuffix(".command") }
     }
 
+    /// The sign-in is under way, or its script still runs in a window left open to be read: its profile is in use.
+    private var windowIsOpen: Bool { phase == .running || (scriptPid().map { ProcessTable.runs($0) } ?? false) }
 
     /// The `.scripted` window, once its shell has ended (a settings-file window closes by itself).
     private func closeWindow() {
