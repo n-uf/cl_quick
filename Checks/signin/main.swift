@@ -313,7 +313,11 @@ do {
     })
     let o = c.waitEnd()
     lock.lock(); let (b, a) = (before, after); lock.unlock()
-    check("no word: exactly 3 asks after the login ended, whether or not one came before it (\(b) before)", { if case .unverified? = o { return true } else { return false } }() && a == 3, "\(String(describing: o)) before \(b) after \(a)")
+    // The stand-in tells before from after when it is called; the product tells in `answered`, one queue hop later. The one ask
+    // that was in flight as the status was written can be "before" here and counted by the product: 3 after, or 2 after with
+    // that one before (only the last ask before the end can cross: asks never overlap).
+    check("no word: exactly 3 asks after the login ended, whether or not one came before it (\(b) before)",
+          { if case .unverified? = o { return true } else { return false } }() && (a == 3 || (a == 2 && b >= 1)), "\(String(describing: o)) before \(b) after \(a)")
     c.cleanUp()
 }
 do {
