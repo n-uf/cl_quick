@@ -859,7 +859,8 @@ do {
         }
         let notes: [(String, SwitchNotice)] = [
             ("waiting", SwitchNotice(waiting: g)),
-            ("wrong account", SwitchNotice(ended: SwitchEnded(goal: g, reason: .wrongAccount(signedIn: "robin@example.net", alsoOn: "Work"))))]
+            ("wrong account", SwitchNotice(ended: SwitchEnded(goal: g, reason: .wrongAccount(signedIn: "robin@example.net", alsoOn: "Work")))),
+            ("signed in again", SwitchNotice(signedAgain: "robin@example.net"))]
         for (what, notice) in notes {
             AddressPrivacy.shared.blur = true
             let on = look(notice)

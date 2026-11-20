@@ -502,7 +502,8 @@ struct SwitchNotice: View {
                 }
             }
         } else if let signedAgain {
-            NoticeBox(tone: .ok, title: "Signed in again as \(signedAgain).") {
+            // the address a piece of its own (blurred until the pointer is on it, and in the accessibility text), like the others
+            NoticeBox(tone: .ok, words: (QCWords.text("Signed in again as ") + .address(signedAgain) + .text(".")).strong) {
                 Button("OK", action: drop)
             }
         }
