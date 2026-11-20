@@ -213,7 +213,7 @@ public final class ClaudeSignIn {
         self.onState = onState; self.onEnd = onEnd
         // one window per app: the earlier sign-in ends, and whatever an earlier run of the app left in its work folder
         var ended = false                                                  // the earlier sign-in of this work folder already ended its script
-        if let earlier = Self.current, earlier !== self { earlier.end(.stopped); ended = earlier.work == work }
+        if let earlier = Self.current, earlier !== self { earlier.end(.stopped); ended = earlier.work.standardizedFileURL.path == work.standardizedFileURL.path }
         Self.current = self
         if !ended { endScript(shell: true) }
         // a shell that outlived the wait (it ignored the TERM) is a window still open: its pid file stays its only handle (no
