@@ -479,23 +479,63 @@ do {
 
 // ── Terminal's kept profiles: when they are swept, and what is never touched ─────────────────────────────
 do {
-    // the tool alone: only commands in the folder, quoted or not; never the default or startup profile; no write for nothing
+    // the tool alone: only the exact command a sign-in writes (exec + the quoted script of the folder); never the default or
+    // startup profile; a command that merely mentions the folder stays; no write for nothing
     let t = FakePrefs()
-    let dir = "/sample/app's work", quoted = SignInScript.q(dir + "/sign-in-12345678.command")
+    let dir = "/sample/app's/work", quoted = SignInScript.q(dir + "/sign-in-12345678.command")
     t.put("mine", command: "exec \(quoted)")
-    t.put("mine plain", command: "exec \(dir)/sign-in-12345678.command")
+    t.put("mine upper", command: "exec " + SignInScript.q(dir + "/sign-in-ABCDEF01.command"))
     t.put("mine startup", command: "exec \(quoted)", inUse: true)
+    t.put("plain", command: "exec \(dir)/sign-in-12345678.command")
+    t.put("mentions", command: "cd \(SignInScript.q(dir + "/")); ls")
+    t.put("mentions the script", command: "exec \(quoted); ls")
+    t.put("a url", command: "open \(SignInScript.q("https://example.com" + dir + "/"))")
+    t.put("short hex", command: "exec " + SignInScript.q(dir + "/sign-in-1234567.command"))
+    t.put("not hex", command: "exec " + SignInScript.q(dir + "/sign-in-1234567g.command"))
+    t.put("a subfolder", command: "exec " + SignInScript.q(dir + "/sub/sign-in-12345678.command"))
     t.put("other", command: "exec '/sample/other/sign-in-12345678.command'")
     t.put("sibling", command: "exec '\(dir)-2/sign-in-12345678.command'")
     t.put("no command", command: "")
     let gone = t.tool.remove(commandsRunningIn: dir)
-    check("profiles tool: removes only the profiles whose command runs in the folder (quoted with an apostrophe, or plain)",
-          gone == ["mine", "mine plain"] && t.names == ["mine startup", "no command", "other", "sibling"], "\(gone) \(t.names)")
+    check("profiles tool: removes only the profiles whose command is the folder's sign-in script (quoted, an apostrophe in the folder, any hex case)",
+          gone == ["mine", "mine upper"] && t.names == ["a url", "mentions", "mentions the script", "mine startup", "no command", "not hex", "other", "plain",
+                                                       "short hex", "sibling", "a subfolder"].sorted(), "\(gone) \(t.names)")
+    check("profiles tool: a profile that merely mentions the folder, or the plain form, is kept", t.names.contains("mentions") && t.names.contains("plain")
+          && t.names.contains("mentions the script") && t.names.contains("a url"))
     check("profiles tool: a default or startup profile stays, though its command matches", t.names.contains("mine startup"))
     check("profiles tool: one write; a second run finds nothing and writes nothing", t.tool.remove(commandsRunningIn: dir).isEmpty && t.writes == 1, "\(t.writes)")
     check("profiles tool: an empty folder matches nothing", t.tool.remove(commandsRunningIn: "").isEmpty && t.writes == 1)
+    // a folder that isn't absolute or is too short removes nothing, though a command has that very shape
+    let w = FakePrefs()
+    for f in ["/", "/sample", "/sample/work", "sample/app/work", "~/app/work"] {
+        w.put("p" + f, command: "exec " + SignInScript.q(f + "/sign-in-12345678.command"))
+        w.put("url" + f, command: "open https://example.com/x/")
+    }
+    let before = w.names
+    check("profiles tool: \"/\", a short or a relative folder remove nothing and write nothing",
+          ["/", "/sample", "/sample/work", "sample/app/work", "~/app/work"].allSatisfy { w.tool.remove(commandsRunningIn: $0).isEmpty }
+          && w.writes == 0 && w.names == before, "\(w.writes)")
+    check("profiles tool: three components is enough", w.tool.remove(commandsRunningIn: "/sample/app/work").isEmpty && w.writes == 0)
     t.readable = false
-    check("profiles tool: preferences that can't be read: nothing removed, nothing written", t.tool.remove(commandsRunningIn: "/sample") == [] && t.writes == 1)
+    check("profiles tool: preferences that can't be read: nothing removed, nothing written", t.tool.remove(commandsRunningIn: "/sample/app/work") == [] && t.writes == 1)
+    // Terminal's own write between the read and ours is kept: the profiles are read again and only the chosen names go
+    let racing = FakePrefs()
+    racing.put("mine", command: "exec " + SignInScript.q("/sample/app/work/sign-in-12345678.command"))
+    racing.put("changed", command: "exec " + SignInScript.q("/sample/app/work/sign-in-87654321.command"))
+    var seen = 0, written: [String: Any] = [:]
+    let inner = racing.tool
+    let live = TerminalProfiles(read: {
+        seen += 1
+        let r = inner.read()
+        if seen == 1 {                       // Terminal's own write, after our first read
+            racing.put("new by Terminal", command: "/bin/zsh -l")
+            racing.put("changed", command: "/bin/zsh -l")
+        }
+        return r
+    }, write: { written = $0; inner.write($0) })
+    let removed = live.remove(commandsRunningIn: "/sample/app/work")
+    check("profiles tool: read again before the write: a profile Terminal changed is kept, one it added is in the copy written",
+          removed == ["mine"] && Set(written.keys) == ["changed", "new by Terminal"] && seen == 2, "\(removed) \(written.keys.sorted()) \(seen)")
 }
 do {
     // a sign-in sweeps at its start and at each end; unreadable preferences never stop one

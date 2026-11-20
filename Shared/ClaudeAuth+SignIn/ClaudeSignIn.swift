@@ -566,19 +566,32 @@ public struct TerminalProfiles {
         self.read = read; self.write = write
     }
 
-    /// Removes every profile whose `CommandString` contains `folder` followed by "/" (the folder's own files: how the command
-    /// names its script, quoted or not), unless Terminal's default or startup profile is that one. Nothing is written when
-    /// none matches. Returns the names removed.
+    /// Whether a profile's `CommandString` is exactly what `ClaudeSignIn.command` writes for a script in `folder`:
+    /// `exec ` + the quoted path `<folder>/sign-in-<8 hex>.command`, nothing before or after it (so a command that merely
+    /// mentions the folder, or runs something else in it, never matches).
+    static func isSignInCommand(_ command: String, in folder: String) -> Bool {
+        let head = "exec " + String(SignInScript.q(folder + "/sign-in-").dropLast()), tail = ".command'"
+        guard command.hasPrefix(head), command.hasSuffix(tail), command.count == head.count + 8 + tail.count else { return false }
+        return command.dropFirst(head.count).prefix(8).allSatisfy { $0.isASCII && $0.isHexDigit }
+    }
+
+    /// Removes every profile whose `CommandString` is the sign-in script of `folder` (`isSignInCommand`; an earlier run's
+    /// leftovers have the same shape), unless Terminal's default or startup profile is that one. A folder that isn't absolute
+    /// or has fewer than 3 path components is refused (nothing removed). The profiles are read again just before the write
+    /// and only the chosen names whose command still matches are taken out of that fresh copy (Terminal writes its own
+    /// preferences too). Nothing is written when none matches. Returns the names removed.
     @discardableResult
     public func remove(commandsRunningIn folder: String) -> [String] {
-        guard !folder.isEmpty, let now = read() else { return [] }
-        let plain = folder + "/", quoted = String(SignInScript.q(folder).dropLast()) + "/"
-        let gone = now.profiles.filter { name, profile in
-            guard !now.inUse.contains(name), let command = (profile as? [String: Any])?["CommandString"] as? String else { return false }
-            return command.contains(plain) || command.contains(quoted)
-        }.map(\.key).sorted()
+        guard folder.hasPrefix("/"), folder.split(separator: "/").count >= 3, let now = read() else { return [] }
+        func matches(_ profile: Any?) -> Bool {
+            guard let command = (profile as? [String: Any])?["CommandString"] as? String else { return false }
+            return Self.isSignInCommand(command, in: folder)
+        }
+        let chosen = now.profiles.filter { !now.inUse.contains($0.key) && matches($0.value) }.map(\.key)
+        guard !chosen.isEmpty, let fresh = read() else { return [] }
+        let gone = chosen.filter { !fresh.inUse.contains($0) && matches(fresh.profiles[$0]) }.sorted()
         guard !gone.isEmpty else { return [] }
-        var kept = now.profiles
+        var kept = fresh.profiles
         for name in gone { kept[name] = nil }
         write(kept)
         return gone
