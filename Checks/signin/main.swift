@@ -606,6 +606,45 @@ do {
     u.cleanUp()
     prefs.reset()
 }
+do {
+    // the static sweep's pid-file guard, alone (the only guard at start-up, when no sign-in of this run is `current`): a window
+    // of an earlier run, its script's pid in the work folder's sign-in.pid and the script in its command line, keeps its
+    // profile. The work folder is one no sign-in of this run has used, so what the process's own last sign-in knows
+    // about its window can't be what holds it.
+    prefs.reset()
+    let earlier = base.appendingPathComponent("earlier-run/work")
+    try? fm.createDirectory(at: earlier, withIntermediateDirectories: true)
+    let script = earlier.appendingPathComponent("sign-in-abcdef01.command").path
+    func shell(_ named: String) -> Process {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "trap 'exit 0' TERM HUP; while :; do sleep 0.1; done", "stand-in", named]
+        p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        try? p.run()
+        spin(until: { ProcessTable.launch(of: p.processIdentifier)?.args.contains(named) == true }, max: 3)
+        return p
+    }
+    func names(_ p: Process) { try? "\(p.processIdentifier)\n".write(to: earlier.appendingPathComponent("sign-in.pid"), atomically: true, encoding: .utf8) }
+    func put() { prefs.reset(); prefs.put("Sample app sign-in", command: "exec " + SignInScript.q(script)) }
+    let standIn = prefs.tool
+    func sweep() { ClaudeSignIn.sweep(work: earlier, terminalProfiles: standIn) }
+    let open = shell(script)
+    names(open)
+    put(); sweep()
+    check("sweep: a script of the work folder still running from an earlier run keeps its profile (the pid file alone)",
+          prefs.names == ["Sample app sign-in"] && prefs.reads == 0, "\(prefs.names) \(prefs.reads)")
+    // …a pid that runs something else (the pid was reused) doesn't: the command line must name the script
+    let other = shell("/not/the/work/sign-in-abcdef01.command")
+    names(other); put(); sweep()
+    check("sweep: a pid that runs something else holds nothing", prefs.names.isEmpty, "\(prefs.names)")
+    // …and the window gone (its shell ended), the profile goes
+    names(open); put()
+    open.terminate(); open.waitUntilExit()
+    sweep()
+    check("sweep: the earlier run's window gone, its profile goes", prefs.names.isEmpty, "\(prefs.names)")
+    other.terminate(); other.waitUntilExit()
+    prefs.reset()
+}
 
 // ── one sign-in per app, and the two guards ──────────────────────────────────────────────────────────
 do {
