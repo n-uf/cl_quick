@@ -3732,10 +3732,10 @@ do {
     var finds = 0, makes = 0, opens = 0, told: [String] = []
     sw.findClaude = { lock.lock(); finds += 1; lock.unlock(); return stub }
     sw.makeSignIn = { folder, wanted, claude in
-        makes += 1
+        lock.lock(); makes += 1; lock.unlock()
         var t = AuthTools.system
         t.mayLaunch = { _, f in f.isReady }
-        t.openTerminal = { _ in opens += 1; return true }
+        t.openTerminal = { _ in lock.lock(); opens += 1; lock.unlock(); return true }       // on the sign-in's own queue
         return ClaudeSignIn(folder: AuthFolder(path: folder, isDefault: false), wanted: wanted, timeout: 0.6, tools: t, claude: claude,
                             confirm: { _ in nil }, work: signWork.appendingPathComponent("work"), title: "Sample app", startGrace: 600,
                             terminalProfiles: TerminalProfiles(read: { nil }, write: { _ in }), lateSweep: 0,
@@ -3762,7 +3762,8 @@ do {
               && sw.waiting.count == 1 && sw.ended[profile.id] == nil, "\(String(describing: first)) \(sw.waiting)")
         check("retry keys (\(who)): …begun from the ended switch's goal, for this key's own origin", first.map {
             $0.wantedEmail == "kim@example.com" && $0.wantedUUID == "00000000-0000-4000-8000-0000000000b2" && $0.origin == origin } == true, "\(String(describing: first))")
-        spinUntil(5) { makes > m0 }; spin(0.4)
+        // the open comes from the sign-in's own queue: wait for it, then a moment more to see that no second one follows
+        spinUntil(5) { lock.lock(); defer { lock.unlock() }; return opens > o0 }; spin(0.4)
         lock.lock(); let (f, m, o) = (finds - f0, makes - m0, opens - o0); lock.unlock()
         check("retry keys (\(who)): …one claude looked for, one sign-in made and opened, not two", f == 1 && m == 1 && o == 1, "\(f) \(m) \(o)")
         settled()
