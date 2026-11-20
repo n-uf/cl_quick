@@ -233,7 +233,7 @@ final class AccountSwitcher {
     /// sign-in was under way (a login that failed, ended on nobody, or lost its window), which is a note on the account.
     static func why(_ f: ClaudeSignIn.Failure, folder: String) -> String? {
         switch f {
-        case .folderNotReady, .locked, .alreadySigningIn, .processesUnreadable, .notOpened:
+        case .folderNotReady, .locked, .alreadySigningIn, .windowStillOpen, .processesUnreadable, .notOpened:
             let w = SignInWords.failure(f, folder: folder)
             return w.lead + " " + w.rest
         case .loginFailed, .noAccount, .windowClosed: return nil
@@ -387,6 +387,8 @@ enum SignInWords {
         case .folderNotReady: return ("\(path) isn't there as a plain folder.", "cl_quick didn't open a sign-in.")
         case .locked: return ("Another sign-in for \(path) is starting.", "Wait a moment, then try again.")
         case .alreadySigningIn: return ("Claude Code's sign-in is already open for \(path).", "Finish it, or close its Terminal window, then try again.")
+        // the stuck window may be another profile's: no folder named
+        case .windowStillOpen: return ("An earlier Claude Code sign-in window is still open.", "Close it, then try again.")
         case .processesUnreadable: return ("cl_quick couldn't tell whether Claude Code's sign-in is already open for \(path).", "It didn't open one. Try again.")
         case .notOpened: return ("Terminal didn't open the sign-in.", "Try again.")
         case .loginFailed(let status): return ("Claude Code's sign-in failed.", "It ended with an error (status \(status)); its Terminal window shows why.")

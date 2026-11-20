@@ -53,9 +53,11 @@ public final class ClaudeSignIn {
         case folderNotReady
         /// Another sign-in (this app's or another's) holds the folder's sign-in lock.
         case locked
-        /// A `claude auth login` already runs on the folder, whoever started it, or the app's earlier sign-in window is still
-        /// open (its shell ignored the ask to end).
+        /// A `claude auth login` already runs on the folder, whoever started it.
         case alreadySigningIn
+        /// The app's earlier sign-in window (of any folder: one window per app) is still open: its shell outlived the ask to
+        /// end. Nothing started; the window is left as it is.
+        case windowStillOpen
         /// The running processes couldn't be read (or one that may be Claude Code couldn't be): nothing started.
         case processesUnreadable
         /// The script or the window couldn't be written or opened, or the script never started (`startGrace`).
@@ -214,7 +216,7 @@ public final class ClaudeSignIn {
         if !ended { endScript(shell: true) }
         // a shell that outlived the wait (it ignored the TERM) is a window still open: its pid file stays its only handle (no
         // sweep, no second window: one per app), and nothing is started on top of it
-        if Self.scriptRuns(in: work) { return finish(.failed(.alreadySigningIn)) }
+        if Self.scriptRuns(in: work) { return finish(.failed(.windowStillOpen)) }
         sweepProfiles()                                                    // what earlier runs left in Terminal's preferences
         guard auth.tools.mayLaunch("login", folder) else { return finish(.failed(.folderNotReady)) }
         guard takeLock() else { return finish(.failed(.locked)) }

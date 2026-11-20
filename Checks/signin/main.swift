@@ -694,7 +694,7 @@ do {
     let n = Case("deaf-next", login: ["login": "hang"])
     n.start(wanted: wantedID(uuid(1)))
     check("start: the earlier window's shell outlived the start's wait: refused, already signing in, no window of its own",
-          n.waitEnd(25) == .failed(.alreadySigningIn) && n.terminal.count == 0, "\(String(describing: n.outcome)) \(n.terminal.count)")
+          n.waitEnd(25) == .failed(.windowStillOpen) && n.terminal.count == 0, "\(String(describing: n.outcome)) \(n.terminal.count)")
     check("start: …the earlier window's shell is still there, its pid file untouched and its profile kept",
           d.shellRunning && pidBefore != nil && (try? String(contentsOf: pidFile, encoding: .utf8)) == pidBefore && prefs.left(in: d.work).count == 1,
           "\(d.shellRunning) \(String(describing: pidBefore)) \(prefs.names)")
@@ -1042,13 +1042,13 @@ do {
     check("switch: …and no note is left (not \"hasn't changed\"), nothing waits", sw.waiting[nostart.name] == nil && sw.ended[nostart.name] == nil
           && outcomes.count == outcomesBefore, "\(outcomes)")
     // every way a sign-in fails has its own plain line
-    let failures: [ClaudeSignIn.Failure] = [.folderNotReady, .locked, .alreadySigningIn, .processesUnreadable, .notOpened,
+    let failures: [ClaudeSignIn.Failure] = [.folderNotReady, .locked, .alreadySigningIn, .processesUnreadable, .notOpened, .windowStillOpen,
                                             .loginFailed(status: 2), .noAccount, .windowClosed]
     let lines = failures.map { SignInWords.failure($0, folder: "~/.claude-x") }
     check("failures: each has a line of its own, none the generic one", Set(lines.map(\.lead)).count == failures.count
           && lines.allSatisfy { !($0.lead + $0.rest).contains("hasn't changed") && !$0.lead.isEmpty && !$0.rest.isEmpty }, "\(lines)")
     check("failures: the ones that stop a start are alerts, in the same words as the lines; the others are notes",
-          failures.prefix(5).allSatisfy { AccountSwitcher.why($0, folder: "~/.claude-x") == SignInWords.failure($0, folder: "~/.claude-x").lead + " " + SignInWords.failure($0, folder: "~/.claude-x").rest }
+          failures.prefix(6).allSatisfy { AccountSwitcher.why($0, folder: "~/.claude-x") == SignInWords.failure($0, folder: "~/.claude-x").lead + " " + SignInWords.failure($0, folder: "~/.claude-x").rest }
           && failures.suffix(3).allSatisfy { AccountSwitcher.why($0, folder: "~/.claude-x") == nil })
     check("failures: the lines", lines.map { $0.lead + " " + $0.rest } == [
         "~/.claude-x isn't there as a plain folder. cl_quick didn't open a sign-in.",
@@ -1056,6 +1056,7 @@ do {
         "Claude Code's sign-in is already open for ~/.claude-x. Finish it, or close its Terminal window, then try again.",
         "cl_quick couldn't tell whether Claude Code's sign-in is already open for ~/.claude-x. It didn't open one. Try again.",
         "Terminal didn't open the sign-in. Try again.",
+        "An earlier Claude Code sign-in window is still open. Close it, then try again.",
         "Claude Code's sign-in failed. It ended with an error (status 2); its Terminal window shows why.",
         "The sign-in ended, but no account is signed in to this folder. Try again.",
         "The Terminal window was closed before the sign-in ended. Try again."], "\(lines)")
