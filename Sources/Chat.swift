@@ -1308,9 +1308,8 @@ final class QuickChat {
             self.panel?.makeKey()
         }
         model.signInAgain = { [weak self] in
-            guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id),
-                  let m = self.switcher.ended[id] else { return }
-            self.switcher.begin(p, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: .chat)
+            guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id) else { return }
+            self.switcher.tryAgain(p, origin: .chat)
         }
         model.dropSwitch = { [weak self] in
             if let id = self?.model.target?.profileID { self?.switcher.drop(id) }

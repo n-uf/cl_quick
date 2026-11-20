@@ -172,6 +172,14 @@ final class AccountSwitcher {
         begin(p, uuid: now.uuid, email: now.email, origin: origin)
     }
 
+    /// "Try again as A" / "Sign in again" on a switch that ended: the same account wanted, begun from the folder as it is
+    /// now (after a wrong account the folder is on B, so this is a switch to A, not a sign-in again). Nothing while a
+    /// sign-in is waited for on that profile, or when none ended (the note it was asked from is gone).
+    func tryAgain(_ p: Profile, origin: SwitchGoal.Origin) {
+        guard waiting[p.id] == nil, let m = ended[p.id] else { return }
+        begin(p, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: origin)
+    }
+
     /// Claude Code's sign-in on a folder, for an account (a switch) or for whoever signs in (a signed-out folder, a folder
     /// found, a new one, made by the caller first). `opened`: its window is open. `couldNotStart`: it never opened, and why
     /// (said in an alert unless the caller says it itself). `ended`: its outcome once it opened; the folders are read again

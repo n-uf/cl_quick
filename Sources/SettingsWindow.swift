@@ -725,7 +725,7 @@ struct ProfilePage: View {
             signInAgain: { switcher.signInAgain(profile, origin: .settings) },
             signInSignedOut: { signInSignedOut() },
             drop: { switcher.drop(profile.id) },
-            retry: { g in switcher.begin(profile, uuid: g.wantedUUID, email: g.wantedEmail, origin: .settings) },
+            retry: { _ in switcher.tryAgain(profile, origin: .settings) },
             makeDefault: { state.settings.defaultProfile = profile.id; state.save() },
             setInPicker: { on in var p = profile; p.inPicker = on; store.update(p) },
             remove: { confirmRemove() })
