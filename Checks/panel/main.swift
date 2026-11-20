@@ -8,6 +8,7 @@
 //   Checks/panel.sh
 
 import AppKit
+import ClaudeAuth
 import Carbon.HIToolbox
 import PDFKit
 import SwiftUI
@@ -3715,6 +3716,71 @@ do {
           && QuickChatSettings().webLinks == true)
     for x in [m, sm, hm, om] { x.shutdown() }
     for d in [c.dir, s.dir, h.dir, o.dir] { try? FileManager.default.removeItem(at: d) }
+}
+
+// "Try again as A" on a switch that ended, pressed in the chat and in Settings: each key, as wired, begins the ended switch's
+// goal once (pressed twice: one waiting entry, one claude looked for, one sign-in opened) and nothing when no switch ended.
+// The sign-in is a stand-in: no Terminal opens (its tool says it did, and nothing runs), Terminal's preferences are never
+// read (a stand-in with nothing in it), the locks and files are under build/, and a switch ends by its own timeout (0.6 s).
+do {
+    let sw = AccountSwitcher.shared
+    let savedFind = sw.findClaude, savedMake = sw.makeSignIn, savedTell = AccountSwitcher.tell, savedTarget = chat.model.target
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? "/nonexistent/claude"
+    let signWork = URL(fileURLWithPath: sampleFolder + "-signin")
+    try? FileManager.default.createDirectory(at: signWork, withIntermediateDirectories: true)
+    let lock = NSLock()
+    var finds = 0, makes = 0, opens = 0, told: [String] = []
+    sw.findClaude = { lock.lock(); finds += 1; lock.unlock(); return stub }
+    sw.makeSignIn = { folder, wanted, claude in
+        makes += 1
+        var t = AuthTools.system
+        t.mayLaunch = { _, f in f.isReady }
+        t.openTerminal = { _ in opens += 1; return true }
+        return ClaudeSignIn(folder: AuthFolder(path: folder, isDefault: false), wanted: wanted, timeout: 0.6, tools: t, claude: claude,
+                            confirm: { _ in nil }, work: signWork.appendingPathComponent("work"), title: "Sample app", startGrace: 600,
+                            terminalProfiles: TerminalProfiles(read: { nil }, write: { _ in }), lateSweep: 0,
+                            locks: signWork.appendingPathComponent("locks"), poll: 0.2)
+    }
+    AccountSwitcher.tell = { told.append($0) }
+    let profile = ProfileStore.shared.profile("main")!
+    chat.model.target = QuickChatTarget(profile)
+    func settled() { spinUntil(10) { sw.active == nil && sw.waiting[profile.id] == nil }; spin(0.3) }
+    func endedNote(_ why: String) {
+        sw.drop(profile.id); settled()
+        sw.begin(profile, uuid: "00000000-0000-4000-8000-0000000000b2", email: "kim@example.com", origin: .chat)
+        check("retry keys (\(why)): a switch is begun and ends on its timeout, leaving its note",
+              spinUntil(10) { sw.ended[profile.id] != nil } && sw.waiting[profile.id] == nil, "\(String(describing: sw.ended[profile.id])) \(told)")
+        settled()
+    }
+    func press(_ who: String, origin: SwitchGoal.Origin, _ key: () -> Void) {
+        endedNote(who)
+        let f0 = finds, m0 = makes, o0 = opens
+        key()
+        let first = sw.waiting[profile.id]
+        key()                                              // pressed again while it waits
+        check("retry keys (\(who)): once pressed: the same switch waits, one entry, its note taken", first != nil && sw.waiting[profile.id] == first
+              && sw.waiting.count == 1 && sw.ended[profile.id] == nil, "\(String(describing: first)) \(sw.waiting)")
+        check("retry keys (\(who)): …begun from the ended switch's goal, for this key's own origin", first.map {
+            $0.wantedEmail == "kim@example.com" && $0.wantedUUID == "00000000-0000-4000-8000-0000000000b2" && $0.origin == origin } == true, "\(String(describing: first))")
+        spinUntil(5) { makes > m0 }; spin(0.4)
+        lock.lock(); let (f, m, o) = (finds - f0, makes - m0, opens - o0); lock.unlock()
+        check("retry keys (\(who)): …one claude looked for, one sign-in made and opened, not two", f == 1 && m == 1 && o == 1, "\(f) \(m) \(o)")
+        settled()
+        // nothing ended (the note was taken, or dismissed): the key does nothing
+        sw.drop(profile.id); settled()
+        let f1 = finds, m1 = makes
+        key(); spin(0.6)
+        check("retry keys (\(who)): with no ended switch, nothing begins", sw.waiting[profile.id] == nil && finds == f1 && makes == m1 && told.isEmpty, "\(sw.waiting) \(told)")
+    }
+    press("the chat", origin: .chat) { chat.model.signInAgain() }
+    press("Settings", origin: .settings) {
+        // the page hands its key the goal of the note it draws; with no note, a goal of nobody
+        let goal = sw.ended[profile.id]?.goal ?? SwitchGoal(profileID: profile.id, profileName: profile.name, folder: profile.path,
+                                                            wantedUUID: nil, wantedEmail: "nobody@example.com", fromUUID: nil, fromEmail: nil, origin: .settings)
+        ProfilePage(state: SettingsState(), store: ProfileStore.shared, profile: profile).actions.retry(goal)
+    }
+    sw.drop(profile.id); settled()
+    sw.findClaude = savedFind; sw.makeSignIn = savedMake; AccountSwitcher.tell = savedTell; chat.model.target = savedTarget
 }
 
 CheckQuiet.verify("at the end")

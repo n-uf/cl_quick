@@ -717,7 +717,8 @@ struct ProfilePage: View {
         }
     }
 
-    private var actions: ProfileActions {
+    /// What the page's keys do (internal so the checks press them as they are wired, with the page's real store and switcher).
+    var actions: ProfileActions {
         ProfileActions(
             reveal: { Files.reveal(URL(fileURLWithPath: profile.path)) },
             showTerminal: { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) },
