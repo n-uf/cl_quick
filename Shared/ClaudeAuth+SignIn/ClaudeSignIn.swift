@@ -12,7 +12,8 @@
 // - One profile, one folder: nothing here makes, moves or redirects a Claude Code folder, and nothing is written into one.
 //   A folder the guard refuses (isReady, cl_audit's FolderGuard) starts nothing.
 // - One sign-in window per app: starting a sign-in ends the app's earlier one, window and all (also one an earlier run of
-//   the app left: its script's pid is in the app's own work folder).
+//   the app left: its script's pid is in the app's own work folder). Except a window whose shell outlives the wait (it
+//   ignores the ask to end): that one is kept as it is, with its profile, and the start is refused (`windowStillOpen`).
 // - Two guards against two sign-ins on one folder: any `claude auth login` running on the folder, whoever started it (the
 //   process table: its CLAUDE_CONFIG_DIR where the kernel gives its environment, and the ClaudeSignIn script it runs under;
 //   one whose folder can't be told counts too, see `isLogin`), and a lock every app takes (`flock` on
