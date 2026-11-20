@@ -210,7 +210,7 @@ public final class ClaudeSignIn {
         if let earlier = Self.current, earlier !== self { earlier.end(.stopped) }
         Self.current = self
         endScript(shell: true)
-        sweepProfiles()                                                    // what earlier runs left in Terminal's preferences
+        if !Self.scriptRuns(in: work) { sweepProfiles() }                  // what earlier runs left in Terminal's preferences (a shell that outlived the wait keeps its profile)
         guard auth.tools.mayLaunch("login", folder) else { return finish(.failed(.folderNotReady)) }
         guard takeLock() else { return finish(.failed(.locked)) }
         switch loginRuns() {
@@ -539,17 +539,23 @@ public final class ClaudeSignIn {
     /// (an app calls it off the main thread at its start). Only for the settings-file window (`.scripted` leaves no profile).
     public static func sweep(work: URL, terminalProfiles: TerminalProfiles = .system) {
         queue.sync {
-            if current?.windowIsOpen == true { return }
-            let pidFile = work.appendingPathComponent("sign-in.pid")
-            if let s = try? String(contentsOf: pidFile, encoding: .utf8), let pid = pid_t(s.trimmingCharacters(in: .whitespacesAndNewlines)),
-               pid > 0, ProcessTable.runs(pid), let l = ProcessTable.launch(of: pid),
-               l.args.contains(where: { $0.hasPrefix(work.path + "/sign-in-") && $0.hasSuffix(".command") }) { return }
+            if current?.windowIsOpen == true || scriptRuns(in: work) { return }
             terminalProfiles.remove(commandsRunningIn: work.path)
         }
     }
 
     /// The sign-in is under way, or its script still runs in a window left open to be read: its profile is in use.
     private var windowIsOpen: Bool { phase == .running || (scriptPid().map { ProcessTable.runs($0) } ?? false) }
+    /// A sign-in script of `work` (any app run's, any folder's) still runs: the pid in the work folder's `sign-in.pid` is
+    /// alive and its command line names `<work>/sign-in-<key>.command`. Its window is open and its profile in use. The one
+    /// test for a window no sign-in of this process holds (at start-up, or an earlier run's).
+    private static func scriptRuns(in work: URL) -> Bool {
+        guard let s = try? String(contentsOf: work.appendingPathComponent("sign-in.pid"), encoding: .utf8),
+              let pid = pid_t(s.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0, ProcessTable.runs(pid),
+              let l = ProcessTable.launch(of: pid) else { return false }
+        return l.args.contains { $0.hasPrefix(work.path + "/sign-in-") && $0.hasSuffix(".command") }
+    }
+
 
     /// The `.scripted` window, once its shell has ended (a settings-file window closes by itself).
     private func closeWindow() {

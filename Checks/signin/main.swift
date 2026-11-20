@@ -680,6 +680,22 @@ do {
     check("deaf shell: …and a stop once it is gone takes its profile", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
     c.cleanUp()
 }
+do {
+    // a new sign-in's start sweeps only once the earlier window is gone: one whose shell outlives the start's wait keeps its profile
+    prefs.reset()
+    let d = Case("deaf-earlier", login: ["login": "hang"])
+    d.terminal.shellBody = deafShell(d)
+    d.start(wanted: wantedID(uuid(1)))
+    check("deaf shell: its sign-in is declined, the window left open", d.waitEnd() == .declined && d.shellRunning, "\(String(describing: d.outcome))")
+    let n = Case("deaf-next", login: ["login": "hang"])
+    n.start(wanted: wantedID(uuid(1)))
+    spin(until: { n.states.contains(.waitingForBrowser) || n.outcome != nil }, max: 25)
+    check("start: the earlier window's shell outlived the start's wait: its profile stays beside the new one's",
+          d.shellRunning && n.outcome == nil && prefs.left(in: n.work).count == 2, "\(d.shellRunning) \(String(describing: n.outcome)) \(prefs.names)")
+    n.signIn.stop(); n.waitEnd()
+    d.cleanUp(); n.cleanUp()
+    prefs.reset()
+}
 
 // ── one sign-in per app, and the two guards ──────────────────────────────────────────────────────────
 do {
