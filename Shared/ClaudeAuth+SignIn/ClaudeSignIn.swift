@@ -172,6 +172,8 @@ public final class ClaudeSignIn {
     private var watch = SignInChangeWatch()
     private var startAccount: SignedInAccount?
     private var windowID: String?
+    /// Whether this sign-in got as far as making its own script (the pid file in the work folder is then its window's).
+    private var ownsScript = false
     private let confirmTries: Int
     /// The verified word: being asked (on its own queue), how often after the login ended, and the generation a late answer
     /// is checked against (it moves on every ask and at the end, so an answer for an older ask or a finished sign-in is
@@ -229,6 +231,7 @@ public final class ClaudeSignIn {
         guard makeWork() else { return finish(.failed(.notOpened)) }
         for u in [statusURL, declinedURL, pidURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
         started = Date()
+        ownsScript = true                                                  // from here the script, its window and the pid file are this sign-in's
         _ = watch.look(stamp: auth.recordStamp()) { auth.record() }
         startAccount = watch.seen
         var tools = auth.tools
@@ -339,10 +342,14 @@ public final class ClaudeSignIn {
         phase = .ended
         generation += 1                                                    // a word still on its way is dropped
         timer?.cancel(); timer = nil
-        switch outcome {
-        case .signedIn, .wrongAccount, .unverified, .stopped, .timedOut: endScript(shell: true)
-        // left open to be read: only the login ends (one still waiting after a decline), the script then holds its window
-        case .declined, .failed: endScript(shell: false)
+        // a start refused before it made its own script has no window to end: the pid file is an earlier window's, whose
+        // shell and login are none of its business (a later stop ends that window: `end` on the sign-in that has it)
+        if ownsScript {
+            switch outcome {
+            case .signedIn, .wrongAccount, .unverified, .stopped, .timedOut: endScript(shell: true)
+            // left open to be read: only the login ends (one still waiting after a decline), the script then holds its window
+            case .declined, .failed: endScript(shell: false)
+            }
         }
         releaseLock()
         for u in [statusURL, declinedURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
