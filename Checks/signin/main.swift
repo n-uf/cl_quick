@@ -705,6 +705,8 @@ do {
     spin(0.5)
     check("start: …and the later sweeps (its end, its stop, the static one) leave it", d.shellRunning && prefs.left(in: d.work).count == 1, "\(d.shellRunning) \(prefs.names)")
     d.cleanUp(); n.cleanUp()
+    // the killed shell is gone once it is reaped: until then `n`, the last sign-in, still sees a window open in the work folder
+    check("deaf shell: killed and reaped", spin(until: { d.terminal.last.map { !$0.isRunning } ?? true }, max: 5))
     prefs.reset()
 }
 do {
