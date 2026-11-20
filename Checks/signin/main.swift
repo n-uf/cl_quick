@@ -789,6 +789,46 @@ do {
     }(), "\(String(describing: sw.ended[wrong2.name]))")
     ProfileStore.shared.save([profile(ok)])
 
+    // "Try again as A" after a wrong account: the same account wanted (its id and address), begun from the folder as it is now,
+    // on B, so a switch to A, never a sign-in again; nothing while one is waited for; "Keep B" (drop) clears the note and the
+    // folder stays on B
+    sw.tryAgain(profile(ok), origin: .chat)
+    check("retry: with no ended switch for the profile, nothing begins", sw.waiting[ok.name] == nil && ok.terminal.count == 1)
+    check("retry: the note was for A (kim) and the folder is on B (bob)", sw.ended[wrong.name]?.goal.wantedEmail == "kim@example.com"
+          && ClaudeFolder.account(wrong.folder.path)?.email == "bob@example.com")
+    last = wrong
+    let outcomesBeforeRetry = outcomes.count, opensBeforeRetry = wrong.terminal.count
+    sw.tryAgain(profile(wrong), origin: .chat)
+    let retried = sw.waiting[wrong.name]
+    sw.tryAgain(profile(wrong), origin: .chat)            // pressed again while it waits: nothing more
+    check("retry: begins with the goal's id and address, from the folder's account now (B): a switch, not a sign-in again",
+          retried?.wantedUUID == uuid(7) && retried?.wantedEmail == "kim@example.com" && retried?.fromEmail == "bob@example.com"
+          && retried?.again == false && retried?.origin == .chat && sw.ended[wrong.name] == nil, "\(String(describing: retried))")
+    spin(until: { outcomes.count > outcomesBeforeRetry }, max: 20)
+    check("retry: …one sign-in opened, not two, and it ended on bob again (the wrong account)", outcomes.count == outcomesBeforeRetry + 1
+          && outcomes.last == .ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil)) && wrong.terminal.count == opensBeforeRetry + 1, "\(outcomes) \(wrong.terminal.count)")
+    sw.drop(wrong.name)                                    // "Keep B"
+    check("keep: the note goes, nothing waits, and the folder stays on B", sw.ended[wrong.name] == nil && sw.waiting[wrong.name] == nil
+          && ClaudeFolder.account(wrong.folder.path)?.email == "bob@example.com")
+    // a wrong account after a sign-in again: Try again as A is a switch from B
+    let againWrong = Case("sw-againwrong", login: ["login": "ok", "email": "bob@example.com", "uuid": uuid(8), "org": uuid(51), "orgName": "Sample Org"])
+    againWrong.record("kim@example.com", uuid(7))
+    last = againWrong
+    let beforeAgain = outcomes.count
+    sw.signInAgain(profile(againWrong), origin: .chat)
+    let againGoal = sw.waiting[againWrong.name]
+    spin(until: { outcomes.count > beforeAgain }, max: 20)
+    check("retry: a sign-in again that ended on another account is a wrong account (the goal was a sign-in again)",
+          againGoal?.again == true && outcomes.last == .ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil)) && sw.ended[againWrong.name]?.goal.again == true,
+          "\(String(describing: againGoal)) \(outcomes)")
+    sw.tryAgain(profile(againWrong), origin: .settings)
+    check("retry: …Try again as A then begins a switch from B (not a sign-in again), as Settings asks",
+          sw.waiting[againWrong.name].map { $0.again == false && $0.wantedEmail == "kim@example.com" && $0.fromEmail == "bob@example.com" && $0.origin == .settings } == true,
+          "\(String(describing: sw.waiting[againWrong.name]))")
+    sw.drop(againWrong.name)
+    spin(until: { sw.active == nil }, max: 5)
+    againWrong.cleanUp()
+
     let none = Case("sw-none", login: ["login": "hang"])
     none.record("ann@example.com", uuid(1))
     check("switch: no sign-in is the timeout's note", run(none, uuid: uuid(7), email: "kim@example.com") == .ended(.timedOut)
