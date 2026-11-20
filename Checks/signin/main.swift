@@ -323,10 +323,10 @@ do {
     })
     let o = c.waitEnd()
     lock.lock(); let (b, a) = (before, after); lock.unlock()
-    // The early ask is the one before the end (the record changed with the login still held), well before the status: a counted
-    // early ask would leave 2 after.
-    check("no word: one ask came before the login ended and it doesn't count: exactly 3 after it",
-          { if case .unverified? = o { return true } else { return false } }() && b == 1 && a == 3, "\(String(describing: o)) before \(b) after \(a)")
+    // The asks before the end (a new folder's record turning up asks on every tick while the login is held, so several) are
+    // well before the status and don't count: exactly 3 after it. An early ask counted toward the 3 leaves fewer after.
+    check("no word: asks came before the login ended and they don't count: exactly 3 after it",
+          { if case .unverified? = o { return true } else { return false } }() && b >= 1 && a == 3, "\(String(describing: o)) before \(b) after \(a)")
     c.cleanUp()
 }
 do {
