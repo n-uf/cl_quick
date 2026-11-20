@@ -53,7 +53,8 @@ public final class ClaudeSignIn {
         case folderNotReady
         /// Another sign-in (this app's or another's) holds the folder's sign-in lock.
         case locked
-        /// A `claude auth login` already runs on the folder, whoever started it.
+        /// A `claude auth login` already runs on the folder, whoever started it, or the app's earlier sign-in window is still
+        /// open (its shell ignored the ask to end).
         case alreadySigningIn
         /// The running processes couldn't be read (or one that may be Claude Code couldn't be): nothing started.
         case processesUnreadable
@@ -207,10 +208,14 @@ public final class ClaudeSignIn {
         phase = .running
         self.onState = onState; self.onEnd = onEnd
         // one window per app: the earlier sign-in ends, and whatever an earlier run of the app left in its work folder
-        if let earlier = Self.current, earlier !== self { earlier.end(.stopped) }
+        var ended = false                                                  // the earlier sign-in of this work folder already ended its script
+        if let earlier = Self.current, earlier !== self { earlier.end(.stopped); ended = earlier.work == work }
         Self.current = self
-        endScript(shell: true)
-        if !Self.scriptRuns(in: work) { sweepProfiles() }                  // what earlier runs left in Terminal's preferences (a shell that outlived the wait keeps its profile)
+        if !ended { endScript(shell: true) }
+        // a shell that outlived the wait (it ignored the TERM) is a window still open: its pid file stays its only handle (no
+        // sweep, no second window: one per app), and nothing is started on top of it
+        if Self.scriptRuns(in: work) { return finish(.failed(.alreadySigningIn)) }
+        sweepProfiles()                                                    // what earlier runs left in Terminal's preferences
         guard auth.tools.mayLaunch("login", folder) else { return finish(.failed(.folderNotReady)) }
         guard takeLock() else { return finish(.failed(.locked)) }
         switch loginRuns() {

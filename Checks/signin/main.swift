@@ -681,18 +681,29 @@ do {
     c.cleanUp()
 }
 do {
-    // a new sign-in's start sweeps only once the earlier window is gone: one whose shell outlives the start's wait keeps its profile
+    // a new sign-in's start while the earlier window's shell outlives the start's wait (it ignores TERM): one window per app, so
+    // the start is refused (already signing in), and the earlier window keeps its pid file (its only handle) and its profile
+    // through every later sweep
     prefs.reset()
     let d = Case("deaf-earlier", login: ["login": "hang"])
     d.terminal.shellBody = deafShell(d)
     d.start(wanted: wantedID(uuid(1)))
     check("deaf shell: its sign-in is declined, the window left open", d.waitEnd() == .declined && d.shellRunning, "\(String(describing: d.outcome))")
+    let pidFile = d.work.appendingPathComponent("sign-in.pid")
+    let pidBefore = try? String(contentsOf: pidFile, encoding: .utf8)
     let n = Case("deaf-next", login: ["login": "hang"])
     n.start(wanted: wantedID(uuid(1)))
-    spin(until: { n.states.contains(.waitingForBrowser) || n.outcome != nil }, max: 25)
-    check("start: the earlier window's shell outlived the start's wait: its profile stays beside the new one's",
-          d.shellRunning && n.outcome == nil && prefs.left(in: n.work).count == 2, "\(d.shellRunning) \(String(describing: n.outcome)) \(prefs.names)")
-    n.signIn.stop(); n.waitEnd()
+    check("start: the earlier window's shell outlived the start's wait: refused, already signing in, no window of its own",
+          n.waitEnd(25) == .failed(.alreadySigningIn) && n.terminal.count == 0, "\(String(describing: n.outcome)) \(n.terminal.count)")
+    check("start: …the earlier window's shell is still there, its pid file untouched and its profile kept",
+          d.shellRunning && pidBefore != nil && (try? String(contentsOf: pidFile, encoding: .utf8)) == pidBefore && prefs.left(in: d.work).count == 1,
+          "\(d.shellRunning) \(String(describing: pidBefore)) \(prefs.names)")
+    // the refused start's own end, its stop, and the start-up or quit sweep: none takes an open window's profile
+    n.signIn.stop()
+    let tool = prefs.tool
+    ClaudeSignIn.sweep(work: d.work, terminalProfiles: tool)                       // after the stop on the queue
+    spin(0.5)
+    check("start: …and the later sweeps (its end, its stop, the static one) leave it", d.shellRunning && prefs.left(in: d.work).count == 1, "\(d.shellRunning) \(prefs.names)")
     d.cleanUp(); n.cleanUp()
     prefs.reset()
 }
