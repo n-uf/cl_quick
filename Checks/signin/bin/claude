@@ -5,7 +5,8 @@
 #                                                      account in $CLAUDE_CONFIG_DIR/.claude.json)
 # $QC_LOGIN_CONF lines:
 #   login=ok (default)   after `delay` seconds (0.3) writes $CLAUDE_CONFIG_DIR/.claude.json for `email`, `uuid`, `org`,
-#                        `orgName`, then ends with 0
+#                        `orgName`, then ends with 0 (after `hold` more seconds, when given: the record is there and the
+#                        login still runs, so the sign-in's status doesn't exist yet)
 #   login=declined       Claude Code's words for a sign-in refused in the browser, on its errors; ends with 1
 #   login=declinedwait   the same words, then it waits (a login still at its paste prompt)
 #   login=fail           another error; ends with 2
@@ -27,6 +28,7 @@ case "$mode" in
     printf '{"oauthAccount":{"accountUuid":"%s","emailAddress":"%s","organizationUuid":"%s","organizationName":"%s"},"projects":{}}\n' \
       "$uuid" "$email" "$org" "$orgName" > "$CLAUDE_CONFIG_DIR/.claude.json.new"
     mv "$CLAUDE_CONFIG_DIR/.claude.json.new" "$CLAUDE_CONFIG_DIR/.claude.json"
+    hold="$(val hold)"; [ -z "$hold" ] || sleep "$hold"
     echo "Login successful."
     exit 0 ;;
   declined) echo "Login failed: OAuth error: access_denied - The user denied the request" >&2; exit 1 ;;

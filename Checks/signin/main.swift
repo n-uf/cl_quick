@@ -310,8 +310,9 @@ do {
 }
 do {
     // an ask before the login ended (the record changed first) doesn't count against the 3 tries: 3 asks after the end, however
-    // many came before
-    let c = Case("early-ask", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51)])
+    // many came before. The stand-in login holds 1 s between writing the record and ending, so the early ask is surely before
+    // the status exists (one ask, as the record changed once), and the counts are exact.
+    let c = Case("early-ask", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "hold": "1"])
     let lock = NSLock()
     var before = 0, after = 0
     let status = c.work.appendingPathComponent("sign-in.status")
@@ -322,11 +323,10 @@ do {
     })
     let o = c.waitEnd()
     lock.lock(); let (b, a) = (before, after); lock.unlock()
-    // The stand-in tells before from after when it is called; the product tells in `answered`, one queue hop later. The one ask
-    // that was in flight as the status was written can be "before" here and counted by the product: 3 after, or 2 after with
-    // that one before (only the last ask before the end can cross: asks never overlap).
-    check("no word: exactly 3 asks after the login ended, whether or not one came before it (\(b) before)",
-          { if case .unverified? = o { return true } else { return false } }() && (a == 3 || (a == 2 && b >= 1)), "\(String(describing: o)) before \(b) after \(a)")
+    // The early ask is the one before the end (the record changed with the login still held), well before the status: a counted
+    // early ask would leave 2 after.
+    check("no word: one ask came before the login ended and it doesn't count: exactly 3 after it",
+          { if case .unverified? = o { return true } else { return false } }() && b == 1 && a == 3, "\(String(describing: o)) before \(b) after \(a)")
     c.cleanUp()
 }
 do {
