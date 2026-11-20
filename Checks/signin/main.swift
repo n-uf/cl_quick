@@ -165,10 +165,10 @@ final class Case {
     }
 
     @discardableResult
-    func start(wanted: SignedInAccount?, timeout: TimeInterval = 20, startGrace: TimeInterval = 10,
+    func start(wanted: SignedInAccount?, timeout: TimeInterval = 20, startGrace: TimeInterval = 10, lateSweep: TimeInterval = 0.3,
                confirm: @escaping ClaudeSignIn.Confirm = { _ in nil }) -> ClaudeSignIn {
         signIn = ClaudeSignIn(folder: authFolder, wanted: wanted, timeout: timeout, tools: tools(), claude: claude, confirm: confirm,
-                              work: work, title: "Sample app", startGrace: startGrace, terminalProfiles: prefs.tool, lateSweep: 0.3,
+                              work: work, title: "Sample app", startGrace: startGrace, terminalProfiles: prefs.tool, lateSweep: lateSweep,
                               locks: locks, poll: 0.2)
         signIn.start(onState: { [weak self] in self?.states.append($0) }, onEnd: { [weak self] in self?.outcome = $0 })
         return signIn
@@ -587,7 +587,7 @@ do {
     // a sign-in sweeps at its start and at each end; unreadable preferences never stop one
     prefs.reset()
     let c = Case("sweeps", login: ["login": "hang"])
-    c.start(wanted: wantedID(uuid(1)))
+    c.start(wanted: wantedID(uuid(1)), lateSweep: 2)          // the late sweep comes 2 s after the end: time to put the profile in first
     spin(until: { c.states.contains(.waitingForBrowser) })
     check("profiles: swept at the start", prefs.reads >= 1, "\(prefs.reads)")
     let atStart = prefs.writes
@@ -599,7 +599,7 @@ do {
     // turns up after the stop's sweep must go in the late one: one more write, nobody else sweeping
     prefs.put("Sample app sign-in late", command: "exec " + SignInScript.q(c.work.path + "/sign-in-12345678.command"))
     check("profiles: …and once more after the window had closed itself (the late sweep takes what came after the first)",
-          spin(until: { prefs.writes == atStart + 2 }, max: 4) && prefs.left(in: c.work).isEmpty, "\(prefs.writes) \(atStart) \(prefs.names)")
+          spin(until: { prefs.writes == atStart + 2 }, max: 6) && prefs.left(in: c.work).isEmpty, "\(prefs.writes) \(atStart) \(prefs.names)")
     c.cleanUp()
     // a refused start (the folder isn't there) sweeps at its start and at its end too
     prefs.reset()
