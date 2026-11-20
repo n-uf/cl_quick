@@ -196,7 +196,9 @@ public final class ClaudeSignIn {
         switch phase {
         case .idle: return
         case .running: finish(outcome)
-        case .ended: endScript(shell: true); sweepProfiles(late: true)       // a window left open to be read, now gone
+        case .ended:                                                       // a window left open to be read
+            endScript(shell: true)
+            if !windowIsOpen { sweepProfiles(late: true) }                 // swept only once it is gone (a shell that outlived the wait keeps its profile)
         }
     }
 
