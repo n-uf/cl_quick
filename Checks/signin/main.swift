@@ -581,9 +581,16 @@ do {
     c.start(wanted: wantedID(uuid(1)))
     spin(until: { c.states.contains(.waitingForBrowser) })
     check("profiles: swept at the start", prefs.reads >= 1, "\(prefs.reads)")
-    let atStart = prefs.reads
+    let atStart = prefs.writes
     c.signIn.stop(); c.waitEnd()
-    check("profiles: swept at the end (stopped), and once more after the window had closed itself", spin(until: { prefs.reads >= atStart + 2 }, max: 4), "\(prefs.reads) \(atStart)")
+    // the stop's own sweep took the profile Terminal kept for the window (a write); it has run by the time the outcome came
+    check("profiles: swept at the end (stopped): the window's kept profile is taken at once", prefs.writes == atStart + 1 && prefs.left(in: c.work).isEmpty,
+          "\(prefs.writes) \(atStart) \(prefs.names)")
+    // a read can't tell the late sweep from the first one (a sweep that finds something reads twice), so a profile that only
+    // turns up after the stop's sweep must go in the late one: one more write, nobody else sweeping
+    prefs.put("Sample app sign-in late", command: "exec " + SignInScript.q(c.work.path + "/sign-in-12345678.command"))
+    check("profiles: …and once more after the window had closed itself (the late sweep takes what came after the first)",
+          spin(until: { prefs.writes == atStart + 2 }, max: 4) && prefs.left(in: c.work).isEmpty, "\(prefs.writes) \(atStart) \(prefs.names)")
     c.cleanUp()
     // a refused start (the folder isn't there) sweeps at its start and at its end too
     prefs.reset()
