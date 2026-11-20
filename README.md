@@ -87,7 +87,8 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
 - A switch that ends without the account wanted says what happened, in the chat and on the profile's page in Settings,
   each way in its own words. If another account signed in: "The browser was signed in as b•••@example.com, not
   a•••@example.com. Main is on b•••@example.com now." (and "b•••@example.com is also in use on Work." when it is), with two
-  compact keys, **Try again as** the account wanted (the same switch again) and **Keep** the one it is on now. Declined in
+  compact keys, **Try again as** the account wanted (the same switch again) and **Keep** the one it is on now; when that
+  account is also in use on another profile there is no Keep, only Try again as and a plain Dismiss (OK in Settings). Declined in
   the browser: "The sign-in was declined in the browser. The account in use hasn't changed." Signed in but Claude Code
   didn't confirm which account: "Signed in, but Claude Code didn't confirm which account. Check the account line in the
   menu." (the folder may have changed, so it never says "hasn't changed"). After 10 minutes with no change it stops looking

@@ -17,7 +17,8 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 - **Clearer switching.** The switch question says the browser must be signed in to claude.ai as that account first. While
   the sign-in waits, a short checklist says what to check in the browser ("Logged in as" before Authorize, Switch account if
   it's wrong), with the address blurred. After a wrong account the note says the browser was signed in as B, not A, that
-  Main is on B now, and whether B is also in use on another profile, with **Try again as A** and **Keep B**. A sign-in
+  Main is on B now, and whether B is also in use on another profile, with **Try again as A** and **Keep B** (when B is also
+  in use on another profile there is no Keep B, only Try again as A and a plain dismiss). A sign-in
   declined in the browser, one Claude Code didn't confirm, and each way a sign-in can fail have their own words, and a
   window Terminal never ran is the "couldn't start" alert.
 - **No Terminal profiles left behind.** Terminal keeps a profile for every settings file it opens, with its dead command;

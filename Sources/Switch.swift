@@ -360,9 +360,11 @@ enum SwitchWords {
     static func retry(_ e: SwitchEnded) -> (title: String, address: String?) {
         e.goal.again && e.signedIn == nil ? ("Sign in again", nil) : ("Try again as ", e.goal.wantedEmail)
     }
-    /// The key that keeps what happened: "Keep <the address it is on>" after a wrong account, else nil (the caller's OK).
+    /// The key that keeps what happened: "Keep <the address it is on>" after a wrong account on an account no other profile
+    /// uses; nil otherwise (the caller's plain dismiss: Dismiss in the chat, OK in Settings). When that account is also in use
+    /// on another profile there is nothing to keep: the note still says so, and Try again as A is the one key that acts.
     static func keep(_ e: SwitchEnded) -> (title: String, address: String)? {
-        guard let b = e.signedIn, !b.isEmpty else { return nil }
+        guard case .wrongAccount(let b, let also) = e.reason, !b.isEmpty, also == nil else { return nil }
         return ("Keep ", b)
     }
 }

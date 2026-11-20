@@ -1053,6 +1053,13 @@ do {
     let wrongKeys = (SwitchWords.retry(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))), SwitchWords.keep(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))))
     check("keys: after a wrong account: \"Try again as A\" (the same switch) and \"Keep B\"",
           wrongKeys.0.title == "Try again as " && wrongKeys.0.address == "kim@example.com" && wrongKeys.1?.title == "Keep " && wrongKeys.1?.address == "bob@example.com")
+    // B also in use on another profile: nothing to keep, so only Try again as A and the plain dismiss; the line still says so
+    let alsoKeys = (SwitchWords.retry(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: "Work"))), SwitchWords.keep(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: "Work"))))
+    check("keys: after a wrong account on one also in use on another profile: Try again as A, and no Keep B (the plain dismiss)",
+          alsoKeys.0.title == "Try again as " && alsoKeys.0.address == "kim@example.com" && alsoKeys.1 == nil
+          && line(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: "Work"))).hasSuffix("is also in use on Work."))
+    check("keys: …and no Keep when nobody signed in (an empty address), as before",
+          SwitchWords.keep(ended(.wrongAccount(signedIn: "", alsoOn: nil))) == nil)
     check("keys: other endings keep their one dismiss (no Keep), and retry as the account wanted",
           SwitchWords.keep(ended(.declined)) == nil && SwitchWords.retry(ended(.declined)).address == "kim@example.com")
     check("keys: a sign-in again that never came is just Sign in again; a wrong account on one is still Try again as A",
