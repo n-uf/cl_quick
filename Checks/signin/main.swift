@@ -696,6 +696,20 @@ do {
     d.cleanUp(); n.cleanUp()
     prefs.reset()
 }
+do {
+    // the start-up sweep reads nothing of Terminal's for someone who never signed in (no sign-in work folder)
+    prefs.reset()
+    let never = base.appendingPathComponent("never-signed-in/work")
+    prefs.put("Sample app sign-in", command: "exec " + SignInScript.q(never.path + "/sign-in-12345678.command"))
+    let standIn = prefs.tool
+    AccountSwitcher.sweepWork(never, terminalProfiles: standIn)
+    check("start-up sweep: no sign-in work folder: Terminal's preferences aren't read, nothing is taken", prefs.reads == 0 && prefs.names == ["Sample app sign-in"],
+          "\(prefs.reads) \(prefs.names)")
+    try? fm.createDirectory(at: never, withIntermediateDirectories: true)
+    AccountSwitcher.sweepWork(never, terminalProfiles: standIn)
+    check("start-up sweep: …with the folder there, what an earlier run left is taken", prefs.names.isEmpty, "\(prefs.names)")
+    prefs.reset()
+}
 
 // ── one sign-in per app, and the two guards ──────────────────────────────────────────────────────────
 do {

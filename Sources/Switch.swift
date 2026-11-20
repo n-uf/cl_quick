@@ -105,7 +105,15 @@ final class AccountSwitcher {
     /// Sweeps Terminal's kept profiles of cl_quick's sign-ins that nothing sweeps by itself any more: a declined or failed
     /// window left open and closed by hand later, with no sign-in after it. At start (above) and at quit (`stopForQuit`).
     /// Nothing while only checking or drawing; the checks put a stand-in here (never this Mac's Terminal preferences).
-    static var sweepLeftovers: () -> Void = { if !Files.readOnly { ClaudeSignIn.sweep(work: signInWork) } }
+    static var sweepLeftovers: () -> Void = { if !Files.readOnly { sweepWork(signInWork) } }
+
+    /// The sweep itself, nothing when the sign-in work folder isn't there: whoever never signed in has left nothing, and
+    /// Terminal's preferences aren't read for them.
+    static func sweepWork(_ work: URL, terminalProfiles: TerminalProfiles = .system) {
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: work.path, isDirectory: &isFolder), isFolder.boolValue else { return }
+        ClaudeSignIn.sweep(work: work, terminalProfiles: terminalProfiles)
+    }
 
     /// cl_quick's folder for its sign-ins' files (never the Claude Code folder).
     static var signInWork: URL { Files.folder.appendingPathComponent("sign-in") }
