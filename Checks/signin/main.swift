@@ -96,6 +96,9 @@ final class FakeTerminal {
     let conf: URL
     /// Says it opened the file, but never runs it (a Terminal that never started the script).
     var neverStarts = false
+    /// Runs this shell body in place of the script's command (it gets the script's path, so the shell's command line names it):
+    /// a window whose shell the check shapes (one that ignores TERM). Nothing is passed to it but that path.
+    var shellBody: String?
     init(conf: URL) { self.conf = conf }
 
     func open(_ url: URL) -> Bool {
@@ -111,7 +114,13 @@ final class FakeTerminal {
         settings = p
         let sh = Process(), input = Pipe()
         sh.executableURL = URL(fileURLWithPath: "/bin/sh")
-        sh.arguments = ["-c", cmd]
+        if let body = shellBody {
+            // the command is "exec '<script>'": the script's path is what a window's shell carries in its command line
+            let path = cmd.hasPrefix("exec '") && cmd.hasSuffix("'") ? String(cmd.dropFirst(6).dropLast()) : cmd
+            sh.arguments = ["-c", body, "stand-in", path]
+        } else {
+            sh.arguments = ["-c", cmd]
+        }
         sh.environment = ["PATH": "/usr/bin:/bin", "HOME": home.path, "ZDOTDIR": zdot.path, "TERM": "dumb",
                           "QC_LOGIN_CONF": conf.path, "ANTHROPIC_API_KEY": "made-up-key"]
         sh.standardInput = input
@@ -644,6 +653,32 @@ do {
     check("sweep: the earlier run's window gone, its profile goes", prefs.names.isEmpty, "\(prefs.names)")
     other.terminate(); other.waitUntilExit()
     prefs.reset()
+}
+/// A window's shell that ignores TERM (and the TERM its children get), ends cleanly on HUP (Terminal's hang-up), and has
+/// declined its sign-in: the window stays open to be read, as a real declined one does.
+func deafShell(_ c: Case) -> String {
+    "trap '' TERM; trap 'exit 0' HUP; printf '%s\\n' $$ > '\(c.work.path)/sign-in.pid'; : > '\(c.work.path)/sign-in.declined'; "
+        + "while :; do (trap - TERM; exec sleep 0.1); done"
+}
+/// Waits for whatever the sign-in's queue still does (a stop's wait for the shell): the static sweep takes that queue, and
+/// is handed a Terminal stand-in with nothing in it.
+func settle(_ work: URL) { ClaudeSignIn.sweep(work: work, terminalProfiles: FakePrefs().tool) }
+do {
+    // stopping an ended window whose shell doesn't end when asked: the profile stays; once the shell dies, a stop takes it
+    prefs.reset()
+    let c = Case("deaf", login: ["login": "hang"])
+    c.terminal.shellBody = deafShell(c)
+    c.start(wanted: wantedID(uuid(1)))
+    check("deaf shell: its sign-in is declined, the window left open to be read", c.waitEnd() == .declined && c.shellRunning, "\(String(describing: c.outcome))")
+    c.signIn.stop()
+    settle(c.work)                                       // the stop has waited out its 3 s (and the 1 s after the kill)
+    check("deaf shell: stopped, the shell is still there (TERM ignored; it is never killed)", c.shellRunning)
+    check("deaf shell: …and its profile stays with the window still open", prefs.left(in: c.work).count == 1, "\(prefs.names)")
+    if let s = c.terminal.last { kill(s.processIdentifier, SIGHUP) }
+    check("deaf shell: the hang-up ends it cleanly", c.shellEnded() == 0)
+    c.signIn.stop()
+    check("deaf shell: …and a stop once it is gone takes its profile", spin(until: { prefs.left(in: c.work).isEmpty }, max: 4), "\(prefs.names)")
+    c.cleanUp()
 }
 
 // ── one sign-in per app, and the two guards ──────────────────────────────────────────────────────────
