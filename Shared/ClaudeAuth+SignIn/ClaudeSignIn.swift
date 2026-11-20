@@ -532,6 +532,22 @@ public final class ClaudeSignIn {
         }
     }
 
+    /// Sweeps Terminal's kept profiles of the sign-ins in `work`, with no sign-in of the caller's in hand: for an app that is
+    /// starting (what earlier runs left) or quitting (a declined or failed window left open and closed by hand since, which
+    /// no later sign-in would sweep). Nothing while a sign-in of this process runs or its window is still open, nor while a
+    /// script of `work` runs from an earlier run of the app (that window's profile is in use). Blocks on the sign-in queue
+    /// (an app calls it off the main thread at its start). Only for the settings-file window (`.scripted` leaves no profile).
+    public static func sweep(work: URL, terminalProfiles: TerminalProfiles = .system) {
+        queue.sync {
+            if current?.windowIsOpen == true { return }
+            let pidFile = work.appendingPathComponent("sign-in.pid")
+            if let s = try? String(contentsOf: pidFile, encoding: .utf8), let pid = pid_t(s.trimmingCharacters(in: .whitespacesAndNewlines)),
+               pid > 0, ProcessTable.runs(pid), let l = ProcessTable.launch(of: pid),
+               l.args.contains(where: { $0.hasPrefix(work.path + "/sign-in-") && $0.hasSuffix(".command") }) { return }
+            terminalProfiles.remove(commandsRunningIn: work.path)
+        }
+    }
+
     /// The sign-in is under way, or its script still runs in a window left open to be read: its profile is in use.
     private var windowIsOpen: Bool { phase == .running || (scriptPid().map { ProcessTable.runs($0) } ?? false) }
 

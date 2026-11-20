@@ -93,11 +93,22 @@ final class AccountSwitcher {
     var findClaude: () -> String? = { ClaudeLocator.find()?.path }
     var makeSignIn: (_ folder: String, _ wanted: SignedInAccount?, _ claude: String) -> ClaudeSignIn = AccountSwitcher.realSignIn
 
-    /// Made once, as cl_quick starts (the chat holds it): a sign-in script an older version left behind goes (not while
-    /// only checking or drawing).
+    /// Made once, as cl_quick starts (the chat holds it): a sign-in script an older version left behind goes, and so do the
+    /// profiles Terminal kept of earlier sign-ins (off the main thread; not while only checking or drawing).
     private init() {
-        if !Files.readOnly { try? FileManager.default.removeItem(at: Files.folder.appendingPathComponent("sign-in.command")) }
+        if !Files.readOnly {
+            try? FileManager.default.removeItem(at: Files.folder.appendingPathComponent("sign-in.command"))
+            DispatchQueue.global(qos: .utility).async { Self.sweepLeftovers() }
+        }
     }
+
+    /// Sweeps Terminal's kept profiles of cl_quick's sign-ins that nothing sweeps by itself any more: a declined or failed
+    /// window left open and closed by hand later, with no sign-in after it. At start (above) and at quit (`stopForQuit`).
+    /// Nothing while only checking or drawing; the checks put a stand-in here (never this Mac's Terminal preferences).
+    static var sweepLeftovers: () -> Void = { if !Files.readOnly { ClaudeSignIn.sweep(work: signInWork) } }
+
+    /// cl_quick's folder for its sign-ins' files (never the Claude Code folder).
+    static var signInWork: URL { Files.folder.appendingPathComponent("sign-in") }
 
     /// cl_quick's ClaudeSignIn: the real Mac's tools (Terminal, the folder's own guard; no Keychain reader), its files in
     /// cl_quick's folder (sign-in/), the account confirmed by a short `claude` on the folder.
@@ -105,7 +116,7 @@ final class AccountSwitcher {
         let f = AuthFolder(path: expand(folder), isDefault: ClaudeFolder.isDefault(folder))
         return ClaudeSignIn(folder: f, wanted: wanted, tools: .system, claude: claude,
                             confirm: SignInWord.confirm(claude: claude, workFolder: Files.work.appendingPathComponent("sign-in").path),
-                            work: Files.folder.appendingPathComponent("sign-in"), title: "cl_quick", shown: tilde(f.path))
+                            work: signInWork, title: "cl_quick", shown: tilde(f.path))
     }
 
     /// "Switch to …": asks first, in plain words, then opens Claude Code's sign-in and watches the folder.
@@ -259,10 +270,13 @@ final class AccountSwitcher {
     }
 
     /// cl_quick is quitting: the sign-in under way ends now, its login and window with it (nothing waits for an outcome).
+    /// Then Terminal's kept profiles are swept whether one was under way or not: an ended sign-in's window, left open to be
+    /// read and closed by hand since, keeps its profile until something sweeps it.
     func stopForQuit() {
         pending = nil
         active?.signIn.stopNow()
         active = nil
+        Self.sweepLeftovers()
     }
 
     /// Two spellings of one folder (~ or the full path, a trailing slash, a link to it).

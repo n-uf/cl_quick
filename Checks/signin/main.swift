@@ -899,7 +899,41 @@ do {
     check("switch: two spellings of one folder are one", AccountSwitcher.sameFolder(second.folder.path, second.folder.path + "/./")
           && !AccountSwitcher.sameFolder(second.folder.path, first.folder.path))
     sw.drop(second.name)
-    for c in [ok, wrong, wrong2, elsewhere, none, declined, failedLogin, nostart, stop, unconfirmed, first, second] { c.cleanUp() }
+
+    // a declined window left open and closed by hand later, with no sign-in after it: nothing but the sweep at quit (and at
+    // start) takes its profile. Terminal's preferences are the stand-in's; the sweep is handed them, never the real ones.
+    prefs.reset()
+    sw.drop(first.name); sw.drop(second.name)
+    spin(until: { sw.active == nil }, max: 5)
+    let lateWork = declined.work
+    var sweeps = 0
+    let standIn = prefs.tool
+    func sweepNow() { ClaudeSignIn.sweep(work: lateWork, terminalProfiles: standIn) }
+    AccountSwitcher.sweepLeftovers = { sweeps += 1; sweepNow() }
+    let left = Case("sw-left", login: ["login": "declined"])
+    left.record("ann@example.com", uuid(1))
+    check("switch: a declined sign-in's window is left open to be read", run(left, uuid: uuid(7), email: "kim@example.com") == .ended(.declined) && left.shellRunning)
+    sw.drop(left.name)
+    check("sweep: while that window is open its profile stays (the static sweep leaves a window in use alone)",
+          { sweepNow(); return !prefs.left(in: lateWork).isEmpty }(), "\(prefs.names)")
+    if let s = left.terminal.last { kill(s.processIdentifier, SIGKILL) }          // closed by hand
+    check("sweep: …and closed by hand, with no sign-in after it, it stays until a sweep comes", spin(until: { !left.shellRunning }, max: 5)
+          && { spin(1); return !prefs.left(in: lateWork).isEmpty }(), "\(prefs.names)")
+    sw.stopForQuit()
+    check("sweep: quitting sweeps it (stopForQuit, though no sign-in is under way)", sweeps == 1 && prefs.left(in: lateWork).isEmpty, "\(sweeps) \(prefs.names)")
+    // not while a sign-in runs
+    let running = Case("sw-running", login: ["login": "hang"])
+    running.record("ann@example.com", uuid(1))
+    last = running
+    sw.begin(profile(running), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    spin(until: { running.states.contains(.waitingForBrowser) || !prefs.left(in: lateWork).isEmpty }, max: 10)
+    _ = running.waitLogin()
+    sweepNow()
+    check("sweep: a sign-in under way keeps its profile", !prefs.left(in: lateWork).isEmpty, "\(prefs.names)")
+    sw.drop(running.name)
+    spin(until: { prefs.left(in: lateWork).isEmpty }, max: 5)
+    AccountSwitcher.sweepLeftovers = {}
+    for c in [ok, wrong, wrong2, elsewhere, none, declined, failedLogin, nostart, stop, unconfirmed, first, second, left, running] { c.cleanUp() }
 }
 
 // ── the words a switch ends on (the same in the chat and in Settings) ────────────────────────────────
