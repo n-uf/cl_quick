@@ -619,8 +619,9 @@ do {
     // the static sweep's pid-file guard, alone (the only guard at start-up, when no sign-in of this run is `current`): a window
     // of an earlier run, its script's pid in the work folder's sign-in.pid and the script in its command line, keeps its
     // profile. The work folder is one no sign-in of this run has used, so what the process's own last sign-in knows
-    // about its window can't be what holds it.
-    prefs.reset()
+    // about its window can't be what holds it. Its own Terminal-preferences stand-in: an earlier block's late sweep, on the
+    // shared one, can't be counted as a read here.
+    let mine = FakePrefs()
     let earlier = base.appendingPathComponent("earlier-run/work")
     try? fm.createDirectory(at: earlier, withIntermediateDirectories: true)
     let script = earlier.appendingPathComponent("sign-in-abcdef01.command").path
@@ -634,25 +635,24 @@ do {
         return p
     }
     func names(_ p: Process) { try? "\(p.processIdentifier)\n".write(to: earlier.appendingPathComponent("sign-in.pid"), atomically: true, encoding: .utf8) }
-    func put() { prefs.reset(); prefs.put("Sample app sign-in", command: "exec " + SignInScript.q(script)) }
-    let standIn = prefs.tool
+    func put() { mine.reset(); mine.put("Sample app sign-in", command: "exec " + SignInScript.q(script)) }
+    let standIn = mine.tool
     func sweep() { ClaudeSignIn.sweep(work: earlier, terminalProfiles: standIn) }
     let open = shell(script)
     names(open)
     put(); sweep()
     check("sweep: a script of the work folder still running from an earlier run keeps its profile (the pid file alone)",
-          prefs.names == ["Sample app sign-in"] && prefs.reads == 0, "\(prefs.names) \(prefs.reads)")
+          mine.names == ["Sample app sign-in"] && mine.reads == 0, "\(mine.names) \(mine.reads)")
     // …a pid that runs something else (the pid was reused) doesn't: the command line must name the script
     let other = shell("/not/the/work/sign-in-abcdef01.command")
     names(other); put(); sweep()
-    check("sweep: a pid that runs something else holds nothing", prefs.names.isEmpty, "\(prefs.names)")
+    check("sweep: a pid that runs something else holds nothing", mine.names.isEmpty, "\(mine.names)")
     // …and the window gone (its shell ended), the profile goes
     names(open); put()
     open.terminate(); open.waitUntilExit()
     sweep()
-    check("sweep: the earlier run's window gone, its profile goes", prefs.names.isEmpty, "\(prefs.names)")
+    check("sweep: the earlier run's window gone, its profile goes", mine.names.isEmpty, "\(mine.names)")
     other.terminate(); other.waitUntilExit()
-    prefs.reset()
 }
 /// A window's shell that ignores TERM (and the TERM its children get), ends cleanly on HUP (Terminal's hang-up), and has
 /// declined its sign-in: the window stays open to be read, as a real declined one does.
@@ -709,17 +709,17 @@ do {
 }
 do {
     // the start-up sweep reads nothing of Terminal's for someone who never signed in (no sign-in work folder)
-    prefs.reset()
+    // (its own Terminal-preferences stand-in: another block's late sweep on the shared one can't count as a read)
+    let mine = FakePrefs()
     let never = base.appendingPathComponent("never-signed-in/work")
-    prefs.put("Sample app sign-in", command: "exec " + SignInScript.q(never.path + "/sign-in-12345678.command"))
-    let standIn = prefs.tool
+    mine.put("Sample app sign-in", command: "exec " + SignInScript.q(never.path + "/sign-in-12345678.command"))
+    let standIn = mine.tool
     AccountSwitcher.sweepWork(never, terminalProfiles: standIn)
-    check("start-up sweep: no sign-in work folder: Terminal's preferences aren't read, nothing is taken", prefs.reads == 0 && prefs.names == ["Sample app sign-in"],
-          "\(prefs.reads) \(prefs.names)")
+    check("start-up sweep: no sign-in work folder: Terminal's preferences aren't read, nothing is taken", mine.reads == 0 && mine.names == ["Sample app sign-in"],
+          "\(mine.reads) \(mine.names)")
     try? fm.createDirectory(at: never, withIntermediateDirectories: true)
     AccountSwitcher.sweepWork(never, terminalProfiles: standIn)
-    check("start-up sweep: …with the folder there, what an earlier run left is taken", prefs.names.isEmpty, "\(prefs.names)")
-    prefs.reset()
+    check("start-up sweep: …with the folder there, what an earlier run left is taken", mine.names.isEmpty, "\(mine.names)")
 }
 
 // ── one sign-in per app, and the two guards ──────────────────────────────────────────────────────────
