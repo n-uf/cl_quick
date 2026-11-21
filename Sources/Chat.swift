@@ -1937,7 +1937,8 @@ final class QuickChatPanel: NSPanel {
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // ⌘[ and ⌘] (exactly ⌘): the previous and next message of the user's, matched by KEY CODE, so they work on any layout (the
         // Ukrainian х and ї are on those keys, and ї and ґ keep typing: shortcutLetter, which the Edit keys use, is left alone)
-        if flags.intersection([.command, .option, .control, .shift]) == [.command] {
+        // (only while the panel is the key window: ⌘[ typed in Settings or another app is never the chat's)
+        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command] {
             switch Int(e.keyCode) {
             case kVK_ANSI_LeftBracket: if onNavigate(.previousPrompt) { return true }
             case kVK_ANSI_RightBracket: if onNavigate(.nextPrompt) { return true }
@@ -1974,7 +1975,7 @@ final class QuickChatPanel: NSPanel {
         case "d" where !shift: onDictate(); return true
         // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view; ⌘[ ⌘] are above, by key code): taken only
         // when the chat window has something to scroll, and never a text edit, so the field keeps its keys
-        case "j": if onNavigate(shift ? .answerStart : .latest) { return true }
+        case "j" where isKeyWindow: if onNavigate(shift ? .answerStart : .latest) { return true }
         case "n" where !shift: onNewChat(); return true
         case "w" where !shift: onClose(); return true
         default: break

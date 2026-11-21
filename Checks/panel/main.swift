@@ -5066,6 +5066,15 @@ func chatKeyChecks() {
           QCNavHelp.latest.hasSuffix(" ⌘J") && QCNavHelp.start.hasSuffix(" ⇧⌘J") && QCNavHelp.previous.hasSuffix(" ⌘[") && QCNavHelp.next.hasSuffix(" ⌘]"))
     let pages = QCKeysView.pages(opener: "⌃⇧Space")
     check("keys: the keys list has three pages, none as tall as the 12 rows it had", pages.map(\.page) == QCKeysPage.allCases && pages.map { $0.rows.count }.max()! < 12, "\(pages.map { $0.rows.count })")
+    // the panel not the key window (hidden: a ⌘[ typed in Settings or another app is not the chat's): nothing is taken, nothing moves
+    sc.jumpToLatest(); settle()
+    let keyOff = sc.offset()
+    chat.hide(); spin(0.3)
+    let notKey = [key("j", kVK_ANSI_J, cmd), key("J", kVK_ANSI_J, [.command, .shift]), key("[", kVK_ANSI_LeftBracket, cmd), key("]", kVK_ANSI_RightBracket, cmd),
+                  key("х", kVK_ANSI_LeftBracket, cmd)]
+    check("keys: with the panel not the key window ⌘J, ⇧⌘J, ⌘[ and ⌘] are not taken and move nothing", !p.isKeyWindow && notKey.allSatisfy { !$0 } && sc.offset() == keyOff, "\(notKey) \(sc.offset()) vs \(keyOff)")
+    chat.open(); spin(0.4)
+    check("keys: and with the panel key again they work", key("[", kVK_ANSI_LeftBracket, cmd) && sc.offset() != keyOff)
     // with no chat (the bar) the navigation keys are not taken
     m.newChat(); spin(0.3)
     check("keys: in the bar (no chat) ⌘J, ⌘[, ⌘], Page Up and End are not taken", !key("j", kVK_ANSI_J, cmd) && !key("[", kVK_ANSI_LeftBracket, cmd) && !key("]", kVK_ANSI_RightBracket, cmd)
