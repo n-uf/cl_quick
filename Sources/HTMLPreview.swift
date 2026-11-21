@@ -77,6 +77,8 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Safe Browsing asks Google/Apple about a navigation's URL before the delegate is asked: no lookups
+        config.preferences.isFraudulentWebsiteWarningEnabled = false
         config.userContentController.add(rules)
         trace("add rules")
         let view = QCPreviewWebView(frame: .zero, configuration: config)
