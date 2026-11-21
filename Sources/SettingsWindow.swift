@@ -604,7 +604,9 @@ struct ProfileContent<Name: View, Add: View>: View {
     @Environment(\.face) private var face
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // (10 pt between its blocks, not 14: the strip's track row, which every page keeps, takes 34 pt, and a profile's
+        // page must stay no taller than General was: 666 pt in its picture)
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     nameField

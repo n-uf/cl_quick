@@ -367,10 +367,10 @@ if #available(macOS 14, *) {
         MainActor.assumeIsolated { SettingsRender.write(to: path, page: page) }
         if let rep = NSBitmapImageRep(data: (try? Data(contentsOf: URL(fileURLWithPath: path))) ?? Data()) { heights[page] = CGFloat(rep.pixelsHigh) / 2 }
     }
-    // (a profile's page is no part of this: the track's row, which every page keeps, makes it taller than it was)
-    let subPages = ["general", "chat-custom", "chat-builtin", "chat-limit", "chat-noweb"].compactMap { heights[$0] }
-    check("height: APP and CHAT (scrolled to Custom or to Built in, at the limit, Links and search off) are each no taller than General's 666 pt",
-          heights.count == 6 && subPages.count == 5 && subPages.allSatisfy { $0 <= oldGeneralHeight }, "\(heights)")
+    // (a profile's page too: the track's row, which every page keeps, is paid for by that page's tighter spacing)
+    let subPages = ["general", "profile", "chat-custom", "chat-builtin", "chat-limit", "chat-noweb"].compactMap { heights[$0] }
+    check("height: APP, CHAT (scrolled to Custom or to Built in, at the limit, Links and search off) and a profile's page are each no taller than General's 666 pt",
+          heights.count == 6 && subPages.count == 6 && subPages.allSatisfy { $0 <= oldGeneralHeight }, "\(heights)")
     check("height: what is typed never changes it: CHAT is as tall with no text, with some and at the limit, and with the other built-in text",
           Set(["chat-custom", "chat-builtin", "chat-limit", "chat-noweb"].compactMap { heights[$0] }).count == 1, "\(heights)")
     try? FileManager.default.removeItem(at: dir)
