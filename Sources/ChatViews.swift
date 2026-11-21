@@ -105,7 +105,14 @@ struct QCBar: View {
 
 struct QCWindow: View {
     @ObservedObject var model: QuickChatModel
+    /// How the chat scrolls (ChatScroll.swift): the model's, watched here for the floating control.
+    @ObservedObject private var scroll: QCChatScroll
     @Environment(\.qcRendering) private var rendering
+
+    init(model: QuickChatModel) {
+        self.model = model
+        scroll = model.scroll
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,24 +123,27 @@ struct QCWindow: View {
                     .overlay(VStack(alignment: .leading, spacing: 0) { turns }.padding(Self.chatPadding), alignment: .bottom)
                     .clipped()
                     .overlay(alignment: .top) { fade }
+                    .overlay(alignment: .bottomTrailing) { floating }
             } else {
-                // the chat is at least as tall as the scroll view, so the empty space below a short one drags too
+                // the chat is at least as tall as the scroll view, so the empty space below a short one drags too. It is
+                // an NSScrollView underneath; QCChatScroll watches it (the probe finds it), so following the end stops when
+                // the user scrolls up, and the buttons scroll it.
                 GeometryReader { geo in
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 0) {
-                                turns
-                                Color.clear.frame(height: 1).id("end")
-                            }
-                            .padding(Self.chatPadding)
-                            .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
-                            .qcDraggable()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            turns
+                            Color.clear.frame(height: 1)
                         }
-                        .onChange(of: model.scrollTick) { _ in proxy.scrollTo("end", anchor: .bottom) }
-                        .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+                        .padding(Self.chatPadding)
+                        .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
+                        .background(QCScrollProbe(scroll: scroll))
+                        .qcDraggable()
                     }
+                    .onChange(of: model.scrollTick) { _ in scroll.contentChanged() }
+                    .onChange(of: model.followTick) { _ in scroll.jumpToLatest(animated: false) }
                 }
                 .overlay(alignment: .top) { fade }
+                .overlay(alignment: .bottomTrailing) { floating }
                 .frame(minHeight: 44)         // a line of chat stays, whatever the window
             }
             // Dictation off in macOS: its one line, over the field box
@@ -171,6 +181,11 @@ struct QCWindow: View {
     private var fade: some View {
         LinearGradient(colors: [QCColor.window, QCColor.window.opacity(0)], startPoint: .top, endPoint: .bottom)
             .frame(height: 10).allowsHitTesting(false)
+    }
+
+    /// What floats over the answers' bottom edge, in the gap above the field box: bottom right, jump to latest.
+    private var floating: some View {
+        QCScrollControl(scroll: scroll).padding(.trailing, QCSpace.gap).padding(.bottom, 8)
     }
 
     @ViewBuilder private var turns: some View {
@@ -1031,8 +1046,8 @@ struct QCControls: View {
 }
 
 /// A step control (the model, thinking): a short label and a bar per step, rising. The bars up to and including the one
-/// in use are filled bright (the text colour, or ember when the step in use costs more) and a dot sits under the one in
-/// use; the bars above it are a faint fill, never tinted, so only what is in use looks lit. Each bar is a target of its
+/// in use are filled bright (the text colour, or ember when the step in use costs more); the bars above it are a faint
+/// fill, never tinted, so only what is in use looks lit (nothing else marks the step in use). Each bar is a target of its
 /// own (5 pt drawn in an 8 × 28 pt column; the columns touch, a control: a press there never moves the window): a click
 /// picks that step. Thinking's Off is a dash before the bars. The pointer on a bar lights it and the label shows its
 /// short name; nothing pops up (the keys are under the row's keys button, VoiceOver has the full names); the scroll
@@ -1156,7 +1171,8 @@ struct QCStepControl: View {
         .accessibilityAdjustableAction { d in _ = step(d == .increment ? 1 : -1) }
     }
 
-    /// One step's target: an 8 × 28 column with its bar (or Off's dash) at the bottom, and under the one in use a dot.
+    /// One step's target: an 8 × 28 column with its bar (or Off's dash) standing on the line that centres the tallest bar (15 pt)
+    /// in the column.
     @ViewBuilder private func column(_ j: Int, lit litColour: Color) -> some View {
         let s = steps[j]
         let isOff = offSlot && j == 0
@@ -1721,6 +1737,8 @@ struct QCIconButton: View {
     /// A 24 pt target with a smaller glyph (an answer's actions, a code block's Copy); else 28.
     var small = false
     var size: CGFloat? = nil
+    /// What VoiceOver says, when it should say more than the symbol's name (the tooltip is `help`).
+    var label: String? = nil
     let action: () -> Void
     @State private var hover = false
     var body: some View {
@@ -1733,6 +1751,7 @@ struct QCIconButton: View {
                 .qcControl()     // the whole target
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
+        .accessibilityLabel(Text(label ?? help))
     }
 }
 
@@ -1751,7 +1770,6 @@ struct QCMicButton: View {
                 .foregroundColor(on ? QCColor.accent : hover ? QCColor.text : QCColor.muted)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(on ? QCColor.accent.opacity(0.18) : hover ? QCColor.hover : .clear))
-        .accessibilityLabel(Text(label ?? help))
                 .qcControl()
         }
         .buttonStyle(.plain)

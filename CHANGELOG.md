@@ -4,6 +4,12 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **No forced scrolling while an answer streams.** The chat followed the end of the text even when you had scrolled up to
+  read. Now it follows only while you are at the bottom (within a few points) when new text arrives. Scroll up by any
+  means (wheel, trackpad, scroller, keys, selecting text) and new text never moves the view; scroll back down by hand,
+  press the new **jump to latest** button (floating at the bottom right of the answers, with a dot while text has
+  arrived below), or send a message, and it follows again. The button glides to the bottom, or jumps at once with Reduce
+  Motion; it is labelled "Jump to latest" and hides at the bottom.
 - **Shortcuts that don't clash with macOS.**
   - **Model and thinking keys are now ⌥⌘ arrows** (⌥⌘↑ ⌥⌘↓ thinking, ⌥⌘→ ⌥⌘← model). Plain ⌘ arrows were taken by the
     chat, but in a Mac text field they are the caret's jumps to the line's and the text's start and end; they now reach

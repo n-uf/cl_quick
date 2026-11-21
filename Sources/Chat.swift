@@ -256,8 +256,12 @@ final class QuickChatModel: ObservableObject {
     @Published var knownModels: [QuickChatModelChoice: String] = [:]
     /// Asks the field to take the keyboard.
     @Published var focusTick = 0
-    /// Asks the window to scroll to the end.
+    /// The chat's text changed: the window keeps the end in view when it is following (ChatScroll.swift).
     @Published var scrollTick = 0
+    /// A message was sent (or asked again, or the chat was cleared): the window jumps to the end and follows.
+    @Published var followTick = 0
+    /// How the chat window scrolls: whether it follows, and the buttons that scroll it.
+    let scroll = QCChatScroll()
     /// The profile's week, as Claude Code last reported it (Level.swift).
     @Published var level: QuickChatLevel?
     /// While a limit is full: the profile with the most room, for Ask on ….
@@ -497,7 +501,7 @@ final class QuickChatModel: ObservableObject {
         // the chat on screen ended: this message starts a new one, with nothing from the old one
         if ended != nil { turns = []; ended = nil; accountNote = nil; takeWebDefault(); takeInstructionsDefault() }
         turns.append(QuickChatTurn(question: q, images: sent, files: sentFiles, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
-        scrollTick += 1
+        scrollTick += 1; followTick += 1
         ask(q, images: sent, files: sentFiles)
     }
 
@@ -659,7 +663,7 @@ final class QuickChatModel: ObservableObject {
             turns = [QuickChatTurn(question: q, images: imgs, files: fls, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
             ended = nil; accountNote = nil
             takeWebDefault(); takeInstructionsDefault()
-            scrollTick += 1
+            scrollTick += 1; followTick += 1
             ask(q, images: imgs, files: fls)
             return
         }
@@ -667,7 +671,7 @@ final class QuickChatModel: ObservableObject {
         turns[i].activity = nil; toolBreak = false; thinkBreak = false
         turns[i].started = Date(); turns[i].seconds = nil
         turns[i].thinkingTitle = effectiveThinking.effort == nil ? nil : effectiveThinking.title
-        scrollTick += 1
+        scrollTick += 1; followTick += 1
         // a running `claude` already holds this message's pictures and files in its conversation, and sending them again
         // would pile them up (a request over the API's limit fails every later message): a retry that carries any starts
         // a new chat, with this message alone (start() says so when there was more before it)
@@ -694,7 +698,7 @@ final class QuickChatModel: ObservableObject {
         takeWebDefault(); takeInstructionsDefault()
         accountNote = nil
         barProblem = nil
-        scrollTick += 1
+        scrollTick += 1; followTick += 1
     }
 
     /// The notice a turn shows now. A full limit is live state: once the level shows room again it is gone (the turn
@@ -720,6 +724,7 @@ final class QuickChatModel: ObservableObject {
         closeProcess()
         ended = nil
         turns = []
+        followTick += 1
         returnHeld = false
         sendWhenReady = false
         if dictating || dictationNoticed { dictate(false) }

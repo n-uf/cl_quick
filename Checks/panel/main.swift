@@ -4507,6 +4507,112 @@ do {
     QCHTMLPreview.reveal = true
 }
 
+// ── scrolling: follows the end only while it is at the end; the jump-to-latest button ────────────────────────────────────────────
+// Driven without a screen or a mouse: the real chat window (ordered in, invisible), its real scroll view, and the scroll made
+// the way any scroll is (the clip view's bounds), which is what the wheel, the trackpad, the scroller, a key and a selection's
+// drag all end up doing.
+struct ChatScrollRig {
+    static func lines(_ n: Int, _ tag: String) -> String { (1...n).map { "Line \($0) of the \(tag) sample answer, long enough to be a line." }.joined(separator: "\n\n") }
+    static func turn(_ i: Int, lines n: Int = 14) -> QuickChatTurn {
+        var t = QuickChatTurn(question: "Sample question number \(i)?", answer: lines(n, "#\(i)"), model: "Haiku 5.5")
+        t.phase = .done; t.seconds = 1.5
+        return t
+    }
+}
+func chatScrollChecks() {
+    let m = chat.model
+    let sc = m.scroll
+    sc.reduceMotion = { true }
+    m.newChat(); m.field = ""
+    m.turns = (1...4).map { ChatScrollRig.turn($0) }
+    chat.open(); spin(0.3)
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    guard let clip = sc.scrollView?.contentView else { check("scroll: the chat's NSScrollView is found", false); return }
+    func user(scrollTo o: CGFloat) {         // as the wheel or a drag makes it: the clip's own bounds move
+        clip.scroll(to: NSPoint(x: 0, y: o)); sc.scrollView?.reflectScrolledClipView(clip)
+    }
+    func settle() { spin(0.15) }
+    func stream(_ s: String) { m.turns[m.turns.count - 1].answer += s; m.scrollTick += 1; settle() }
+    check("scroll: the chat's NSScrollView is found and the chat starts at the bottom, following",
+          sc.scrollView != nil && sc.isAtBottom && sc.following && sc.atBottom && sc.maxOffset() > 200, "max \(sc.maxOffset()) offset \(sc.offset())")
+    // at the bottom, new text follows
+    let max0 = sc.maxOffset()
+    stream("\n\n" + ChatScrollRig.lines(4, "streamed"))
+    check("scroll: at the bottom, new text grows the chat and the view follows", sc.maxOffset() > max0 + 50 && sc.isAtBottom && sc.following && !sc.newBelow, "max \(max0) -> \(sc.maxOffset()), offset \(sc.offset())")
+    // after a scroll up (by any means), new text never moves the view
+    user(scrollTo: sc.maxOffset() - 300); settle()
+    check("scroll: a scroll up stops following, and the jump-to-latest button shows", !sc.following && !sc.atBottom && !sc.isAtBottom, "following \(sc.following) atBottom \(sc.atBottom)")
+    let held = sc.offset()
+    stream("\n\n" + ChatScrollRig.lines(4, "more"))
+    check("scroll: after a scroll up, new text does not move the view, and says there is new text below", sc.offset() == held && !sc.following && sc.newBelow && !sc.atBottom, "offset \(held) -> \(sc.offset()) new \(sc.newBelow)")
+    // the button: back to the bottom, following again
+    sc.jumpToLatest(animated: false); settle()
+    check("scroll: the button returns to the bottom and resumes following (the dot and the button go)", sc.isAtBottom && sc.following && sc.atBottom && !sc.newBelow, "offset \(sc.offset()) max \(sc.maxOffset())")
+    let max1 = sc.maxOffset()
+    stream("\n\n" + ChatScrollRig.lines(3, "after-jump"))
+    check("scroll: after the button, new text follows again", sc.maxOffset() > max1 + 30 && sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    // by hand, down to the bottom: following resumes
+    user(scrollTo: sc.maxOffset() - 400); settle()
+    check("scroll: scrolled up again, not following", !sc.following && !sc.atBottom)
+    user(scrollTo: sc.maxOffset()); settle()
+    check("scroll: scrolling to the bottom by hand resumes following", sc.following && sc.atBottom && sc.isAtBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
+    let max2 = sc.maxOffset()
+    stream("\n\n" + ChatScrollRig.lines(3, "by-hand"))
+    check("scroll: after scrolling down by hand, new text follows", sc.maxOffset() > max2 + 30 && sc.isAtBottom)
+    // within a few points of the bottom counts as the bottom
+    user(scrollTo: sc.maxOffset() - 3); settle()
+    check("scroll: 3 pt above the bottom is still the bottom (following)", sc.following && sc.atBottom)
+    user(scrollTo: sc.maxOffset() - 40); settle()
+    check("scroll: 40 pt above the bottom is not (not following)", !sc.following && !sc.atBottom)
+    // sending jumps to the bottom and follows
+    m.followTick += 1; settle()
+    check("scroll: a message sent (followTick) jumps to the bottom and follows", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
+    // the animated glide ends where it was asked to (and at once with Reduce Motion, above)
+    sc.reduceMotion = { false }
+    user(scrollTo: 0); settle()
+    sc.jumpToLatest(animated: true)
+    check("scroll: the glide follows from the moment of the press (following again at once)", sc.following)
+    spinUntil(5) { sc.isAtBottom }
+    spin(0.2)
+    check("scroll: the animated jump ends at the bottom, following", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
+    sc.reduceMotion = { true }
+    // a new chat: the window follows again from a clean start
+    user(scrollTo: 0); settle()
+    m.newChat(); settle()
+    m.turns = [ChatScrollRig.turn(9)]
+    spin(0.3)
+    check("scroll: after a new chat the view follows", sc.following)
+    // sending is one of the places the model asks to follow
+    do {
+        let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+        let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("scroll-check")
+        try? FileManager.default.removeItem(at: dir)
+        try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+        try? "mode=ok\nargs=\(dir.appendingPathComponent("args.txt").path)\n".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+        let s = QuickChatModel()
+        var tg = QuickChatTarget(Profile(id: "scroll-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
+        tg.workFolder = dir.appendingPathComponent("work").path
+        tg.accountUUID = "u-scroll"; tg.email = "alex@example.com"
+        signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-scroll", email: "alex@example.com")
+        s.target = tg
+        s.resolveClaude = { $0(stub) }
+        s.freshTarget = { _, done in done(tg) }
+        let before = s.followTick
+        s.field = "hello"; s.send()
+        check("scroll: send() asks the window to follow", s.followTick == before + 1 && s.turns.count == 1, "\(before) -> \(s.followTick)")
+        let end = Date().addingTimeInterval(8)
+        while !(s.turns.last?.phase == .done), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        let again = s.followTick
+        s.again()
+        check("scroll: ask again asks the window to follow", s.followTick == again + 1)
+        s.newChat()
+        try? FileManager.default.removeItem(at: dir)
+    }
+    m.newChat(); chat.hide(); spin(0.2)
+}
+chatScrollChecks()
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)
