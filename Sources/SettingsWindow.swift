@@ -1,8 +1,10 @@
 // SettingsWindow: cl_quick's settings, in cl_audit's look (Faces, Style, Parts): General, a tile per profile with its
 // lamp, and the + tile to add one. A profile's page in three layers: its name and folder; its accounts (the one in use
 // with its 5 hours and week, standby ones with their week as last reported, Add an account…); how the chat uses it
-// (the default, the picker); then Remove. General: one grid for the shortcut, the model and thinking new chats start
-// with, Open at login and Updates (the daily look for a newer release), then one strip for cl_quick's own data. No (i): a plain line where something needs saying.
+// (the default, the picker); then Remove. General has two sub-pages, chosen on a track (APP | CHAT) under the tiles in the
+// same tray: APP, one grid for the shortcut, Dictation, Blur addresses, Open at login and Updates (the daily look for a
+// newer release); CHAT, what new chats start with (the model and thinking, Links and search, Instructions); then, under
+// both, one strip for cl_quick's own data. No (i): a plain line where something needs saying.
 
 import AddressPrivacy
 import AppKit
@@ -14,12 +16,20 @@ enum SettingsPage: Hashable {
     case general, profile(String), add
 }
 
+/// General's two sub-pages: the app's own settings, and what new chats start with.
+enum GeneralTab: String, CaseIterable {
+    case app, chat
+    var title: String { self == .app ? "App" : "Chat" }
+}
 final class SettingsState: ObservableObject {
     /// A move to another page closes the Add an account… form (it belongs to one profile's page).
     @Published var page: SettingsPage = .general { didSet { if page != oldValue { addingFor = nil } } }
     /// The profile whose page has its Add an account… form open (nil: none).
     @Published var addingFor: String?
     @Published var settings = QuickChat.shared.settings
+    /// The sub-page of General last shown (APP first; the window remembers it while cl_quick runs). Leaving the shortcut's
+    /// page ends a recording.
+    @Published var generalTab: GeneralTab = .app { didSet { if generalTab != oldValue { stopRecording() } } }
     /// Folders being signed in (Sign in another account…): the box says so until their sign-in (ClaudeSignIn) has ended.
     @Published var signingIn: Set<String> = []
     @Published var tick = 0
@@ -108,6 +118,10 @@ final class SettingsState: ObservableObject {
     private var signInTickets: [String: UUID] = [:]
 
     func save() { QuickChat.shared.settingsChanged(settings) }
+
+    /// Remove cl_quick data…: the custom instructions this window holds go too. Nothing is saved on the way: the settings
+    /// file is moved to the Trash with the rest, and a save would write it again.
+    func dataRemoved() { settings.instructions = "" }
 }
 
 final class SettingsWindow {
@@ -157,7 +171,7 @@ struct SettingsRoot: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 let _ = state.tick           // a switch or a sign-in moved: the lamps are drawn again
-                SettingsTiles(profiles: store.profiles.map { tile(for: $0) }, page: state.page) { state.page = $0 }
+                SettingsTiles(profiles: store.profiles.map { tile(for: $0) }, page: state.page, tab: $state.generalTab) { state.page = $0 }
                 switch state.page {
                 case .general: GeneralPage(state: state, store: store)
                 case .add: AddPage(state: state, store: store)
@@ -195,10 +209,30 @@ struct SettingsTiles: View {
     struct Item: Identifiable { let id: String; let name: String; let sub: String; let lamp: Lamp }
     let profiles: [Item]
     let page: SettingsPage
+    /// General's sub-page (APP | CHAT), under the tiles while General is the page.
+    var tab: Binding<GeneralTab> = .constant(.app)
     var pick: (SettingsPage) -> Void = { _ in }
     @Environment(\.face) private var face
 
+    /// The sub-pages as the Card style selector of cl_audit is drawn (PillPicker, compact): small capitals on a recessed
+    /// track, the chosen one a raised key, the others muted; the segments the same width. On a profile's page the row is
+    /// not shown but keeps its room, so the tray never changes height.
+    static let tabSize: CGFloat = 10.5
+    private var subPages: some View {
+        let shown = page == .general
+        return PillPicker(options: GeneralTab.allCases, selection: tab, compact: true, size: Self.tabSize,
+                          segmentWidth: PillPicker<GeneralTab>.equalWidth(GeneralTab.allCases.map(\.title), size: Self.tabSize, padding: 16),
+                          title: { $0.title })
+            .opacity(shown ? 1 : 0).allowsHitTesting(shown).accessibilityHidden(!shown)
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) { tiles; subPages }
+            .padding(9)
+            .background(SurfaceShape(surface: face.strip, radius: 8))
+    }
+
+    private var tiles: some View {
         FlowTiles {
             TileKey(selected: page == .general) { TileText(title: "General", sub: "shortcut · new chats") }
                 .onTapGesture { pick(.general) }
@@ -215,8 +249,6 @@ struct SettingsTiles: View {
                 .onTapGesture { pick(.add) }
                 .help("Add a profile")
         }
-        .padding(9)
-        .background(SurfaceShape(surface: face.strip, radius: 8))
     }
 }
 
@@ -651,6 +683,8 @@ struct LineRow<Control: View>: View {
 struct GridLine<Control: View>: View {
     let label: String
     var first = false
+    /// A wide control (a text box) takes the rest of the row instead of its own width.
+    var fill = false
     @ViewBuilder let control: Control
     @Environment(\.face) private var face
     static var labelWidth: CGFloat { 104 }
@@ -662,7 +696,7 @@ struct GridLine<Control: View>: View {
                 Text(label).font(.system(size: 12.5)).foregroundStyle(face.text).frame(width: Self.labelWidth, alignment: .leading)
                     .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
                 control.alignmentGuide(.firstTextBaseline) { _ in 14 }      // the middle of the first control's 28 pt
-                Spacer(minLength: 0)
+                if !fill { Spacer(minLength: 0) }
             }
             .padding(.vertical, 8)
         }
@@ -1021,10 +1055,12 @@ struct GeneralSample {
     var registered: String? = nil
     /// Claude Code's list of models for the default profile's account; nil: none known yet.
     var models: [QuickChatModelEntry]? = nil
+    /// The part of the Instructions box a picture shows (scrolled to).
+    var part: QuickChatInstructions.Part = .custom
 }
 
-/// General: one card, one grid (four labels on the left, every control in the column beside them), then one quiet strip
-/// for cl_quick's own data.
+/// General: the sub-page the strip's track chose, APP (one card, one grid: every label on the left, every control in the
+/// column beside them) or CHAT (ChatCard), then one quiet strip for cl_quick's own data.
 struct GeneralPage: View {
     @ObservedObject var state: SettingsState
     @ObservedObject var store: ProfileStore
@@ -1032,80 +1068,14 @@ struct GeneralPage: View {
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     @State private var chats: [(Profile, Int, Int64)] = []
     @State private var own: Int64 = 0
-    /// Claude Code gave a new list of models: drawn again.
-    @State private var modelsTick = 0
     @Environment(\.face) private var face
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("General").font(.system(size: 16, weight: .semibold)).foregroundStyle(face.text).padding(.horizontal, 2)
-            SCard(title: "") {
-                GridLine(label: "Shortcut", first: true) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        if let r = state.recording { recorderRow(r) }
-                        else {
-                            KeySegments(choices: shortcutChoices, selected: shortcutSelected, pick: pick)
-                            shortcutNote
-                        }
-                    }
-                }
-                // the newest of each family the default profile's account has, by name; its model's thinking steps
-                let list = models, family = QuickChatModels.resolve(state.settings.model, in: list).family
-                let think = ModelCatalog.thinking(state.settings.thinking, family: family, list: list)
-                GridLine(label: "Model") {
-                    KeySegments(choices: ModelCatalog.choices(list).map { .init(id: $0.choice.rawValue, title: $0.title) },
-                                selected: family.rawValue) { id in
-                        if let m = QuickChatModelChoice(rawValue: id) { state.settings.model = m; state.save() }
-                    }
-                }
-                GridLine(label: "Thinking") {
-                    KeySegments(choices: think.steps.map { .init(id: $0.rawValue, title: $0.title) },
-                                selected: think.now.rawValue) { id in
-                        if let t = QuickChatThinking(rawValue: id) { state.settings.thinking = t; state.save() }
-                    }
-                }
-                GridLine(label: "Dictation") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        KeySegments(choices: [.init(id: QuickChatDictationReturn.showFirst.rawValue, title: "Shows text first"),
-                                              .init(id: QuickChatDictationReturn.sendAtOnce.rawValue, title: "Sends at once")],
-                                    selected: state.settings.dictationReturn.rawValue) { id in
-                            if let r = QuickChatDictationReturn(rawValue: id) { state.settings.dictationReturn = r; state.save() }
-                        }
-                        note(state.settings.dictationReturn == .showFirst
-                             ? "Return after dictation shows the text; Return again sends it."
-                             : "Return after dictation sends the text at once.", face.muted)
-                    }
-                }
-                GridLine(label: "Links and search") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        SSwitch(isOn: Binding(get: { state.settings.webLinks },
-                                              set: { state.settings.webLinks = $0; state.save() }), on: "", off: "")
-                        note(state.settings.webLinks
-                             ? "Claude can open links and search the web. Pages count toward your usage."
-                             : "Claude can't open links or search the web; a link in a message is only text.", face.muted)
-                    }
-                }
-                GridLine(label: "Blur addresses") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        SSwitch(isOn: Binding(get: { state.settings.blurAddresses },
-                                              set: { state.settings.blurAddresses = $0; state.save() }), on: "", off: "")
-                        note(state.settings.blurAddresses
-                             ? "Account addresses stay blurred until the pointer is on them."
-                             : "Account addresses show in full.", face.muted)
-                    }
-                }
-                GridLine(label: "Open at login") {
-                    SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
-                }
-                GridLine(label: "Updates") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        SSwitch(isOn: Binding(get: { state.settings.checkForUpdates },
-                                              set: { state.settings.checkForUpdates = $0; state.save() }), on: "", off: "")
-                        note(state.settings.checkForUpdates
-                             ? "About once a day, asks GitHub for a newer version; the menu says so. Nothing is downloaded."
-                             : "No check: cl_quick makes no request to GitHub.", face.muted)
-                    }
-                }
+            // (no page title: the tile and the APP | CHAT track in the strip say where this is)
+            switch state.generalTab {
+            case .app: appCard
+            case .chat: ChatCard(state: state, store: store, sample: sample)
             }
             HStack(spacing: 10) {
                 Text(dataWords).font(.system(size: 11)).foregroundStyle(face.muted).fixedSize(horizontal: false, vertical: true)
@@ -1119,20 +1089,58 @@ struct GeneralPage: View {
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.05), lineWidth: 1))
         }
         .onAppear(perform: count)
-        .onReceive(NotificationCenter.default.publisher(for: ModelCatalog.changed)) { _ in modelsTick += 1 }
         .onDisappear { state.stopRecording() }
     }
 
-    /// Incognito in one sentence, the size of cl_quick's own files, and old chats from earlier versions while any are left.
-    /// Claude Code's list for the default profile's account in use (new chats start there), as last given; nil before
-    /// a chat on it has started once.
-    private var models: [QuickChatModelEntry]? {
-        _ = modelsTick
-        if let sample { return sample.models }
-        guard let p = store.profile(state.settings.defaultProfile) ?? store.profiles.first else { return nil }
-        return ModelCatalog.shared.list(profile: p.id, account: store.inUse(p)?.uuid)
+    /// App: one card, one grid (the shortcut, Dictation, Blur addresses, Open at login, Updates).
+    private var appCard: some View {
+        SCard(title: "") {
+            GridLine(label: "Shortcut", first: true) {
+                VStack(alignment: .leading, spacing: 7) {
+                    if let r = state.recording { recorderRow(r) }
+                    else {
+                        KeySegments(choices: shortcutChoices, selected: shortcutSelected, pick: pick)
+                        shortcutNote
+                    }
+                }
+            }
+            GridLine(label: "Dictation") {
+                VStack(alignment: .leading, spacing: 7) {
+                    KeySegments(choices: [.init(id: QuickChatDictationReturn.showFirst.rawValue, title: "Shows text first"),
+                                          .init(id: QuickChatDictationReturn.sendAtOnce.rawValue, title: "Sends at once")],
+                                selected: state.settings.dictationReturn.rawValue) { id in
+                        if let r = QuickChatDictationReturn(rawValue: id) { state.settings.dictationReturn = r; state.save() }
+                    }
+                    note(state.settings.dictationReturn == .showFirst
+                         ? "Return after dictation shows the text; Return again sends it."
+                         : "Return after dictation sends the text at once.", face.muted)
+                }
+            }
+            GridLine(label: "Blur addresses") {
+                VStack(alignment: .leading, spacing: 7) {
+                    SSwitch(isOn: Binding(get: { state.settings.blurAddresses },
+                                          set: { state.settings.blurAddresses = $0; state.save() }), on: "", off: "")
+                    note(state.settings.blurAddresses
+                         ? "Account addresses stay blurred until the pointer is on them."
+                         : "Account addresses show in full.", face.muted)
+                }
+            }
+            GridLine(label: "Open at login") {
+                SSwitch(isOn: Binding(get: { sample?.login ?? loginOn }, set: { setLogin($0) }), on: "", off: "")
+            }
+            GridLine(label: "Updates") {
+                VStack(alignment: .leading, spacing: 7) {
+                    SSwitch(isOn: Binding(get: { state.settings.checkForUpdates },
+                                          set: { state.settings.checkForUpdates = $0; state.save() }), on: "", off: "")
+                    note(state.settings.checkForUpdates
+                         ? "About once a day, asks GitHub for a newer version; the menu says so. Nothing is downloaded."
+                         : "No check: cl_quick makes no request to GitHub.", face.muted)
+                }
+            }
+        }
     }
 
+    /// Incognito in one sentence, the size of cl_quick's own files, and old chats from earlier versions while any are left.
     private var dataWords: String {
         let n = chats.reduce(0) { $0 + $1.1 }, b = chats.reduce(Int64(0)) { $0 + $1.2 }
         return "Quick chats are incognito: nothing is saved on this Mac. cl_quick's own settings, \(Files.size(sample?.own ?? own))."
@@ -1236,16 +1244,113 @@ struct GeneralPage: View {
         let a = NSAlert()
         a.messageText = "Move cl_quick's data to the Trash?"
         let old = n == 0 ? "" : "\(n == 1 ? "1 old quick chat" : "\(n) old quick chats") saved by earlier versions and "
-        a.informativeText = "This moves \(old)cl_quick's profiles, settings and work folders to the Trash. Open at login turns off and cl_quick quits. Your Claude Code folders, their sign-ins and their other sessions stay; you can bring these back from the Trash."
+        a.informativeText = "This moves \(old)cl_quick's profiles, settings (your custom instructions too) and work folders to the Trash. Open at login turns off and cl_quick quits. Your Claude Code folders, their sign-ins and their other sessions stay; you can bring these back from the Trash."
         a.addButton(withTitle: "Move to Trash"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         QuickChat.shared.closeForRemoval()
+        state.dataRemoved()         // the custom instructions go with the rest (the window's own copy, never saved again)
         try? SMAppService.mainApp.unregister()
         let failed = Files.remove(store.profiles)
         if !failed.isEmpty {
             let b = NSAlert(); b.messageText = "Some of it couldn't be moved"; b.informativeText = failed.joined(separator: "\n"); b.runModal()
         }
         NSApp.terminate(nil)
+    }
+}
+
+/// General ▸ CHAT: what new chats start with. One card: the model and thinking, links and search, and the user's own
+/// instructions. Each applies to a new chat; an open chat keeps what it started with. It never changes the window's
+/// height with what is typed: the box has a fixed height and scrolls inside itself, with the built-in text above the user's.
+struct ChatCard: View {
+    @ObservedObject var state: SettingsState
+    @ObservedObject var store: ProfileStore
+    var sample: GeneralSample? = nil
+    /// Claude Code gave a new list of models: drawn again.
+    @State private var modelsTick = 0
+    /// The part of the Instructions box in view (it opens on Custom), which link is lit; and the last jump asked for.
+    @State private var active: QuickChatInstructions.Part = .custom
+    @State private var jump: SJump?
+    @State private var jumpID = 0
+    @Environment(\.face) private var face
+
+    var body: some View {
+        SCard(title: "", line: "What new chats start with. Changes apply to new chats; open chats keep theirs.") {
+            // the newest of each family the default profile's account has, by name; its model's thinking steps
+            let list = models, family = QuickChatModels.resolve(state.settings.model, in: list).family
+            let think = ModelCatalog.thinking(state.settings.thinking, family: family, list: list)
+            GridLine(label: "Model", first: true) {
+                KeySegments(choices: ModelCatalog.choices(list).map { .init(id: $0.choice.rawValue, title: $0.title) },
+                            selected: family.rawValue) { id in
+                    if let m = QuickChatModelChoice(rawValue: id) { state.settings.model = m; state.save() }
+                }
+            }
+            GridLine(label: "Thinking") {
+                KeySegments(choices: think.steps.map { .init(id: $0.rawValue, title: $0.title) },
+                            selected: think.now.rawValue) { id in
+                    if let t = QuickChatThinking(rawValue: id) { state.settings.thinking = t; state.save() }
+                }
+            }
+            GridLine(label: "Links and search") {
+                VStack(alignment: .leading, spacing: 7) {
+                    SSwitch(isOn: Binding(get: { state.settings.webLinks },
+                                          set: { state.settings.webLinks = $0; state.save() }), on: "", off: "")
+                    note(state.settings.webLinks
+                         ? "Claude can open links and search the web. Pages count toward your usage."
+                         : "Claude can't open links or search the web; a link in a message is only text.", face.muted)
+                }
+            }
+            GridLine(label: "Instructions", fill: true) { instructionsField }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ModelCatalog.changed)) { _ in modelsTick += 1 }
+    }
+
+    /// Claude Code's list for the default profile's account in use (new chats start there), as last given; nil before
+    /// a chat on it has started once.
+    private var models: [QuickChatModelEntry]? {
+        _ = modelsTick
+        if let sample { return sample.models }
+        guard let p = store.profile(state.settings.defaultProfile) ?? store.profiles.first else { return nil }
+        return ModelCatalog.shared.list(profile: p.id, account: store.inUse(p)?.uuid)
+    }
+
+    /// The user's own lines, added after the fixed instructions of a new chat: saved as they are typed, in a box of about
+    /// seven lines that scrolls and shows the built-in text read-only above them (the web or the no-web one, by Links and
+    /// search, swapped live); at most 1,000 characters of their own, with a live counter.
+    private var instructionsField: some View {
+        let n = state.settings.instructions.count
+        let counter: Color = { switch QuickChatInstructions.level(n) {
+            case .plain: return face.muted
+            case .near: return Color.hex(0xffb24a)
+            case .full: return Color.hex(0xff7b7b) } }()
+        // a picture draws the box scrolled to the part its page names (chat-custom: Custom; chat-builtin: Built in)
+        let shownPart = sample?.part ?? active
+        return VStack(alignment: .leading, spacing: 7) {
+            SJumpLinks(active: shownPart) { part in jumpID += 1; jump = SJump(part: part, id: jumpID) }
+                .frame(height: 28, alignment: .center)
+            SInstructionsBox(placeholder: "For example: “Answer in Ukrainian.” “Prefer tables for comparisons.”",
+                             text: Binding(get: { state.settings.instructions },
+                                           set: { state.settings.instructions = QuickChatInstructions.clamp($0); state.save() }),
+                             builtIn: QuickChatCommand.fixedPrompt(web: state.settings.webLinks),
+                             active: $active, jump: jump, limit: QuickChatInstructions.limit, label: "Instructions",
+                             drawnAt: shownPart)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                // one line always (the counter's words change at the limit, and nothing here may change the page's height)
+                Text("Built-in text is sent first, then yours. Applies to new chats.").font(.system(size: 11)).foregroundStyle(face.muted)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+                Text(QuickChatInstructions.counter(n)).font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(counter).fixedSize()
+                    .accessibilityLabel("\(n) of \(QuickChatInstructions.limit) characters")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func note(_ t: String, _ c: Color, lamp: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if lamp { LED(color: c, size: 6).alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 1 } }
+            Text(t).font(.system(size: 11)).foregroundStyle(c == face.muted ? c : c.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -1363,6 +1468,7 @@ enum SettingsRender {
             // General with sample settings: ⌃Space with nothing to say, ⌘Space clashing with macOS's Spotlight, the
             // shortcut off, Other… listening for keys, and ⌥Space refused by macOS when registered
             at = .general
+            st.generalTab = page.hasPrefix("chat") ? .chat : .app
             st.settings.shortcut = page == "general-clash" ? .commandSpace : page == "general-taken" ? .optionSpace : .controlSpace
             st.settings.shortcutOn = page != "general-off"
             st.settings.model = .haiku
@@ -1382,14 +1488,38 @@ enum SettingsRender {
                 .init(value: "claude-opus-4-8", displayName: "Opus 4.8", efforts: ["low", "medium", "high"])]
             if page == "general-fable" { st.settings.model = .fable; st.settings.thinking = .max }
             if page == "general-haiku" { st.settings.thinking = .max }
-            if page == "general-noweb" { st.settings.webLinks = false }
+            if page.hasSuffix("noweb") { st.settings.webLinks = false }
+            // General ▸ Chat, with Custom instructions in sample text only: chat (empty box), chat-custom (the example),
+            // chat-noweb (the same, Links and search off: the other built-in text), chat-builtin (the box scrolled to Built in),
+            // chat-builtin-noweb, chat-near (962 characters: the counter amber), chat-limit (1,000: red)
+            if page.hasPrefix("chat-") {
+                let lines = ["Answer in Ukrainian unless I write in another language.", "Prefer tables when comparing things.",
+                             "Keep code comments short and in English.", "Use metric units and 24-hour times.",
+                             "When I ask for a command, give the command first and one line of explanation.", "Don't repeat my question back to me.",
+                             "If a request is ambiguous, ask one short question before answering.", "Write dates as 21 Nov 2026.",
+                             "Avoid emoji and exclamation marks.", "Show file paths and commands in code formatting.",
+                             "Keep answers under ten lines unless I ask for more.", "Give the short answer first, then the reasoning.",
+                             "When you are unsure, say so and say what would settle it.", "Use the second person and a friendly, plain tone.",
+                             "Never end with an offer to help further.", "Use numbered steps for anything I have to do in order.",
+                             "Name the tool or setting exactly as it appears on screen.",
+                             "Put a short summary at the top of any answer longer than a paragraph.",
+                             "Keep names, numbers and quotes exactly as I wrote them.", "Use a table only when there are three or more things to compare."]
+                let long = lines.joined(separator: "\n")
+                switch page {
+                case "chat-near": st.settings.instructions = String(long.prefix(962))
+                case "chat-limit":
+                    st.settings.instructions = String((long + "\nSpell out acronyms the first time you use them in an answer, then use the short form.").prefix(1000))
+                default: st.settings.instructions = lines.prefix(2).joined(separator: "\n") + "\nKeep code comments short."
+                }
+            }
             let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.commandSpace.title + " opens Spotlight in macOS." : nil,
                                        registered: page == "general-taken" ? QuickChatShortcut.optionSpace.title + " is taken by another app." : nil,
-                                       models: page == "general-nolist" ? nil : models)
+                                       models: page == "general-nolist" ? nil : models,
+                                       part: page.contains("builtin") ? .builtIn : .custom)
             view = AnyView(GeneralPage(state: st, store: ProfileStore.shared, sample: sample))
         }
         let whole = VStack(alignment: .leading, spacing: 14) {
-            SettingsTiles(profiles: tiles, page: at)
+            SettingsTiles(profiles: tiles, page: at, tab: .constant(st.generalTab))
             view
         }
         let r = ImageRenderer(content: whole.padding(18).frame(width: 640).face(.std)

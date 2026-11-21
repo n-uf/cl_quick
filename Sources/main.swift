@@ -31,7 +31,11 @@
 //                                       accounts-other, accounts-forget), Add a profile (add, first, add-refused,
 //                                       add-empty) and General (general, general-clash, general-off,
 //                                       general-recording, general-taken, general-fable, general-haiku,
-//                                       general-nolist, general-noweb)
+//                                       general-nolist, general-noweb: the APP sub-page), and General ▸ CHAT with the
+//                                       Instructions box in sample text (chat: the empty box;
+//                                       chat-custom: the example text, the box scrolled to Custom; chat-builtin: scrolled
+//                                       to Built in; chat-noweb, chat-builtin-noweb: the same with Links and search off,
+//                                       so the other built-in text; chat-near: 962 characters; chat-limit: 1,000)
 //   --render-menu OUT.png STATE [dark]  the menu bar menu's profile blocks in a drawn menu, light or dark (STATE: menu,
 //                                       address (the pointer on the first profile's address), full, one, signedout;
 //                                       with standby rows: standby, standby-lit, standby-waiting, standby2; with Add an
