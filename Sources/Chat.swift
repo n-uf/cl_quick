@@ -44,7 +44,7 @@ enum QuickChatDictationReturn: String, Codable, CaseIterable {
 struct QuickChatSettings: Codable, Equatable {
     /// The shortcut opens the chat from any app. On by default: it's what cl_quick is for.
     var shortcutOn = true
-    var shortcut: QuickChatShortcut = .optionSpace
+    var shortcut: QuickChatShortcut = .standard
     /// The profile the shortcut chats on; nil: the first.
     var defaultProfile: String? = nil
     var model: QuickChatModelChoice = .haiku
@@ -70,7 +70,7 @@ struct QuickChatSettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         shortcutOn = (try? c.decodeIfPresent(Bool.self, forKey: .shortcutOn)) ?? true
-        shortcut = (try? c.decodeIfPresent(QuickChatShortcut.self, forKey: .shortcut)) ?? .optionSpace
+        shortcut = (try? c.decodeIfPresent(QuickChatShortcut.self, forKey: .shortcut)) ?? .standard
         defaultProfile = try? c.decodeIfPresent(String.self, forKey: .defaultProfile)
         model = (try? c.decodeIfPresent(QuickChatModelChoice.self, forKey: .model)) ?? .haiku
         thinking = (try? c.decodeIfPresent(QuickChatThinking.self, forKey: .thinking)) ?? .off
@@ -1474,8 +1474,8 @@ final class QuickChat {
 
     private func applyShortcut() {
         hotKey.unregister()
-        // a shortcut that could never have been kept (a hand-edited settings.json): ⌥Space instead
-        if settings.shortcut.refused != nil { settings.shortcut = .optionSpace }
+        // a shortcut that could never have been kept (a hand-edited settings.json): the standard one instead
+        if settings.shortcut.refused != nil { settings.shortcut = .standard }
         // (not while only checking: `Files.readOnly`, so a check never takes the shortcut from the installed app)
         shortcutState = settings.shortcutOn && !Files.readOnly ? (hotKey.register(settings.shortcut) ?? "on") : nil
     }

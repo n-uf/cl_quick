@@ -2537,6 +2537,49 @@ do {
           && rows.range(of: "⌘1 – ⌘5")!.lowerBound < rows.range(of: "⌃1 – ⌃6")!.lowerBound, rows)
 }
 
+// ── the opener's presets: ⌃⇧Space, ⇧⌘Space, ⌥Space, then Other… and Off; ⌃⇧Space for a new install; a saved one is kept ──
+do {
+    typealias S = QuickChatShortcut
+    check("the presets are ⌃⇧Space, ⇧⌘Space, ⌥Space, in that order", S.presets.map(\.title) == ["⌃⇧Space", "⇧⌘Space", "⌥Space"], "\(S.presets.map(\.title))")
+    check("the presets' key is Space, and none is ⌘Space, ⌃Space, ⌃⌥Space or ⌥⇧Space",
+          S.presets.allSatisfy { $0.keyCode == UInt32(kVK_Space) } && ![S.commandSpace, S.controlSpace, S.controlOptionSpace, S.optionShiftSpace].contains { S.presets.contains($0) })
+    check("a new install's shortcut is ⌃⇧Space (the settings struct, and a file without the key)",
+          QuickChatSettings().shortcut == .controlShiftSpace && QuickChatSettings().shortcut.title == "⌃⇧Space"
+          && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data("{}".utf8)))?.shortcut == .controlShiftSpace)
+    func tail(_ s: S) -> [String] { GeneralPage.shortcutChoices(for: s).suffix(2).map { "\($0.id)=\($0.title)" } }
+    let fresh = GeneralPage.shortcutChoices(for: .standard).map { $0.title }
+    check("the Settings row: the three presets, Other…, Off", fresh == ["⌃⇧Space", "⇧⌘Space", "⌥Space", "Other…", "Off"], "\(fresh)")
+    // an old saved ⌃Space (as a settings file of the earlier version holds it) survives, is no preset, and shows as Other… with its note
+    do {
+        var saved = QuickChatSettings(); saved.shortcut = .controlSpace
+        let old = try JSONEncoder().encode(saved)
+        let back = try JSONDecoder().decode(QuickChatSettings.self, from: old)
+        check("a saved ⌃Space is kept as it is on reading the settings", back.shortcut == .controlSpace && back.shortcutOn, "\(back.shortcut.title)")
+        check("a saved ⌃Space is no preset", !back.shortcut.isPreset)
+        check("a saved ⌃Space shows as the recorded Other… key, by its title", tail(back.shortcut) == ["record=⌃Space", "off=Off"], "\(tail(back.shortcut))")
+        check("a saved ⌃Space keeps its clash note", back.shortcut.clash(symbolic: [:]) == "⌃Space switches to the previous input source in macOS.", "\(String(describing: back.shortcut.clash(symbolic: [:])))")
+    } catch { check("a saved ⌃Space decodes", false, "\(error)") }
+    for (name, want) in [("controlSpace", S.controlSpace), ("commandSpace", S.commandSpace), ("optionSpace", S.optionSpace), ("optionShiftSpace", S.optionShiftSpace)] {
+        let d = try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"shortcut":"\#(name)"}"#.utf8))
+        check("an oldest settings file naming \(name) keeps it", d?.shortcut == want, "\(String(describing: d?.shortcut.title))")
+    }
+    // clash(): ⌘Space is Spotlight, ⌃Space and ⌃⌥Space switch input sources (⌃⌥Space where macOS has it on), the new presets are free
+    func symbolic(_ id: String, mods: Int, on: Bool = true) -> [String: Any] {
+        [id: ["enabled": NSNumber(value: on), "value": ["parameters": [NSNumber(value: 32), NSNumber(value: 49), NSNumber(value: mods)]]]]
+    }
+    check("clash: ⌘Space opens Spotlight", S.commandSpace.clash(symbolic: [:]) == "⌘Space opens Spotlight in macOS.", "\(String(describing: S.commandSpace.clash(symbolic: [:])))")
+    check("clash: ⌃Space switches input source", S.controlSpace.clash(symbolic: [:])?.contains("input source") == true)
+    check("clash: ⌃⌥Space is flagged where macOS has it on",
+          S.controlOptionSpace.clash(symbolic: symbolic("61", mods: 1 << 18 | 1 << 19))?.contains("next input source") == true
+          && S.controlOptionSpace.clash(symbolic: [:]) == nil)
+    check("clash: ⌃Space switched off in macOS is not flagged, and ⌘Space moved to another key is not either",
+          S.controlSpace.clash(symbolic: symbolic("60", mods: 1 << 18, on: false)) == nil && S.commandSpace.clash(symbolic: symbolic("64", mods: 1 << 20 | 1 << 17)) == nil)
+    check("clash: ⌃⇧Space, ⇧⌘Space and ⌥Space clash with nothing as macOS ships", S.presets.allSatisfy { $0.clash(symbolic: [:]) == nil })
+    check("only ⌥Space has a note, the non-breaking space line",
+          S.optionSpace.info == "⌥Space normally types a non-breaking space; with this shortcut it opens cl_quick instead." && S.controlShiftSpace.info == nil && S.shiftCommandSpace.info == nil && S.controlSpace.info == nil)
+    check("none of the presets is refused", S.presets.allSatisfy { $0.refused == nil })
+}
+
 // A recorded shortcut is named by its key as printed, never by the Shift character (⌃⇧1 is "⌃⇧1", not "⌃⇧!")
 do {
     if let us = QuickChatShortcut.layoutData(id: "com.apple.keylayout.US") {

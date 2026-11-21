@@ -9,6 +9,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
     chat, but in a Mac text field they are the caret's jumps to the line's and the text's start and end; they now reach
     the field and a selected answer's view again. ⇧⌘ arrows still select; ⌃⌘ arrows aren't cl_quick's. ⌘1–⌘5 (size) and
     ⌃1–⌃6 (place) are unchanged.
+  - **The opener's presets are ⌃⇧Space, ⇧⌘Space and ⌥Space** (then Other… and Off), and a new install opens with
+    ⌃⇧Space. The old presets clashed: ⌘Space is Spotlight, ⌃Space and ⌃⌥Space are macOS's input-source switching, and
+    ⌥⇧Space types a non-breaking space. ⌥Space stays for people used to it; while it's selected, Settings says "⌥Space
+    normally types a non-breaking space; with this shortcut it opens cl_quick instead." A shortcut you already saved is
+    kept as it is: an old ⌃Space shows as Other… with its input-source note.
 - **AddressPrivacy comes from cl_kit.** The module that hides an account address moved to
   [cl_kit](https://github.com/n-uf/cl_kit) (v26.11.3, `Privacy/`); cl_quick now builds it from the vendored copy, like the
   other shared modules, and no longer keeps its own in `Shared/`. Nothing changes in the app: the code is the same.

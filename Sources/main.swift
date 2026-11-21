@@ -30,7 +30,8 @@
 //                                       accounts-again, accounts-stopped, accounts-signedout, accounts-signing,
 //                                       accounts-other, accounts-forget), Add a profile (add, first, add-refused,
 //                                       add-empty) and General (general, general-clash, general-off,
-//                                       general-recording, general-taken, general-fable, general-haiku,
+//                                       general-recording, general-taken, general-nbsp (⌥Space and its note), general-kept
+//                                       (a ⌃Space kept from an older version, as Other…), general-fable, general-haiku,
 //                                       general-nolist, general-noweb: the APP sub-page), and General ▸ CHAT with the
 //                                       Instructions box in sample text (chat: the empty box;
 //                                       chat-custom: the example text, the box scrolled to Custom; chat-builtin: scrolled

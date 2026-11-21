@@ -257,7 +257,9 @@ tile): **APP** (first; the last one shown is remembered) and **CHAT**, then, und
 
 **APP:**
 
-- **Shortcut**: ⌥Space by default, four other Space shortcuts, Other… for any key with ⌘, ⌃ or ⌥, or Off. It warns
+- **Shortcut**: ⌃⇧Space by default, with ⇧⌘Space and ⌥Space, Other… for any key with ⌘, ⌃ or ⌥, or Off. ⌥Space stays for
+  those used to it: it normally types a non-breaking space, and a line says so while it's selected. A shortcut saved by
+  an earlier version is kept as it is, even if it's no longer one of these (⌃Space shows as Other…, with its note). It warns
   only about real clashes, and with a way out (a button that picks a preset none of macOS's own shortcuts uses):
   - a macOS shortcut that uses the key, as this Mac has them set (Spotlight, Finder's search, the input sources);
   - a key another app holds, when macOS refuses to register it ("taken by another app").

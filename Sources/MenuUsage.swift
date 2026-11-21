@@ -747,7 +747,7 @@ enum QCMenuRender {
             let l = NSBox(frame: NSRect(x: 10, y: 4, width: w - 20, height: 1)); l.boxType = .separator; v.addSubview(l)
             return v
         }
-        var parts: [NSView] = [line("Quick chat", "⌥Space"), rule()]
+        var parts: [NSView] = [line("Quick chat", "⌃⇧Space"), rule()]
         for (n, b) in blocks.enumerated() {
             if n > 0 { parts.append(rule()) }
             parts.append(b)

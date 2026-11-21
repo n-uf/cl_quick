@@ -1,4 +1,4 @@
-// Shortcut: the chat's shortcut. Five Space shortcuts to pick from, or Record another… for any key held with ⌘, ⌃ or ⌥.
+// Shortcut: the chat's shortcut. Three Space shortcuts to pick from, or Record another… for any key held with ⌘, ⌃ or ⌥.
 //
 // It's registered the way macOS's own app shortcuts are (RegisterEventHotKey), so macOS asks for no Accessibility
 // permission and it sees no other key. Before it's kept, it's checked against macOS's own shortcuts that use Space
@@ -24,8 +24,21 @@ struct QuickChatShortcut: Codable, Equatable, Hashable, Identifiable {
     static let optionShiftSpace = Self(keyCode: UInt32(kVK_Space), key: "Space", carbonModifiers: UInt32(optionKey | shiftKey))
     static let controlSpace = Self(keyCode: UInt32(kVK_Space), key: "Space", carbonModifiers: UInt32(controlKey))
     static let commandSpace = Self(keyCode: UInt32(kVK_Space), key: "Space", carbonModifiers: UInt32(cmdKey))
-    static let presets: [Self] = [.optionSpace, .controlOptionSpace, .optionShiftSpace, .controlSpace, .commandSpace]
+    static let controlShiftSpace = Self(keyCode: UInt32(kVK_Space), key: "Space", carbonModifiers: UInt32(controlKey | shiftKey))
+    static let shiftCommandSpace = Self(keyCode: UInt32(kVK_Space), key: "Space", carbonModifiers: UInt32(shiftKey | cmdKey))
+    /// The three to pick from, then Other… and Off. None of them is a shortcut macOS uses: ⌘Space is Spotlight, ⌃Space and
+    /// ⌃⌥Space switch input sources, ⌥⇧Space types a non-breaking space (the first four, which earlier versions offered,
+    /// are still understood where an older settings file names them, and a saved one stays the shortcut, as an Other…).
+    /// ⌥Space stays for those used to it (it types a non-breaking space; see `info`).
+    static let presets: [Self] = [.controlShiftSpace, .shiftCommandSpace, .optionSpace]
+    /// What a new install opens with.
+    static let standard = controlShiftSpace
     var isPreset: Bool { Self.presets.contains(self) }
+
+    /// A plain word about a preset worth knowing before it's picked, or nil.
+    var info: String? {
+        self == .optionSpace ? "⌥Space normally types a non-breaking space; with this shortcut it opens cl_quick instead." : nil
+    }
 
     private var has: (control: Bool, option: Bool, shift: Bool, command: Bool) {
         (carbonModifiers & UInt32(controlKey) != 0, carbonModifiers & UInt32(optionKey) != 0,

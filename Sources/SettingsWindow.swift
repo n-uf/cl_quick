@@ -1185,10 +1185,12 @@ struct GeneralPage: View {
 
     // MARK: The shortcut (Record another…'s listening is SettingsState's, so closing the window ends it)
 
-    /// The five Space shortcuts, Other… (the recorded one, when it's none of them) and Off.
-    private var shortcutChoices: [KeySegments.Choice] {
-        let s = state.settings.shortcut
-        return QuickChatShortcut.presets.map { .init(id: $0.id, title: $0.title) }
+    /// The three Space shortcuts, Other… (the recorded one, when it's none of them: a ⌃Space kept from an older version shows
+    /// as itself there) and Off.
+    private var shortcutChoices: [KeySegments.Choice] { Self.shortcutChoices(for: state.settings.shortcut) }
+    /// (a check reads them)
+    static func shortcutChoices(for s: QuickChatShortcut) -> [KeySegments.Choice] {
+        QuickChatShortcut.presets.map { .init(id: $0.id, title: $0.title) }
             + [.init(id: "record", title: s.isPreset ? "Other…" : s.title), .init(id: "off", title: "Off")]
     }
 
@@ -1235,6 +1237,8 @@ struct GeneralPage: View {
                 wayOut(st, face.danger, from: s)
             } else if let c = sample != nil ? sample?.clash : s.clash() {
                 wayOut(c, face.caution, from: s)
+            } else if let i = s.info {
+                wayOut(i, face.caution, from: s)
             }
         }
     }
@@ -1501,11 +1505,14 @@ enum SettingsRender {
                 SField(placeholder: "Name, e.g. Personal", text: .constant("Personal"), width: 150)
             })
         default:
-            // General with sample settings: ⌃Space with nothing to say, ⌘Space clashing with macOS's Spotlight, the
-            // shortcut off, Other… listening for keys, and ⌥Space refused by macOS when registered
+            // General with sample settings: ⌃⇧Space with nothing to say, ⌘Space clashing with macOS's Spotlight (general-clash),
+            // a ⌃Space kept from an older version, shown as Other… with its note (general-kept), ⌥Space with its
+            // non-breaking-space line (general-nbsp), the shortcut off, Other… listening for keys, and ⌥Space refused by macOS
+            // when registered
             at = .general
             st.generalTab = page.hasPrefix("chat") ? .chat : .app
-            st.settings.shortcut = page == "general-clash" ? .commandSpace : page == "general-taken" ? .optionSpace : .controlSpace
+            st.settings.shortcut = page == "general-clash" ? .commandSpace : page == "general-taken" || page == "general-nbsp" ? .optionSpace
+                : page == "general-kept" ? .controlSpace : .standard
             st.settings.shortcutOn = page != "general-off"
             st.settings.model = .haiku
             st.settings.thinking = .off
@@ -1548,7 +1555,8 @@ enum SettingsRender {
                 default: st.settings.instructions = lines.prefix(2).joined(separator: "\n") + "\nKeep code comments short."
                 }
             }
-            let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.commandSpace.title + " opens Spotlight in macOS." : nil,
+            let sample = GeneralSample(clash: page == "general-clash" ? QuickChatShortcut.commandSpace.title + " opens Spotlight in macOS."
+                                           : page == "general-kept" ? QuickChatShortcut.controlSpace.title + " switches to the previous input source in macOS." : nil,
                                        registered: page == "general-taken" ? QuickChatShortcut.optionSpace.title + " is taken by another app." : nil,
                                        models: page == "general-nolist" ? nil : models,
                                        part: page.contains("builtin") ? .builtIn : .custom)
