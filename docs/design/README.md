@@ -13,6 +13,10 @@ A sketch shows what was proposed at the time. The app and the CHANGELOG say what
 
 ## App sketches
 
+- [menubar-usage-sketch.html](menubar-usage-sketch.html): the account in use's usage in the menu every time it
+  opens (M1–M3: grey last known, read again at once), and in the menu bar icon itself (I1–I5: colour only, the
+  bubble filling up, two bars, a number, a ring). Proposed 2026-11-21, not picked yet.
+
 - [menu-accounts-sketch.html](menu-accounts-sketch.html): the menu showing which accounts a profile holds (standby
   rows, Add an account…).
 - [model-controls-sketch.html](model-controls-sketch.html): the chat's model and thinking controls, four ideas.
