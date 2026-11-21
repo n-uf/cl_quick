@@ -46,6 +46,9 @@ jobs:
       - name: Checks/panel.sh
         run: Checks/panel.sh
 
+      - name: Checks/instructions.sh
+        run: Checks/instructions.sh
+
       - name: Checks/bars.sh
         run: Checks/bars.sh
 

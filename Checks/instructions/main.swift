@@ -1,0 +1,381 @@
+// The Custom instructions' checks that need the app (Checks/instructions.sh). Sample text only; a chat on the stand-in
+// `claude` (Checks/stub-claude, under build/ only), nothing on any screen, nothing of this Mac's own written.
+//   - stored with the other settings, read back, cut at 1,000 characters, an old file without the key reads as none;
+//   - typing and pasting in the real text view stop at 1,000;
+//   - the prompt a chat's `claude` is started with: an empty box leaves it as it was, the text comes after the fixed text
+//     (web and no web);
+//   - which chat takes which text: a new chat the current one, an open chat its own, and an open chat is never restarted
+//     for it (same process, no "New chat" line); an empty bar takes it at once and replaces its idle `claude` silently;
+//   - Remove cl_quick data… clears it everywhere it is held (the file goes to the Trash with the rest).
+
+import AppKit
+import SwiftUI
+
+Files.readOnly = true
+let app = NSApplication.shared
+CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
+
+var failed = 0, passed = 0
+func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
+    if ok { passed += 1 } else { failed += 1; print("FAIL \(name) \(detail())") }
+}
+
+// Nothing of this Mac's own: one sample profile in memory (readOnly keeps the store out of the file) on a sample folder.
+let sampleFolder = ProcessInfo.processInfo.environment["QC_SAMPLE_DIR"] ?? NSTemporaryDirectory() + "cl_quick-instructions-checks-sample"
+try? FileManager.default.createDirectory(atPath: sampleFolder, withIntermediateDirectories: true)
+ProfileStore.shared.save([Profile(id: "main", name: "Main", folder: sampleFolder)])
+
+let own = "Answer in Ukrainian unless I write in another language.\nPrefer tables when comparing things."
+let lead = "\n\nThe user's own instructions:\n"
+
+// MARK: what is stored
+
+func decode(_ json: String) -> QuickChatSettings? { try? JSONDecoder().decode(QuickChatSettings.self, from: Data(json.utf8)) }
+func json(_ o: [String: Any]) -> String { String(decoding: (try? JSONSerialization.data(withJSONObject: o)) ?? Data(), as: UTF8.self) }
+check("stored: the box starts empty, and a file without the key reads as none",
+      QuickChatSettings().instructions.isEmpty && decode("{}")?.instructions == "")
+check("stored: an old settings file keeps its other settings and reads no instructions",
+      decode(#"{"webLinks":false,"blurAddresses":false}"#).map { !$0.webLinks && !$0.blurAddresses && $0.instructions.isEmpty } == true)
+check("stored: the text is read as written, lines and all", decode(json(["instructions": own]))?.instructions == own)
+check("stored: a wrong type is none", decode(#"{"instructions":5}"#)?.instructions == "" && decode(#"{"instructions":null}"#)?.instructions == "")
+check("stored: a file edited by hand past the cap is cut to 1,000",
+      decode(json(["instructions": String(repeating: "a", count: 1500)]))?.instructions.count == 1000)
+var saved = QuickChatSettings(); saved.instructions = own
+let enc = (try? JSONEncoder().encode(saved)) ?? Data()
+check("stored: it is written under its own key and read back whole",
+      ((try? JSONSerialization.jsonObject(with: enc)) as? [String: Any])?["instructions"] as? String == own
+      && (try? JSONDecoder().decode(QuickChatSettings.self, from: enc)) == saved)
+check("stored: for the app, not per profile (a profile holds no instructions)",
+      !String(decoding: (try? JSONEncoder().encode(Profile(id: "p", name: "P", folder: "~/.claude-sample"))) ?? Data(), as: UTF8.self).contains("instructions"))
+check("stored: in settings.json, inside the folder Remove… moves to the Trash",
+      Files.settings.lastPathComponent == "settings.json" && Files.settings.deletingLastPathComponent().standardizedFileURL == Files.folder.standardizedFileURL)
+
+// MARK: the box, in the real text view: the built-in part above the user's, protected; the cap on the user's part
+
+do {
+    var bound = ""                      // what the box hands to Settings, and Settings stores: the user's part only
+    var spied = QuickChatInstructions.Part.custom       // the link lit (what scroll-spy hands to the page)
+    func parent(web: Bool, jump: SJump? = nil) -> SInstructionsTextView {
+        SInstructionsTextView(text: Binding(get: { bound }, set: { bound = $0 }), active: Binding(get: { spied }, set: { spied = $0 }), jump: jump,
+                              builtIn: QuickChatCommand.fixedPrompt(web: web),
+                              placeholder: "For example: “Answer in Ukrainian.”", limit: 1000, label: "Instructions",
+                              ink: .white, dim: .gray)
+    }
+    let coord = parent(web: false).makeCoordinator()
+    let (scroll, tv) = SProtectedTextView.make(delegate: coord, label: "Instructions")
+    scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 108)
+    coord.attach(scroll, tv)
+    coord.apply()
+    scroll.layoutSubtreeIfNeeded()
+    func whole() -> NSString { tv.string as NSString }
+    func built() -> String { whole().substring(to: tv.protectedLength) }
+    func user() -> String { whole().substring(from: tv.protectedLength) }
+    func put(_ s: String, at range: NSRange) { tv.insertText(s, replacementRange: range) }
+    let pl = tv.protectedLength, builtFirst = built()
+
+    check("box: the built-in text (after a lock) is the box's first lines, then the hairline's line, and the user's part is empty",
+          builtFirst.contains(QuickChatCommand.systemPrompt) && builtFirst.hasSuffix("\n\n") && tv.dividerLocation == pl - 1 && user().isEmpty && bound.isEmpty,
+          builtFirst)
+    check("box: it is one scroll view of a fixed height of about seven lines", scroll.frame.height == SInstructionsBox.height && SInstructionsBox.height >= 100 && SInstructionsBox.height <= 120)
+    let lm = tv.layoutManager!
+    lm.ensureLayout(for: tv.textContainer!)
+    func hairlineY() -> CGFloat { lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: tv.dividerLocation), effectiveRange: nil).minY }
+    func top() -> CGFloat { scroll.contentView.bounds.origin.y }
+    /// Runs the main run loop until `done` holds, or `s` seconds are up.
+    func spin(_ s: TimeInterval = 2, until done: () -> Bool) {
+        let end = Date().addingTimeInterval(s)
+        while !done(), Date() < end { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+    func atCustom() -> Bool { abs(top() - (hairlineY() - 4)) < 2 }
+    check("box: it opens scrolled to Custom: the hairline is at the top, with the box able to scroll that far however little is written",
+          hairlineY() > 20 && atCustom(), "scrolled to \(top()), the hairline is at \(hairlineY())")
+    check("box: …and Custom is the part in view (its link lit)", coord.partInView == .custom && spied == .custom)
+    // jump links and scroll-spy
+    coord.scrollTo(.builtIn, animated: false)
+    spin { spied == .builtIn }
+    check("box: Built in scrolls to the top, and its link is the one lit", top() == 0 && coord.partInView == .builtIn && spied == .builtIn, "\(top()) \(spied)")
+    coord.scrollTo(.custom, animated: false)
+    spin { spied == .custom }
+    check("box: Custom scrolls back to the hairline, and its link is lit again", atCustom() && spied == .custom, "\(top()) \(spied)")
+    // part way: the link follows the middle of the view
+    scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 10)); scroll.reflectScrolledClipView(scroll.contentView)
+    spin { spied == .builtIn }
+    check("box: scrolling by hand lights the link of the part in view", spied == .builtIn && coord.partInView == .builtIn, "\(top()) \(spied)")
+    // a link's request (a new id each time): about 200 ms, at once with Reduce Motion on
+    coord.parent = parent(web: false, jump: SJump(part: .custom, id: 1)); coord.apply()
+    spin { atCustom() && spied == .custom }
+    check("box: a link's request scrolls to its part, and the spy follows", atCustom() && spied == .custom, "\(top()) \(spied)")
+    scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 0)); scroll.reflectScrolledClipView(scroll.contentView)
+    coord.apply()
+    spin(0.3) { false }
+    check("box: the same request is not run twice", top() == 0, "\(top())")
+    coord.parent = parent(web: false, jump: SJump(part: .custom, id: 2)); coord.apply()
+    spin { atCustom() }
+    check("box: …a new one is", atCustom(), "\(top())")
+    coord.parent = parent(web: false, jump: SJump(part: .builtIn, id: 3)); coord.apply()
+    spin { top() == 0 }
+    check("box: …and Built in's request goes to the top", top() == 0 && spied == .builtIn, "\(top()) \(spied)")
+    coord.scrollTo(.custom, animated: false)
+    // the links' hit areas
+    check("box: a jump link's hit area is at least 44 × 22 pt", SJumpLink.hit.width >= 44 && SJumpLink.hit.height >= 22)
+
+    put("Keep it short.", at: NSRange(location: pl, length: 0))
+    check("box: typing at the start of the user's part works, and the field's text is the user's part alone",
+          user() == "Keep it short." && bound == "Keep it short." && built() == builtFirst, "\(user()) | \(bound)")
+    // edits and pastes never change the built-in part
+    put("XX", at: NSRange(location: 3, length: 0))
+    put(String(repeating: "v", count: 200), at: NSRange(location: 0, length: 0))
+    put("", at: NSRange(location: 0, length: 30))
+    put("", at: NSRange(location: pl - 1, length: 1))
+    put("z", at: NSRange(location: pl - 5, length: 5))
+    check("box: edits and pastes in the built-in part, and a backspace at the start of the user's, change nothing",
+          built() == builtFirst && user() == "Keep it short." && bound == "Keep it short.", "\(built().prefix(40)) | \(user())")
+    put("New.", at: NSRange(location: 0, length: whole().length))
+    check("box: select all and type replaces the user's part only", built() == builtFirst && user() == "New." && bound == "New.", user())
+    put("", at: NSRange(location: 0, length: whole().length))
+    check("box: select all and delete clears the user's part only", built() == builtFirst && user().isEmpty && bound.isEmpty)
+    // the caret and selections
+    tv.setSelectedRange(NSRange(location: 2, length: 0))
+    check("box: the caret can't be put in the built-in part", tv.selectedRange() == NSRange(location: pl, length: 0), "\(tv.selectedRange())")
+    tv.setSelectedRange(NSRange(location: 0, length: 20))
+    check("box: a selection over the built-in part (to copy it) is allowed", tv.selectedRange() == NSRange(location: 0, length: 20), "\(tv.selectedRange())")
+    // the cap counts the user's part alone, a paste included
+    put(String(repeating: "x", count: 900), at: NSRange(location: pl, length: 0))
+    put(String(repeating: "p", count: 500), at: NSRange(location: pl + 900, length: 0))
+    check("box: a paste past 1,000 of the user's part gives what fits (the built-in part isn't counted)",
+          user().count == 1000 && user().hasSuffix(String(repeating: "p", count: 100)) && bound == user() && whole().length > 1000 && built() == builtFirst, "\(user().count)")
+    put("a", at: NSRange(location: whole().length, length: 0))
+    check("box: a key typed in a full box does nothing", user().count == 1000 && !user().hasSuffix("a"))
+    put(String(repeating: "q", count: 40), at: NSRange(location: pl, length: 0))
+    check("box: a paste into a full box does nothing", user().count == 1000 && !user().contains("q") && built() == builtFirst)
+    put(String(repeating: "r", count: 30), at: NSRange(location: pl, length: 10))
+    check("box: a paste over a selection takes the room the selection frees", user().count == 1000 && user().hasPrefix(String(repeating: "r", count: 10) + "x"), String(user().prefix(14)))
+    put("", at: NSRange(location: pl, length: 50))
+    put("b", at: NSRange(location: pl + 950, length: 0))
+    check("box: deleting works in a full box, and typing then works again, one character at a time up to the limit", user().count == 951 && bound.hasSuffix("b"))
+    put("", at: NSRange(location: 0, length: whole().length))
+    put(String(repeating: "z", count: 5000), at: NSRange(location: pl, length: 0))
+    check("box: a long paste into an empty box is cut to 1,000", user().count == 1000 && bound.count == 1000 && built() == builtFirst)
+    // what is stored holds only the user's text
+    let st = SettingsState()
+    st.settings.instructions = QuickChatInstructions.clamp(bound)
+    let stored = String(decoding: (try? JSONEncoder().encode(st.settings)) ?? Data(), as: UTF8.self)
+    check("box: the stored setting holds the user's text only, never the built-in part",
+          st.settings.instructions == bound && !stored.contains("Built in") && !stored.contains("Yours") && !stored.contains(QuickChatCommand.systemPrompt)
+          && !stored.contains("floating chat window"))
+    // Links and search swaps the built-in part live; the user's text and the rules stay
+    put("", at: NSRange(location: 0, length: whole().length))
+    put("My text.", at: NSRange(location: pl, length: 0))
+    coord.parent = parent(web: true)
+    coord.apply()
+    check("box: Links and search swaps the built-in text live: the web one, the user's text where it was",
+          built().contains(QuickChatCommand.webSystemPrompt) && !built().contains("You have no tools here.") && user() == "My text." && bound == "My text.", built())
+    let pl2 = tv.protectedLength, builtWeb = built()
+    check("box: …and the swap doesn't count as the user's text", pl2 != pl && bound == "My text.")
+    put("YY", at: NSRange(location: 4, length: 0))
+    put("!", at: NSRange(location: pl2, length: 0))
+    check("box: …the new built-in part is protected too, and typing still goes into the user's part", built() == builtWeb && user() == "!My text.", "\(user())")
+    coord.parent = parent(web: false)
+    coord.apply()
+    check("box: …and back to the no-web text", built() == builtFirst && user() == "!My text.")
+    // a change from outside (the text cleared) reaches the box
+    bound = ""
+    coord.apply()
+    check("box: a text cleared from outside empties the user's part and leaves the built-in part", user().isEmpty && built() == builtFirst)
+    // the same through Settings' own binding: whatever gets to the stored text is within the cap
+    st.settings.instructions = QuickChatInstructions.clamp(String(repeating: "m", count: 2000))
+    check("cap: the stored text never goes past 1,000", st.settings.instructions.count == 1000)
+}
+
+// MARK: the chat on the stand-in `claude`
+
+struct Fix {
+    let m: QuickChatModel
+    let dir: URL
+    let argsFile: String
+    /// The stand-in's process id (it writes it when it starts; a restarted chat has another).
+    var pid: String {
+        ((try? String(contentsOfFile: argsFile, encoding: .utf8)) ?? "").split(separator: "\n").first { $0.hasPrefix("PID ") }.map { String($0.dropFirst(4)) } ?? ""
+    }
+    /// The system prompt the stand-in was started with (its argument after --system-prompt).
+    var prompt: String? {
+        let r = (try? String(contentsOfFile: argsFile, encoding: .utf8)) ?? ""
+        guard let a = r.range(of: "ARG [--system-prompt]\nARG [") else { return nil }
+        guard let b = r.range(of: "]\nARG [--", range: a.upperBound..<r.endIndex) else { return nil }
+        return String(r[a.upperBound..<b.lowerBound])
+    }
+    func answered(_ n: Int) {
+        let end = Date().addingTimeInterval(40)
+        while !(m.turns.count == n && m.turns.last?.phase == .done), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        CheckQuiet.verify("after an answer")
+    }
+    func say(_ text: String, answers n: Int) { m.field = text; m.send(); answered(n) }
+    func waitFor(_ s: TimeInterval = 20, _ f: () -> Bool) {
+        let end = Date().addingTimeInterval(s)
+        while !f(), Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.03)) }
+    }
+}
+func signedInFolder(_ folder: URL, uuid: String, email: String) {
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try? Data(#"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)"}}"#.utf8).write(to: folder.appendingPathComponent(".claude.json"))
+}
+func fixture(_ name: String) -> Fix {
+    let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("ins-" + name)
+    try? FileManager.default.removeItem(at: dir)
+    try? FileManager.default.createDirectory(at: dir.appendingPathComponent("work"), withIntermediateDirectories: true)
+    let argsFile = dir.appendingPathComponent("args.txt").path
+    try? "mode=ok\nargs=\(argsFile)\n".write(to: dir.appendingPathComponent("stub.conf"), atomically: true, encoding: .utf8)
+    let m = QuickChatModel()
+    var tg = QuickChatTarget(Profile(id: name, name: "Main", folder: dir.appendingPathComponent("folder").path))
+    tg.workFolder = dir.appendingPathComponent("work").path
+    tg.accountUUID = "u-\(name)"; tg.email = "alex@example.com"
+    signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-\(name)", email: "alex@example.com")
+    m.target = tg
+    m.resolveClaude = { $0(stub) }
+    m.freshTarget = { _, done in done(tg) }
+    return Fix(m: m, dir: dir, argsFile: argsFile)
+}
+func settings(_ text: String, web: Bool) -> QuickChatSettings { var s = QuickChatSettings(); s.instructions = text; s.webLinks = web; return s }
+
+// an empty box leaves the prompt as it was, web and no web
+do {
+    let f = fixture("empty"), m = f.m
+    m.defaults = { settings("", web: false) }; m.newChat()
+    f.say("hi", answers: 1)
+    check("chat: an empty box starts claude with the fixed text alone (no web)", f.prompt == QuickChatCommand.systemPrompt, f.prompt ?? "nil")
+    m.defaults = { settings("  \n ", web: true) }; m.newChat()
+    f.say("hi", answers: 1)
+    check("chat: a box of blanks adds nothing either (web)", f.prompt == QuickChatCommand.webSystemPrompt, f.prompt ?? "nil")
+    m.shutdown(); try? FileManager.default.removeItem(at: f.dir)
+}
+
+// the text comes after the fixed text, web and no web
+do {
+    let f = fixture("after"), m = f.m
+    m.defaults = { settings(own, web: false) }; m.newChat()
+    f.say("hi", answers: 1)
+    check("chat: the text follows the fixed text, lead-in between (no web)", f.prompt == QuickChatCommand.systemPrompt + lead + own, f.prompt ?? "nil")
+    m.defaults = { settings("\n" + own + "\n", web: true) }; m.newChat()
+    f.say("hi", answers: 1)
+    check("chat: the text follows the web text, trimmed (web)", f.prompt == QuickChatCommand.webSystemPrompt + lead + own, f.prompt ?? "nil")
+    m.shutdown(); try? FileManager.default.removeItem(at: f.dir)
+}
+
+// which chat takes which text
+do {
+    let f = fixture("keeps"), m = f.m
+    m.defaults = { settings(own, web: false) }; m.newChat()
+    check("chat: a new chat takes the current text", m.instructions == own)
+    f.say("first", answers: 1)
+    let pid = f.pid
+    check("chat: the chat started with that text", !pid.isEmpty && f.prompt == QuickChatCommand.systemPrompt + lead + own)
+    // the text changes in Settings while the chat is open
+    m.defaults = { settings("Keep it short.", web: false) }; m.instructionsSettingChanged("Keep it short.")
+    check("chat: an open chat keeps the text it started with", m.instructions == own, m.instructions)
+    f.say("second", answers: 2)
+    check("chat: …and is not restarted for it: the same claude answers, with no \"New chat\" line",
+          f.pid == pid && m.turns.count == 2 && m.accountNote == nil && f.prompt == QuickChatCommand.systemPrompt + lead + own,
+          "\(f.pid) \(pid) \(m.turns.count) \(String(describing: m.accountNote))")
+    m.defaults = { settings("", web: false) }; m.instructionsSettingChanged("")
+    f.say("third", answers: 3)
+    check("chat: …not even when the box is emptied", f.pid == pid && m.turns.count == 3 && m.instructions == own)
+    // a new chat takes what is there now
+    m.defaults = { settings("Keep it short.", web: false) }
+    m.newChat()
+    check("chat: a new chat takes the text as it is now", m.instructions == "Keep it short." && m.turns.isEmpty)
+    f.say("fourth", answers: 1)
+    check("chat: …and its claude is started with it, a new process",
+          f.pid != pid && f.prompt == QuickChatCommand.systemPrompt + lead + "Keep it short.", "\(f.pid) \(pid) \(f.prompt ?? "nil")")
+    m.shutdown(); try? FileManager.default.removeItem(at: f.dir)
+}
+
+// an empty bar (no chat on screen) takes the text at once; the claude it had warm is replaced, silently
+do {
+    let f = fixture("bar"), m = f.m
+    m.defaults = { settings("Old text.", web: false) }; m.newChat()
+    m.warm()
+    f.waitFor { !f.pid.isEmpty }
+    let warm = f.pid
+    check("bar: a claude is warm for the empty bar, with the old text", !warm.isEmpty && f.prompt == QuickChatCommand.systemPrompt + lead + "Old text.", f.prompt ?? "nil")
+    m.defaults = { settings(own, web: false) }; m.instructionsSettingChanged(own)
+    check("bar: an empty bar takes a changed text at once", m.instructions == own)
+    f.say("hello", answers: 1)
+    check("bar: …its warm claude is replaced by one with the new text, and nothing says so (no chat was lost)",
+          f.pid != warm && f.prompt == QuickChatCommand.systemPrompt + lead + own && m.accountNote == nil, "\(f.pid) \(warm) \(f.prompt ?? "nil")")
+    m.shutdown(); try? FileManager.default.removeItem(at: f.dir)
+}
+
+// MARK: Settings saves as it is typed; Remove… clears it
+
+do {
+    let chat = QuickChat.shared
+    chat.model.defaults = { chat.settings }
+    let st = SettingsState()
+    st.settings.instructions = "Keep it short."
+    st.save()
+    check("save: a change in the box reaches the app's settings as it is made (no Save key)",
+          chat.settings.instructions == "Keep it short." && chat.model.instructions == "Keep it short.", chat.settings.instructions)
+    st.settings.instructions = "Keep it short and plain."
+    st.save()
+    check("save: …key after key", chat.settings.instructions == "Keep it short and plain." && chat.model.instructions == "Keep it short and plain.")
+    chat.closeForRemoval()
+    check("Remove…: the app's settings and the chat hold none afterwards", chat.settings.instructions.isEmpty && chat.model.instructions.isEmpty,
+          "\(chat.settings.instructions) | \(chat.model.instructions)")
+    st.dataRemoved()
+    check("Remove…: the settings window's own copy is cleared too (and nothing is saved on the way)",
+          st.settings.instructions.isEmpty && chat.settings.instructions.isEmpty)
+    check("Remove…: a new chat afterwards starts with the fixed text alone",
+          QuickChatCommand(claude: "/opt/sample/bin/claude", configDir: sampleFolder, isDefaultDir: false, workFolder: sampleFolder, model: "haiku",
+                           instructions: chat.model.instructions).prompt == QuickChatCommand.systemPrompt)
+}
+
+// General ▸ APP | CHAT: the state, the pages Settings opens on, the track's metrics
+do {
+    let st = SettingsState()
+    check("tabs: General opens on APP", st.page == .general && st.generalTab == .app)
+    // picking a segment is setting the track's binding: the state follows, and is remembered
+    let pick = Binding(get: { st.generalTab }, set: { st.generalTab = $0 })
+    pick.wrappedValue = .chat
+    check("tabs: picking CHAT selects it, and it is remembered across pages", st.generalTab == .chat)
+    st.open(profile: "main", addAccount: true)
+    check("tabs: Add an account… still lands on the profile's page with its form open", st.page == .profile("main") && st.addingFor == "main" && st.generalTab == .chat)
+    st.open(profile: SettingsWindow.addPage)
+    check("tabs: Add a profile still lands on its page", st.page == .add)
+    st.open(profile: nil)
+    check("tabs: no profile lands on General, on the sub-page last shown", st.page == .general && st.generalTab == .chat)
+    st.open(profile: nil, firstProfile: "main", firstRun: true)
+    check("tabs: the first run lands on the first profile", st.page == .profile("main"))
+    st.generalTab = .app; st.recording = .some(nil); st.generalTab = .chat
+    check("tabs: leaving APP ends a shortcut recording", st.recording == nil)
+    // the track as cl_audit's Card style selector draws it (compact PillPicker), at the sizes the operator set
+    let w = PillPicker<GeneralTab>.equalWidth(GeneralTab.allCases.map(\.title), size: SettingsTiles.tabSize, padding: 16)
+    let one = PillPicker<GeneralTab>.equalWidth(["CHAT"], size: SettingsTiles.tabSize, padding: 16)
+    check("tabs: label 10.5 pt; the segments are all one width: the widest label plus 16 pt each side", SettingsTiles.tabSize >= 10.5 && SettingsTiles.tabSize <= 11
+          && w >= one && w - one < 16, "\(w) \(one)")
+}
+
+// the window's height: both sub-pages (and a profile's) are no taller than General was at eaed019. Drawn as the app draws
+// them (--render-settings): the picture is 2 pixels to the point, the old General 666 pt (its render, 1332 px).
+if #available(macOS 14, *) {
+    let oldGeneralHeight: CGFloat = 666
+    let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("ins-renders")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    var heights: [String: CGFloat] = [:]
+    for page in ["general", "profile", "chat-custom", "chat-builtin", "chat-limit", "chat-noweb"] {
+        let path = dir.appendingPathComponent(page + ".png").path
+        MainActor.assumeIsolated { SettingsRender.write(to: path, page: page) }
+        if let rep = NSBitmapImageRep(data: (try? Data(contentsOf: URL(fileURLWithPath: path))) ?? Data()) { heights[page] = CGFloat(rep.pixelsHigh) / 2 }
+    }
+    // (a profile's page is no part of this: the track's row, which every page keeps, makes it taller than it was)
+    let subPages = ["general", "chat-custom", "chat-builtin", "chat-limit", "chat-noweb"].compactMap { heights[$0] }
+    check("height: APP and CHAT (scrolled to Custom or to Built in, at the limit, Links and search off) are each no taller than General's 666 pt",
+          heights.count == 6 && subPages.count == 5 && subPages.allSatisfy { $0 <= oldGeneralHeight }, "\(heights)")
+    check("height: what is typed never changes it: CHAT is as tall with no text, with some and at the limit, and with the other built-in text",
+          Set(["chat-custom", "chat-builtin", "chat-limit", "chat-noweb"].compactMap { heights[$0] }).count == 1, "\(heights)")
+    try? FileManager.default.removeItem(at: dir)
+}
+
+CheckQuiet.verify("at the end")
+print(failed == 0 ? "instructions checks: \(passed)/\(passed) passed" : "instructions checks: \(failed) failed, \(passed) passed")
+exit(failed == 0 ? 0 : 1)
