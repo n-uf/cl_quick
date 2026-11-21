@@ -14,8 +14,8 @@ Built by `scripts/modules.sh` as its own static library (`libAddressPrivacy.a`, 
 SwiftUI only. `Checks/addressprivacy.sh` is its own suite (in CI); the apps' suites check how they use it.
 
 Files: `AddressText.swift` (Foundation only: the plain forms), `AddressSetting.swift` (an optional prefs-domain store),
-`AddressState.swift` (the setting as an observable value, the hover gate), `AddressInk.swift` (AppKit drawing, the alert
-label), `AddressViews.swift` (SwiftUI).
+`AddressState.swift` (the setting as an observable value, the hover gate), `AddressInk.swift` (AppKit drawing),
+`AddressLabel.swift` (the alert's address), `AddressViews.swift` (SwiftUI).
 
 ## The setting comes in as a value
 
@@ -81,7 +81,7 @@ AddressText.sentence(address: a, blur: blur)                  // "hidden address
 AddressText.sentence("Forget {}?", addresses: [a], blur: blur)   // fill a template's {} in order: "Forget hidden address?"
 AddressText.drawn(address: a, revealed: false, blur: blur)    // the STAND-IN to draw/show where text can't blur (CGContext, widget, Dock tile)
 AddressText.attributed(address: a, blur: blur, attributes: [.font: f])   // the same as NSAttributedString
-AddressText.words(a, blur: blur)                              // = sentence (accessibility labels)
+AddressText.words(a, blur: blur)                              // = sentence (accessibility labels); AddressText.mask(a) is the same words
 AddressText.standIn, AddressText.hidden                       // the constants
 ```
 
@@ -94,11 +94,19 @@ AddressText.short(address: a, blur: blur)     // the part before the @ when show
 "Switch to \(AddressText.short(address: a, blur: blur))"
 ```
 
+While hidden `short` (like `sentence`) reads "hidden address" for **every** account, so a list of rows can't be told apart by it.
+An app that needs distinguishable hidden rows (cl_audit's "Switch to …" menu with several accounts) should not build them from
+text: draw each row with `AddressInk` (the stand-in blurred, the real address on highlight with the pointer on the row), as
+cl_quick's `QCStandbyMenuRow` does, and give the row's accessibility label `sentence` (the same words for all). Distinct
+accessibility labels for hidden rows would tell the accounts apart again, which is the point of hiding them.
+
 ### Account ids
 
 An account id (a UUID or its first characters) counts as hidden like an address: never drawn, never in accessibility, never in a
 tooltip. The forms hide whatever text they are given, so pass an id through them (`AddressText.sentence(id:blur:)`), and use
-`AddressText.needsHiding(_:)` (an `@`, or an id) to decide what to pass. A title that is only an id prefix is hidden too.
+`AddressText.needsHiding(_:)` (an `@`, or an id) to decide what to pass. A title that is only an id prefix is hidden too. An
+id is any run of 8 or more hex-like characters (a-f, 0-9, dashes), all-letter ones included (hiding only those with a digit
+would give the others away).
 
 ## Drawing in AppKit (`AddressInk`, `AddressLabel`)
 
@@ -115,9 +123,13 @@ A readable address longer than the room is truncated with a tail ellipsis. `Addr
 (callers pass the stand-in, never an address); `AddressInk.blurPad` is how far it reaches.
 
 **An address in an alert** (NSAlert text can't blur): `alert.accessoryView = AddressLabel(address: a)`. The stand-in blurred,
-the address while the pointer is on it. It works while the alert runs modally (the tracking area gets no enter or exit then, so
-the label reads the pointer's place every 50 ms in every run loop mode), and the reveal ends when the alert closes, the window
-loses focus, the app is deactivated or a menu starts tracking. Its accessibility label is `hidden address`.
+the address while the pointer is on it. Its frame is the stand-in's width whatever the address and the setting. It works while
+the alert runs modally (the tracking area gets no enter or exit then, so the label reads the pointer's place every 50 ms in
+every run loop mode, while its window is shown and key and the app active). The reveal ends when the alert closes, the window
+loses focus, the app is deactivated or hidden, or a menu starts tracking, and stays ended until the pointer has left the
+label. The poll stops when the label leaves its window, its window closes, or another window takes over the modal session
+(a hidden app only pauses it). Its accessibility label is `hidden address` (computed on each call), and it follows a change
+of the app's setting; `blur:` is a test override, and `surroundings` swaps what the poll reads (for checks).
 
 **A menu row** (`NSMenuItem.view`): draw with an `AddressInk`; the row is "readable" while the menu highlights it
 (`enclosingMenuItem?.isHighlighted`) or the blur is off. Its item's title and accessibility label come from `sentence`/`short`.

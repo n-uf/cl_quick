@@ -59,7 +59,7 @@ check("sentence: 'hidden address' for every address while the blur is on, holdin
 check("sentence: the address itself with the blur off, or on an explicit reveal",
       samples.allSatisfy { AddressText.sentence(address: $0, blur: false) == $0 && AddressText.sentence(address: $0, revealed: true, blur: true) == $0 })
 check("sentence: words(_:blur:) and the old maskEmail say the same, the same for every address",
-      samples.allSatisfy { AddressText.words($0, blur: true) == "hidden address" && maskEmail($0) == "hidden address" })
+      samples.allSatisfy { AddressText.words($0, blur: true) == "hidden address" && AddressText.mask($0) == "hidden address" })
 check("sentence: a template's {} places are filled in order, hidden, never with the address",
       AddressText.sentence("Signed in as {}, not {}.", addresses: [one, two], blur: true) == "Signed in as hidden address, not hidden address."
       && AddressText.sentence("Signed in as {}, not {}.", addresses: [one, two], blur: false) == "Signed in as \(one), not \(two)."
@@ -75,7 +75,9 @@ check("short: a row built from it holds nothing of the address ('Switch to hidde
 // account ids count as hidden
 check("ids: a UUID or its first characters are something to hide, like an address; ordinary words are not",
       AddressText.needsHiding(uuid) && AddressText.needsHiding("1a2b3c4d") && AddressText.needsHiding("1a2b3c4d-5e6f") && AddressText.needsHiding(one)
-      && !AddressText.needsHiding("Main") && !AddressText.needsHiding("feedface") && !AddressText.needsHiding("account") && !AddressText.needsHiding("12345"))
+      && !AddressText.needsHiding("Main") && !AddressText.needsHiding("account") && !AddressText.needsHiding("12345"))
+check("ids: an id of letters a-f only is hidden too (hiding only those with a digit would give the others away)",
+      AddressText.needsHiding("deadbeef") && AddressText.needsHiding("feedface-cafe") && !AddressText.needsHiding("deadbee") && !AddressText.needsHiding("deadbeeg"))
 check("ids: through the forms an id is the stand-in / 'hidden address', never itself, unless revealed",
       AddressText.sentence(id: uuid, blur: true) == "hidden address" && !AddressText.sentence(id: uuid, blur: true).contains("1A2B")
       && AddressText.drawn(address: uuid, blur: true) == AddressText.standIn && AddressText.sentence(id: uuid, revealed: true, blur: true) == uuid)
@@ -172,6 +174,19 @@ do {
     check("gate: …nor does a hover cut short (a peek is the app's own)", p.on)
     p.peek = false
     check("gate: …and the app turning it off blurs it", !p.on)
+
+    // a view that computes the reveal in its body from the counter is never one update late
+    var q = AddressHoverGate()
+    q.pointer(true)
+    let now = AddressPrivacy.shared.hoverEnded
+    check("gate: isOn(at:) with the counter as the gate last saw it: revealed", q.isOn(at: now))
+    check("gate: …at once false when the counter has moved on (the hover ended), before any sync", !q.isOn(at: now + 1) && q.on)
+    q.sync(now + 1)
+    check("gate: …and after the sync too", !q.on && !q.isOn(at: now + 1))
+    q.pointer(true, counter: now + 1)
+    check("gate: a pointer entering anew takes the counter as it is: revealed", q.isOn(at: now + 1))
+    var pk = AddressHoverGate(); pk.peek = true
+    check("gate: a peek is revealed whatever the counter", pk.isOn(at: now + 5))
 
     // a hover ends by itself when the app loses focus, a window loses focus or closes, a menu starts tracking
     let before = AddressPrivacy.shared.hoverEnded
@@ -353,6 +368,12 @@ check("ink: right-aligned, the hidden stand-in is the same for two addresses", i
 check("ink: the blurred picture has the blur's room on every side", (AddressInk.blurred(AddressText.standIn, color: .white, font: font)?.size.height ?? 0) >= ink.lineHeight + 2 * AddressInk.blurPad - 1)
 ink.reset()
 check("ink: reset keeps drawing the same thing", inkImage(one, readable: false).tiffRepresentation == restA.tiffRepresentation)
+do {
+    let capped = AddressInk(font: font)
+    for i in 0..<(AddressInk.cacheLimit * 3) { _ = capped.standIn(NSColor(white: CGFloat(i) / 30, alpha: 1)) }
+    check("ink: the blurred pictures kept are capped (one per colour, the oldest dropped)", capped.cached == AddressInk.cacheLimit, "\(capped.cached)")
+    check("ink: …and a colour dropped is made again, the same", capped.standIn(NSColor(white: 0, alpha: 1))?.tiffRepresentation != nil && capped.cached == AddressInk.cacheLimit)
+}
 
 // AddressLabel: the alert's accessory
 do {
@@ -379,36 +400,94 @@ do {
     host.contentView?.addSubview(l1)
     l1.frame.origin = NSPoint(x: 40, y: 50)
     check("label: in a window it asks for mouse moves", host.acceptsMouseMovedEvents)
-    l1.follow(inWindow: l1.convert(NSPoint(x: l1.bounds.midX, y: l1.bounds.midY), to: nil))
+    func inside(_ l: AddressLabel) -> NSPoint { l.convert(NSPoint(x: l.bounds.midX, y: l.bounds.midY), to: nil) }
+    func outside(_ l: AddressLabel) -> NSPoint { l.convert(NSPoint(x: l.bounds.maxX + 40, y: l.bounds.midY), to: nil) }
+    // the label's own timer keeps polling while the checks spin: its surroundings are the checks' (the window shown, key,
+    // the app active, the pointer where `put` last said), so a reading by the timer agrees with the check's own
+    var shown = true, key = true, active = true, modal: NSWindow? = nil, pointer: NSPoint? = nil
+    l1.surroundings.shown = { _ in shown }; l1.surroundings.key = { _ in key }; l1.surroundings.appActive = { active }
+    l1.surroundings.modalWindow = { modal }; l1.surroundings.pointer = { _ in pointer }
+    func put(_ p: NSPoint?) { pointer = p; l1.follow(inWindow: p) }
+    put(inside(l1))
     check("label: the pointer read on it reveals the address (no enter event)", l1.revealed && l1.drawnText == one)
     NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: nil)
     spin(0.05)
     check("label: the app losing focus ends the reveal at once", !l1.revealed && l1.drawnText == AddressText.standIn)
-    l1.follow(inWindow: l1.convert(NSPoint(x: l1.bounds.midX, y: l1.bounds.midY), to: nil))
+    put(inside(l1))
+    check("label: …and the poll doesn't take it up again while the pointer hasn't left (ended stays ended)", !l1.revealed && l1.suppressed)
+    put(outside(l1))
+    check("label: …until the pointer has left the label", !l1.revealed && !l1.suppressed)
+    put(inside(l1))
+    check("label: …then it reveals again on the next entry", l1.revealed)
     NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: host)
     spin(0.05)
-    check("label: its window losing focus ends it", !l1.revealed)
-    l1.follow(inWindow: l1.convert(NSPoint(x: l1.bounds.midX, y: l1.bounds.midY), to: nil))
-    NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: host)
-    spin(0.05)
-    check("label: its window closing ends it", !l1.revealed)
-    l1.follow(inWindow: l1.convert(NSPoint(x: l1.bounds.midX, y: l1.bounds.midY), to: nil))
+    check("label: its window losing focus ends it (and keeps it ended)", !l1.revealed); put(inside(l1)); check("label: …even when the poll reads the pointer on it", !l1.revealed)
+    put(outside(l1)); put(inside(l1))
     NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: nil)
     spin(0.05)
     check("label: a menu starting to track ends it", !l1.revealed)
-    l1.follow(inWindow: l1.convert(NSPoint(x: l1.bounds.maxX + 40, y: l1.bounds.midY), to: nil))
+    put(outside(l1))
     check("label: the pointer read off it keeps it blurred", !l1.revealed && l1.drawnText == AddressText.standIn)
-    l1.follow(inWindow: l1.convert(NSPoint(x: l1.bounds.midX, y: l1.bounds.midY), to: nil)); l1.follow(inWindow: nil)
+    put(inside(l1)); put(nil)
     check("label: no pointer at all blurs it too", !l1.revealed)
+
+    // the poll: it runs while the label is in a window, and its readings come through swappable surroundings
+    check("poll: it runs while the label is in a window", l1.isPolling)
+    pointer = inside(l1)
+    l1.tick()
+    check("poll: shown, key and active, with the pointer on it: readable", l1.revealed)
+    shown = false; l1.tick()
+    check("poll: shown → hidden (a hidden app, a covered window): the reveal ends, and the poll keeps running (it resumes when shown again)", !l1.revealed && l1.isPolling)
+    shown = true; put(outside(l1)); pointer = inside(l1); l1.tick()
+    check("poll: …and reveals again once shown, after the pointer has left", l1.revealed)
+    key = false; l1.tick()
+    check("poll: a window that is not key never reveals", !l1.revealed)
+    key = true; put(outside(l1)); pointer = inside(l1); active = false; l1.tick()
+    check("poll: nor does an app that isn't active", !l1.revealed && l1.isPolling)
+    active = true; put(outside(l1)); pointer = inside(l1); l1.tick()
+    check("poll: active again, it reveals", l1.revealed)
+    modal = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 50, height: 50), styleMask: [.borderless], backing: .buffered, defer: true)
+    l1.tick()
+    check("poll: another window taking over the modal session stops the poll and ends the reveal", !l1.isPolling && !l1.revealed)
+    modal = nil
+    host.contentView?.addSubview(l1)       // moved out and in again: the poll starts anew
+    l1.removeFromSuperview()
+    check("poll: the label leaving its window stops the poll, and it is blurred", !l1.isPolling && !l1.revealed)
+    host.contentView?.addSubview(l1)
+    check("poll: put back in a window it polls again", l1.isPolling)
+    NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: host)
+    spin(0.05)
+    check("poll: its window closing stops it", !l1.isPolling && !l1.revealed)
     l1.removeFromSuperview()
     check("label: out of its window it is blurred", !l1.revealed)
+
+    // a live label follows the app's setting: drawn again at once, its words and text recomputed, its frame unchanged
+    AddressPrivacy.shared.apply(blur: true)
+    let live = AddressLabel(address: one)
+    host.contentView?.addSubview(live)          // (a view outside any window keeps no pending redraw)
+    let width0 = live.frame.width
+    live.needsDisplay = false
+    AddressPrivacy.shared.apply(blur: false)
+    check("live: a change of the setting redraws a live label at once", live.needsDisplay)
+    check("live: …its text and its accessibility label follow (computed on each call), and its frame doesn't move",
+          live.drawnText == one && live.accessibilityLabel() == one && live.frame.width == width0)
+    AddressPrivacy.shared.apply(blur: true)
+    check("live: …and back", live.drawnText == AddressText.standIn && live.accessibilityLabel() == "hidden address")
+    let fixed = AddressLabel(address: one, blur: true)
+    host.contentView?.addSubview(fixed)
+    fixed.needsDisplay = false
+    AddressPrivacy.shared.apply(blur: false)
+    check("live: a label with a test override ignores the app's setting (same words, same text)", fixed.accessibilityLabel() == "hidden address" && fixed.drawnText == AddressText.standIn)
+    AddressPrivacy.shared.apply(blur: true)
+    live.removeFromSuperview(); fixed.removeFromSuperview()
     let forced = AddressLabel(address: one, blur: false)
     check("label: the test override of the setting reaches it (blur: false: the address, whole)", forced.sharp && forced.drawnText == one && forced.accessibilityLabel() == one)
     let forcedOn = AddressLabel(address: one, blur: true)
     AddressPrivacy.shared.apply(blur: false)
     check("label: …and blur: true holds whatever the app's setting is", !forcedOn.sharp && forcedOn.accessibilityLabel() == "hidden address")
     let off = AddressLabel(address: long)
-    check("label: with the blur off it draws the address at rest, whole, and its label is the whole address", off.sharp && off.drawnText == long && off.accessibilityLabel() == long && off.frame.width > l2.frame.width)
+    check("label: with the blur off it draws the address at rest (cut to the same room), and its label is the whole address",
+          off.sharp && off.drawnText == long && off.accessibilityLabel() == long && off.frame.width == l2.frame.width)
     AddressPrivacy.shared.apply(blur: true)
 }
 

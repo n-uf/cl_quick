@@ -85,10 +85,18 @@ public struct AddressHoverGate: Equatable {
     /// An outside reveal (a peek); the app sets and clears it.
     public var peek = false
     public init(seen: Int = AddressPrivacy.shared.hoverEnded) { self.seen = seen }
-    /// The address is to be read: the pointer is on it, or a peek is on.
+    /// The address is to be read: the pointer is on it, or a peek is on. (As of the last `sync`: a view that already knows
+    /// the counter asks `isOn(at:)`, which is right in the same update as the hover's end.)
     public var on: Bool { pointerOn || peek }
+    /// The same, for the counter's value now: a hover that ended since the gate last saw the counter does not count, so a
+    /// view that computes it in its body is never one update late.
+    public func isOn(at counter: Int) -> Bool { peek || (pointerOn && seen == counter) }
     /// The pointer entered (true) or left (false).
-    public mutating func pointer(_ inside: Bool) { pointerOn = inside }
+    /// (An entering pointer is a new hover: it takes the counter as it is now, so an earlier cut-short one doesn't end it.)
+    public mutating func pointer(_ inside: Bool, counter: Int = AddressPrivacy.shared.hoverEnded) {
+        pointerOn = inside
+        if inside { seen = counter }
+    }
     /// The counter's value now: a change ends the hover.
     public mutating func sync(_ ended: Int) { if ended != seen { seen = ended; pointerOn = false } }
     /// The view went away, or its text changed: the hover ends there and then.

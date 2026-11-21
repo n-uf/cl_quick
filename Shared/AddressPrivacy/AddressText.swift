@@ -78,19 +78,20 @@ public enum AddressText {
         text.contains("@") || isAccountID(text)
     }
 
-    /// An account id: a UUID, or its first characters (8 or more hexadecimal digits and dashes).
+    /// An account id: a UUID, or its first characters (8 or more hexadecimal digits and dashes). Every hex-like text of that
+    /// length counts, an all-letter id ("deadbeef") too: an id that is hidden only when it happens to hold a digit would give
+    /// itself away; an ordinary word of eight or more letters a-f is rare enough to hide with them.
     public static func isAccountID(_ text: String) -> Bool {
         let t = text.trimmingCharacters(in: .whitespaces)
         let hex = t.filter { $0 != "-" }
-        return hex.count >= 8 && t.count <= 36 && hex.allSatisfy(\.isHexDigit) && t.allSatisfy { $0.isHexDigit || $0 == "-" }
-            && hex.contains(where: \.isNumber)
+        return hex.count >= 8 && t.count <= 36 && t.allSatisfy { $0.isHexDigit || $0 == "-" }
     }
 
     /// An account id as text: never drawn, never spoken, never in a tooltip while the blur is on (the stand-in words), and
     /// itself only on the app's explicit word.
     public static func sentence(id: String, revealed: Bool = false, blur: Bool) -> String { sentence(address: id, revealed: revealed, blur: blur) }
-}
 
-/// An address in running text: "hidden address" (AddressText.sentence). (The name of the old mask, kept for callers; it no
-/// longer holds the first letter or the domain.)
-public func maskEmail(_ email: String) -> String { AddressText.hidden }
+    /// An address in running text while hidden: "hidden address", whatever the address (the name of the old first-letter
+    /// mask, kept so callers read as before; it no longer holds the first letter, a length or the domain).
+    public static func mask(_ address: String) -> String { hidden }
+}

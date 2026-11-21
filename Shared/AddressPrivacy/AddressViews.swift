@@ -34,7 +34,7 @@ public struct BlurredAddress: View {
     /// Whether the address is blurred now: the override, or the app's setting.
     public var blurred: Bool { blur ?? privacy.blur }
     /// Whether the address is drawn readable now.
-    public var readable: Bool { gate.on || revealed || !blurred }
+    public var readable: Bool { gate.isOn(at: privacy.hoverEnded) || revealed || !blurred }
 
     /// The text the view draws: the address while readable, else the stand-in (the body draws exactly this).
     public static func drawn(address: String, readable: Bool, blur: Bool) -> String {
@@ -90,7 +90,7 @@ public struct AddressKeyLabel: View {
     public var body: some View {
         HStack(spacing: 0) {
             Text(title)
-            BlurredAddress(address: address, size: size, revealed: gate.on, blur: blur)
+            BlurredAddress(address: address, size: size, revealed: gate.isOn(at: privacy.hoverEnded), blur: blur)
         }
         .onHover { gate.pointer($0) }
         .onChange(of: privacy.hoverEnded) { gate.sync($0) }
