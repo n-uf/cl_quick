@@ -24,8 +24,6 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     /// The next main-frame navigation is the initial load of our own HTML; set just before `loadHTMLString`.
     private(set) var allowInitialLoad = false
     private var generation = 0
-    /// The folders the rule list was compiled in (under the temporary folder); removed when the window closes.
-    private(set) var storeFolders: [URL] = []
 
     /// "html" or "htm", in any case: the code blocks that get the control.
     static func isHTML(_ language: String) -> Bool {
@@ -50,26 +48,65 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         }
         dropWebView()
         trace("compile")
-        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("cl_quick-preview-\(UUID().uuidString)", isDirectory: true)
-        storeFolders.append(folder)
-        guard let store = WKContentRuleListStore(url: folder) else { return failed(w, "The preview can't be made safe, so it isn't shown.") }
-        store.compileContentRuleList(forIdentifier: Self.ruleListName, encodedContentRuleList: Self.encodedRules) { [weak self] list, error in
-            DispatchQueue.main.async {
-                guard let self, self.generation == mine, let w = self.window else { return }     // closed or replaced meanwhile
-                guard let list, error == nil else { return self.failed(w, "The preview can't be made safe, so it isn't shown.") }
-                let view = Self.makeWebView(rules: list, trace: self.trace)
-                view.navigationDelegate = self
-                view.uiDelegate = self
-                self.page = view
-                view.frame = NSRect(origin: .zero, size: w.contentLayoutRect.size)
-                view.autoresizingMask = [.width, .height]
-                w.contentView = view
-                self.allowInitialLoad = true
-                self.trace("load")
-                view.loadHTMLString(html, baseURL: nil)
-            }
+        Self.withRules { [weak self] list in
+            guard let self, self.generation == mine, let w = self.window else { return }     // closed or replaced meanwhile
+            guard let list else { return self.failed(w, "The preview can't be made safe, so it isn't shown.") }
+            let view = Self.makeWebView(rules: list, trace: self.trace)
+            view.navigationDelegate = self
+            view.uiDelegate = self
+            self.page = view
+            view.frame = NSRect(origin: .zero, size: w.contentLayoutRect.size)
+            view.autoresizingMask = [.width, .height]
+            w.contentView = view
+            self.allowInitialLoad = true
+            self.trace("load")
+            view.loadHTMLString(html, baseURL: nil)
         }
+    }
+
+    // MARK: the rule list
+
+    /// The compiled list, kept for the run: compiled once, for the encoded rules it was made from.
+    private static var compiled: (rules: String, list: WKContentRuleList)?
+    private static var compiling = false
+    private static var waiting: [(WKContentRuleList?) -> Void] = []
+    /// Checks: how many lists were compiled, and the folders they were compiled in (each removed as soon as it was done).
+    private(set) static var compiles = 0
+    private(set) static var compileFolders: [URL] = []
+    static let folderPrefix = "cl_quick-preview-"
+
+    /// The block-all list: the one compiled before, or a new one (main thread; `done` gets nil when it can't be compiled).
+    static func withRules(_ done: @escaping (WKContentRuleList?) -> Void) {
+        let encoded = encodedRules
+        if let c = compiled, c.rules == encoded { return done(c.list) }
+        waiting.append(done)
+        guard !compiling else { return }
+        compiling = true
+        compiles += 1
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent(folderPrefix + UUID().uuidString, isDirectory: true)
+        compileFolders.append(folder)
+        func finish(_ list: WKContentRuleList?) {
+            try? FileManager.default.removeItem(at: folder)          // the compiled list is in memory: nothing stays on disk
+            if let list { compiled = (encoded, list) }
+            compiling = false
+            let all = waiting
+            waiting = []
+            for d in all { d(list) }
+        }
+        guard let store = WKContentRuleListStore(url: folder) else { return finish(nil) }
+        store.compileContentRuleList(forIdentifier: ruleListName, encodedContentRuleList: encoded) { list, error in
+            DispatchQueue.main.async { finish(error == nil ? list : nil) }
+        }
+    }
+
+    /// Checks: the next press compiles again.
+    static func forgetCompiledRules() { compiled = nil }
+
+    /// At launch: folders a crash left behind (one is made only while a list compiles) go.
+    static func sweepStaleFolders(in dir: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        for n in names where n.hasPrefix(folderPrefix) { try? FileManager.default.removeItem(at: dir.appendingPathComponent(n)) }
     }
 
     /// A web view with the isolation set and the block-all rules added; nothing is loaded yet.
@@ -129,10 +166,6 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         let w = window
         window = nil
         w?.delegate = nil
-        let folders = storeFolders
-        storeFolders = []
-        // after the close notification has returned
-        DispatchQueue.main.async { for f in folders { try? FileManager.default.removeItem(at: f) } }
         w?.orderOut(nil)
     }
 

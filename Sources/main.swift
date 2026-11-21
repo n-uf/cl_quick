@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        QCHTMLPreview.sweepStaleFolders()
         // the first run: the Claude Code folders found become profiles, and cl_audit's quick chat settings come along
         let store = ProfileStore.shared
         var s = chat.settings

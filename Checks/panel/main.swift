@@ -4082,6 +4082,8 @@ do {
         }
     }
     check("preview: nothing exists before Preview is pressed", pv.window == nil && pv.page == nil)
+    QCHTMLPreview.forgetCompiledRules()
+    let compiles0 = QCHTMLPreview.compiles
     autoreleasepool { pv.show(sampleHTML) }       // this program's outermost pool never drains: the window is made inside one that does
     spinUntil(15) { pv.page != nil }
     check("preview: compiled, then the rules added, then loaded, in that order", steps.prefix(3).elementsEqual(["compile", "add rules", "load"]), "\(steps)")
@@ -4166,11 +4168,9 @@ do {
         return ({ w == nil }, { v == nil })
     }
     var windowGone = { false }, viewGone = { false }
-    var folders: [URL] = []
     autoreleasepool {
         pv.show("<p>fourth</p>")
         spinUntil(15) { pv.page != nil }
-        folders = pv.storeFolders
         (windowGone, viewGone) = weakPair()
         pv.window?.close()
         spin(0.2)
@@ -4178,7 +4178,20 @@ do {
     check("preview: after the close the shared object holds neither", pv.window == nil && pv.page == nil)
     check("preview: the window is released", spinUntil(10) { windowGone() })
     check("preview: the web view is released", spinUntil(10) { viewGone() })
-    check("preview: the rule store's folders are gone", !folders.isEmpty && spinUntil(10) { folders.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) } }, "\(folders)")
+    let folders = QCHTMLPreview.compileFolders.suffix(QCHTMLPreview.compiles - compiles0)
+    check("preview: the rules were compiled once for the good list (and once for the bad one), not once per press",
+          QCHTMLPreview.compiles - compiles0 == 2, "\(QCHTMLPreview.compiles - compiles0)")
+    check("preview: each rule store folder is gone once its compile is done", !folders.isEmpty && folders.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }, "\(folders)")
+    do {      // a stale folder from a crash is swept at launch; nothing else is
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent("cl_quick-sweep-check-\(UUID().uuidString)", isDirectory: true)
+        let stale = dir.appendingPathComponent(QCHTMLPreview.folderPrefix + "old", isDirectory: true), other = dir.appendingPathComponent("other", isDirectory: true)
+        try? FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        QCHTMLPreview.sweepStaleFolders(in: dir)
+        check("preview: the launch sweep removes cl_quick-preview-* folders and leaves the rest",
+              !FileManager.default.fileExists(atPath: stale.path) && FileManager.default.fileExists(atPath: other.path))
+        try? FileManager.default.removeItem(at: dir)
+    }
     steps = []
     pv.trace = { steps.append($0) }
     pv.show("<p>fifth</p>")                       // a press after a close makes a new window
