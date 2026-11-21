@@ -506,11 +506,11 @@ enum QuickChatInstructions {
     /// The box's two parts, as its jump links name them: the built-in text first, then the user's own ("Custom").
     enum Part: Equatable { case builtIn, custom }
 
-    /// The part in view (the one whose link is lit while scrolling): Custom once the middle of the viewport is past the
-    /// hairline between the parts, Built in before it. `offset` is how far the box is scrolled, `viewport` its height,
-    /// `divider` where the hairline is in the text.
+    /// The part in view (the one whose link is lit while scrolling): Custom once the hairline between the parts has come
+    /// into the top quarter of the viewport (or past it), Built in before that. `offset` is how far the box is scrolled,
+    /// `viewport` its height, `divider` where the hairline is in the text.
     static func part(offset: CGFloat, viewport: CGFloat, divider: CGFloat) -> Part {
-        offset + viewport / 2 >= divider ? .custom : .builtIn
+        offset + viewport / 4 >= divider ? .custom : .builtIn
     }
 
     /// Where the box scrolls to for a part: the top for Built in, the hairline (just above it) for Custom, never past

@@ -306,11 +306,12 @@ check("box: a caret never goes into the built-in part, a selection over it is fi
       && QuickChatInstructions.caret(NSRange(location: 2, length: 9), protected: P) == NSRange(location: 2, length: 9)
       && QuickChatInstructions.caret(NSRange(location: P + 3, length: 0), protected: P) == NSRange(location: P + 3, length: 0))
 // the box's jump links: which part is in view, and where a link scrolls to
-check("box: at the top the built-in part is in view; with the hairline in the top half or above, Custom",
+check("box: at the top the built-in part is in view; with the hairline in the top quarter or above, Custom",
       QuickChatInstructions.part(offset: 0, viewport: 108, divider: 90) == .builtIn
-      && QuickChatInstructions.part(offset: 36, viewport: 108, divider: 90) == .custom
-      && QuickChatInstructions.part(offset: 35, viewport: 108, divider: 90) == .builtIn
-      && QuickChatInstructions.part(offset: 90, viewport: 108, divider: 90) == .custom)
+      && QuickChatInstructions.part(offset: 63, viewport: 108, divider: 90) == .custom
+      && QuickChatInstructions.part(offset: 62, viewport: 108, divider: 90) == .builtIn
+      && QuickChatInstructions.part(offset: 86, viewport: 108, divider: 90) == .custom      // opened on Custom
+      && QuickChatInstructions.part(offset: 0, viewport: 108, divider: 20) == .custom)      // a very short built-in text: no Built in
 check("box: Built in scrolls to the top, Custom to the hairline (never past what the text can scroll)",
       QuickChatInstructions.scrollTarget(.builtIn, divider: 90, most: 300) == 0
       && QuickChatInstructions.scrollTarget(.custom, divider: 90, most: 300) == 86
