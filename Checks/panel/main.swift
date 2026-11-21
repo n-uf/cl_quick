@@ -4572,6 +4572,20 @@ func chatScrollChecks() {
     sc.jumpToLatest(); settle()
     user(scrollTo: sc.maxOffset() - 1); settle()
     check("scroll: a 1 pt scroll up from the bottom stops following too", !sc.following)
+    // the trackpad's elastic bounce: a flick down to the end overshoots (the clip's bounds go past the end) and springs back; each
+    // spring-back step is upward but ends at the bottom, so following stays on and the next text shows no "new"
+    sc.jumpToLatest(); settle()
+    let edge = sc.maxOffset()
+    for over in [30, 22, 14, 7, 3, 1, 0] as [CGFloat] {
+        clip.setBoundsOrigin(NSPoint(x: 0, y: edge + over)); sc.scrollView?.reflectScrolledClipView(clip)
+    }
+    settle()
+    check("scroll: the overshoot and spring-back at the bottom keep following", sc.following && sc.atBottom && abs(sc.offset() - edge) < 1, "following \(sc.following) offset \(sc.offset()) edge \(edge)")
+    stream("\n\n" + ChatScrollRig.lines(3, "after-bounce"))
+    check("scroll: and the next text follows, with no \"new\" mark", sc.isAtBottom && sc.following && !sc.newBelow, "following \(sc.following) new \(sc.newBelow)")
+    // a bounce that springs back to a place above the bottom is a scroll up (the user pulled up past the end, or scrolled up)
+    user(scrollTo: sc.maxOffset() - 25); settle()
+    check("scroll: an upward move that ends above the bottom still stops following", !sc.following)
     user(scrollTo: sc.maxOffset() - 40); settle()
     check("scroll: 40 pt above the bottom is not (not following)", !sc.following && !sc.atBottom)
     // sending jumps to the bottom and follows

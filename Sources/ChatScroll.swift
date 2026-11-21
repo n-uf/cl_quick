@@ -167,7 +167,9 @@ final class QCChatScroll: ObservableObject {
         lastClipHeight = g.clip.bounds.height
         clipSawHeight = g.doc.bounds.height
         if !moving, !resized, !shrank, abs(o - lastOffset) > 0.01 {
-            if o < lastOffset { following = false } else if isAtBottom { following = true }
+            // (only an upward move that ENDS ABOVE the bottom stops following: a trackpad's flick to the end overshoots and springs
+            // back, and each spring-back step is upward but ends at the bottom)
+            if o < lastOffset, o < maxOffset() - 0.5 { following = false } else if isAtBottom { following = true }
         }
         lastOffset = o
         scheduleRefresh()
