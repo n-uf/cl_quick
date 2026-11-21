@@ -4209,6 +4209,16 @@ do {
             return ready && port != 0
         }
         func stop() { listener?.cancel(); listener = nil }
+        /// Pumps the run loop until no new connection has arrived for `quiet` s (`ceiling` s at most), so what a slow machine
+        /// starts late is counted too.
+        func settle(quiet: TimeInterval = 1.5, ceiling: TimeInterval = 20) {
+            let end = Date().addingTimeInterval(ceiling)
+            var seen = connections, since = Date()
+            while Date() < end, Date().timeIntervalSince(since) < quiet {
+                spin(0.1)
+                if connections != seen { seen = connections; since = Date() }
+            }
+        }
     }
     /// Every vector, each at its own path on the listener, plain HTTP and (img, preconnect, link, ping) HTTPS too: a TLS hello
     /// is an accepted connection as well. The page's own script (`document.title = 'js'`) must not run.
@@ -4311,6 +4321,7 @@ do {
             v.mouseUp(with: event(.leftMouseUp, 3))
         } else { check("probe: the trusted link's rectangle was found", false, "\(String(describing: rect))") }
         spin(2.0)
+        if lb.connections > 0 { lb.settle() }          // a run that sees requests waits for the last of them (a sealed one has none)
         run.title = evaluate("document.title", in: .page) as? String
         run.clientFlag = evaluate("window.__qcGuard", in: .defaultClient)
         run.pageFlag = evaluate("typeof window.__qcGuard", in: .page)
@@ -4323,13 +4334,29 @@ do {
     // mutation 1: rules left out. Every fetch vector that WebKit really starts reaches the listener (the paths below fired
     // in every run; `prefetch`, `dns-prefetch` and `track` do not fire in WKWebView even unprotected).
     QCHTMLPreview.addRules = false
-    let noRules = probe()
+    var noRules = probe()
     QCHTMLPreview.addRules = true
-    let fetched = ["img", "css-url", "css-import", "css-link", "font", "srcset", "picture", "svg-image", "input-image", "poster", "video", "audio",
-                   "source", "preload", "image-set", "cursor"]
+    // Two groups. The first (style sheets, media, preload) arrived in every run, the CI runner's included (run 44919902886:
+    // 22 connections, every one of these and not one of the second): required wherever the control runs. The second (images,
+    // css urls, fonts, a cursor, a poster) are what WebKit starts only when it paints the page, and that runner never did,
+    // although the page had been laid out (the link's rectangle was read). A machine that starts none of them, with the rules
+    // left out, can't show them: they are skipped, said so with the counts, and the rules-on check below still holds every
+    // one of them (and all else) to not one connection. Some of them arriving and others not is a failure, never a skip.
+    let always = ["css-import", "css-link", "video", "audio", "source", "preload"]
+    let drawn = ["img", "css-url", "font", "srcset", "picture", "svg-image", "input-image", "poster", "image-set", "cursor"]
+    // QC_PROBE_NO_DRAWN=1 simulates that runner: the control's own paths lose the second group
+    if ProcessInfo.processInfo.environment["QC_PROBE_NO_DRAWN"] != nil { noRules?.paths.removeAll { drawn.contains($0) } }
+    func arrived(_ r: ProbeRun?, _ kinds: [String]) -> [String] { kinds.filter { r?.paths.contains($0) == true } }
+    let drawnSkipped = ((noRules?.connections ?? 0) > 0 && arrived(noRules, drawn).isEmpty && arrived(noRules, always).count == always.count) ? drawn : []
+    if !drawnSkipped.isEmpty {
+        var counts: [String: Int] = [:]
+        for p in noRules?.paths ?? [] { counts[p, default: 0] += 1 }
+        print("NOTE probe: the control skips \(drawnSkipped.count) kinds (\(drawnSkipped.joined(separator: ", "))): with the rules left out this machine started none of them, while it started every sheet, media and preload one; the rules-on check below still requires no connection at all. \(noRules?.connections ?? -1) connections, paths \(counts.sorted { $0.key < $1.key }.map { "\($0.key)×\($0.value)" })")
+    }
+    let controlNeeds = always + (drawnSkipped.isEmpty ? drawn : [])
     check("probe: with the rules left out the listener sees connections and the specific requests (so a lost rule list would be seen)",
-          (noRules?.connections ?? 0) > 0 && fetched.allSatisfy { noRules?.paths.contains($0) == true },
-          "\(noRules?.connections ?? -1) missing \(fetched.filter { noRules?.paths.contains($0) != true })")
+          (noRules?.connections ?? 0) > 0 && controlNeeds.allSatisfy { noRules?.paths.contains($0) == true },
+          "\(noRules?.connections ?? -1) missing \(controlNeeds.filter { noRules?.paths.contains($0) != true })")
     // mutation 2: click guard left out. A click makes WebKit connect (no request is sent, the rules block it) before the
     // policy is asked and cancels; the policy was asked about every link, the trusted click included.
     QCHTMLPreview.addGuard = false
