@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             chat.settingsChanged(s)
         }
         chat.openSettings = { id in SettingsWindow.shared.show(profile: id) }
+        chat.openAddAccount = { id in SettingsWindow.shared.show(profile: id, addAccount: true) }
         chat.start()
         let it = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         it.button?.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "cl_quick")
@@ -113,10 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         store.noteAccounts()
         store.reload()          // off the main thread; the next look at the menu has what changed
         // each profile: its name, the account in use, and that account's two limits (MenuUsage.swift); a click opens the chat on it
-        // (a profile's standby accounts are rows under its block: a click asks the same question and sign-in as Settings' Switch…)
+        // (a profile's standby accounts are rows under its block: a click asks the same question and sign-in as Settings' Switch…;
+        // after them Add an account…, which opens Settings on the profile with that form open)
         QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) },
                            switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
                            switchTo: { p, a in AccountSwitcher.shared.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .settings) },
+                           addAccount: { p in SettingsWindow.shared.show(profile: p.id, addAccount: true) },
                            pick: { [chat = self.chat] id in chat.open(profile: id) })
             .forEach(menu.addItem)
         if !store.profiles.isEmpty { menu.addItem(.separator()) }

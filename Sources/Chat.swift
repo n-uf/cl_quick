@@ -325,6 +325,11 @@ final class QuickChatModel: ObservableObject {
     /// The mic button: Dictation into the field on (true) or off.
     var dictate: (Bool) -> Void = { _ in }
     var openSettings: (String?) -> Void = { _ in }
+    /// Add an account… in the profile menu: Settings on that profile with its Add an account… form open.
+    var openAddAccount: (String) -> Void = { _ in }
+    /// A standby account's row in the profile menu: the same question and sign-in as the menu bar's row (the controller
+    /// asks first, then opens Claude Code's sign-in and watches the folder).
+    var switchProfile: (Profile, KnownAccount) -> Void = { _, _ in }
     var defaults: () -> QuickChatSettings = { .init() }
     /// The profiles the picker offers, with their levels.
     var pickable: () -> [(Profile, QuickChatLevel?)] = { [] }
@@ -1271,6 +1276,8 @@ final class QuickChat {
     private(set) var shortcutState: String?
     /// Opens Settings (main.swift), on a profile's card or General.
     var openSettings: (String?) -> Void = { _ in }
+    /// Opens Settings on a profile's card with its Add an account… form open (main.swift).
+    var openAddAccount: (String) -> Void = { _ in }
 
     var isOpen: Bool { panel?.isVisible == true }
 
@@ -1288,6 +1295,12 @@ final class QuickChat {
         model.inputSourceIsDictation = { [weak self] in QCDictation.inputSourceIsDictation(self?.panel?.firstResponder) }
         model.commitComposition = { [weak self] in (self?.panel?.firstResponder as? NSTextView)?.unmarkText() }
         model.openSettings = { [weak self] id in self?.openSettings(id) }
+        model.openAddAccount = { [weak self] id in self?.openAddAccount(id) }
+        model.switchProfile = { [weak self] p, a in
+            guard let self else { return }
+            self.switcher.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .chat)
+            self.panel?.makeKey()
+        }
         model.defaults = { [weak self] in self?.settings ?? .init() }
         model.pickable = { [weak self] in
             guard let self else { return [] }

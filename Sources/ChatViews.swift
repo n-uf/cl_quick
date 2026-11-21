@@ -933,12 +933,17 @@ struct QCControls: View {
         .padding(.leading, -QCSpace.keyPadding)
     }
 
-    /// The profiles with their weeks and in-use addresses, then Settings for the chat's profile (Settings opens on it and
-    /// the chat steps aside: hidden, not closed, the shortcut brings it back as it was) and Add a profile… (so a single
-    /// profile still has something to offer).
+    /// The profiles with their weeks and in-use addresses, each with its standby accounts and Add an account… under it
+    /// (as in the menu bar's menu: the same switch, the same question), then Settings for the chat's profile (Settings
+    /// opens on it and the chat steps aside: hidden, not closed, the shortcut brings it back as it was) and Add a profile…
+    /// (so a single profile still has something to offer).
     private func pickProfile() {
         QCMenu.pop(QCMenu.profiles(model.pickable(), on: model.target?.profileID,
                                    address: { ProfileStore.shared.inUse($0)?.email }, settings: Self.settingsItem(model),
+                                   standby: { ProfileStore.shared.standby($0) },
+                                   switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
+                                   switchTo: { [weak model] p, a in model?.switchProfile(p, a) },
+                                   addAccount: { [weak model] p in model?.openAddAccount(p.id); model?.hide() },
                                    pick: { model.pickProfile($0) }, add: {
             model.openSettings(SettingsWindow.addPage); model.hide()
         }))
@@ -1514,7 +1519,9 @@ struct QCChip: View {
 
 /// The profile menu: macOS's own, at the pointer. A heading, the profiles (a dot in the level's colour, the week and its
 /// reset in grey under the name, and the address of its account in use, blurred until the pointer is on it: a row of
-/// its own, QCProfileMenuRow), a line, then Add a profile…. No footer: what it used to say is the picker's tooltip.
+/// its own, QCProfileMenuRow), under each its standby accounts (QCStandbyMenuRow, "<address> · standby", Switch… at the
+/// right) and Add an account… (QCAddAccountMenuRow), the same rows and flow as the menu bar's menu (QCStatusMenu); then a
+/// line and Settings for the chat's profile, Add a profile…. No footer: what it used to say is the picker's tooltip.
 enum QCMenu {
     struct Item {
         let title: String
@@ -1525,6 +1532,8 @@ enum QCMenu {
         var profileRow = false
         var address: String? = nil
         let action: () -> Void
+        /// Items of the profile's group, after its row: its standby accounts and Add an account….
+        var after: [NSMenuItem] = []
     }
 
     private final class Handler: NSObject {
@@ -1534,17 +1543,27 @@ enum QCMenu {
     }
 
     /// The profile menu for the profiles the picker offers; `address` gives a profile's account in use (never a standby
-    /// one's). After the line: Settings for the chat's profile (`settings`: its name and what opens it), then Add a
-    /// profile….
+    /// one's). Under a profile's row, in its group: a row for each of its `standby` accounts (when `switchTo` is given:
+    /// QCStatusMenu.standbyItem, so the click goes through the menu bar's guard) and Add an account… (when `addAccount`
+    /// is given: QCStatusMenu.addAccountItem); both off while a switch is waited for on the profile (`switching`).
+    /// After the line: Settings for the chat's profile (`settings`: its name and what opens it), then Add a profile….
     static func profiles(_ list: [(Profile, QuickChatLevel?)], on: String?, address: (Profile) -> String?,
                          settings: (name: String, open: () -> Void)? = nil,
+                         standby: (Profile) -> [KnownAccount] = { _ in [] }, switching: (Profile) -> Bool = { _ in false },
+                         switchTo: ((Profile, KnownAccount) -> Void)? = nil, addAccount: ((Profile) -> Void)? = nil,
                          pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
         var actions: [Item] = []
         if let s = settings { actions.append(Item(title: "Settings for \(s.name)…", detail: "", action: s.open)) }
         actions.append(Item(title: "Add a profile…", detail: "", action: add))
         return build(header: "Profile", items: list.map { p, l in
-            Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.binding()?.p)),
-                 on: p.id == on, profileRow: true, address: address(p)) { pick(p.id) }
+            var it = Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.binding()?.p)),
+                          on: p.id == on, profileRow: true, address: address(p)) { pick(p.id) }
+            let waiting = switching(p)
+            if let switchTo {
+                it.after += standby(p).map { QCStatusMenu.standbyItem(p, $0, waiting: waiting, columns: .chat, switchTo: switchTo).0 }
+            }
+            if let addAccount { it.after.append(QCStatusMenu.addAccountItem(p, waiting: waiting, columns: .chat, add: addAccount).0) }
+            return it
         }, actions: actions)
     }
 
@@ -1579,11 +1598,13 @@ enum QCMenu {
                 i.view = QCProfileMenuRow(title: it.title, detail: it.detail, dot: it.dot, on: it.on, address: it.address, pick: it.action)
             }
             m.addItem(i)
+            it.after.forEach(m.addItem)
         }
-        // the profile rows all as wide as the widest (the menu then widens them with itself)
-        let rows = m.items.compactMap { $0.view as? QCProfileMenuRow }
-        let w = rows.map(\.frame.width).max() ?? 0
-        for r in rows { r.setFrameSize(NSSize(width: w, height: QCProfileMenuRow.height)) }
+        // the profile rows, and the standby and Add an account… rows under them, all as wide as the widest (the menu then
+        // widens them with itself)
+        let views = m.items.compactMap(\.view)
+        let w = views.map(\.frame.width).max() ?? 0
+        for v in views { v.setFrameSize(NSSize(width: w, height: v is QCProfileMenuRow ? QCProfileMenuRow.height : v.frame.height)) }
         if !actions.isEmpty { m.addItem(.separator()) }
         for a in actions { m.addItem(item(a)) }
         return m
