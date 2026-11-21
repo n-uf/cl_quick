@@ -5068,6 +5068,12 @@ func chatBehaviourChecks() {
     check("behaviour: taller mid-chat: the view's top text stays, not following", near(sc.offset(), held) && !sc.following, "offset \(held) -> \(sc.offset())")
     resize(width: 560)
     check("behaviour: wider mid-chat: not following, not pulled to the end", !sc.following && !sc.isAtBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
+    // text that rewraps (the window narrower: the same words on more lines) grows the text, but nothing arrived below
+    let hBefore = sc.maxOffset()
+    resize(width: 320)
+    check("behaviour: narrower mid-chat the text rewraps taller, and that is not \"new text below\"", sc.maxOffset() > hBefore + 20 && !sc.newBelow, "max \(hBefore) -> \(sc.maxOffset()) new \(sc.newBelow)")
+    resize(width: 720)
+    check("behaviour: wider again the text rewraps shorter: still no mark", !sc.newBelow)
     resize(width: QuickChatRoot.width, height: h0)
     // a window that grows by as much as the text left below the view ends with the view at the bottom, and follows again
     sc.jumpToLatest(); settle()

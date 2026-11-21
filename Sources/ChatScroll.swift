@@ -178,22 +178,25 @@ final class QCChatScroll: ObservableObject {
         scheduleRefresh()
     }
 
-    /// The text grew or shrank. Following: the end stays in view. Else the view stays where it is, and text that arrived
-    /// below is noted.
+    /// The text grew or shrank. Following: the end stays in view. Else the view stays where it is. (Whether text ARRIVED below
+    /// is not read from the height: a rewrap or text that grew above the view changes it too. See `contentChanged`.)
     private func documentResized() {
         guard let g = geometry else { return }
-        let h = g.doc.bounds.height
         if following { stick() }
-        else if h > lastHeight, !isAtBottom { newBelow = true }
-        lastHeight = h
+        lastHeight = g.doc.bounds.height
         scheduleRefresh()
     }
 
-    /// The chat's text changed (QuickChatModel.scrollTick): keeps the end in view when following, once the layout has run.
+    /// The chat's text changed (QuickChatModel.scrollTick: text arrived at the end of the chat): keeps the end in view when
+    /// following, once the layout has run; when not following, notes text that arrived below the visible end (the "new"
+    /// mark): the text grew since before the change, and the view is not at the bottom. A rewrap or growth above the view, with
+    /// no change at the end, never ticks, so it never sets the mark.
     func contentChanged() {
+        let before = lastHeight
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, let g = self.geometry else { return }
             if self.following { self.stick() }
+            else if g.doc.bounds.height > before, !self.isAtBottom { self.newBelow = true }
             self.refresh()
         }
     }
