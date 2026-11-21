@@ -6,6 +6,8 @@ import AppKit
 
 Files.readOnly = true
 _ = NSApplication.shared
+/// The user's clipboard: this suite never reads or writes it, and the last check says so.
+let clipboardAtStart = NSPasteboard.general.changeCount
 
 var failed = 0, passed = 0
 func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
@@ -816,5 +818,7 @@ do {
     try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
 }
 
+check("clipboard: the whole suite left the general pasteboard as it was (a copy made by someone else meanwhile counts too: run again)",
+      NSPasteboard.general.changeCount == clipboardAtStart, "change count \(clipboardAtStart) → \(NSPasteboard.general.changeCount)")
 print(failed == 0 ? "menu checks: \(passed) passed" : "menu checks: \(failed) FAILED, \(passed) passed")
 exit(failed == 0 ? 0 : 1)
