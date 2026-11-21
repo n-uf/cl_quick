@@ -79,7 +79,7 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         config.userContentController.add(rules)
         trace("add rules")
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = QCPreviewWebView(frame: .zero, configuration: config)
         // on by default on macOS: a force-click on a link would open a Quick Look popover that loads the real page, outside
         // every rule above
         view.allowsLinkPreview = false
@@ -160,12 +160,50 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         decisionHandler(Self.responsePolicy(canShow: navigationResponse.canShowMIMEType))
     }
 
+    /// A download that was begun anyway (never by our policy, which cancels what asks for one): stopped at once.
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = nil
+        download.cancel(nil)
+        trace("download cancelled")
+    }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = nil
+        download.cancel(nil)
+        trace("download cancelled")
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { trace("finished") }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { trace("failed load") }
 
     /// No new windows, whatever asks (target=_blank, window.open).
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? { nil }
+}
+
+/// The web view of the preview. Its right-click menu has "Download Linked File", "Download Image" and "Download Media",
+/// which start a download inside WebKit without asking the navigation delegate or the content rules, and the "Open …"
+/// items, which navigate or open windows: only the Copy items stay.
+final class QCPreviewWebView: WKWebView {
+    /// The identifiers (WebKit's WKMenuItemIdentifier…) of the items that stay.
+    static let keptMenuItems: Set<String> = ["WKMenuItemIdentifierCopy", "WKMenuItemIdentifierCopyImage",
+                                             "WKMenuItemIdentifierCopyLink", "WKMenuItemIdentifierCopyMediaLink"]
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        Self.filter(menu)
+    }
+
+    /// Takes every item but the kept ones out, then the separators left first, last or doubled.
+    static func filter(_ menu: NSMenu) {
+        for item in menu.items where !item.isSeparatorItem {
+            if !(item.identifier.map { keptMenuItems.contains($0.rawValue) } ?? false) { menu.removeItem(item) }
+        }
+        var i = 0
+        while i < menu.items.count {
+            let sep = menu.items[i].isSeparatorItem
+            if sep && (i == 0 || i == menu.items.count - 1 || menu.items[i - 1].isSeparatorItem) { menu.removeItem(at: i) } else { i += 1 }
+        }
+    }
 }
 
 /// The compact "Preview" control in an html block's top row, beside Copy: the language label's size, Copy's 24 pt height

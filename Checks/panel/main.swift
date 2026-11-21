@@ -4109,6 +4109,26 @@ do {
     check("preview: a response that is no page is cancelled, a page allowed",
           QCHTMLPreview.responsePolicy(canShow: false) == .cancel && QCHTMLPreview.responsePolicy(canShow: true) == .allow)
     check("preview: what is compiled is the block-all list", QCHTMLPreview.encodedRules == QCHTMLPreview.blockAll)
+    check("preview: the page is a QCPreviewWebView (its context menu is filtered)", pv.page is QCPreviewWebView)
+    do {      // the right-click menu: only the Copy items stay (the downloads and Open… items would skip the rules)
+        let drop = ["DownloadLinkedFile", "DownloadImage", "DownloadMedia", "OpenLink", "OpenLinkInNewWindow", "OpenImageInNewWindow",
+                    "OpenMediaInNewWindow", "OpenFrameInNewWindow", "Reload", "SearchWeb"]
+        let keep = ["Copy", "CopyImage", "CopyLink", "CopyMediaLink"]
+        let menu = NSMenu()
+        func add(_ id: String?) { let i = NSMenuItem(title: id ?? "x", action: nil, keyEquivalent: ""); i.identifier = id.map { NSUserInterfaceItemIdentifier("WKMenuItemIdentifier" + $0) }; menu.addItem(i) }
+        menu.addItem(.separator())
+        for id in drop.prefix(4) { add(id) }
+        menu.addItem(.separator())
+        for id in keep { add(id) }
+        menu.addItem(.separator()); menu.addItem(.separator())
+        for id in drop.dropFirst(4) { add(id) }
+        add(nil)
+        menu.addItem(.separator())
+        QCPreviewWebView.filter(menu)
+        let left = menu.items.map { $0.identifier?.rawValue ?? ($0.isSeparatorItem ? "-" : "?") }
+        check("preview: the context menu keeps only the Copy items, with no separator first, last or doubled",
+              left == keep.map { "WKMenuItemIdentifier" + $0 }, "\(left)")
+    }
 
     // another press replaces the content in the same window (a new view each time: the old one is released)
     weak var firstView = pv.page
