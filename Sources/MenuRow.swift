@@ -468,6 +468,27 @@ final class QCAddressLabel: NSView {
     override func mouseExited(with e: NSEvent) { reveal(false) }
     func reveal(_ on: Bool) { guard on != revealed else { return }; revealed = on; needsDisplay = true }
 
+    // A modal alert (NSAlert.runModal) gets no enter and exit from the tracking area above, so while the label is in a
+    // window the pointer's place is also read every 50 ms, in every run loop mode (the modal one included), and the
+    // address is readable exactly while the pointer is on the label.
+    private var poll: Timer?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        poll?.invalidate(); poll = nil
+        guard let w = window else { reveal(false); return }
+        w.acceptsMouseMovedEvents = true
+        var shown = false
+        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] t in
+            guard let self, let w = self.window else { t.invalidate(); return }
+            if w.isVisible { shown = true; self.follow(inWindow: w.mouseLocationOutsideOfEventStream) }
+            else if shown { t.invalidate(); self.reveal(false) }     // the alert has closed
+        }
+        RunLoop.main.add(t, forMode: .common)
+        poll = t
+    }
+    /// The pointer at a point of the window (nil: it is nowhere): the address is readable while it is on the label.
+    func follow(inWindow p: NSPoint?) { reveal(p.map { bounds.contains(convert($0, from: nil)) } ?? false) }
+
     /// Drawn readable: the pointer is on it, or addresses are not blurred (AddressPrivacy).
     var sharp: Bool { revealed || !AddressPrivacy.shared.blur }
 

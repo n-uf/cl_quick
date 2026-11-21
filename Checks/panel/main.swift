@@ -1012,6 +1012,23 @@ do {
             label.mouseExited(with: leave)
             check("alert: the pointer leaving it blurs it again, as at rest", !label.revealed && look() == rest)
         } else { check("alert: enter and exit events for the hover checks", false) }
+        // a modal alert delivers no enter and exit to the tracking area: the label follows the pointer's place by itself
+        // (the alert's window here is a stand-in, never shown; the timer's own reading is `follow(inWindow:)`)
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.borderless], backing: .buffered, defer: true)
+        host.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        host.contentView?.addSubview(label)
+        label.frame.origin = NSPoint(x: 40, y: 50)
+        let rest2 = look()
+        label.follow(inWindow: label.convert(NSPoint(x: label.bounds.midX, y: label.bounds.midY), to: nil))
+        check("alert: with the pointer on the address (read from where it is) it is readable, with no enter event", label.revealed && look() != rest2)
+        label.follow(inWindow: label.convert(NSPoint(x: label.bounds.maxX + 30, y: label.bounds.midY), to: nil))
+        check("alert: the pointer off the address blurs it again, as at rest", !label.revealed && look() == rest2)
+        label.follow(inWindow: label.convert(NSPoint(x: label.bounds.midX, y: label.bounds.midY), to: nil))
+        label.follow(inWindow: nil)
+        check("alert: no pointer at all blurs it too", !label.revealed)
+        check("alert: the label asks its window for mouse moves", host.acceptsMouseMovedEvents)
+        label.removeFromSuperview()
+        check("alert: out of its window the address is blurred", !label.revealed)
     } else { check("alert: the address is in an accessory view", false) }
 
     // a hover cut short (the panel hidden under the pointer, a modal alert, the window covered) sends no mouse-exit: the
