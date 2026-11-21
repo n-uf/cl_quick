@@ -11,8 +11,10 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   should render whole.
 - **Shared modules from cl_kit.** ProfileCore, Runs and ClaudeAuth (with the shared sign-in, ClaudeSignIn) now come from a
   tagged release of [cl_kit](https://github.com/n-uf/cl_kit), copied into `Vendor/cl_kit-<tag>/` by `scripts/vendor.sh`,
-  instead of cl_audit's code at a pinned commit plus cl_quick's own patches. Nothing changes in the app: the code is the
-  same, still built without the Keychain read. CI runs cl_kit's suites on the copy and checks it is exactly its tag.
+  instead of cl_audit's code at a pinned commit plus cl_quick's own patches. The sign-in and the runner are the same code;
+  ProfileCore also takes cl_audit's later changes (account and organisation ids, the reader's state machine), which
+  cl_quick doesn't use yet. Still built without the Keychain read. CI runs cl_kit's suites on the copy and checks it is
+  exactly its tag.
 - **The chat's profile menu matches the menu bar's.** Under each profile's row, its standby accounts are rows
   ("<address> · standby", **Switch…** at the right, the address blurred until the pointer is on the row) and, after them,
   **Add an account…**. A standby row starts the same switch as the menu bar's row (same guards, same "Switch Main to this

@@ -31,6 +31,10 @@ if [ "${1:-}" = --check ]; then
   read -r tag want < "$pin"
   fetch "$tag"
   [ "$commit" = "$want" ] || { echo "FAIL: $tag is $commit in $src, Vendor/CL_KIT says $want" >&2; exit 1; }
+  # suite output is left out of the comparison only where the suites write it (./build, Checks/.work); a `build` or `.work`
+  # anywhere else in the copy is drift (the tag has none)
+  stray="$(cd "$repo/Vendor/cl_kit-$tag" && find . \( -name build -o -name .work \) -prune -print | grep -vxE '\./build|\./Checks/\.work' || true)"
+  [ -z "$stray" ] || { echo "FAIL: Vendor/cl_kit-$tag has what $tag doesn't: $stray" >&2; exit 1; }
   if diff -r -q -x .work -x build "$tmp/tree" "$repo/Vendor/cl_kit-$tag"; then
     echo "vendor: Vendor/cl_kit-$tag is exactly $tag ($commit)"
   else
