@@ -447,12 +447,13 @@ do {
           QCStatusMenu.mayAddAccount(main, exists: { _ in true }, waiting: { _ in false }) && !QCStatusMenu.mayAddAccount(main, exists: { _ in true }, waiting: { $0.id == "main" })
           && QCStatusMenu.mayAddAccount(main, exists: { _ in true }, waiting: { $0.id == "work" }))
     check("add: …and the profile is still there (one removed since the menu was built opens nothing)",
-          !QCStatusMenu.mayAddAccount(main, exists: { _ in false }, waiting: { _ in false }) && !QCStatusMenu.mayAddAccount(main, waiting: { _ in false }))
+          !QCStatusMenu.mayAddAccount(main, exists: { _ in false }, waiting: { _ in false }))
     QCStatusMenu.allowAddAccount = { _ in false }
     added = []; addRow.press(); spin(0.1)
     check("add: a click the rule refuses opens nothing", added.isEmpty, "\(added)")
     QCStatusMenu.allowAddAccount = realAdd
-    check("add: the real rule is the one rows are built with (a profile that isn't in the store has no form to open)", !QCStatusMenu.mayAddAccount(main) && !realAdd(main))
+    let nobody = Profile(id: "no-such-profile-in-the-store", name: "Nobody", folder: "~/.claude-sample-nobody")
+    check("add: the real rule is the one rows are built with (a profile that isn't in the store has no form to open)", !QCStatusMenu.mayAddAccount(nobody) && !realAdd(nobody))
     QCStatusMenu.allowAddAccount = { _ in true }
     // waiting for a sign-in on the profile: its row is off (the item too), the other profile's is on
     let waitingAdd = addMenu([mainOne, workOne], switching: { $0.id == "main" })
