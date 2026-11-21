@@ -479,6 +479,51 @@ enum QuickChatInstructions {
         return replacement.count <= room ? replacement : String(replacement.prefix(room))
     }
 
+    /// What an edit of the box does when its first `protected` characters are the built-in text (read-only, shown above
+    /// the user's own): the edit as it is, a changed one, or nothing. An edit never changes the built-in part; one that
+    /// reaches into it from the user's part (select all, then type) only replaces the user's part; the 1,000-character
+    /// limit counts the user's part alone, a paste included. `full` is the box's whole text.
+    enum Edit: Equatable {
+        case allow
+        case reject
+        /// Replace this range (of the whole text, all of it in the user's part) with this text instead.
+        case replace(NSRange, String)
+    }
+    static func edit(_ replacement: String, replacing range: NSRange, in full: String, protected: Int,
+                     limit: Int = QuickChatInstructions.limit) -> Edit {
+        let whole = full as NSString
+        guard protected >= 0, protected <= whole.length, range.location != NSNotFound, NSMaxRange(range) <= whole.length else { return .reject }
+        // wholly inside the built-in part, or ending where the user's begins (a backspace at its start): nothing
+        if range.location < protected, NSMaxRange(range) <= protected { return .reject }
+        let aimed = range.location < protected ? NSRange(location: protected, length: NSMaxRange(range) - protected) : range
+        let user = whole.substring(from: protected)
+        let fit = Self.fit(replacement, replacing: NSRange(location: aimed.location - protected, length: aimed.length), in: user, limit: limit)
+        if aimed == range, fit == replacement { return .allow }
+        if fit.isEmpty, aimed.length == 0 { return .reject }
+        return .replace(aimed, fit)
+    }
+
+    /// The box's two parts, as its jump links name them: the built-in text first, then the user's own ("Custom").
+    enum Part: Equatable { case builtIn, custom }
+
+    /// The part in view (the one whose link is lit while scrolling): Custom once the middle of the viewport is past the
+    /// hairline between the parts, Built in before it. `offset` is how far the box is scrolled, `viewport` its height,
+    /// `divider` where the hairline is in the text.
+    static func part(offset: CGFloat, viewport: CGFloat, divider: CGFloat) -> Part {
+        offset + viewport / 2 >= divider ? .custom : .builtIn
+    }
+
+    /// Where the box scrolls to for a part: the top for Built in, the hairline (just above it) for Custom, never past
+    /// `most` (how far the text can scroll).
+    static func scrollTarget(_ part: Part, divider: CGFloat, most: CGFloat) -> CGFloat {
+        part == .builtIn ? 0 : min(max(0, divider - 4), max(0, most))
+    }
+
+    /// Where a caret may be: not in the built-in part (a selection that only covers it, to copy, is fine).
+    static func caret(_ new: NSRange, protected: Int) -> NSRange {
+        new.length == 0 && new.location < protected ? NSRange(location: protected, length: 0) : new
+    }
+
     /// The fixed text, then (when the box has any text besides blanks) a blank line, the lead-in and the text.
     /// Never instead of the fixed text; an empty box leaves `fixed` exactly as it is.
     static func appended(to fixed: String, _ user: String) -> String {

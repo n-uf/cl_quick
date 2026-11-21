@@ -277,6 +277,45 @@ check("instructions: a paste of characters made of several scalars is cut on a c
 check("instructions: a text over the cap (a file edited by hand) is cut again when the prompt is built",
       { var x = cmd; x.instructions = String(repeating: "y", count: 1400)
         return x.prompt == QuickChatCommand.systemPrompt + "\n\nThe user's own instructions:\n" + String(repeating: "y", count: 1000) }())
+// the box shows the built-in text first (protected), the user's own after it: an edit never changes the built-in part, and
+// the cap counts the user's part alone
+let bi = "Built-in text.\nYours ↓\n"                 // the protected part of a sample box
+let P = (bi as NSString).length
+func boxEdit(_ new: String, _ loc: Int, _ len: Int, in user: String) -> QuickChatInstructions.Edit {
+    QuickChatInstructions.edit(new, replacing: NSRange(location: loc, length: len), in: bi + user, protected: P)
+}
+check("box: typing at the start of the user's part goes through", boxEdit("a", P, 0, in: "") == .allow)
+check("box: typing or pasting inside the built-in part is refused", boxEdit("a", 3, 0, in: "abc") == .reject && boxEdit("pasted", 0, 0, in: "") == .reject
+      && boxEdit("x", P - 1, 0, in: "") == .reject)
+check("box: deleting in the built-in part is refused, a backspace at the start of the user's part too",
+      boxEdit("", 0, P, in: "abc") == .reject && boxEdit("", 2, 5, in: "abc") == .reject && boxEdit("", P - 1, 1, in: "abc") == .reject)
+check("box: select all and type replaces the user's part only", boxEdit("new", 0, P + 3, in: "abc") == .replace(NSRange(location: P, length: 3), "new"))
+check("box: select all and delete clears the user's part only", boxEdit("", 0, P + 3, in: "abc") == .replace(NSRange(location: P, length: 3), ""))
+check("box: an edit in the user's part goes through", boxEdit("X", P + 1, 1, in: "abc") == .allow && boxEdit("", P, 2, in: "abc") == .allow)
+let userFull = String(repeating: "u", count: 1000)
+check("box: the cap counts the user's part alone (the built-in part isn't in it)", boxEdit("a", P + 999, 0, in: String(userFull.dropLast())) == .allow
+      && boxEdit("a", P + 1000, 0, in: userFull) == .reject)
+check("box: a paste past the cap is cut to what fits, and never touches the built-in part",
+      boxEdit(String(repeating: "p", count: 500), P + 900, 0, in: String(repeating: "x", count: 900)) == .replace(NSRange(location: P + 900, length: 0), String(repeating: "p", count: 100))
+      && boxEdit(String(repeating: "p", count: 5000), 0, P, in: "") == .reject)
+check("box: select all and a long paste gives 1,000 of the user's part", boxEdit(String(repeating: "p", count: 5000), 0, P + 1000, in: userFull)
+      == .replace(NSRange(location: P, length: 1000), String(repeating: "p", count: 1000)))
+check("box: a caret never goes into the built-in part, a selection over it is fine for copying",
+      QuickChatInstructions.caret(NSRange(location: 4, length: 0), protected: P) == NSRange(location: P, length: 0)
+      && QuickChatInstructions.caret(NSRange(location: P, length: 0), protected: P) == NSRange(location: P, length: 0)
+      && QuickChatInstructions.caret(NSRange(location: 2, length: 9), protected: P) == NSRange(location: 2, length: 9)
+      && QuickChatInstructions.caret(NSRange(location: P + 3, length: 0), protected: P) == NSRange(location: P + 3, length: 0))
+// the box's jump links: which part is in view, and where a link scrolls to
+check("box: at the top the built-in part is in view; with the hairline in the top half or above, Custom",
+      QuickChatInstructions.part(offset: 0, viewport: 108, divider: 90) == .builtIn
+      && QuickChatInstructions.part(offset: 36, viewport: 108, divider: 90) == .custom
+      && QuickChatInstructions.part(offset: 35, viewport: 108, divider: 90) == .builtIn
+      && QuickChatInstructions.part(offset: 90, viewport: 108, divider: 90) == .custom)
+check("box: Built in scrolls to the top, Custom to the hairline (never past what the text can scroll)",
+      QuickChatInstructions.scrollTarget(.builtIn, divider: 90, most: 300) == 0
+      && QuickChatInstructions.scrollTarget(.custom, divider: 90, most: 300) == 86
+      && QuickChatInstructions.scrollTarget(.custom, divider: 90, most: 40) == 40
+      && QuickChatInstructions.scrollTarget(.custom, divider: 2, most: 40) == 0)
 check("instructions: the counter reads n / 1,000, and says so at the limit",
       QuickChatInstructions.counter(0) == "0 / 1,000" && QuickChatInstructions.counter(962) == "962 / 1,000" && QuickChatInstructions.counter(999) == "999 / 1,000"
       && QuickChatInstructions.counter(1000) == "1,000 / 1,000 · limit")
