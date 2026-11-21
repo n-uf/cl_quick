@@ -68,6 +68,9 @@ final class QCChatScroll: ObservableObject {
     private var flipped = true
     private var lastOffset: CGFloat = 0
     private var lastHeight: CGFloat = 0
+    private var lastClipHeight: CGFloat = 0
+    /// The text's height as the last move of the view saw it (a smaller one now: the text shrank under the view).
+    private var clipSawHeight: CGFloat = 0
     /// Set while this code moves the view (its own moves are not the user's).
     private var moving = false
     private var refreshPending = false
@@ -98,7 +101,7 @@ final class QCChatScroll: ObservableObject {
             nc.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in self?.viewportResized() },
             nc.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in self?.documentResized() },
         ]
-        lastOffset = offset(); lastHeight = doc.bounds.height
+        lastOffset = offset(); lastHeight = doc.bounds.height; lastClipHeight = clip.bounds.height; clipSawHeight = doc.bounds.height
         if following { stick() }
         refresh()
     }
@@ -146,10 +149,21 @@ final class QCChatScroll: ObservableObject {
 
     /// The view's position changed: the wheel, the trackpad, the scroller, a key, a selection's drag, or ours. Whoever it
     /// was, the position says whether to follow; ours leave `following` as they were asked to.
+    ///
+    /// Any move UP stops following, however small (a trackpad's first 1 to 3 points are still a scroll up: the next text must
+    /// not pull the view back); only a move DOWN that ends within the slack of the bottom resumes it. Two things move the
+    /// position that are not the user's, and leave `following` alone: the viewport changing height (a resize: the view's
+    /// top is held, or the bottom pulled up) and the text shrinking under a view at the bottom (AppKit cuts the position).
     private func clipMoved() {
-        guard geometry != nil else { return }
+        guard let g = geometry else { return }
         let o = offset()
-        if !moving, abs(o - lastOffset) > 0.01 { following = isAtBottom }
+        let resized = g.clip.bounds.height != lastClipHeight
+        let shrank = g.doc.bounds.height < clipSawHeight && isAtBottom
+        lastClipHeight = g.clip.bounds.height
+        clipSawHeight = g.doc.bounds.height
+        if !moving, !resized, !shrank, abs(o - lastOffset) > 0.01 {
+            if o < lastOffset { following = false } else if isAtBottom { following = true }
+        }
         lastOffset = o
         scheduleRefresh()
     }

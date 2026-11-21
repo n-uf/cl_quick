@@ -4559,9 +4559,19 @@ func chatScrollChecks() {
     let max2 = sc.maxOffset()
     stream("\n\n" + ChatScrollRig.lines(3, "by-hand"))
     check("scroll: after scrolling down by hand, new text follows", sc.maxOffset() > max2 + 30 && sc.isAtBottom)
-    // within a few points of the bottom counts as the bottom
-    user(scrollTo: sc.maxOffset() - 3); settle()
-    check("scroll: 3 pt above the bottom is still the bottom (following)", sc.following && sc.atBottom)
+    // within a few points of the bottom the button is hidden (the bottom), but ANY move up stops following: a trackpad's first
+    // 1 to 3 points are a scroll up, and the next text must not pull the view back; a move down into the slack resumes it
+    sc.jumpToLatest(); settle()
+    user(scrollTo: sc.maxOffset() - 2); settle()
+    check("scroll: a 2 pt scroll up stops following (the button stays hidden: still within the slack)", !sc.following && sc.atBottom, "following \(sc.following) atBottom \(sc.atBottom)")
+    let held2 = sc.offset()
+    stream("\n\n" + ChatScrollRig.lines(3, "gentle"))
+    check("scroll: after a 2 pt scroll up, streaming text does not pull the view back", abs(sc.offset() - held2) < 1 && !sc.following, "offset \(held2) -> \(sc.offset())")
+    user(scrollTo: sc.maxOffset() - 1); settle()
+    check("scroll: 1 pt above the bottom, reached from below (a move down into the slack), follows again", sc.following && sc.atBottom, "following \(sc.following)")
+    sc.jumpToLatest(); settle()
+    user(scrollTo: sc.maxOffset() - 1); settle()
+    check("scroll: a 1 pt scroll up from the bottom stops following too", !sc.following)
     user(scrollTo: sc.maxOffset() - 40); settle()
     check("scroll: 40 pt above the bottom is not (not following)", !sc.following && !sc.atBottom)
     // sending jumps to the bottom and follows
