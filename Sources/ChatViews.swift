@@ -2442,6 +2442,17 @@ enum QuickChatRender {
             }
             return
         }
+        // the keys list alone, on each of its pages: keys-model (the first page, as it first opens), keys-move, keys-write
+        if state.hasPrefix("keys-") {
+            QCKeys.shared.page = state == "keys-move" ? .move : state == "keys-write" ? .write : .modelWindow
+            let v = QCKeysView(opener: "⌃⇧Space").fixedSize().padding(20).background(Color(white: 0.1)).environment(\.colorScheme, .dark)
+            let r = ImageRenderer(content: v)
+            r.scale = 3
+            if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
+            return
+        }
         // the bar's usage indicator alone on the bar's fill, twice the size of the other pictures: indicator-5h (the
         // 5-hour window higher), indicator-wk (the week higher), indicator-no5h (no 5-hour number yet), indicator-full
         if state.hasPrefix("indicator-") {

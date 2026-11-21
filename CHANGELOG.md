@@ -11,7 +11,7 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
     to latest; its pill is accent coloured while text has arrived below, until you reach the bottom. Left: ⤒ (start of the
     answer, while its first line is above the view) and copy, for the answer at the view's bottom edge while its footer is
     out of sight; both work while it streams. The handles keep clear of the resize band, the drag surfaces and the scroller;
-    the answers' text column is narrower by the gutters (19 pt left, 30 pt right).
+    the answers' text column is narrower by the gutters (19 pt left, about 31 pt right: the scroller's track and the strip).
   - **Each answer's footer** is now ⤒ copy ↻ (⤒ only while the answer's first line is above the view).
   - **Keys:** ⌘J jump to latest; ⇧⌘J start of the answer in view; ⌘[ ⌘] previous and next message of yours; ⇧⌘C copies the
     answer in view once you have scrolled up (else the last answer); Page Up and Page Down scroll the answers (and stop

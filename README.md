@@ -168,7 +168,7 @@ minutes for a profile.
     and stop following) and End (the bottom, following) work even while the field has the keyboard; arrows keep their text
     meaning there.
   - The handles keep clear of the window's resize band (under 4 pt deep), the drag surfaces and the answers' scroller: the left
-    one stands 5 pt in, the right one inward of the scroller's 16 pt track, and the text column starts after them.
+    one stands 5 pt in, the right one inward of the scroller's track (17 pt), and the text column starts after them.
 - Answers stream in as Markdown; tables (header, alignment row, rows) are drawn as a grid whose cells wrap to the
   panel's width and scroll sideways when there are too many columns; code blocks have Copy, and an `html` block also has Preview (the page in its own window: no scripts, nothing fetched from the network, links and downloads do nothing); under each answer Copy and a line like "answered by Haiku 5.5 ·
   2.4 s"; under the last one also Ask again.
