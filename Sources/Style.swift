@@ -3,6 +3,7 @@
 // primary action (Apply) is the aluminium key with the lit orange slot. A picker is a recessed track with the
 // chosen item a raised key.
 
+import AppKit
 import SwiftUI
 
 struct PillButtonStyle: ButtonStyle {
@@ -127,8 +128,20 @@ struct PillPicker<Value: Hashable>: View {
     @Binding var selection: Value
     var compact = false
     var fill = false            // stretch the choices across the width
+    /// The legends' size when it isn't the compact or the full one's (9 and 9.5 pt).
+    var size: CGFloat? = nil
+    /// Every segment this wide (`equalWidth`) instead of its own title's width.
+    var segmentWidth: CGFloat? = nil
     let title: (Value) -> String
     @Environment(\.face) private var face
+
+    /// The width that suits segments that are all the same: the widest title (in capitals, tracked as they are drawn)
+    /// and `padding` at each side.
+    static func equalWidth(_ titles: [String], size: CGFloat, padding: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: size, weight: .semibold)
+        let widest = titles.map { ($0.uppercased() as NSString).size(withAttributes: [.font: font, .kern: 1]).width }.max() ?? 0
+        return ceil(widest) + 2 * padding
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -136,12 +149,13 @@ struct PillPicker<Value: Hashable>: View {
                 let on = o == selection
                 Button { selection = o } label: {
                     Text(title(o))
-                        .font(.system(size: compact ? 9 : 9.5, weight: .semibold)).tracking(1).textCase(.uppercase)
+                        .font(.system(size: size ?? (compact ? 9 : 9.5), weight: .semibold)).tracking(1).textCase(.uppercase)
                         .lineLimit(1).fixedSize()
                         .foregroundStyle(on ? face.legend : face.trackLegend)
                         .shadow(color: on ? face.legendShadow : .clear, radius: 0, y: face.legendShadowY)
                         .padding(.horizontal, fill ? 6 : compact ? 8 : 10)      // stretched choices share any extra width
                         .frame(maxWidth: fill ? .infinity : nil)
+                        .frame(width: segmentWidth)
                         .frame(height: compact ? 20 : 22)
                         .background { if on { RaisedShape(finish: face.key, radius: 3) } }
                         .contentShape(Rectangle())
