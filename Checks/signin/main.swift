@@ -1099,7 +1099,7 @@ do {
     check("switch: its words say so, the addresses apart from them (blurred)", {
         guard let e = sw.ended[wrong2.name] else { return false }
         let w = SwitchWords.ended(e)
-        return w.rest.spoken.hasSuffix(" \(maskEmail("bob@example.com")) is also in use on sw-elsewhere.") && w.rest.addresses == ["bob@example.com", "bob@example.com"]
+        return w.rest.spoken.hasSuffix(" \(AddressText.mask("bob@example.com")) is also in use on sw-elsewhere.") && w.rest.addresses == ["bob@example.com", "bob@example.com"]
     }(), "\(String(describing: sw.ended[wrong2.name]))")
     ProfileStore.shared.save([profile(ok)])
 
@@ -1299,7 +1299,7 @@ do {
     }
     func ended(_ r: SwitchEndReason, again: Bool = false) -> SwitchEnded { SwitchEnded(goal: goal(again: again), reason: r) }
     func line(_ e: SwitchEnded) -> String { let w = SwitchWords.ended(e); return w.lead.spoken + w.rest.spoken }
-    let b = maskEmail("bob@example.com"), k = maskEmail("kim@example.com")
+    let b = AddressText.mask("bob@example.com"), k = AddressText.mask("kim@example.com")
     check("words: a wrong account says the browser was signed in as B, not A, and Main is on B now",
           line(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil))) == "The browser was signed in as \(b), not \(k). Main is on \(b) now.")
     check("words: …and that B is also in use on the other profile, when it is",

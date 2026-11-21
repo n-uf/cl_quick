@@ -212,16 +212,18 @@ final class QCMenuUsageBlock: NSView {
         toolTip = "Open the quick chat on \(model.title.replacingOccurrences(of: "Claude ", with: ""))"
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
-        setAccessibilityLabel(model.spoken)
     }
     required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    /// What VoiceOver reads, worked out on each call (so a change of the Blur addresses setting reaches it).
+    override func accessibilityLabel() -> String? { model.spoken }
 
     override var isFlipped: Bool { true }
 
     // MARK: size
 
     private static func w(_ s: String, _ f: NSFont) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: f]).width) }
-    /// Measures the room an address is given: the wider of it and the stand-in (nothing moves when it is revealed).
+    /// Measures the room an address is given: the stand-in's while the blur is on, whatever the address (nothing moves when it is revealed).
     private static let sizer = AddressInk(font: QCProfileMenuRow.addressFont)
     /// Draws the address (its own text while it is readable, else the stand-in blurred).
     private let ink = AddressInk(font: QCProfileMenuRow.addressFont)
@@ -311,7 +313,6 @@ final class QCMenuUsageBlock: NSView {
     func reload(_ m: QCMenuProfile) {
         guard m != model, m.shape == model.shape, Self.width(m) <= frame.width else { return }
         model = m
-        setAccessibilityLabel(m.spoken)
         needsDisplay = true
     }
 
@@ -467,10 +468,11 @@ enum QCStatusMenu {
         return (item, row)
     }
 
-    /// Whether a click on Add an account… may open it now: no switch is waited for on the profile (the menu was built some
-    /// time ago, and a switch may have begun since).
-    static func mayAddAccount(_ p: Profile, waiting: (Profile) -> Bool = { AccountSwitcher.shared.waiting[$0.id] != nil }) -> Bool {
-        !waiting(p)
+    /// Whether a click on Add an account… may open it now: the profile is still there (it may have been removed since the
+    /// menu was built) and no switch is waited for on it (one may have begun since).
+    static func mayAddAccount(_ p: Profile, exists: (Profile) -> Bool = { ProfileStore.shared.profile($0.id) != nil },
+                              waiting: (Profile) -> Bool = { AccountSwitcher.shared.waiting[$0.id] != nil }) -> Bool {
+        exists(p) && !waiting(p)
     }
     /// The rule a click on Add an account… is held to (a seam: the checks replace it).
     static var allowAddAccount: (Profile) -> Bool = { mayAddAccount($0) }

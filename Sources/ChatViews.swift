@@ -1544,7 +1544,12 @@ struct QCChip: View {
             .qcControl()     // its gaps and padding too, never a move
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
+        // the pulsing lamp is no words to VoiceOver: it says what it means
+        .accessibilityValue(waiting ? QCChip.waitingValue : "")
     }
+
+    /// What VoiceOver reads while the lamp pulses.
+    static let waitingValue = "waiting for the sign-in"
 }
 
 /// The profile menu: macOS's own, at the pointer. A heading, the profiles (a dot in the level's colour, the week and its
@@ -1687,11 +1692,13 @@ struct QCButton: View {
     @State private var gate = AddressHoverGate()
     @ObservedObject private var privacy = AddressPrivacy.shared
     var body: some View {
+        // (worked out from the counter now, so a hover that just ended is never drawn one update late)
+        let reveal = gate.isOn(at: privacy.hoverEnded)
         Button(action: action) {
             HStack(spacing: 0) {
                 Text(title)
                 if let address {
-                    BlurredAddress(address: address, revealed: gate.on)
+                    BlurredAddress(address: address, revealed: reveal)
                     Text(after)
                 }
             }

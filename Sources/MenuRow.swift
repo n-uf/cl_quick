@@ -68,7 +68,7 @@ final class QCProfileMenuRow: NSView {
     /// Draws the address (its own text while readable, else the stand-in blurred) and keeps the blurred pictures.
     private let ink = AddressInk(font: QCProfileMenuRow.addressFont)
 
-    /// The room of the address: the wider of it and the stand-in (nothing moves when it is revealed).
+    /// The room of the address: the stand-in's while the blur is on, whatever the address (nothing moves when it is revealed).
     private var addressWidth: CGFloat { address.map { Self.sizer.room(for: $0, blur: AddressPrivacy.shared.blur) } ?? 0 }
     /// The text drawn for the address now: its own while it is readable, the stand-in at rest (never any part of it).
     var drawnAddress: String? { address.map { AddressText.drawn(address: $0, revealed: sharp, blur: true) } }
@@ -260,10 +260,12 @@ final class QCStandbyMenuRow: NSView {
         autoresizingMask = [.width]
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
-        setAccessibilityLabel(Self.spoken(address))
         setAccessibilityEnabled(enabled)
     }
     required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    /// What VoiceOver reads, worked out on each call (so a change of the Blur addresses setting reaches it).
+    override func accessibilityLabel() -> String? { Self.spoken(address) }
 
     override var isFlipped: Bool { true }
 
@@ -271,7 +273,7 @@ final class QCStandbyMenuRow: NSView {
     /// Measures the room an address is given, and draws it (AddressInk).
     private static let sizer = AddressInk(font: addressFont)
     private let ink = AddressInk(font: QCStandbyMenuRow.addressFont)
-    /// The room of the address: the wider of it and the stand-in, so the tag after it doesn't move on a reveal.
+    /// The room of the address: the stand-in's while the blur is on, whatever the address, so the tag after it never moves.
     static func room(_ address: String) -> CGFloat { sizer.room(for: address, blur: AddressPrivacy.shared.blur) }
     /// The least width that shows it all (nothing is cut): the address's room, its tag and "Switch…".
     static func width(_ address: String, columns: Columns = .bar) -> CGFloat {
@@ -282,16 +284,19 @@ final class QCStandbyMenuRow: NSView {
 
     /// Whether the row is lit by the menu (the address is sharp then); a dimmed row never is.
     var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
-    /// The address is drawn readable: the row is lit, or addresses are not blurred (AddressPrivacy).
-    var sharp: Bool { lit || !AddressPrivacy.shared.blur }
+    /// The pointer is on the row (a keyboard highlight or type-ahead lights the row too, but never reveals the address).
+    private(set) var pointerOn = false
+    /// The address is drawn readable: the row is lit with the pointer on it (or lit for a picture), or addresses are not
+    /// blurred (AddressPrivacy).
+    var sharp: Bool { (lit && (pointerOn || highlighted)) || !AddressPrivacy.shared.blur }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
     }
-    override func mouseEntered(with e: NSEvent) { needsDisplay = true }
-    override func mouseExited(with e: NSEvent) { needsDisplay = true }
+    override func mouseEntered(with e: NSEvent) { pointerOn = true; needsDisplay = true }
+    override func mouseExited(with e: NSEvent) { pointerOn = false; needsDisplay = true }
     override func mouseUp(with e: NSEvent) { if releasedOn(e) { press() } }
 
     /// A click anywhere on the row: closes the menu, then runs the switch question. Nothing while dimmed.

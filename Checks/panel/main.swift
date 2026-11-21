@@ -799,7 +799,7 @@ do {
     var wk = QuickChatLevel(); wk.week = 40
     let words = QCHeaderLine.spoken(level: wk)
     check("header: its words are the meters' alone, no profile name or address",
-          !words.isEmpty && !words.contains("@") && !words.contains(maskEmail("ultra-1@example.com")) && !words.contains(t.name), words)
+          !words.isEmpty && !words.contains("@") && !words.contains(AddressText.mask("ultra-1@example.com")) && !words.contains(t.name), words)
 
     // the profile menu: each profile a row of its own with its account in use's address (none when none is known), then
     // Settings for the chat's profile and Add a profile…
@@ -909,7 +909,7 @@ do {
               && QCStandbyMenuRow.Columns.chat.addressX == QCProfileMenuRow.textX, "\(srows.map(\.address))")
         check("accounts: at rest an address is blurred and the row is not lit; the title and label hold it masked, never in full",
               srows.allSatisfy { !$0.sharp && !$0.lit } && acc.items.filter { $0.view is QCStandbyMenuRow }.allSatisfy { !$0.title.contains("alex.") && $0.title.hasSuffix(" · standby") }
-              && srows[0].accessibilityLabel() == maskEmail("alex.studio@example.com") + ", standby, switch")
+              && srows[0].accessibilityLabel() == AddressText.mask("alex.studio@example.com") + ", standby, switch")
         srows[0].highlighted = true
         check("accounts: lit by the menu (the pointer on it) the address is clear, and the other is not", srows[0].sharp && srows[0].lit && !srows[1].sharp)
         srows[0].highlighted = false
@@ -934,6 +934,59 @@ do {
         AccountSwitcher.runAlert = keepAlert
         check("accounts: the chat's switch asks 'Switch Main to this account?' and, on Cancel, begins nothing",
               questions == ["Switch Main to this account?"] && AccountSwitcher.shared.waiting["main"] == nil, "\(questions)")
+        // answered Switch (no `claude` is found, nothing opens): the goal the menu's switch makes is the menu bar's (origin
+        // .settings), so when it lands the chat only refreshes: a new chat, the draft kept, nothing sent. Only the limit-full
+        // "Switch to X…" offer (origin .chat) continues the chat's own question.
+        do {
+            let keepFind = AccountSwitcher.shared.findClaude, keepTell = AccountSwitcher.tell
+            AccountSwitcher.shared.findClaude = { nil }
+            AccountSwitcher.tell = { _ in }
+            AccountSwitcher.runAlert = { _ in .alertFirstButtonReturn }
+            chat.model.switchProfile(mainP, KnownAccount(uuid: "u2", email: "alex.studio@example.com"))
+            check("accounts: a switch chosen in the chat's profile menu is a Settings-origin switch (it never continues or sends the chat's draft)",
+                  AccountSwitcher.shared.waiting["main"]?.origin == .settings, "\(String(describing: AccountSwitcher.shared.waiting["main"]?.origin))")
+            spinUntil(5) { AccountSwitcher.shared.waiting["main"] == nil }          // nothing to run: it drops itself
+            AccountSwitcher.shared.drop("main")
+            chat.model.switchTo(QuickChatSwitchOffer(uuid: "u2", email: "alex.studio@example.com"))
+            check("accounts: …and the limit-full 'Switch to X…' offer stays a chat-origin switch",
+                  AccountSwitcher.shared.waiting["main"]?.origin == .chat, "\(String(describing: AccountSwitcher.shared.waiting["main"]?.origin))")
+            spinUntil(5) { AccountSwitcher.shared.waiting["main"] == nil }
+            AccountSwitcher.shared.drop("main")
+            AccountSwitcher.runAlert = keepAlert
+            AccountSwitcher.shared.findClaude = keepFind; AccountSwitcher.tell = keepTell
+        }
+        // the question was modal: a switch begun meanwhile on the same profile is not replaced by a second one
+        do {
+            let keepFind = AccountSwitcher.shared.findClaude, keepTell = AccountSwitcher.tell
+            AccountSwitcher.shared.findClaude = { nil }; AccountSwitcher.tell = { _ in }
+            var began = false
+            AccountSwitcher.runAlert = { _ in
+                if !began { began = true; AccountSwitcher.shared.begin(mainP, uuid: "u3", email: "alex.old@example.org", origin: .settings) }
+                return .alertFirstButtonReturn
+            }
+            AccountSwitcher.shared.confirmAndSwitch(mainP, uuid: "u2", email: "alex.studio@example.com", origin: .chat)
+            check("accounts: a switch begun while the question was open is kept (the answer doesn't start a second one over it)",
+                  AccountSwitcher.shared.waiting["main"]?.wantedUUID == "u3" && AccountSwitcher.shared.waiting["main"]?.origin == .settings)
+            spinUntil(5) { AccountSwitcher.shared.waiting["main"] == nil }
+            AccountSwitcher.shared.drop("main")
+            AccountSwitcher.runAlert = keepAlert
+            AccountSwitcher.shared.findClaude = keepFind; AccountSwitcher.tell = keepTell
+        }
+        // Settings: a profile whose sign-in becomes waited for (begun in the chat or the menu bar) has its form closed
+        do {
+            let st2 = SettingsState()
+            st2.open(profile: "main", addAccount: true)
+            st2.switchMoved(waiting: { _ in false })
+            let keptOpen = st2.addingFor == "main"
+            st2.switchMoved(waiting: { $0 == "main" })
+            check("accounts: a switch starting elsewhere for the profile closes its open Add an account… form (and not another's)",
+                  keptOpen && st2.addingFor == nil)
+            st2.open(profile: "main", addAccount: true)
+            st2.switchMoved(waiting: { $0 == "work" })
+            check("accounts: …another profile's waiting switch leaves it open", st2.addingFor == "main")
+        }
+        // the picker's lamp says what it means to VoiceOver while it pulses
+        check("accounts: the pulsing picker lamp has words for VoiceOver", QCChip.waitingValue == "waiting for the sign-in")
         // Add an account…
         let adds = acc.items.filter { $0.view is QCAddAccountMenuRow }
         addedFor = []; (adds[0].view as? QCAddAccountMenuRow)?.press(); spin(0.1)
@@ -1057,7 +1110,7 @@ do {
     check("address words: the note holds the whole address apart from its words, and nothing else of it",
           note.addresses == [a] && note.pieces.map(\.text) == ["Main is on ", a, " now."] && note.pieces.map(\.isAddress) == [false, true, false])
     check("address words: as words (VoiceOver, checks) the address is masked, never in full",
-          note.spoken == "Main is on \(maskEmail(a)) now." && !note.spoken.contains("ultra-2"))
+          note.spoken == "Main is on \(AddressText.mask(a)) now." && !note.spoken.contains("ultra-2"))
     check("address words: no address known, no address piece", QCWords.isOn("Main", address: nil).addresses.isEmpty && QCWords.isOn("Main", address: nil).spoken == "Main is on another account now.")
     // the account notes the model makes carry the address apart
     let m = QuickChatModel()
@@ -1065,7 +1118,7 @@ do {
     t.email = a
     m.accountChanged(to: t)
     check("address words: the note after an account change carries the address apart, masked as words",
-          m.accountNote?.addresses == [a] && m.accountNote?.spoken == "Main is on \(maskEmail(a)) now.", "\(String(describing: m.accountNote))")
+          m.accountNote?.addresses == [a] && m.accountNote?.spoken == "Main is on \(AddressText.mask(a)) now.", "\(String(describing: m.accountNote))")
     // the sign-in texts: both addresses apart, the punctuation stays glued to each so a line never starts with a comma
     let wrong = QCWords.text("Signed in as ") + .address(a) + .text(", not ") + .address(b) + .text(".")
     let tokens = QCSentence.tokens(wrong).map { $0.map(\.text).joined() }
@@ -1173,7 +1226,7 @@ do {
     check("alert: its buttons are Switch and Cancel", alert.buttons.map(\.title) == ["Switch", "Cancel"])
     if let label = alert.accessoryView as? AddressLabel {
         check("alert: the accessory holds the whole address for drawing, blurred at rest", label.address == "kim@example.org" && !label.revealed)
-        check("alert: its accessibility label is the masked address", label.accessibilityLabel() == maskEmail("kim@example.org") && label.isAccessibilityElement())
+        check("alert: its accessibility label is the masked address", label.accessibilityLabel() == AddressText.mask("kim@example.org") && label.isAccessibilityElement())
         func look() -> Data? {
             guard let rep = label.bitmapImageRepForCachingDisplay(in: label.bounds) else { return nil }
             label.cacheDisplay(in: label.bounds, to: rep)
@@ -1245,7 +1298,7 @@ do {
           && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"blurAddresses":"no"}"#.utf8)))?.blurAddresses == true)
     let offRow = QCProfileMenuRow(title: "Main", detail: "week 40%", dot: nil, on: true, address: a, pick: {})
     check("blur setting: on, the picker row's address is blurred at rest and the words are masked",
-          !offRow.sharp && BlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) > 2 && note.spoken.contains(maskEmail(a)))
+          !offRow.sharp && BlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) > 2 && note.spoken.contains(AddressText.mask(a)))
     var offSettings = QuickChatSettings(); offSettings.blurAddresses = false
     AddressPrivacy.shared.apply(offSettings)
     check("blur setting: off, the picker row draws the full address sharp at rest", offRow.sharp && !offRow.revealed)
@@ -1264,7 +1317,7 @@ do {
     check("blur setting: off, the button's address is not blurred", BlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0 && button.address == a)
     AddressPrivacy.shared.apply(QuickChatSettings())
     check("blur setting: on again, blurred at rest and masked as words",
-          !offRow.sharp && note.spoken == "Main is on \(maskEmail(a)) now." && drawn(note).edges < sharpDraw.edges * 0.8)
+          !offRow.sharp && note.spoken == "Main is on \(AddressText.mask(a)) now." && drawn(note).edges < sharpDraw.edges * 0.8)
 }
 
 // ── the mic button: macOS Dictation into OUR field, cl_quick never activated (stand-ins for Dictation: no real one

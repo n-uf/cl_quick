@@ -38,7 +38,7 @@ func make(_ l: QuickChatLevel?, address: String? = mainAddress, problem: SignInP
 // ── the words of a block ───────────────────────────────────────────────────────────────────────────
 let rich = make(level(five: 13, week: 88))
 check("lines: header, account in use (masked), the two bars' words, how old", rich.lines == [
-    "Claude Main", maskEmail(mainAddress) + " · in use", "5-hour 13% in 1h 5m", "Week 88% in 1d 5h", "Updated just now"], "\(rich.lines)")
+    "Claude Main", AddressText.mask(mainAddress) + " · in use", "5-hour 13% in 1h 5m", "Week 88% in 1d 5h", "Updated just now"], "\(rich.lines)")
 check("rows: 13% and 88% with the time to each reset", rich.rows.map(\.share) == ["13%", "88%"] && rich.rows.map(\.resets) == ["in 1h 5m", "in 1d 5h"])
 check("colours: 13% green, 88% red (cl_audit's scale)", rich.rows[0].colour == Painter.green && rich.rows[1].colour == Painter.red)
 check("colours: amber from 50%, red from 80%, crimson from 95%",
@@ -46,7 +46,7 @@ check("colours: amber from 50%, red from 80%, crimson from 95%",
       && Painter.color(80, stale: false) == Painter.red && Painter.color(95, stale: false) == Painter.crimson)
 check("colours: the profile's dot takes the fuller window's colour", rich.dotP == 88)
 check("a name that starts with Claude is not given a second one", QCMenuProfile.title("Claude Work") == "Claude Work" && QCMenuProfile.title("Work") == "Claude Work")
-check("the words never hold the full address", !rich.lines.joined().contains(mainAddress) && !rich.spoken.contains(mainAddress) && rich.spoken.contains(maskEmail(mainAddress)))
+check("the words never hold the full address", !rich.lines.joined().contains(mainAddress) && !rich.spoken.contains(mainAddress) && rich.spoken.contains(AddressText.mask(mainAddress)))
 check("countdown: minutes, hours, days", [TimeWords.countdown(now.addingTimeInterval(19 * 60), now: now), TimeWords.countdown(now.addingTimeInterval(102 * 60), now: now),
       TimeWords.countdown(now.addingTimeInterval(67 * 3600), now: now), TimeWords.countdown(now.addingTimeInterval(16 * 86400), now: now)]
       == ["19m", "1h 42m", "2d 19h", "16 days"])
@@ -112,14 +112,14 @@ check("saved full: nor does it hide a refusal that is still ahead", make(dateles
       "\(make(datelessRefused).lines)")
 let afterReset = make(level(five: nil, week: 100, weekIn: -60, ago: 2 * 3600))
 check("saved full: once its reset is past, normal rules: 'No recent numbers', no note",
-      afterReset.lines == ["Claude Main", maskEmail(mainAddress) + " · in use", "No recent numbers"] && afterReset.fullNote == nil && !afterReset.fullNoteStale
+      afterReset.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No recent numbers"] && afterReset.fullNote == nil && !afterReset.fullNoteStale
       && afterReset.rows.isEmpty && afterReset.dotP == nil, "\(afterReset.lines)")
 let afterResetFive = make(level(five: 100, fiveIn: -60, week: 30, weekIn: -60, ago: 90 * 60))
 check("saved full: both windows reset since, over an hour old: 'No recent numbers'", afterResetFive.noUsage && afterResetFive.noUsageText == "No recent numbers" && afterResetFive.fullNote == nil)
 check("saved full: a not-full old number is still hidden: 'No recent numbers'", make(level(five: 40, week: 88, ago: 2 * 3600)).noUsageText == "No recent numbers")
 let dayOld = make(level(five: nil, week: 100, weekIn: -3600, ago: 28 * 3600))
 check("stale: a day-old week whose reset is past isn't shown at all: 'No recent numbers', no bars, no note, no age",
-      dayOld.lines == ["Claude Main", maskEmail(mainAddress) + " · in use", "No recent numbers"] && dayOld.rows.isEmpty && dayOld.fullNote == nil
+      dayOld.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No recent numbers"] && dayOld.rows.isEmpty && dayOld.fullNote == nil
       && dayOld.dotP == nil && dayOld.updated == nil, "\(dayOld.lines)")
 check("stale: 'No recent numbers' sizes the block like 'No usage yet'", QCMenuUsageBlock.height(dayOld) == QCMenuUsageBlock.height(make(nil)))
 check("fresh full: a full week 2 min old is still the crimson note ('Week full · in 1d 5h'), the 5-hour row as it is, the dot crimson",
@@ -130,7 +130,7 @@ check("fresh full: a fresh answer replaces the saved one at once (12%, no note)"
 
 // ── no numbers, a window not known, a full limit, signed out ───────────────────────────────────────
 let none = make(nil)
-check("no numbers: the account line and one muted line, no bars, no age", none.lines == ["Claude Main", maskEmail(mainAddress) + " · in use", "No usage yet"] && none.rows.isEmpty && none.noUsage,
+check("no numbers: the account line and one muted line, no bars, no age", none.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No usage yet"] && none.rows.isEmpty && none.noUsage,
       "\(none.lines)")
 check("only an old week (reset since): no numbers either", make(level(five: nil, week: 70, weekIn: -60)).noUsage)
 let weekOnly = make(level(five: nil, week: 21))
@@ -154,7 +154,7 @@ block.hover(at: NSPoint(x: block.addressRect.midX, y: 4))
 check("the pointer leaving the address blurs it again", !block.revealed)
 block.hover(at: NSPoint(x: block.addressRect.midX, y: block.addressRect.midY)); block.hover(at: nil)
 check("the pointer leaving the block blurs it", !block.revealed)
-check("the VoiceOver label has the masked address only", (block.accessibilityLabel() ?? "").contains(maskEmail(mainAddress)) && !(block.accessibilityLabel() ?? "").contains(mainAddress))
+check("the VoiceOver label has the masked address only", (block.accessibilityLabel() ?? "").contains(AddressText.mask(mainAddress)) && !(block.accessibilityLabel() ?? "").contains(mainAddress))
 block.press(); spin(0.1)
 check("a click opens the chat on the profile", picked == ["main"])
 let longName = make(level(five: 13, week: 88), profile: Profile(id: "x", name: String(repeating: "Wide name ", count: 5), folder: "~/.claude-x"))
@@ -206,7 +206,7 @@ var switched: [String] = []
 let realAllow = QCStatusMenu.allowSwitch
 QCStatusMenu.allowSwitch = { _, _ in true }
 let yan = KnownAccount(uuid: "u8", email: "yan.old@example.org")
-let zedAddress = "zed@example.com", zedMasked = maskEmail(zedAddress)
+let zedAddress = "zed@example.com", zedMasked = AddressText.mask(zedAddress)
 func standbyMenu(_ infos: [QCStatusMenu.Info], switching: @escaping (Profile) -> Bool = { _ in false }, live: ((Profile) -> QCStatusMenu.Info)? = nil) -> [NSMenuItem] {
     QCStatusMenu.items(infos, now: now, live: live, switching: switching, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") }) { _ in }
 }
@@ -444,12 +444,15 @@ do {
     check("add: the second profile's own row opens it for that profile", added == ["work"], "\(added)")
     // the click's own rule: nothing while a switch is waited for on the profile (a menu built a while ago)
     check("add: the rule is no switch waited for on the profile",
-          QCStatusMenu.mayAddAccount(main, waiting: { _ in false }) && !QCStatusMenu.mayAddAccount(main, waiting: { $0.id == "main" }) && QCStatusMenu.mayAddAccount(main, waiting: { $0.id == "work" }))
+          QCStatusMenu.mayAddAccount(main, exists: { _ in true }, waiting: { _ in false }) && !QCStatusMenu.mayAddAccount(main, exists: { _ in true }, waiting: { $0.id == "main" })
+          && QCStatusMenu.mayAddAccount(main, exists: { _ in true }, waiting: { $0.id == "work" }))
+    check("add: …and the profile is still there (one removed since the menu was built opens nothing)",
+          !QCStatusMenu.mayAddAccount(main, exists: { _ in false }, waiting: { _ in false }) && !QCStatusMenu.mayAddAccount(main, waiting: { _ in false }))
     QCStatusMenu.allowAddAccount = { _ in false }
     added = []; addRow.press(); spin(0.1)
     check("add: a click the rule refuses opens nothing", added.isEmpty, "\(added)")
     QCStatusMenu.allowAddAccount = realAdd
-    check("add: the real rule is the one rows are built with (no switch is waited for here)", QCStatusMenu.mayAddAccount(main))
+    check("add: the real rule is the one rows are built with (a profile that isn't in the store has no form to open)", !QCStatusMenu.mayAddAccount(main) && !realAdd(main))
     QCStatusMenu.allowAddAccount = { _ in true }
     // waiting for a sign-in on the profile: its row is off (the item too), the other profile's is on
     let waitingAdd = addMenu([mainOne, workOne], switching: { $0.id == "main" })
@@ -596,7 +599,7 @@ do {
     let on = build()
     let onBlock = picture(on.block), onRow = on.row.flatMap(picture)
     check("blur setting: on, the usage block's address is blurred at rest and masked as words, the standby row too",
-          !on.block.sharp && on.block.model.lines[1] == maskEmail(mainAddress) + " · in use" && on.row?.sharp == false
+          !on.block.sharp && on.block.model.lines[1] == AddressText.mask(mainAddress) + " · in use" && on.row?.sharp == false
           && on.item?.title == zedMasked + " · standby" && on.row?.accessibilityLabel() == zedMasked + ", standby, switch")
 
     var offSettings = QuickChatSettings(); offSettings.blurAddresses = false
@@ -618,7 +621,7 @@ do {
 
     AddressPrivacy.shared.apply(QuickChatSettings())
     let back = build()
-    check("blur setting: on again, the next menu blurs and masks as before", !back.block.sharp && back.block.model.lines[1] == maskEmail(mainAddress) + " · in use"
+    check("blur setting: on again, the next menu blurs and masks as before", !back.block.sharp && back.block.model.lines[1] == AddressText.mask(mainAddress) + " · in use"
           && back.row?.sharp == false && back.item?.title == zedMasked + " · standby" && picture(back.block) == onBlock)
 }
 
