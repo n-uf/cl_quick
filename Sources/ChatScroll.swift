@@ -79,6 +79,8 @@ final class QCChatScroll: ObservableObject {
     private struct Weak { weak var view: NSView? }
     private var questions: [UUID: Weak] = [:]
     private var answers: [UUID: Weak] = [:]
+    /// Behind each finished answer's footer row (the answer's id): where the footer ends.
+    private var footers: [UUID: Weak] = [:]
 
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
@@ -222,27 +224,31 @@ final class QCChatScroll: ObservableObject {
         if pair != belongs { pair = belongs }
     }
 
-    /// The answer the left handle belongs to: the one at the view's bottom edge, when it is taller than the view and its end
-    /// (so its footer) is below the view's bottom edge. While streaming at the bottom its end is in view: none.
+    /// The answer the left handle belongs to: the one that has begun above the view's bottom edge while its footer is out of
+    /// view, whatever its height (the handle is there to reach ⤒ and copy when the footer is not). The footer counts: an
+    /// answer that is itself in view but whose footer is below the edge has the handle too. A streaming answer has no footer,
+    /// so its end counts: while following at the bottom its end is in view, and there is none.
     func pairedAnswer() -> UUID? {
         guard let g = geometry else { return nil }
         let bottom = offset() + g.clip.bounds.height
         for (id, w) in answers {
             guard let v = attached(w.view) else { continue }
-            let t = top(of: v), h = v.frame.height
-            if h > g.clip.bounds.height, t < bottom, t + h > bottom + 0.5 { return id }
+            let t = top(of: v)
+            let end = attached(footers[id]?.view).map { top(of: $0) + $0.frame.height } ?? t + v.frame.height
+            if t < bottom, end > bottom + 0.5 { return id }
         }
         return nil
     }
 
     // MARK: Anchors
 
-    enum AnchorKind { case question, answer }
+    enum AnchorKind { case question, answer, footer }
 
     func register(_ kind: AnchorKind, _ id: UUID, _ view: NSView) {
         switch kind {
         case .question: questions[id] = Weak(view: view)
         case .answer: answers[id] = Weak(view: view)
+        case .footer: footers[id] = Weak(view: view)
         }
         scheduleRefresh()
     }
@@ -251,9 +257,13 @@ final class QCChatScroll: ObservableObject {
         switch kind {
         case .question: if questions[id]?.view === view { questions[id] = nil }
         case .answer: if answers[id]?.view === view { answers[id] = nil }
+        case .footer: if footers[id]?.view === view { footers[id] = nil }
         }
         scheduleRefresh()
     }
+
+    /// Where an answer's footer row ends, as an offset from the document's top (a check reads it); nil while it has none.
+    func bottom(ofFooter id: UUID) -> CGFloat? { attached(footers[id]?.view).map { top(of: $0) + $0.frame.height } }
 
     private func attached(_ v: NSView?) -> NSView? {
         guard let v, let doc, v.window != nil, v.isDescendant(of: doc) else { return nil }

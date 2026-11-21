@@ -4806,6 +4806,34 @@ func chatHandleChecks() {
 }
 chatHandleChecks()
 
+// ── the left handle for a SHORT answer whose footer is below the view's bottom edge (the footer counts, not the answer's height) ──
+func chatShortAnswerChecks() {
+    let m = chat.model
+    let sc = m.scroll
+    m.newChat(); m.field = ""
+    m.turns = (1...4).map { ChatScrollRig.turn($0, lines: 4) }
+    chat.open(); spin(0.3)
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    guard let sv = sc.scrollView else { check("short: the chat's scroll view is found", false); return }
+    let clip = sv.contentView
+    let ids = m.turns.map(\.id)
+    func user(scrollTo o: CGFloat) { clip.scroll(to: NSPoint(x: 0, y: o)); sv.reflectScrolledClipView(clip) }
+    func settle() { spin(0.2) }
+    guard let end2 = sc.bottom(ofFooter: ids[1]), let top2 = sc.top(ofAnswer: ids[1]) else { check("short: the footer and answer anchors are found", false); return }
+    check("short: the second answer is shorter than the view", end2 - top2 < clip.bounds.height, "\(end2 - top2) vs \(clip.bounds.height)")
+    user(scrollTo: end2 - 10 - clip.bounds.height); settle()     // the view's bottom edge 10 pt above the footer's end: half the footer in view
+    check("short: the answer is in view but its footer is cut by the bottom edge: it has the left handle", sc.pair == ids[1], "\(String(describing: sc.pair))")
+    user(scrollTo: top2 + 20 - clip.bounds.height + 0); settle()                    // the edge inside the answer's text
+    check("short: the edge inside the short answer: it has the left handle", sc.pair == ids[1], "\(String(describing: sc.pair))")
+    user(scrollTo: end2 + 1 - clip.bounds.height); settle()                         // the whole footer in view
+    check("short: the whole footer in view: no left handle for it", sc.pair != ids[1], "\(String(describing: sc.pair))")
+    user(scrollTo: top2 - 40 - clip.bounds.height); settle()                        // the answer not yet begun at the edge
+    check("short: before the answer has begun at the edge, it has none", sc.pair != ids[1], "\(String(describing: sc.pair))")
+    m.newChat(); chat.hide(); spin(0.2)
+}
+chatShortAnswerChecks()
+
 // ── the navigation keys: ⌘J, ⇧⌘J, ⌘[ ⌘], ⇧⌘C in view, Page Up, Page Down and End with the field focused ──────────────────────────
 func chatKeyChecks() {
     func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1 }

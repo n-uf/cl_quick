@@ -507,7 +507,7 @@ struct QCTurnView: View {
             if turn.phase == .done || turn.phase == .stopped {
                 let shown = last || hover || model.copied == turn.id       // ⌘⇧C on an earlier answer says "Copied" under it
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
-                footer.padding(.top, 4).opacity(shown ? 1 : 0)
+                footer.background(anchor(.footer)).padding(.top, 4).opacity(shown ? 1 : 0)
             }
             if let p = model.shownProblem(turn) {      // a full limit only while it is still full, on the latest turn
                 QCProblemView(problem: p, model: model, answered: !turn.answer.isEmpty, last: last)
