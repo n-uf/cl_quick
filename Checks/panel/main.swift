@@ -13,6 +13,7 @@ import ClaudeAuth
 import Carbon.HIToolbox
 import PDFKit
 import SwiftUI
+import WebKit
 
 Files.readOnly = true
 let app = NSApplication.shared
@@ -4039,6 +4040,131 @@ do {
           && QuickChatSettings().webLinks == true)
     for x in [m, sm, hm, om] { x.shutdown() }
     for d in [c.dir, s.dir, h.dir, o.dir] { try? FileManager.default.removeItem(at: d) }
+}
+
+// ── Preview on an html block, and its window (never ordered in: QCHTMLPreview.reveal is off) ───────────────────────────
+do {
+    let m = chat.model
+    chat.open(); spin(0.3)
+    func previewMark(_ answer: String) -> CGRect? {
+        var t = QuickChatTurn(question: "q"); t.answer = answer; t.phase = .done
+        m.turns = [t]; spin(0.5)
+        return QCStepTargets.shared.marks["preview"]
+    }
+    let sampleHTML = "<h1>Sample</h1>\n<p>Hello <a href=\"https://example.com\">link</a></p>"
+    if let r = previewMark("Here:\n```html\n\(sampleHTML)\n```") {
+        check("preview: an html block has the control, 24 pt tall like Copy", abs(r.height - QCSpace.small) < 0.5, "\(r)")
+    } else { check("preview: an html block has the control", false) }
+    check("preview: an htm block has it too", previewMark("```htm\n<p>x</p>\n```") != nil)
+    check("preview: the language in capitals has it too", previewMark("```HTML\n<p>x</p>\n```") != nil)
+    for lang in ["swift", "", "xml", "htmlx", "js", "css"] {
+        check("preview: a \(lang.isEmpty ? "plain" : lang) block has none", previewMark("```\(lang)\n<p>x</p>\n```") == nil)
+    }
+    check("preview: text with no code block has none", previewMark("a <p>tag</p> in text") == nil)
+    check("preview: the language test is html or htm in any case",
+          ["html", "htm", "HTML", "Htm", " html "].allSatisfy(QCHTMLPreview.isHTML) && !["", "xhtml", "htmlx", "ht"].contains(where: QCHTMLPreview.isHTML))
+    m.turns = []; spin(0.2)
+
+    // the window and its view: made on a press, with the isolation in place before the first load
+    QCHTMLPreview.reveal = false
+    let pv = QCHTMLPreview.shared
+    var steps: [String] = []
+    var atLoad: [String] = []
+    var flagStillUp = false
+    pv.trace = { s in
+        steps.append(s)
+        if s == "load" {          // just before loadHTMLString: the flag is up, and a click, a form or a frame gets nothing
+            atLoad = [pv.decide(isMainFrame: true, type: .linkActivated, download: false),
+                      pv.decide(isMainFrame: true, type: .formSubmitted, download: false),
+                      pv.decide(isMainFrame: false, type: .other, download: false),
+                      pv.decide(isMainFrame: true, type: .other, download: true)].map { "\($0.rawValue)" }
+            flagStillUp = pv.allowInitialLoad
+        }
+    }
+    check("preview: nothing exists before Preview is pressed", pv.window == nil && pv.page == nil)
+    autoreleasepool { pv.show(sampleHTML) }       // this program's outermost pool never drains: the window is made inside one that does
+    spinUntil(15) { pv.page != nil }
+    check("preview: compiled, then the rules added, then loaded, in that order", steps.prefix(3).elementsEqual(["compile", "add rules", "load"]), "\(steps)")
+    check("preview: before the load, a click, a form, a frame and a download are all cancelled, and the initial load is still allowed after them",
+          atLoad == Array(repeating: "\(WKNavigationActionPolicy.cancel.rawValue)", count: 4) && flagStillUp, "\(atLoad) \(flagStillUp)")
+    if let w = pv.window, let v = pv.page {
+        let c = v.configuration
+        check("preview: the data store is non-persistent", c.websiteDataStore.isPersistent == false)
+        check("preview: JavaScript is off", c.defaultWebpagePreferences.allowsContentJavaScript == false)
+        check("preview: the window is titled Preview, titled and resizable, about 720 × 560",
+              w.title == "Preview" && w.styleMask.contains(.titled) && w.styleMask.contains(.resizable) && w.styleMask.contains(.closable)
+              && abs(w.contentLayoutRect.width - 720) < 1 && abs(w.contentLayoutRect.height - 560) < 1, "\(w.contentLayoutRect)")
+        check("preview: the window is kept after closing by us alone", w.isReleasedWhenClosed == false && w.delegate === pv)
+        check("preview: the page is the window's content and the delegates are set", w.contentView === v && v.navigationDelegate === pv && v.uiDelegate === pv)
+        check("preview: it was not ordered in (checks show nothing)", !w.isVisible)
+    } else { check("preview: the window and web view exist after a press", false) }
+    let rules = (try? JSONSerialization.jsonObject(with: Data(QCHTMLPreview.blockAll.utf8))) as? [[String: [String: String]]]
+    check("preview: the rule list blocks every load (url-filter .* and action block)",
+          rules?.count == 1 && rules?[0]["trigger"]?["url-filter"] == ".*" && rules?[0]["action"]?["type"] == "block")
+    check("preview: the initial load was allowed once and then the flag went", spinUntil(15) { !pv.allowInitialLoad } && !steps.contains("failed load"), "\(steps)")
+    check("preview: after it, even a main-frame load is cancelled", pv.decide(isMainFrame: true, type: .other, download: false) == .cancel)
+    check("preview: …and a link click, a reload, a back-forward", [WKNavigationType.linkActivated, .reload, .backForward, .formResubmitted]
+        .allSatisfy { pv.decide(isMainFrame: true, type: $0, download: false) == .cancel })
+    check("preview: a response that is no page is cancelled, a page allowed",
+          QCHTMLPreview.responsePolicy(canShow: false) == .cancel && QCHTMLPreview.responsePolicy(canShow: true) == .allow)
+    check("preview: what is compiled is the block-all list", QCHTMLPreview.encodedRules == QCHTMLPreview.blockAll)
+
+    // another press replaces the content in the same window (a new view each time: the old one is released)
+    weak var firstView = pv.page
+    weak var firstWindow = pv.window          // weak: this check must not keep the window it later sees closed
+    var allowed: WKNavigationActionPolicy?
+    steps = []
+    pv.trace = { s in steps.append(s); if s == "load" { allowed = pv.decide(isMainFrame: true, type: .other, download: false) } }
+    autoreleasepool { pv.show("<p>second</p>") }
+    spinUntil(15) { steps.contains("load") }
+    check("preview: the initial load of a new press is allowed (.other, main frame)", allowed == .allow && !pv.allowInitialLoad, "\(String(describing: allowed))")
+    check("preview: a second press shows in the same window, with a new web view", pv.window === firstWindow && pv.page != nil && pv.page !== firstView)
+    spinUntil(5) { firstView == nil }
+    check("preview: the first web view is released when replaced", firstView == nil)
+
+    // a rule list that can't be compiled: nothing is loaded, a short message stands in
+    let goodRules = QCHTMLPreview.encodedRules
+    QCHTMLPreview.encodedRules = "not rules"
+    steps = []
+    pv.trace = { steps.append($0) }
+    pv.show("<p>third</p>")
+    spinUntil(15) { steps.contains("failed") }
+    check("preview: when the rules don't compile the page is not loaded", steps == ["compile", "failed"] && pv.page == nil && pv.window?.contentView is NSTextField, "\(steps)")
+    QCHTMLPreview.encodedRules = goodRules
+
+    // closing releases the window and the web view; the temporary rule store goes
+    // (This program's outermost autorelease pool never drains, and CheckQuiet.verify's NSApp.windows puts every live window
+    // into it: so the window under test is made and closed inside a pool of its own, and looked at after that pool drained.)
+    pv.close()
+    steps = []
+    pv.trace = { steps.append($0) }
+    func weakPair() -> (() -> Bool, () -> Bool) {
+        weak var w = pv.window
+        weak var v = pv.page
+        return ({ w == nil }, { v == nil })
+    }
+    var windowGone = { false }, viewGone = { false }
+    var folders: [URL] = []
+    autoreleasepool {
+        pv.show("<p>fourth</p>")
+        spinUntil(15) { pv.page != nil }
+        folders = pv.storeFolders
+        (windowGone, viewGone) = weakPair()
+        pv.window?.close()
+        spin(0.2)
+    }
+    check("preview: after the close the shared object holds neither", pv.window == nil && pv.page == nil)
+    check("preview: the window is released", spinUntil(10) { windowGone() })
+    check("preview: the web view is released", spinUntil(10) { viewGone() })
+    check("preview: the rule store's folders are gone", !folders.isEmpty && spinUntil(10) { folders.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) } }, "\(folders)")
+    steps = []
+    pv.trace = { steps.append($0) }
+    pv.show("<p>fifth</p>")                       // a press after a close makes a new window
+    spinUntil(15) { pv.page != nil }
+    check("preview: a press after a close opens a new window and view", pv.window != nil && pv.page != nil)
+    pv.close()
+    check("preview: close() too leaves nothing", pv.window == nil && pv.page == nil)
+    QCHTMLPreview.reveal = true
 }
 
 CheckQuiet.verify("at the end")
