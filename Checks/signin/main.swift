@@ -201,6 +201,15 @@ final class Case {
         return s.isRunning ? nil : s.terminationStatus
     }
     var shellRunning: Bool { terminal.last?.isRunning == true }
+    /// Stops it, and waits for its window's shell to be gone before the next case starts: a stop that comes right after the
+    /// window was asked for may come before the script wrote its pid (a slow Terminal, or a slow runner), and the sign-in
+    /// ends that script once it shows only while it is still the app's last one. Left running, its login would be another
+    /// case's leftover (one whose parent is gone, whose folder the process guard can't tell where the kernel gives no
+    /// environment).
+    func stopAndSettle() {
+        signIn.stop(); waitEnd()
+        _ = shellEnded(15)
+    }
     func record(_ email: String, _ id: String, org: String = uuid(51), orgName: String = "Sample Org") {
         let j = #"{"oauthAccount":{"accountUuid":"\#(id)","emailAddress":"\#(email)","organizationUuid":"\#(org)","organizationName":"\#(orgName)"}}"#
         try? j.write(to: folder.appendingPathComponent(".claude.json"), atomically: true, encoding: .utf8)
@@ -513,7 +522,7 @@ do {
     check("failed: the next sign-in's start closes it (a clean end)", !held.isRunning && held.terminationStatus == 0)
     check("failed: …and its profile goes at that start (the next one's own is the only one left)",
           spin(until: { prefs.left(in: n.work).count == 1 }, max: 8) && prefs.names.contains("Sample app sign-in") && !prefs.names.contains("Sample app sign-in 1"), "\(prefs.names)")
-    n.signIn.stop(); n.waitEnd()
+    n.stopAndSettle()
     c.cleanUp(); n.cleanUp()
 }
 do {
@@ -608,6 +617,12 @@ do {
     spin(until: { c.states.contains(.waitingForBrowser) })
     check("profiles: swept at the start", prefs.reads >= 1, "\(prefs.reads)")
     let atStart = prefs.writes
+    // the window's script is under way (its login runs) before the stop: a stop while Terminal is still starting the script
+    // is a case of its own (below), whose script is ended only once it shows, and with it the sweeps. And the earlier
+    // sign-in's late sweep, which this start set off when it ended that one (0.3 s), has come and gone: on the same stand-in
+    // it would otherwise be the second write counted below, in this sign-in's own late sweep's place.
+    c.waitLogin()
+    spin(0.5)
     c.signIn.stop(); c.waitEnd()
     // the stop's own sweep took the profile Terminal kept for the window (a write); it has run by the time the outcome came
     check("profiles: swept at the end (stopped): the window's kept profile is taken at once", prefs.writes == atStart + 1 && prefs.left(in: c.work).isEmpty,
@@ -630,6 +645,36 @@ do {
     if case .signedIn? = u.waitEnd() { check("profiles: Terminal's preferences unreadable: the sign-in goes on, nothing written", prefs.writes == 0, "\(prefs.writes)") }
     else { check("profiles: unreadable preferences", false, "\(String(describing: u.outcome))") }
     u.cleanUp()
+    prefs.reset()
+}
+/// A window whose shell has the script open at once but runs it only `delay` seconds later (a slow Terminal, or a runner slow
+/// to start a login shell): removing the script file in that time doesn't keep it from running. The script's path stays in
+/// the shell's command line, as a window's does.
+func slowStart(_ delay: Double) -> String { "exec 9<\"$1\" || exit 1; sleep \(delay); exec /bin/zsh /dev/fd/9 \"$1\"" }
+do {
+    // a stop while Terminal is still starting the window's script (its pid not written yet): the stop ends nothing it can see,
+    // but once the script shows it is ended, window and all (a clean end), its login with it, and its profile swept (late too:
+    // a profile Terminal writes after the window closed goes)
+    prefs.reset()
+    let c = Case("late-start", login: ["login": "hang"])
+    c.terminal.shellBody = slowStart(1)
+    c.start(wanted: wantedID(uuid(1)), lateSweep: 2)
+    spin(until: { c.states.contains(.waitingForBrowser) })
+    // the shell has the script open once its `sleep` runs (on a busy Mac the stop could otherwise remove the file first)
+    let shellPid = c.terminal.last?.processIdentifier ?? -1
+    spin(until: { ProcessTable.table()?.contains { $0.ppid == shellPid && $0.name == "sleep" } == true }, max: 5)
+    c.signIn.stop()
+    check("late start: stopped before the window's script ran", c.waitEnd() == .stopped && c.shellRunning && !pidAlive(c.loginPid),
+          "\(String(describing: c.outcome)) \(c.shellRunning) \(c.loginPid)")
+    check("late start: …the script, once it shows, is ended: its shell ends cleanly (its window closes)", c.shellEnded(12) == 0,
+          "\(c.shellRunning) \(String(describing: c.terminal.last.map { $0.isRunning ? nil : $0.terminationStatus }))")
+    // (the sign-in sees the shell gone on its own clock, a moment apart from this one's: it removes the pid file then)
+    let pidFile = c.work.appendingPathComponent("sign-in.pid").path
+    check("late start: …no login left running, no pid file left", spin(until: { !pidAlive(c.loginPid) && !fm.fileExists(atPath: pidFile) }, max: 3),
+          "login \(c.loginPid) alive \(pidAlive(c.loginPid)), pid file \(fm.fileExists(atPath: pidFile))")
+    prefs.put("Sample app sign-in late", command: "exec " + SignInScript.q(c.work.path + "/sign-in-12345678.command"))
+    check("late start: …and its profile is swept after it, late too", spin(until: { prefs.left(in: c.work).isEmpty }, max: 6), "\(prefs.names)")
+    c.cleanUp()
     prefs.reset()
 }
 do {
@@ -798,7 +843,7 @@ do {
     spin(until: { d.states.contains(.waitingForBrowser) || d.outcome != nil })
     check("process guard: another app's login on another folder doesn't refuse this one", d.outcome == nil && d.terminal.count == 1,
           "\(String(describing: d.outcome))")
-    d.signIn.stop(); d.waitEnd()
+    d.stopAndSettle()
     endOther(other)
     // a bare login whose environment the kernel doesn't give (and no ClaudeSignIn script above it): its folder can't be told, so
     // it refuses rather than guesses (any folder). Whether the kernel gives a platform binary's environment (/bin/bash, the
@@ -832,7 +877,7 @@ do {
         c.start(wanted: wantedID(uuid(1)), processTable: { table(c) })
         spin(until: { c.states.contains(.waitingForBrowser) || c.outcome != nil })
         let o = c.outcome
-        if o == nil { c.signIn.stop(); c.waitEnd() }
+        if o == nil { c.stopAndSettle() }
         c.cleanUp()
         return o
     }
@@ -874,7 +919,7 @@ do {
         c.start(wanted: wantedID(uuid(1)))
         spin(until: { c.states.contains(.waitingForBrowser) || c.outcome != nil })
         let o = c.outcome
-        if o == nil { c.signIn.stop(); c.waitEnd() }
+        if o == nil { c.stopAndSettle() }
         c.cleanUp()
         return o
     }
