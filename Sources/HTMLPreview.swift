@@ -79,7 +79,11 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         config.userContentController.add(rules)
         trace("add rules")
-        return WKWebView(frame: .zero, configuration: config)
+        let view = WKWebView(frame: .zero, configuration: config)
+        // on by default on macOS: a force-click on a link would open a Quick Look popover that loads the real page, outside
+        // every rule above
+        view.allowsLinkPreview = false
+        return view
     }
 
     private func makeWindow() -> NSWindow {

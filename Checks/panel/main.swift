@@ -4091,6 +4091,7 @@ do {
         let c = v.configuration
         check("preview: the data store is non-persistent", c.websiteDataStore.isPersistent == false)
         check("preview: JavaScript is off", c.defaultWebpagePreferences.allowsContentJavaScript == false)
+        check("preview: link previews (the force-click popover) are off", v.allowsLinkPreview == false)
         check("preview: the window is titled Preview, titled and resizable, about 720 × 560",
               w.title == "Preview" && w.styleMask.contains(.titled) && w.styleMask.contains(.resizable) && w.styleMask.contains(.closable)
               && abs(w.contentLayoutRect.width - 720) < 1 && abs(w.contentLayoutRect.height - 560) < 1, "\(w.contentLayoutRect)")
