@@ -6,7 +6,7 @@ import SwiftUI
 import AppKit
 import AddressPrivacy
 
-// The blur itself (the stand-in, the hover gate, the views, the setting) is the AddressPrivacy module, Shared/AddressPrivacy/.
+// The blur itself (the stand-in, the hover gate, the views, the setting) is the AddressPrivacy module, cl_kit's Privacy/ (Vendor/).
 // What stays here is the chat's sentence in pieces, which draws its addresses through it.
 
 extension AddressPrivacy {

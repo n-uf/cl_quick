@@ -17,8 +17,8 @@ version="$(tr -d '[:space:]' < "$here/VERSION")"
 build="$(git -C "$here" rev-list --count HEAD 2>/dev/null || echo 1)"
 
 rm -rf "$out"; mkdir -p "$out"
-# The shared modules (ProfileCore, Runs, ClaudeAuth with ClaudeSignIn) from the vendored cl_kit tag (Vendor/CL_KIT), and
-# AddressPrivacy (Shared/AddressPrivacy/), built first as static libraries (scripts/modules.sh); never the Keychain read.
+# The shared modules (ProfileCore, Runs, ClaudeAuth with ClaudeSignIn, and AddressPrivacy) from the vendored cl_kit tag
+# (Vendor/CL_KIT), built first as static libraries (scripts/modules.sh); never the Keychain read.
 repo="$here"
 . "$here/scripts/modules.sh"
 echo "compiling the shared modules…"
