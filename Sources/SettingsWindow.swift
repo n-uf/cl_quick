@@ -124,6 +124,35 @@ final class SettingsState: ObservableObject {
     func dataRemoved() { settings.instructions = "" }
 }
 
+/// cl_quick has no menu bar of its own, so a window's Edit keys have to be handled by the window, as the chat panel does
+/// (QuickChatPanel.performKeyEquivalent): cut, copy, paste, select all, undo and redo go to whatever has the keyboard.
+enum QCEditKeys {
+    /// The edit action a ⌘ key stands for (⌘X, ⌘C, ⌘V, ⌘A, ⌘Z and ⇧⌘Z), or nil: not an edit key.
+    static func action(for e: NSEvent) -> Selector? {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
+              let key = QuickChatPanel.shortcutLetter(e) else { return nil }
+        let shift = flags.contains(.shift)
+        switch key {
+        case "x" where !shift: return #selector(NSText.cut(_:))
+        case "c" where !shift: return #selector(NSText.copy(_:))
+        case "v" where !shift: return #selector(NSText.paste(_:))
+        case "a" where !shift: return #selector(NSText.selectAll(_:))
+        case "z": return shift ? Selector(("redo:")) : Selector(("undo:"))
+        default: return nil
+        }
+    }
+}
+
+/// The settings window: the Edit keys reach the text field or box that has the keyboard (the Instructions box takes ⌘A, ⌘C,
+/// ⌘V, ⌘X, ⌘Z and ⇧⌘Z).
+final class SettingsNSWindow: NSWindow {
+    override func performKeyEquivalent(with e: NSEvent) -> Bool {
+        if let action = QCEditKeys.action(for: e), firstResponder?.tryToPerform(action, with: self) == true { return true }
+        return super.performKeyEquivalent(with: e)
+    }
+}
+
 final class SettingsWindow {
     static let shared = SettingsWindow()
     let state = SettingsState()
@@ -141,7 +170,7 @@ final class SettingsWindow {
         let first = ProfileStore.shared.profiles.first?.id
         state.open(profile: profile, addAccount: addAccount, firstProfile: first, firstRun: firstRun)
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 660), styleMask: [.titled, .closable, .resizable],
+            let w = SettingsNSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 660), styleMask: [.titled, .closable, .resizable],
                              backing: .buffered, defer: false)
             w.title = "cl_quick Settings"
             w.isReleasedWhenClosed = false
@@ -218,12 +247,17 @@ struct SettingsTiles: View {
     /// track, the chosen one a raised key, the others muted; the segments the same width. On a profile's page the row is
     /// not shown but keeps its room, so the tray never changes height.
     static let tabSize: CGFloat = 10.5
-    private var subPages: some View {
-        let shown = page == .general
-        return PillPicker(options: GeneralTab.allCases, selection: tab, compact: true, size: Self.tabSize,
-                          segmentWidth: PillPicker<GeneralTab>.equalWidth(GeneralTab.allCases.map(\.title), size: Self.tabSize, padding: 16),
-                          title: { $0.title })
-            .opacity(shown ? 1 : 0).allowsHitTesting(shown).accessibilityHidden(!shown)
+    /// The track's height: the key (20) and the track's padding (3 each side).
+    static let trackHeight: CGFloat = 26
+    @ViewBuilder private var subPages: some View {
+        if page == .general {
+            PillPicker(options: GeneralTab.allCases, selection: tab, compact: true, size: Self.tabSize,
+                       segmentWidth: PillPicker<GeneralTab>.equalWidth(GeneralTab.allCases.map(\.title), size: Self.tabSize, padding: 16),
+                       title: { $0.title })
+        } else {
+            // not drawn (so not in the key loop or VoiceOver either), with its room kept
+            Color.clear.frame(width: 1, height: Self.trackHeight)
+        }
     }
 
     var body: some View {
