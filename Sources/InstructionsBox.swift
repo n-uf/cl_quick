@@ -111,6 +111,16 @@ struct SInstructionsBox: View {
     }
 }
 
+/// The box's scroll view, which says when the user scrolls it (the wheel or a trackpad; the scroller's own dragging posts
+/// its live-scroll notification, which the coordinator listens to as well).
+final class SScrollView: NSScrollView {
+    var onUserScroll: () -> Void = {}
+    override func scrollWheel(with event: NSEvent) {
+        onUserScroll()
+        super.scrollWheel(with: event)
+    }
+}
+
 /// The text view: plain text, no smart quotes or dashes, a protected prefix, a limit on the user's part, a hairline.
 final class SProtectedTextView: NSTextView {
     /// How many characters at the start are the built-in part (the hairline's own line included).
@@ -119,6 +129,21 @@ final class SProtectedTextView: NSTextView {
     var dividerLocation = 0
     var placeholder = NSAttributedString()
     var hairline = NSColor.gray
+
+    /// What an edit is about to change, as AppKit asks for it before every typing, paste, drop and transformation
+    /// (Make Upper Case and the like replace the selection with the whole of the changed text): each range is cut to start
+    /// where the user's part does, and one that is only the built-in part is dropped, so no edit can reach it or carry it
+    /// into the user's text. Nothing left: nil, and the edit doesn't happen.
+    override var rangesForUserTextChange: [NSValue]? {
+        guard let ranges = super.rangesForUserTextChange else { return nil }
+        let kept = ranges.compactMap { v -> NSValue? in
+            let r = v.rangeValue, end = NSMaxRange(r)
+            guard end > protectedLength || (r.length == 0 && r.location >= protectedLength) else { return nil }
+            let start = max(r.location, protectedLength)
+            return NSValue(range: NSRange(location: start, length: end - start))
+        }
+        return kept.isEmpty ? nil : kept
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -136,7 +161,7 @@ final class SProtectedTextView: NSTextView {
     }
 
     /// The box as a scroll view (what the settings window holds), with `delegate` for the rules above.
-    static func make(delegate: NSTextViewDelegate, label: String) -> (NSScrollView, SProtectedTextView) {
+    static func make(delegate: NSTextViewDelegate, label: String) -> (SScrollView, SProtectedTextView) {
         let tv = SProtectedTextView(frame: NSRect(x: 0, y: 0, width: 300, height: SInstructionsBox.height))
         tv.delegate = delegate
         tv.isRichText = false
@@ -156,7 +181,7 @@ final class SProtectedTextView: NSTextView {
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         tv.autoresizingMask = [.width]
         tv.setAccessibilityLabel(label)
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: SInstructionsBox.height))
+        let scroll = SScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: SInstructionsBox.height))
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -231,15 +256,29 @@ struct SInstructionsTextView: NSViewRepresentable {
         init(_ p: SInstructionsTextView) { parent = p }
         deinit { for w in watch { NotificationCenter.default.removeObserver(w) } }
 
-        func attach(_ s: NSScrollView, _ t: SProtectedTextView) {
+        func attach(_ s: SScrollView, _ t: SProtectedTextView) {
             scroll = s; tv = t
-            watch.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: s, queue: .main) { [weak self] _ in
+            let nc = NotificationCenter.default
+            // scrolled by the user, by any means (the wheel, a trackpad, the scroller): the box is never put back on Custom
+            s.onUserScroll = { [weak self] in self?.settled = true }
+            watch.append(nc.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: s, queue: .main) { [weak self] _ in
+                self?.settled = true
+            })
+            watch.append(nc.addObserver(forName: NSView.frameDidChangeNotification, object: s, queue: .main) { [weak self] _ in
                 self?.fitSpace(); self?.placeIfReady()
             })
             // scroll-spy: the link of the part in view follows the scrolling (also while a jump animates)
-            watch.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: s.contentView, queue: .main) { [weak self] _ in
+            watch.append(nc.addObserver(forName: NSView.boundsDidChangeNotification, object: s.contentView, queue: .main) { [weak self] _ in
                 self?.spy()
             })
+            // undo and redo change the text without a textDidChange: what the box holds is taken again
+            for name in [Notification.Name.NSUndoManagerDidUndoChange, Notification.Name.NSUndoManagerDidRedoChange] {
+                watch.append(nc.addObserver(forName: name, object: nil, queue: nil) { [weak self] n in
+                    guard let self, let tv = self.tv, let um = tv.undoManager, (n.object as AnyObject?) === um else { return }
+                    tv.setSelectedRange(QuickChatInstructions.caret(tv.selectedRange(), protected: tv.protectedLength))
+                    self.takeFromView(tv)
+                })
+            }
         }
 
         /// Makes the box show the built-in text and the user's text as the view's inputs have them now: filled the first
@@ -279,6 +318,7 @@ struct SInstructionsTextView: NSViewRepresentable {
                 st.replaceCharacters(in: NSRange(location: pl, length: whole.length - pl),
                                      with: NSAttributedString(string: QuickChatInstructions.clamp(parent.text), attributes: attrs))
                 tv.setSelectedRange(QuickChatInstructions.caret(tv.selectedRange(), protected: pl))
+                tv.undoManager?.removeAllActions()       // an undo would act on text that is no longer there
             }
             if let j = parent.jump, j.id != lastJump { lastJump = j.id; scrollTo(j.part, animated: true) }
             tv.needsDisplay = true
@@ -362,17 +402,24 @@ struct SInstructionsTextView: NSViewRepresentable {
         }
 
         func textDidChange(_ note: Notification) {
-            guard let tv = note.object as? SProtectedTextView, let st = tv.textStorage else { return }
+            guard let tv = note.object as? SProtectedTextView else { return }
+            takeFromView(tv)
+        }
+
+        /// What the box holds as the user's text goes to the page (and is stored): after typing, a paste, a transformation,
+        /// undo and redo alike. Typed text takes the user's look, and one over the limit (composed text) is cut.
+        func takeFromView(_ tv: SProtectedTextView) {
+            guard let st = tv.textStorage else { return }
             let pl = tv.protectedLength, whole = tv.string as NSString
             guard whole.length >= pl else { return }
             edited = true
             var user = whole.substring(from: pl)
             // composed text (an input method) is only checked once it is set; then anything over is cut
             if !tv.hasMarkedText(), user.count > parent.limit { user = QuickChatInstructions.clamp(user) }
-            // typed text takes the look of the user's part
             st.setAttributes(SInstructionsText.user(parent.ink), range: NSRange(location: pl, length: whole.length - pl))
             if user != whole.substring(from: pl) {
                 st.replaceCharacters(in: NSRange(location: pl, length: whole.length - pl), with: NSAttributedString(string: user, attributes: SInstructionsText.user(parent.ink)))
+                tv.undoManager?.removeAllActions()       // an undo would act on text that is no longer there
             }
             if parent.text != user { parent.text = user }
             tv.needsDisplay = true
