@@ -466,6 +466,7 @@ struct QCTurnView: View {
     /// This answer's first line is above the visible area: its footer has "Go to the start".
     var above = false
     @State private var hover = false
+    @Environment(\.qcFooterBelow) private var footerBelow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -504,7 +505,7 @@ struct QCTurnView: View {
                 }
                 .padding(.top, 10)
             }
-            if turn.phase == .done || turn.phase == .stopped {
+            if (turn.phase == .done || turn.phase == .stopped), !(footerBelow && last) {
                 let shown = last || hover || model.copied == turn.id       // ⌘⇧C on an earlier answer says "Copied" under it
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
                 footer.background(anchor(.footer)).padding(.top, 4).opacity(shown ? 1 : 0)
@@ -1602,6 +1603,16 @@ extension EnvironmentValues {
     }
 }
 
+/// Set while drawing a picture of the edge handles: the last answer's footer is below the picture's bottom edge (out of view),
+/// as it is whenever the left handle shows. No picture shows the pair with the footer in view: the app never does.
+private struct QCFooterBelowKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var qcFooterBelow: Bool {
+        get { self[QCFooterBelowKey.self] }
+        set { self[QCFooterBelowKey.self] = newValue }
+    }
+}
+
 /// The profile picker's key: a dot, then its title and a chevron (a narrow row: the dot alone); it opens a menu.
 struct QCChip: View {
     let title: String
@@ -2627,6 +2638,8 @@ enum QuickChatRender {
             // nav-new-open: and its stack open) and an answer's footer with ⤒ (answer-start)
             case "nav-rest", "nav-lit", "nav-open", "nav-new", "nav-new-open":
                 let fresh = state.hasPrefix("nav-new")
+                // a long second answer, its footer below the picture's bottom edge (qcFooterBelow): the view is inside it
+                m.turns[1].answer += "\n\nA few more notes:\n- `-t` prints nothing else, so `kill` gets a clean list.\n- Without `-t` the first line is a header.\n- Add `-a` to `lsof` to AND the filters together.\n- Use `sudo` when the process belongs to another user."
                 m.scroll.showForPicture(atBottom: false, newBelow: fresh, canPrevious: true, canNext: true, answersAbove: [t2.id], pair: t2.id)
                 m.scroll.left.showForPicture(lit: state == "nav-lit", expanded: state == "nav-open")
                 m.scroll.right.showForPicture(lit: state == "nav-lit", expanded: state == "nav-open" || state == "nav-new-open")
@@ -2728,6 +2741,7 @@ enum QuickChatRender {
         // QC_RENDER_BUSY=1: over a busy page of text instead of a plain grey, to show nothing of it comes through the card
         let busy = env["QC_RENDER_BUSY"] == "1"
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true).environment(\.qcStepHover, stepHover)
+            .environment(\.qcFooterBelow, state.hasPrefix("nav-"))
             .frame(width: width, height: m.isWindow ? height : state == "bar-tall" ? 170 : nil)
             .padding(30).background(busy ? AnyView(QCBusyBackdrop()) : AnyView(Color(white: 0.1)))
         let r = ImageRenderer(content: view)
