@@ -320,8 +320,8 @@ final class QCMenuUsageBlock: NSView {
     }
 
     /// A lamp in the lamp column (a standby row draws its hollow one here too).
-    static func drawLamp(_ color: NSColor, glow: Bool = false, hollow: Bool = false, midY: CGFloat) {
-        let r = NSRect(x: padX, y: midY - dotSize / 2, width: dotSize, height: dotSize)
+    static func drawLamp(_ color: NSColor, glow: Bool = false, hollow: Bool = false, x: CGFloat = padX, midY: CGFloat) {
+        let r = NSRect(x: x, y: midY - dotSize / 2, width: dotSize, height: dotSize)
         NSGraphicsContext.saveGraphicsState()
         if glow {
             let s = NSShadow()
@@ -455,7 +455,8 @@ enum QCStatusMenu {
     /// (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing new happens
     /// here: it is the path the chat's and Settings' Switch… take. Off while a sign-in for the profile is waited for.
     /// The item's title and action stay for VoiceOver, the menu's type-ahead and Return (the title has the address masked).
-    static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, QCStandbyMenuRow) {
+    static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, columns: QCStandbyMenuRow.Columns = .bar,
+                            switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, QCStandbyMenuRow) {
         // the menu was built some time ago: the question is asked only if the account is still on standby
         let run = { if allowSwitch(p, a) { switchTo(p, a) } }
         let h = Handler(enabled: !waiting, run)
@@ -463,33 +464,58 @@ enum QCStatusMenu {
         item.target = h
         item.representedObject = h          // the menu item keeps its handler alive
         item.isEnabled = !waiting
-        let row = QCStandbyMenuRow(address: a.email, enabled: !waiting, pick: run)
+        let row = QCStandbyMenuRow(address: a.email, enabled: !waiting, columns: columns, pick: run)
+        item.view = row
+        return (item, row)
+    }
+
+    /// Whether a click on Add an account… may open it now: no switch is waited for on the profile (the menu was built some
+    /// time ago, and a switch may have begun since).
+    static func mayAddAccount(_ p: Profile, waiting: (Profile) -> Bool = { AccountSwitcher.shared.waiting[$0.id] != nil }) -> Bool {
+        !waiting(p)
+    }
+    /// The rule a click on Add an account… is held to (a seam: the checks replace it).
+    static var allowAddAccount: (Profile) -> Bool = { mayAddAccount($0) }
+
+    /// Add an account… (QCAddAccountMenuRow), last in its profile's group: opens Settings on the profile with its Add an
+    /// account… form open (`add`). Nothing new is begun here: the form is Settings' own. Off while a sign-in for the profile
+    /// is waited for, as Settings' own key is. Both menus build it here.
+    static func addAccountItem(_ p: Profile, waiting: Bool, columns: QCStandbyMenuRow.Columns = .bar,
+                               add: @escaping (Profile) -> Void) -> (NSMenuItem, QCAddAccountMenuRow) {
+        let run = { if allowAddAccount(p) { add(p) } }
+        let h = Handler(enabled: !waiting, run)
+        let item = NSMenuItem(title: QCAddAccountMenuRow.title, action: #selector(Handler.fire), keyEquivalent: "")
+        item.target = h
+        item.representedObject = h
+        item.isEnabled = !waiting
+        let row = QCAddAccountMenuRow(enabled: !waiting, columns: columns, pick: run)
         item.view = row
         return (item, row)
     }
 
     /// Every block and row as wide as the widest (the menu then widens them with itself).
-    static func fit(blocks: [QCMenuUsageBlock], rows: [QCStandbyMenuRow]) {
+    static func fit(blocks: [QCMenuUsageBlock], rows: [NSView]) {
         let w = max(blocks.map(\.frame.width).max() ?? 0, rows.map(\.frame.width).max() ?? 0)
         for b in blocks { b.setFrameSize(NSSize(width: w, height: b.frame.height)) }
         for r in rows { r.setFrameSize(NSSize(width: w, height: r.frame.height)) }
     }
 
     /// The menu's items for the profiles: a block each (its numbers follow the store while the menu is open when `live`),
-    /// under it a row for each standby account (when `switchTo` is given), a line between profiles and none inside a
-    /// profile's group. `pick` opens the quick chat on a profile. The rows stay as built when the menu opened (it is
-    /// built again on every open).
+    /// under it a row for each standby account (when `switchTo` is given) and Add an account… (when `addAccount` is given),
+    /// a line between profiles and none inside a profile's group. `pick` opens the quick chat on a profile. The rows stay
+    /// as built when the menu opened (it is built again on every open).
     static func items(_ infos: [Info], now: Date = Date(), live: ((Profile) -> Info)? = nil,
                       switching: (Profile) -> Bool = { _ in false }, switchTo: ((Profile, KnownAccount) -> Void)? = nil,
+                      addAccount: ((Profile) -> Void)? = nil,
                       pick: @escaping (String) -> Void) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
         var blocks: [QCMenuUsageBlock] = []
-        var rows: [QCStandbyMenuRow] = []
+        var rows: [NSView] = []
         for (n, i) in infos.enumerated() {
             if n > 0 { items.append(.separator()) }
             let p = i.profile
             let block = QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: i.level, address: i.address, problem: i.problem, now: now),
-                                         joined: switchTo != nil && !i.standby.isEmpty) { pick(p.id) }
+                                         joined: (switchTo != nil && !i.standby.isEmpty) || addAccount != nil) { pick(p.id) }
             if let live {
                 block.provider = {
                     let j = live(p)
@@ -501,13 +527,18 @@ enum QCStatusMenu {
             item.view = block
             item.representedObject = p.id
             items.append(item)
+            let waiting = switching(p)
             if let switchTo {
-                let waiting = switching(p)
                 for a in i.standby {
                     let (line, row) = standbyItem(p, a, waiting: waiting, switchTo: switchTo)
                     rows.append(row)
                     items.append(line)
                 }
+            }
+            if let addAccount {
+                let (line, row) = addAccountItem(p, waiting: waiting, add: addAccount)
+                rows.append(row)
+                items.append(line)
             }
         }
         fit(blocks: blocks, rows: rows)

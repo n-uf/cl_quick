@@ -259,6 +259,15 @@ final class QCStandbyMenuRow: NSView {
     static let lampX = QCMenuUsageBlock.padX, addressX = QCMenuUsageBlock.padX + QCMenuUsageBlock.textGap
     static let addressFont = QCProfileMenuRow.addressFont, tagFont = QCMenuUsageBlock.accountFont
     static let hintGap: CGFloat = 18
+
+    /// Where the lamp and the address sit: the menu bar's block's (`bar`), or the chat's profile menu's, under the
+    /// in-use row's dot and name (`chat`).
+    struct Columns: Equatable {
+        let lampX: CGFloat, addressX: CGFloat
+        static let bar = Columns(lampX: QCStandbyMenuRow.lampX, addressX: QCStandbyMenuRow.addressX)
+        static let chat = Columns(lampX: QCProfileMenuRow.dotX, addressX: QCProfileMenuRow.textX)
+    }
+    let columns: Columns
     /// As tall as the blurred address's picture (the text's height and the blur's reach above and below), so the blur
     /// is never cut; the highlight is a native item's height, centred.
     static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: addressFont]).height) + 2 * QCProfileMenuRow.blurPad
@@ -269,9 +278,9 @@ final class QCStandbyMenuRow: NSView {
     /// What VoiceOver reads: the address masked, "standby", "switch" (the action).
     static func spoken(_ address: String) -> String { AddressPrivacy.words(address) + ", standby, switch" }
 
-    init(address: String, enabled: Bool, pick: @escaping () -> Void) {
-        self.address = address; self.enabled = enabled; self.pick = pick
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(address), height: Self.height))
+    init(address: String, enabled: Bool, columns: Columns = .bar, pick: @escaping () -> Void) {
+        self.address = address; self.enabled = enabled; self.columns = columns; self.pick = pick
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(address, columns: columns), height: Self.height))
         autoresizingMask = [.width]
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
@@ -284,8 +293,8 @@ final class QCStandbyMenuRow: NSView {
 
     private static func w(_ s: String, _ f: NSFont) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: f]).width) }
     /// The least width that shows it all (nothing is cut): the address (as wide blurred as sharp), its tag and "Switch…".
-    static func width(_ address: String) -> CGFloat {
-        addressX + w(address, addressFont) + w(tag, tagFont) + hintGap + w(hint, tagFont) + QCMenuUsageBlock.padX
+    static func width(_ address: String, columns: Columns = .bar) -> CGFloat {
+        columns.addressX + w(address, addressFont) + w(tag, tagFont) + hintGap + w(hint, tagFont) + QCMenuUsageBlock.padX
     }
 
     /// Whether the row is lit by the menu (the address is sharp then); a dimmed row never is.
@@ -325,14 +334,14 @@ final class QCStandbyMenuRow: NSView {
         let fg: NSColor = on ? .selectedMenuItemTextColor : enabled ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.14)
         let sub: NSColor = on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.75) : fg
         let mid = bounds.midY
-        QCMenuUsageBlock.drawLamp(on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.85) : fg, hollow: true, midY: mid)
+        QCMenuUsageBlock.drawLamp(on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.85) : fg, hollow: true, x: columns.lampX, midY: mid)
         let width = Self.w(address, Self.addressFont)
         if sharp {
-            QCMenuUsageBlock.drawText(address, Self.addressFont, sub, x: Self.addressX, midY: mid)
+            QCMenuUsageBlock.drawText(address, Self.addressFont, sub, x: columns.addressX, midY: mid)
         } else if let img = blurredAddress(fg) {
-            img.draw(in: NSRect(x: Self.addressX - QCProfileMenuRow.blurPad, y: mid - img.size.height / 2, width: img.size.width, height: img.size.height))
+            img.draw(in: NSRect(x: columns.addressX - QCProfileMenuRow.blurPad, y: mid - img.size.height / 2, width: img.size.width, height: img.size.height))
         }
-        QCMenuUsageBlock.drawText(Self.tag, Self.tagFont, sub, x: Self.addressX + width, midY: mid)
+        QCMenuUsageBlock.drawText(Self.tag, Self.tagFont, sub, x: columns.addressX + width, midY: mid)
         if on {
             let hintW = Self.w(Self.hint, Self.tagFont)
             QCMenuUsageBlock.drawText(Self.hint, Self.tagFont, sub, x: bounds.maxX - QCMenuUsageBlock.padX - hintW, midY: mid)
@@ -351,6 +360,79 @@ final class QCStandbyMenuRow: NSView {
         super.viewDidChangeEffectiveAppearance()
         blurCache = nil
         needsDisplay = true
+    }
+}
+
+/// "Add an account…" as the last row of a profile's group in a menu, after its standby rows: a small plus in the lamp
+/// column and the words in the address column, dimmed like a standby row and lit by the menu's highlight. A click
+/// anywhere on it closes the menu and runs `pick` (the item's action does the same for Return). While a sign-in for the
+/// profile is waited for it is dimmed further, never lit, and does nothing.
+final class QCAddAccountMenuRow: NSView {
+    let enabled: Bool
+    let columns: QCStandbyMenuRow.Columns
+    let pick: () -> Void
+    /// For pictures: drawn as if the menu highlighted it.
+    var highlighted = false
+
+    static let title = "Add an account…"
+
+    init(enabled: Bool, columns: QCStandbyMenuRow.Columns = .bar, pick: @escaping () -> Void) {
+        self.enabled = enabled; self.columns = columns; self.pick = pick
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(columns: columns), height: QCStandbyMenuRow.height))
+        autoresizingMask = [.width]
+        setAccessibilityElement(true)
+        setAccessibilityRole(.menuItem)
+        setAccessibilityLabel(Self.title)
+        setAccessibilityEnabled(enabled)
+    }
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    override var isFlipped: Bool { true }
+
+    /// The least width that shows it all.
+    static func width(columns: QCStandbyMenuRow.Columns = .bar) -> CGFloat {
+        columns.addressX + ceil((title as NSString).size(withAttributes: [.font: QCStandbyMenuRow.addressFont]).width) + QCMenuUsageBlock.padX
+    }
+
+    /// Whether the row is lit by the menu; a dimmed row never is.
+    var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with e: NSEvent) { needsDisplay = true }
+    override func mouseExited(with e: NSEvent) { needsDisplay = true }
+    override func mouseUp(with e: NSEvent) { if releasedOn(e) { press() } }
+
+    /// A click anywhere on the row: closes the menu, then runs `pick`. Nothing while dimmed.
+    func press() {
+        guard enabled else { return }
+        closeMenuThen(pick)
+    }
+    override func accessibilityPerformPress() -> Bool {
+        guard enabled else { return false }
+        press()
+        return true
+    }
+
+    override func draw(_ dirty: NSRect) {
+        let on = lit
+        if on {
+            NSColor.selectedContentBackgroundColor.setFill()
+            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - QCStandbyMenuRow.highlightH / 2, width: bounds.width - 10, height: QCStandbyMenuRow.highlightH), xRadius: 4, yRadius: 4).fill()
+        }
+        let fg: NSColor = on ? .selectedMenuItemTextColor : enabled ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.14)
+        let mid = bounds.midY
+        // the plus, as wide as the lamps are
+        let c = columns.lampX + QCMenuUsageBlock.dotSize / 2, r = QCMenuUsageBlock.dotSize / 2 - 0.6
+        let plus = NSBezierPath()
+        plus.move(to: NSPoint(x: c - r, y: mid)); plus.line(to: NSPoint(x: c + r, y: mid))
+        plus.move(to: NSPoint(x: c, y: mid - r)); plus.line(to: NSPoint(x: c, y: mid + r))
+        plus.lineWidth = 1.2; plus.lineCapStyle = .round
+        fg.setStroke(); plus.stroke()
+        QCMenuUsageBlock.drawText(Self.title, QCStandbyMenuRow.addressFont, fg, x: columns.addressX, midY: mid)
     }
 }
 
