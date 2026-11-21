@@ -284,6 +284,15 @@ final class QCChatScroll: ObservableObject {
 
     /// The top of a message of the user's, as an offset from the document's top (a check reads it).
     func top(ofQuestion id: UUID) -> CGFloat? { attached(questions[id]?.view).map(top(of:)) }
+    /// The text column as drawn: the horizontal extent, in window coordinates, of an answer's anchor (it spans the column). A
+    /// check measures the handle strips against it.
+    func textColumn() -> ClosedRange<CGFloat>? {
+        answers.values.compactMap { attached($0.view) }.first.map { v in
+            let r = v.convert(v.bounds, to: nil)
+            return r.minX...r.maxX
+        }
+    }
+
     /// The top of an answer's first line, the same way.
     func top(ofAnswer id: UUID) -> CGFloat? { attached(answers[id]?.view).map(top(of:)) }
 

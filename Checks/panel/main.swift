@@ -4615,7 +4615,8 @@ func chatScrollChecks() {
     sc.previousPrompt()
     check("prompts: a few points below the third message ▲ lands on it", near(sc.offset(), target(2)), "offset \(sc.offset()) want \(target(2))")
     sc.nextPrompt(); sc.nextPrompt()
-    check("prompts: ▼ to the last message, where ▼ is disabled", near(sc.offset(), target(3)) && !sc.canNext || sc.offset() >= sc.maxOffset() - 1, "offset \(sc.offset()) next \(sc.canNext)")
+    // (the last message's landing is cut to what can be scrolled to, as `target` is; both must hold)
+    check("prompts: ▼ to the last message lands on it, where ▼ is disabled", near(sc.offset(), target(3)) && !sc.canNext, "offset \(sc.offset()) want \(target(3)) next \(sc.canNext)")
     check("prompts: ▲ ▼ show only with two messages of the user's", !QCChatScroll.showsPrompts(turns: 0) && !QCChatScroll.showsPrompts(turns: 1) && QCChatScroll.showsPrompts(turns: 2))
     // the landing highlight is a flag for about a second, then off (no fade: the view draws it or not)
     check("prompts: the landed message is lit", sc.flash != nil)
@@ -4719,9 +4720,17 @@ func chatHandleChecks() {
     guard let ls = sc.frames["left.strip"], let rs = sc.frames["right.strip"] else { check("handles: both strips report their frames", false, "\(sc.frames.keys.sorted())"); return }
     check("handles: the strips are 14 × 44, along the edges", near(ls.width, 14) && near(ls.height, 44) && near(rs.width, 14) && near(rs.height, 44), "\(ls) \(rs)")
     check("handles: the left strip stands 5 pt in, the right one inward of the scroller", near(ls.minX, QCEdgeLayout.clear) && near(rs.maxX, W - QCEdgeLayout.scroller), "\(ls.minX) \(rs.maxX) W \(W)")
-    check("handles: the text column is 10 pt or more clear of each pill",
-          QCEdgeLayout.leftGutter - (QCEdgeLayout.clear + QCEdgeLayout.pillWidth) >= 10 && QCEdgeLayout.rightGutter - (QCEdgeLayout.scroller - 0 + QCEdgeLayout.pillWidth) >= 10,
-          "\(QCEdgeLayout.leftGutter) \(QCEdgeLayout.rightGutter)")
+    // the text column as DRAWN (an answer's anchor spans it), against the strips and pills as drawn, in window coordinates
+    if let col = sc.textColumn() {
+        let lw = win(ls), rw = win(rs)
+        let leftPill = lw.minX + QCEdgeLayout.pillWidth, rightPill = rw.maxX - QCEdgeLayout.pillWidth
+        check("handles: the text column (measured) is the gutters' column: it starts at the left gutter and ends at the right one",
+              near(col.lowerBound, QCEdgeLayout.leftGutter) && near(col.upperBound, W - QCEdgeLayout.rightGutter), "column \(col) gutters \(QCEdgeLayout.leftGutter) \(QCEdgeLayout.rightGutter) W \(W)")
+        check("handles: the text column (measured) starts 10 pt or more after the left pill and its strip is not over the text", col.lowerBound - leftPill >= 10 && lw.maxX <= col.lowerBound + 0.5,
+              "column \(col) left strip \(lw) pill right edge \(leftPill)")
+        check("handles: the text column (measured) ends 10 pt or more before the right pill and its strip is not over the text", rightPill - col.upperBound >= 10 && rw.minX >= col.upperBound - 0.5,
+              "column \(col) right strip \(rw) pill left edge \(rightPill)")
+    } else { check("handles: the text column is measured", false) }
     // opening: a pass opens nothing, a rest opens it, beside the handle and never under the pointer; leaving closes it after a while
     for (name, state) in [("left", sc.left), ("right", sc.right)] {
         state.strip(true); spin(0.05); state.strip(false)
