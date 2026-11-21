@@ -26,7 +26,7 @@ build_modules "$out/modules" no-keychain -O
 link=(); while IFS= read -r f; do link+=("$f"); done < <(modules_link "$out/modules")
 echo "compiling…"
 swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$out/$name" "$here"/Sources/*.swift "${link[@]}" \
-  -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement
+  -framework AppKit -framework SwiftUI -framework Carbon -framework ServiceManagement -framework WebKit
 
 app="$out/$name.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

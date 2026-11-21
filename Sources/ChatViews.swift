@@ -631,6 +631,7 @@ struct QCCodeBlock: View {
             HStack(spacing: 0) {
                 Text(language.isEmpty ? "code" : language).font(.system(size: 11.5)).foregroundColor(QCColor.muted)
                 Spacer()
+                if QCHTMLPreview.isHTML(language) { QCPreviewButton(html: code) }
                 QCCopyIcon(text: code)
             }
             .padding(.leading, 12).padding(.trailing, 2)
