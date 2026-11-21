@@ -4065,6 +4065,21 @@ do {
           ["html", "htm", "HTML", "Htm", " html "].allSatisfy(QCHTMLPreview.isHTML) && !["", "xhtml", "htmlx", "ht"].contains(where: QCHTMLPreview.isHTML))
     m.turns = []; spin(0.2)
 
+    do {      // where the window opens: beside the chat panel, floating only when there is no room
+        let screen = NSRect(x: 0, y: 0, width: 1600, height: 1000), size = NSSize(width: 720, height: 560)
+        let right = QCHTMLPreview.placement(panel: NSRect(x: 100, y: 300, width: 520, height: 580), screen: screen, size: size)
+        check("preview: room on the right of the panel: beside it, top lines aligned, not floating",
+              right.origin == NSPoint(x: 632, y: 320) && !right.floating, "\(right)")
+        let left = QCHTMLPreview.placement(panel: NSRect(x: 1000, y: 300, width: 520, height: 580), screen: screen, size: size)
+        check("preview: room only on the left: to the left of it, not floating", left.origin == NSPoint(x: 268, y: 320) && !left.floating, "\(left)")
+        let none = QCHTMLPreview.placement(panel: NSRect(x: 500, y: 300, width: 520, height: 580), screen: screen, size: size)
+        check("preview: no room either side: centred and floating", none.origin == NSPoint(x: 440, y: 220) && none.floating, "\(none)")
+        let low = QCHTMLPreview.placement(panel: NSRect(x: 100, y: 0, width: 520, height: 300), screen: screen, size: size)
+        check("preview: kept on the screen when the panel is low", low.origin.y == 0 && !low.floating, "\(low)")
+        let bare = QCHTMLPreview.placement(panel: nil, screen: screen, size: size)
+        check("preview: no panel showing: centred, not floating", bare.origin == NSPoint(x: 440, y: 220) && !bare.floating)
+    }
+
     // the window and its view: made on a press, with the isolation in place before the first load
     QCHTMLPreview.reveal = false
     let pv = QCHTMLPreview.shared

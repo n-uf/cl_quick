@@ -43,6 +43,7 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         let w = window ?? makeWindow()
         window = w
         if Self.reveal {
+            if !w.isVisible { place(w) }
             NSApp.activate(ignoringOtherApps: true)
             w.makeKeyAndOrderFront(nil)
         }
@@ -123,6 +124,27 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         // every rule above
         view.allowsLinkPreview = false
         return view
+    }
+
+    /// Where a window `size` big goes beside the chat panel on the screen's visible frame: to its right, else to its left,
+    /// top lines aligned (kept on the screen), `gap` apart. With no room on either side it is centred and `floating`, so the
+    /// floating chat panel never hides it; with no panel showing it is just centred.
+    static func placement(panel: NSRect?, screen: NSRect, size: NSSize, gap: CGFloat = 12) -> (origin: NSPoint, floating: Bool) {
+        let centred = NSPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
+        guard let p = panel else { return (centred, false) }
+        let y = min(max(p.maxY - size.height, screen.minY), max(screen.maxY - size.height, screen.minY))
+        if p.maxX + gap + size.width <= screen.maxX { return (NSPoint(x: p.maxX + gap, y: y), false) }
+        if p.minX - gap - size.width >= screen.minX { return (NSPoint(x: p.minX - gap - size.width, y: y), false) }
+        return (centred, true)
+    }
+
+    /// The window opens beside the chat panel, not behind it.
+    private func place(_ w: NSWindow) {
+        let panel = NSApp.windows.compactMap { $0 as? QuickChatPanel }.first { $0.isVisible }
+        guard let screen = (panel?.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let r = Self.placement(panel: panel?.frame, screen: screen, size: w.frame.size)
+        w.setFrameOrigin(r.origin)
+        w.level = r.floating ? .floating : .normal
     }
 
     private func makeWindow() -> NSWindow {
