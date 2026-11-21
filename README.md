@@ -150,6 +150,25 @@ minutes for a profile.
 ## The chat
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
+- **Moving in a chat.** The chat follows the end of an answer as it streams only while you are at the bottom (within a few
+  points) when new text arrives. Scroll up by any means (wheel, trackpad, scroller, Page Up, selecting text) and new text
+  never moves the view; get back to the bottom (by hand, End, ⌘J or the ↓ button) or send a message and it follows again.
+  Resizing at the bottom keeps the bottom; resizing mid-chat keeps what you are reading in place; hiding and reopening the
+  panel restores the place and whether it follows. Every jump is instant (nothing animates).
+  - Two **edge handles** stand in the answers' side gutters, above the field: thin pills at rest. The pointer resting on one
+    for about 0.15 s opens its stack beside it, inward over the text, in a solid box; it closes about 0.5 s after the pointer
+    leaves both. **Right:** ▲ ▼ (the previous and next message of yours, once there are two; the landed bubble is lighter for
+    about a second) and ↓ jump to latest (while not at the bottom; the pill takes the accent colour while text has arrived
+    below, until you reach the bottom). **Left:** ⤒ (the start of the answer, only while its first line is above the view) and
+    copy, for the answer at the view's bottom edge while its footer is out of sight (also while it streams: copy takes the text
+    so far). Each answer's own footer has ⤒ copy ↻ (⤒ only while its first line is above the view).
+  - **Keys** (the panel's own, exact modifiers; none is a text edit): ⌘J jump to latest, ⇧⌘J the start of the answer at the
+    view's bottom edge (the last one at the bottom), ⌘[ and ⌘] the previous and next message of yours (nothing at the ends),
+    ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and Page Up, Page Down (they scroll
+    and stop following) and End (the bottom, following) work even while the field has the keyboard; arrows keep their text
+    meaning there.
+  - The handles keep clear of the window's resize band (under 4 pt deep), the drag surfaces and the answers' scroller: the left
+    one stands 5 pt in, the right one inward of the scroller's 16 pt track, and the text column starts after them.
 - Answers stream in as Markdown; tables (header, alignment row, rows) are drawn as a grid whose cells wrap to the
   panel's width and scroll sideways when there are too many columns; code blocks have Copy, and an `html` block also has Preview (the page in its own window: no scripts, nothing fetched from the network, links and downloads do nothing); under each answer Copy and a line like "answered by Haiku 5.5 ·
   2.4 s"; under the last one also Ask again.
@@ -177,9 +196,14 @@ minutes for a profile.
       the bottom keeps the 85 pt gap the first opening has, so ⌃2 is that place). The bar keeps growing as it does
       wherever you drag it. macOS can take ⌃1–⌃6 for itself: when "Switch to Desktop N" is turned on in System
       Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Mission Control, cl_quick never sees those keys.
-  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the digit keys, the label halves, Return,
-    ⇧Return, ⌘N, ⌘D (Dictation on/off), ⌘⇧C (copy the last answer), Esc and ⌘W, and the shortcut that opens cl_quick.
-    A click elsewhere or Esc closes it.
+  - The keys button opens a list of the shortcuts on three pages, under a small track (MODEL & WINDOW · MOVE · WRITE;
+    ← and → turn the pages while the list is open, and the last page is remembered while cl_quick runs):
+    - **Model & window:** ⌥⌘ arrows (thinking, model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
+    - **Move:** ⌘J, ⇧⌘J, ⌘[ ⌘], Page Up, Page Down and End (see "Moving in a chat" below).
+    - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, and the shortcut
+      that opens cl_quick.
+
+    The list is as tall on every page, so switching never resizes it. A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
     fuller), two thin stacked bars (the 5-hour window over the week) and the share of the fuller window, such as
     "5h ▬ 78%" ("full" when a limit is full). On a narrow bar it drops the share, then the label.

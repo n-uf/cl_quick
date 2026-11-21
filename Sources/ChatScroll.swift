@@ -22,6 +22,10 @@
 import AppKit
 import SwiftUI
 
+/// The keys that move in the chat (the panel's performKeyEquivalent, exact modifiers): ⌘J the latest, ⇧⌘J the start of the answer
+/// in view, ⌘[ ⌘] the previous and next message of the user's, Page Up, Page Down and End.
+enum QCNav: Equatable { case latest, answerStart, previousPrompt, nextPrompt, pageUp, pageDown, end }
+
 final class QCChatScroll: ObservableObject {
     /// "At the bottom" is within this many points of it.
     static let slack: CGFloat = 4
@@ -43,6 +47,17 @@ final class QCChatScroll: ObservableObject {
     @Published private(set) var flash: UUID?
     /// The answers whose top edge (first line) is above the visible area: their "go to the start" shows.
     @Published private(set) var answersAbove: Set<UUID> = []
+    /// The answer at the view's bottom edge whose footer is out of sight (taller than the view, its first line above the
+    /// view's bottom, its end below it): the left handle's answer, whose ⤒ and copy float. Nil: no left handle.
+    @Published private(set) var pair: UUID?
+
+    /// The two edge handles' states: left (this answer), right (navigation).
+    let left = QCEdgeState()
+    let right = QCEdgeState()
+    /// The window-global frames the handles report, by name ("left.strip", "right.box", …), for the checks.
+    var frames: [String: CGRect] = [:]
+
+    func forget(_ name: String) { frames["\(name).strip"] = nil; frames["\(name).box"] = nil }
 
     /// Whether new text moves the view to the end. True at the start.
     private(set) var following = true
@@ -189,6 +204,21 @@ final class QCChatScroll: ObservableObject {
             return id
         })
         if answersAbove != above { answersAbove = above }
+        let belongs = pairedAnswer()
+        if pair != belongs { pair = belongs }
+    }
+
+    /// The answer the left handle belongs to: the one at the view's bottom edge, when it is taller than the view and its end
+    /// (so its footer) is below the view's bottom edge. While streaming at the bottom its end is in view: none.
+    func pairedAnswer() -> UUID? {
+        guard let g = geometry else { return nil }
+        let bottom = offset() + g.clip.bounds.height
+        for (id, w) in answers {
+            guard let v = attached(w.view) else { continue }
+            let t = top(of: v), h = v.frame.height
+            if h > g.clip.bounds.height, t < bottom, t + h > bottom + 0.5 { return id }
+        }
+        return nil
     }
 
     // MARK: Anchors
@@ -270,6 +300,35 @@ final class QCChatScroll: ObservableObject {
         go(to: top(of: v) - Self.inset, follow: false)
     }
 
+    /// The answer at the view's bottom edge: the last one whose first line is above that edge (so, with the view at the bottom,
+    /// the last answer). The left handle's, ⇧⌘J's and ⇧⌘C's.
+    func answerAtBottomEdge() -> UUID? {
+        guard let g = geometry else { return nil }
+        let bottom = offset() + g.clip.bounds.height
+        return answers.compactMap { id, w -> (UUID, CGFloat)? in
+            guard let v = attached(w.view) else { return nil }
+            let t = top(of: v)
+            return t < bottom ? (id, t) : nil
+        }.max { $0.1 < $1.1 }?.0
+    }
+
+    /// A key that moves in the chat. False when there is nothing to move (no scroll view yet): the key is not taken.
+    func perform(_ nav: QCNav, turns: Int) -> Bool {
+        guard geometry != nil else { return false }
+        switch nav {
+        case .latest, .end: jumpToLatest()
+        case .answerStart: if let id = answerAtBottomEdge() { goToStart(ofAnswer: id) }
+        case .previousPrompt: previousPrompt()
+        case .nextPrompt: nextPrompt()
+        case .pageUp: go(to: offset() - page(), follow: false)
+        case .pageDown: go(to: offset() + page(), follow: false)
+        }
+        return true
+    }
+
+    /// A page: the visible height less a few lines, as the system's page keys keep some of what was in view.
+    private func page() -> CGFloat { max(40, (clip?.bounds.height ?? 0) - 40) }
+
     /// ▲ and ▼ show once there are two messages of the user's to go between.
     static func showsPrompts(turns: Int) -> Bool { turns >= 2 }
 
@@ -299,10 +358,10 @@ final class QCChatScroll: ObservableObject {
     // MARK: For pictures (a render can't draw a scroll view)
 
     func showForPicture(atBottom: Bool, newBelow: Bool, canPrevious: Bool = true, canNext: Bool = true, flash: UUID? = nil,
-                        answersAbove: Set<UUID> = []) {
+                        answersAbove: Set<UUID> = [], pair: UUID? = nil) {
         self.atBottom = atBottom; self.newBelow = newBelow
         self.canPrevious = canPrevious; self.canNext = canNext; self.flash = flash
-        self.answersAbove = answersAbove
+        self.answersAbove = answersAbove; self.pair = pair
     }
 }
 
@@ -367,38 +426,250 @@ struct QCAnchor: NSViewRepresentable {
     }
 }
 
-// MARK: - The floating control
 
-/// The small control floating at the answers' bottom right, just above the field box: ▲ ▼ (the previous and the next message
-/// of the user's, once there are two), then jump to latest while the view is not at the bottom (with a dot when text has
-/// arrived below since).
-struct QCScrollControl: View {
-    @ObservedObject var scroll: QCChatScroll
-    /// The chat has two or more messages of the user's.
-    let prompts: Bool
+/// The navigation buttons' tooltips: the words, then the key.
+enum QCNavHelp {
+    static let previous = "Previous message of mine ⌘["
+    static let next = "Next message of mine ⌘]"
+    static let latest = "Jump to latest ⌘J"
+    static let start = "Go to the start of this answer ⇧⌘J"
+}
+
+// MARK: - Edge handles
+
+/// Where the edge handles stand and how they open: ONE place for the numbers.
+///
+/// What else lives at the panel's edges, and where the handles keep clear of it (points, from the answers area's side):
+///   - macOS's resize band: the window frame's own, under 4 pt deep inside the edge (a press 1 pt in resizes, 4 pt in is the
+///     content's), 20 pt around a corner. The handles start 5 pt in, and the corners are far below the answers' bottom.
+///   - the drag surfaces: every empty part of the card moves the window; a control (`qcControl`) never does. Handles' strips
+///     and boxes are controls.
+///   - the vertical scroller of the answers: an NSScroller `scrollerWidth` (15 pt) wide on the right edge, in both styles
+///     (an overlay scroller only draws when it is wanted, but its track is there). The right handle stands inward of it.
+///   - the text: the answers' gutters are as wide as the handle strips, so a handle never touches the text column, and the
+///     pill is 10 pt or more clear of it.
+enum QCEdgeLayout {
+    /// From the window's edge to the handle's strip on the left: clear of the resize band (under 4 pt deep).
+    static let clear: CGFloat = 5
+    /// The hit strip along the edge, and the pill drawn in it (on its outer side).
+    static let stripWidth: CGFloat = 14, stripHeight: CGFloat = 44
+    static let pillWidth: CGFloat = 3, pillHeight: CGFloat = 30
+    /// The vertical scroller's track on the right (a check compares it with what the scroll view has).
+    /// (measured: 17 pt wide in the panel with either style; two points over the scroller's nominal width are kept clear)
+    static var scroller: CGFloat { ceil(NSScroller.scrollerWidth(for: .regular, scrollerStyle: NSScroller.preferredScrollerStyle)) + 2 }
+    /// The answers' text starts and ends this far from the sides: the strip fits in the gutter, the pill is 11 pt clear of the text.
+    static var leftGutter: CGFloat { clear + stripWidth }
+    static var rightGutter: CGFloat { scroller + stripWidth }
+    /// From the answers area's bottom (the field box is under it) to the tallest box's bottom.
+    static let bottomGap: CGFloat = 8
+    /// A box is at most this tall (three buttons in a stack and its padding), so a handle stays in line at any content.
+    static let boxMaxHeight: CGFloat = 3 * QCSpace.small + 2 * boxPadding
+    static let boxPadding: CGFloat = 2
+
+    // MARK: How a stack opens (the operator is finalising this: change it here)
+    /// The pointer rests on a handle this long before its stack opens (a pass over it opens nothing).
+    static let dwell: TimeInterval = 0.15
+    /// The stack closes this long after the pointer has left both the handle and the stack.
+    static let collapseAfter: TimeInterval = 0.5
+    /// The stack opens BESIDE the handle, inward toward the text, this far clear of the pill, centred on it vertically.
+    static let boxGap: CGFloat = 6
+    /// Keyboard or VoiceOver opening: it stays this long when nothing holds it open.
+    static let keptAfterActivation: TimeInterval = 4
+
+    /// The box's distance from the window's edge (the pill is `clear` or `scroller` in, and `pillWidth` wide).
+    static var leftBoxInset: CGFloat { clear + pillWidth + boxGap }
+    static var rightBoxInset: CGFloat { scroller + pillWidth + boxGap }
+}
+
+/// One handle's state: whether its stack is open. The pointer's rest, its leaving, and the keyboard drive it; nothing animates.
+final class QCEdgeState: ObservableObject {
+    /// The stack is open.
+    @Published private(set) var expanded = false
+    /// The pointer is on the handle, or its stack is open (the pill is lit).
+    var lit: Bool { onStrip || expanded }
+    @Published private(set) var onStrip = false
+    private var onBox = false
+    private var focused = false
+    private var opening: DispatchWorkItem?
+    private var closing: DispatchWorkItem?
+    var dwell = QCEdgeLayout.dwell
+    var collapseAfter = QCEdgeLayout.collapseAfter
+
+    /// The pointer entered or left the handle's strip.
+    func strip(_ inside: Bool) {
+        if onStrip != inside { onStrip = inside }
+        settle()
+    }
+
+    /// The pointer entered or left the open stack.
+    func box(_ inside: Bool) {
+        onBox = inside
+        settle()
+    }
+
+    /// Keyboard focus is on the handle.
+    func focus(_ f: Bool) {
+        focused = f
+        if f { open() }
+        settle()
+    }
+
+    /// Opens it at once (the keyboard, VoiceOver): it stays until the pointer or focus has come and gone, or for a few seconds.
+    func activate() {
+        open()
+        cancel(&closing)
+        if !onStrip, !onBox, !focused { close(after: QCEdgeLayout.keptAfterActivation) }
+    }
+
+    /// A picture can't wait for a pointer: the state it shows.
+    func showForPicture(lit: Bool, expanded: Bool) {
+        onStrip = lit; self.expanded = expanded
+    }
+
+    /// Closes it at once (the panel hid, or the handle has nothing to show).
+    func reset() {
+        cancel(&opening); cancel(&closing)
+        onBox = false; focused = false
+        if onStrip { onStrip = false }
+        if expanded { expanded = false }
+    }
+
+    private var engaged: Bool { onStrip || onBox || focused }
+
+    private func settle() {
+        if engaged {
+            cancel(&closing)
+            if !expanded, opening == nil {
+                let w = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.opening = nil
+                    if self.engaged { self.open() }
+                }
+                opening = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + dwell, execute: w)
+            }
+        } else {
+            cancel(&opening)
+            if expanded, closing == nil { close(after: collapseAfter) }
+        }
+    }
+
+    private func open() { cancel(&opening); if !expanded { expanded = true } }
+
+    private func close(after delay: TimeInterval) {
+        cancel(&closing)
+        let w = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.closing = nil
+            if !self.engaged, self.expanded { self.expanded = false }
+        }
+        closing = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
+    }
+
+    private func cancel(_ w: inout DispatchWorkItem?) { w?.cancel(); w = nil }
+}
+
+/// A handle on one side of the answers area: a thin pill in a strip along the edge; the pointer resting on it opens a stack
+/// of buttons beside it, inward. Nothing slides or fades: it is there or it is not.
+struct QCEdgeHandle<Box: View>: View {
+    enum Side { case left, right }
+    let side: Side
+    @ObservedObject var state: QCEdgeState
+    /// The frames the handle reports (a check reads them), under this name.
+    let name: String
+    let scroll: QCChatScroll
+    /// What VoiceOver calls the handle, and its value ("New text below").
+    let label: String
+    var value = ""
+    /// The pill is in the accent colour (new text below).
+    var accent = false
+    @ViewBuilder let box: () -> Box
 
     var body: some View {
-        if prompts || !scroll.atBottom {
-            HStack(spacing: 0) {
-                if prompts {
-                    QCIconButton(symbol: "chevron.up", help: "Previous message of mine", small: true, label: "Previous message of mine",
-                                 enabled: scroll.canPrevious) { scroll.previousPrompt() }
-                    QCIconButton(symbol: "chevron.down", help: "Next message of mine", small: true, label: "Next message of mine",
-                                 enabled: scroll.canNext) { scroll.nextPrompt() }
+        let left = side == .left
+        ZStack(alignment: left ? .leading : .trailing) {
+            // the hit strip, with the pill on its outer side
+            Button { state.activate() } label: {
+                ZStack(alignment: left ? .leading : .trailing) {
+                    Color.clear
+                    Capsule().fill(accent ? QCColor.accent : state.lit ? QCColor.text : QCColor.muted)
+                        .frame(width: QCEdgeLayout.pillWidth, height: QCEdgeLayout.pillHeight)
                 }
-                if !scroll.atBottom {
-                    QCIconButton(symbol: "arrow.down.to.line", help: "Jump to latest", small: true, label: "Jump to latest") { scroll.jumpToLatest() }
-                        .overlay(alignment: .topTrailing) {
-                            if scroll.newBelow { Circle().fill(QCColor.accent).frame(width: 7, height: 7).offset(x: -3, y: 3).allowsHitTesting(false) }
-                        }
-                        .accessibilityValue(Text(scroll.newBelow ? "New text below" : ""))
+                .frame(width: QCEdgeLayout.stripWidth, height: QCEdgeLayout.stripHeight)
+                .contentShape(Rectangle())
+                .qcControl()
+            }
+            .buttonStyle(.plain)
+            .onHover { state.strip($0) }
+            .accessibilityLabel(Text(label))
+            .accessibilityValue(Text(value))
+            .report(scroll, "\(name).strip")
+            .padding(left ? .leading : .trailing, left ? QCEdgeLayout.clear : QCEdgeLayout.scroller)
+            if state.expanded {
+                VStack(spacing: 0) { box() }
+                    .padding(QCEdgeLayout.boxPadding)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(QCColor.window))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(QCColor.line))
+                    .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
+                    .qcControl()          // the rim as well: a press there never moves the window
+                    .onHover { state.box($0) }
+                    .report(scroll, "\(name).box")
+                    .padding(left ? .leading : .trailing, left ? QCEdgeLayout.leftBoxInset : QCEdgeLayout.rightBoxInset)
+            }
+        }
+        .frame(height: QCEdgeLayout.boxMaxHeight, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: left ? .leading : .trailing)
+        .padding(.bottom, QCEdgeLayout.bottomGap)
+        .onDisappear { state.reset(); scroll.forget(name) }
+    }
+}
+
+private extension View {
+    /// Tells the scroll controller this view's frame (window-global), for the checks.
+    func report(_ scroll: QCChatScroll, _ key: String) -> some View {
+        background(GeometryReader { g in
+            Color.clear
+                .onAppear { scroll.frames[key] = g.frame(in: .global) }
+                .onChange(of: g.frame(in: .global)) { scroll.frames[key] = $0 }
+                .onDisappear { scroll.frames[key] = nil }
+        })
+    }
+}
+
+/// What floats over the answers, in two handles: the left one's stack is this answer's ⤒ and copy (while its footer is out
+/// of sight); the right one's is ▲ ▼ (once there are two messages of the user's) and jump to latest (while not at the bottom).
+struct QCEdgeHandles: View {
+    @ObservedObject var scroll: QCChatScroll
+    @ObservedObject var model: QuickChatModel
+
+    var body: some View {
+        ZStack {
+            if let id = scroll.pair, let turn = model.turns.first(where: { $0.id == id }) {
+                QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, label: "This answer") {
+                    if scroll.answersAbove.contains(id) {
+                        QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
+                                     label: "Go to the start of this answer") { scroll.goToStart(ofAnswer: id) }
+                    }
+                    QCIconButton(symbol: model.copied == id ? "checkmark" : "doc.on.doc", help: "Copy this answer ⇧⌘C", small: true,
+                                 label: "Copy this answer") { _ = model.copyAnswer(of: turn) }
                 }
             }
-                .padding(2)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(QCColor.surface))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(QCColor.line))
-                .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
-                .qcControl()          // the rim as well: a press there never moves the window
+            if QCChatScroll.showsPrompts(turns: model.turns.count) || !scroll.atBottom {
+                QCEdgeHandle(side: .right, state: scroll.right, name: "right", scroll: scroll, label: "Message navigation",
+                             value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
+                    if QCChatScroll.showsPrompts(turns: model.turns.count) {
+                        QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
+                                     enabled: scroll.canPrevious) { scroll.previousPrompt() }
+                        QCIconButton(symbol: "chevron.down", help: QCNavHelp.next, small: true, label: "Next message of mine",
+                                     enabled: scroll.canNext) { scroll.nextPrompt() }
+                    }
+                    if !scroll.atBottom {
+                        QCIconButton(symbol: "arrow.down.to.line", help: QCNavHelp.latest, small: true, label: "Jump to latest") { scroll.jumpToLatest() }
+                    }
+                }
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 }

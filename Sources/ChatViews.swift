@@ -125,7 +125,7 @@ struct QCWindow: View {
                     .overlay(VStack(alignment: .leading, spacing: 0) { turns }.padding(Self.chatPadding), alignment: .bottom)
                     .clipped()
                     .overlay(alignment: .top) { fade }
-                    .overlay(alignment: .bottomTrailing) { floating }
+                    .overlay { floating }
             } else {
                 // the chat is at least as tall as the scroll view, so the empty space below a short one drags too. It is
                 // an NSScrollView underneath; QCChatScroll watches it (the probe finds it), so following the end stops when
@@ -145,7 +145,7 @@ struct QCWindow: View {
                     .onChange(of: model.followTick) { _ in scroll.jumpToLatest() }
                 }
                 .overlay(alignment: .top) { fade }
-                .overlay(alignment: .bottomTrailing) { floating }
+                .overlay { floating }
                 .frame(minHeight: 44)         // a line of chat stays, whatever the window
             }
             // Dictation off in macOS: its one line, over the field box
@@ -176,8 +176,11 @@ struct QCWindow: View {
     /// The window's fill: opaque (alpha 1), so nothing of the windows behind ever shows through.
     static let fill = QCColor.window
 
-    /// The answers start on the same 10 pt line as the header's name and the field box.
-    static let chatPadding = EdgeInsets(top: 4, leading: QCSpace.gap, bottom: 12, trailing: QCSpace.gap)
+    /// The answers' text column: it starts and ends inside the gutters the edge handles stand in (QCEdgeLayout), clear of
+    /// them, of macOS's resize band and of the scroller.
+    static var chatPadding: EdgeInsets {
+        EdgeInsets(top: 4, leading: QCEdgeLayout.leftGutter, bottom: 12, trailing: QCEdgeLayout.rightGutter)
+    }
 
     /// The answers scroll under the header through a short fade, not a hard edge.
     private var fade: some View {
@@ -185,11 +188,8 @@ struct QCWindow: View {
             .frame(height: 10).allowsHitTesting(false)
     }
 
-    /// What floats over the answers' bottom edge, in the gap above the field box: bottom right, ▲ ▼ and jump to latest.
-    private var floating: some View {
-        QCScrollControl(scroll: scroll, prompts: QCChatScroll.showsPrompts(turns: model.turns.count))
-            .padding(.trailing, QCSpace.gap).padding(.bottom, 8)
-    }
+    /// The edge handles over the answers' bottom corners, above the field box (ChatScroll.swift).
+    private var floating: some View { QCEdgeHandles(scroll: scroll, model: model) }
 
     @ViewBuilder private var turns: some View {
         if let note = model.accountNote { QCNote(words: note).padding(.top, 14) }
@@ -541,10 +541,10 @@ struct QCTurnView: View {
             ForEach(Self.footerActions(above: above, last: last), id: \.self) { a in
                 switch a {
                 case .start:
-                    QCIconButton(symbol: "arrow.up.to.line", help: "Go to the start of this answer", small: true,
+                    QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
                                  label: "Go to the start of this answer") { scroll?.goToStart(ofAnswer: turn.id) }
                 case .copy:
-                    QCIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy (⌘⇧C copies the last answer)", small: true) { model.copyAnswer(of: turn) }
+                    QCIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy ⇧⌘C", small: true) { model.copyAnswer(of: turn) }
                 case .again:
                     QCIconButton(symbol: "arrow.clockwise", help: "Ask again", small: true) { model.again() }
                 }
@@ -2597,6 +2597,8 @@ enum QuickChatRender {
             t.problem = .stopped(detail: "claude exited with code 1: API Error: Connection error."); m.turns = [t]
         case "notsigned": var t = QuickChatTurn(question: q1); t.phase = .failed; t.problem = .notSignedIn(profile: "Main", id: "main"); m.turns = [t]
         case "thinking", "short", "haiku", "tint-fable", "tint-extra", "tint-max", "tint-fablemax", "models3", "models2", "keys",
+             "keys-model", "keys-move", "keys-write",
+             "nav-rest", "nav-lit", "nav-open", "nav-new", "nav-new-open", "answer-start",
              _ where state.hasPrefix("hover-"):
             var t2 = QuickChatTurn(question: "And only the PID, for a script?",
                                    answer: "Add `-t`, which prints bare PIDs:\n```zsh\nkill $(lsof -t -iTCP:3000 -sTCP:LISTEN)\n```",
@@ -2612,6 +2614,16 @@ enum QuickChatRender {
             case "tint-fablemax": m.choice = .fable; m.thinking = .max
             case "models2": m.choice = .sonnet; m.thinking = .medium
             case _ where state.hasPrefix("hover-"): m.choice = .opus; m.thinking = .high
+            // the edge handles, with the view scrolled up inside the second answer (nav-rest: both handles at rest; nav-lit: the
+            // pointer on each; nav-open: both stacks open; nav-new: text arrived below, the right handle in the accent;
+            // nav-new-open: and its stack open) and an answer's footer with ⤒ (answer-start)
+            case "nav-rest", "nav-lit", "nav-open", "nav-new", "nav-new-open":
+                let fresh = state.hasPrefix("nav-new")
+                m.scroll.showForPicture(atBottom: false, newBelow: fresh, canPrevious: true, canNext: true, answersAbove: [t2.id], pair: t2.id)
+                m.scroll.left.showForPicture(lit: state == "nav-lit", expanded: state == "nav-open")
+                m.scroll.right.showForPicture(lit: state == "nav-lit", expanded: state == "nav-open" || state == "nav-new-open")
+            case "answer-start":
+                m.scroll.showForPicture(atBottom: true, newBelow: false, answersAbove: [t2.id])
             default: break
             }
         case "full":

@@ -348,6 +348,14 @@ final class QuickChatModel: ObservableObject {
     @discardableResult
     func copyLatestAnswer() -> Bool { latestAnswer.map { copyAnswer(of: $0) } ?? false }
 
+    /// ⇧⌘C: once the user has scrolled up, the answer at the view's bottom edge (the left handle's; the text so far while
+    /// it streams); otherwise the latest complete answer, as ever. The tick and "Copied" are the footer's.
+    @discardableResult
+    func copyAnswerInView() -> Bool {
+        if !scroll.following, let id = scroll.answerAtBottomEdge(), let t = turns.first(where: { $0.id == id }), copyAnswer(of: t) { return true }
+        return copyLatestAnswer()
+    }
+
     // set by QuickChat
     var resolveClaude: (@escaping (String?) -> Void) -> Void = { $0(nil) }
     var hide: () -> Void = {}
@@ -1619,7 +1627,11 @@ final class QuickChat {
         p.onEscape = { [weak self] in self?.escape() }
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
-        p.onCopyAnswer = { [weak self] in _ = self?.model.copyLatestAnswer() }
+        p.onCopyAnswer = { [weak self] in _ = self?.model.copyAnswerInView() }
+        p.onNavigate = { [weak self] nav in
+            guard let m = self?.model, m.isWindow else { return false }
+            return m.scroll.perform(nav, turns: m.turns.count)
+        }
         p.onDictate = { [weak self] in self?.model.toggleDictation() }
         p.onKeyLost = { [weak self] in self?.keyLost() }
         p.onStep = { [weak self] model, by in
@@ -1867,6 +1879,8 @@ final class QuickChatPanel: NSPanel {
     var onCopyAnswer: () -> Void = {}
     /// ⌘D: Dictation on or off, as the mic button does.
     var onDictate: () -> Void = {}
+    /// Moving in the chat (QCNav): true when the key was taken (the chat window has answers to move in).
+    var onNavigate: (QCNav) -> Bool = { _ in false }
     /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
     /// The digit keys (QCDigitKeys): ⌘ digits the size, ⌃ digits the place on the screen.
@@ -1904,7 +1918,8 @@ final class QuickChatPanel: NSPanel {
         guard let c = e.charactersIgnoringModifiers?.lowercased(), !c.isEmpty else { return nil }
         if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.isASCII { return c }
         let place: [Int: String] = [kVK_ANSI_A: "a", kVK_ANSI_C: "c", kVK_ANSI_V: "v", kVK_ANSI_X: "x", kVK_ANSI_Z: "z",
-                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w", kVK_ANSI_D: "d"]
+                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w", kVK_ANSI_D: "d", kVK_ANSI_J: "j"]
+        // (not the bracket keys: Ukrainian has ї and ґ on them, which stay their letters; ⌘[ and ⌘] are the US keys')
         // only a letter of another script falls back to the key's place: a digit, a symbol or a dead key stays as it is
         if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.properties.isAlphabetic, let l = place[Int(e.keyCode)] { return l }
         return c
@@ -1920,6 +1935,19 @@ final class QuickChatPanel: NSPanel {
             return true
         }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Page Up, Page Down and End (no modifier at all, the function flag aside) move the answers even while the field has the
+        // keyboard; the arrows keep their text meaning in the field. Page keys scroll and stop following; End goes to the bottom.
+        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]).isEmpty {
+            switch Int(e.keyCode) {
+            case kVK_PageUp: if onNavigate(.pageUp) { return true }
+            case kVK_PageDown: if onNavigate(.pageDown) { return true }
+            case kVK_End: if onNavigate(.end) { return true }
+            // while the keys list is open, ← and → turn its pages (otherwise they are the field's, as ever)
+            case kVK_LeftArrow: if QCKeys.shared.turnPage(-1) { return true }
+            case kVK_RightArrow: if QCKeys.shared.turnPage(1) { return true }
+            default: break
+            }
+        }
         // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model. Plain ⌘ arrows are macOS's own (in a text field the caret's jump to the
         // line's or the text's start and end, in a selected answer's view a scroll to its ends), so they are not taken and reach
         // the field and the view. A key with ⌥⌘ is offered here first and taken, so neither the field nor a scroll view ever
@@ -1948,6 +1976,11 @@ final class QuickChatPanel: NSPanel {
         case "a": action = #selector(NSText.selectAll(_:))
         case "z": action = shift ? Selector(("redo:")) : Selector(("undo:"))
         case "d" where !shift: onDictate(); return true
+        // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view, ⌘[ ⌘] the previous and next message of the user's):
+        // taken only when the chat window has something to scroll, and never a text edit, so the field keeps its keys
+        case "j": if onNavigate(shift ? .answerStart : .latest) { return true }
+        case "[" where !shift: if onNavigate(.previousPrompt) { return true }
+        case "]" where !shift: if onNavigate(.nextPrompt) { return true }
         case "n" where !shift: onNewChat(); return true
         case "w" where !shift: onClose(); return true
         default: break

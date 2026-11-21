@@ -4669,6 +4669,327 @@ func chatScrollChecks() {
 }
 chatScrollChecks()
 
+// ── the edge handles: when they show, where they stand, how they open, and that they keep clear of the edges' own zones ──────────
+func chatHandleChecks() {
+    func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1 }
+    let m = chat.model
+    let sc = m.scroll
+    m.newChat(); m.field = ""
+    m.turns = (1...4).map { ChatScrollRig.turn($0, lines: 30) }       // answers taller than the view
+    chat.open(); spin(0.3)
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    guard let sv = sc.scrollView, let cv = p.contentView else { check("handles: the chat's scroll view is found", false); return }
+    let clip = sv.contentView
+    let ids = m.turns.map(\.id)
+    func user(scrollTo o: CGFloat) { clip.scroll(to: NSPoint(x: 0, y: o)); sv.reflectScrolledClipView(clip) }
+    func settle() { spin(0.15) }
+    func win(_ r: CGRect) -> NSRect {      // a SwiftUI global frame (top-left) as a window rect
+        let a = cv.convert(NSPoint(x: r.minX, y: cv.isFlipped ? r.minY : cv.bounds.height - r.minY), to: nil)
+        let b = cv.convert(NSPoint(x: r.maxX, y: cv.isFlipped ? r.maxY : cv.bounds.height - r.maxY), to: nil)
+        return NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+    }
+    // which answer the left handle belongs to
+    sc.jumpToLatest(); settle()
+    check("handles: at the bottom the answer's footer is in view: no left handle", sc.pair == nil, "\(String(describing: sc.pair))")
+    check("handles: at the bottom the right handle shows (two messages of the user's)", QCChatScroll.showsPrompts(turns: m.turns.count))
+    let a2 = sc.top(ofAnswer: ids[1]) ?? 0, a3 = sc.top(ofAnswer: ids[2]) ?? 0
+    user(scrollTo: a2 + 100); settle()
+    check("handles: reading the middle of the second answer, the left handle belongs to it", sc.pair == ids[1], "\(String(describing: sc.pair)) offset \(sc.offset()) a2 \(a2) a3 \(a3)")
+    check("handles: its ⤒ is there (the first line is above the view)", sc.answersAbove.contains(ids[1]))
+    user(scrollTo: a2 - 60); settle()
+    check("handles: with the second answer's first line in view the handle is still its (copy only, no ⤒)", sc.pair == ids[1] && !sc.answersAbove.contains(ids[1]), "\(String(describing: sc.pair))")
+    // the view's bottom edge just above the third message: the second answer's end and its footer are in view
+    user(scrollTo: (sc.top(ofQuestion: ids[2]) ?? 0) - 5 - clip.bounds.height); settle()
+    check("handles: once the answer's own footer is in view the left handle goes", sc.pair != ids[1], "\(String(describing: sc.pair))")
+    user(scrollTo: a2 + 100); settle()
+
+    // the frames, in points
+    let W = p.frame.width
+    guard let ls = sc.frames["left.strip"], let rs = sc.frames["right.strip"] else { check("handles: both strips report their frames", false, "\(sc.frames.keys.sorted())"); return }
+    check("handles: the strips are 14 × 44, along the edges", near(ls.width, 14) && near(ls.height, 44) && near(rs.width, 14) && near(rs.height, 44), "\(ls) \(rs)")
+    check("handles: the left strip stands 5 pt in, the right one inward of the scroller", near(ls.minX, QCEdgeLayout.clear) && near(rs.maxX, W - QCEdgeLayout.scroller), "\(ls.minX) \(rs.maxX) W \(W)")
+    check("handles: the text column is 10 pt or more clear of each pill",
+          QCEdgeLayout.leftGutter - (QCEdgeLayout.clear + QCEdgeLayout.pillWidth) >= 10 && QCEdgeLayout.rightGutter - (QCEdgeLayout.scroller - 0 + QCEdgeLayout.pillWidth) >= 10,
+          "\(QCEdgeLayout.leftGutter) \(QCEdgeLayout.rightGutter)")
+    // opening: a pass opens nothing, a rest opens it, beside the handle and never under the pointer; leaving closes it after a while
+    for (name, state) in [("left", sc.left), ("right", sc.right)] {
+        state.strip(true); spin(0.05); state.strip(false)
+        spin(0.3)
+        check("handles: \(name): a pass of 0.05 s opens nothing", !state.expanded)
+        state.strip(true)
+        check("handles: \(name): the pointer's arrival opens nothing yet", !state.expanded)
+        spin(0.05)
+        check("handles: \(name): nothing is open before the rest (0.15 s) is over", !state.expanded)
+        spin(0.25)
+        check("handles: \(name): it opens after the rest, and the handle is lit", state.expanded && state.lit)
+        settle()
+        if let strip = sc.frames["\(name).strip"], let box = sc.frames["\(name).box"] {
+            let pill = name == "left" ? CGRect(x: strip.minX, y: strip.midY - 15, width: 3, height: 30) : CGRect(x: strip.maxX - 3, y: strip.midY - 15, width: 3, height: 30)
+            check("handles: \(name): the stack opens beside the handle, inward, 6 pt clear of the pill",
+                  name == "left" ? near(box.minX, pill.maxX + 6) : near(box.maxX, pill.minX - 6), "box \(box) pill \(pill)")
+            check("handles: \(name): the stack is centred on the handle vertically and never under the pointer's point (the pill's middle)",
+                  near(box.midY, strip.midY) && !box.contains(CGPoint(x: pill.midX, y: pill.midY)), "box \(box) strip \(strip)")
+        } else { check("handles: \(name): the open stack reports its frame", false, "\(sc.frames.keys.sorted())") }
+        state.strip(false)
+        spin(0.25)
+        check("handles: \(name): the stack stays about half a second after the pointer leaves", state.expanded)
+        spin(0.45)
+        check("handles: \(name): it closes after that", !state.expanded && !state.lit)
+        // the pointer on the stack holds it open
+        state.activate()
+        state.box(true); spin(0.7)
+        check("handles: \(name): the pointer on the stack keeps it open", state.expanded)
+        state.box(false); spin(0.7)
+        check("handles: \(name): and it closes after it leaves", !state.expanded)
+        state.reset()
+    }
+    // the zones at the edges, at every panel size: the strips and the open stacks keep clear of the resize band (under 4 pt deep,
+    // 20 pt at a corner), the scroller (its track on the right), and are controls, never a drag surface
+    func zones(_ label: String) {
+        sc.left.activate(); sc.right.activate(); spin(0.3)
+        let size = p.frame.size
+        guard let sv = sc.scrollView, let scroller = sv.verticalScroller else { check("handles: \(label): the scroller is found", false); return }
+        let track = sv.convert(scroller.frame, to: nil)
+        var bad: [String] = []
+        for key in ["left.strip", "right.strip", "left.box", "right.box"] {
+            guard let f = sc.frames[key] else { bad.append("\(key) has no frame"); continue }
+            let r = win(f)
+            let band = [NSRect(x: 0, y: 0, width: 4, height: size.height), NSRect(x: size.width - 4, y: 0, width: 4, height: size.height),
+                        NSRect(x: 0, y: 0, width: size.width, height: 4), NSRect(x: 0, y: size.height - 4, width: size.width, height: 4),
+                        NSRect(x: 0, y: 0, width: 20, height: 20), NSRect(x: size.width - 20, y: 0, width: 20, height: 20),
+                        NSRect(x: 0, y: size.height - 20, width: 20, height: 20), NSRect(x: size.width - 20, y: size.height - 20, width: 20, height: 20)]
+            if band.contains(where: { $0.intersects(r) }) { bad.append("\(key) \(r) meets the resize band") }
+            if track.width > 0, track.intersects(r) { bad.append("\(key) \(r) meets the scroller \(track)") }
+            for q in [CGPoint(x: r.midX, y: r.midY), CGPoint(x: r.minX + 0.5, y: r.minY + 0.5), CGPoint(x: r.maxX - 0.5, y: r.maxY - 0.5)] {
+                let v = QCDragView.hit(at: q, in: p)
+                if v == nil || v === cv.superview { bad.append("\(key) at \(q): the resize zone or outside (\(String(describing: v)))") }
+                if QCDragView.surface(at: q, in: p) != nil { bad.append("\(key) at \(q): a drag surface") }
+            }
+        }
+        check("handles: \(label): the strips and the stacks are clear of the resize band, the scroller (\(track.width) pt) and the drag surfaces", bad.isEmpty, "\(bad)")
+        if let l = sc.frames["left.box"], let r = sc.frames["right.box"], let ls = sc.frames["left.strip"], let rs = sc.frames["right.strip"] {
+            check("handles: \(label): the left and right handles never overlap each other (strips and stacks)",
+                  !l.intersects(r) && !ls.intersects(rs) && !l.intersects(rs) && !r.intersects(ls) && l.maxX < r.minX, "\(l) \(r)")
+        }
+        sc.left.reset(); sc.right.reset()
+    }
+    for w in [320, 420, 520, 720, 960] as [CGFloat] {
+        var f = p.frame; f.size.width = w + 2 * QuickChatRoot.margin; p.setFrame(f, display: true)
+        spin(0.3); spinQuiet(p)
+        user(scrollTo: (sc.top(ofAnswer: ids[1]) ?? 0) + 100); settle()
+        zones("\(Int(w)) pt wide")
+    }
+    m.newChat(); chat.hide(); spin(0.2)
+}
+chatHandleChecks()
+
+// ── the navigation keys: ⌘J, ⇧⌘J, ⌘[ ⌘], ⇧⌘C in view, Page Up, Page Down and End with the field focused ──────────────────────────
+func chatKeyChecks() {
+    func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1 }
+    let m = chat.model
+    let sc = m.scroll
+    m.newChat(); m.field = ""
+    m.turns = (1...4).map { ChatScrollRig.turn($0) }
+    chat.open(); spin(0.3)
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    guard let sv = sc.scrollView else { check("keys: the chat's scroll view is found", false); return }
+    let clip = sv.contentView
+    let ids = m.turns.map(\.id)
+    func user(scrollTo o: CGFloat) { clip.scroll(to: NSPoint(x: 0, y: o)); sv.reflectScrolledClipView(clip) }
+    func settle() { spin(0.15) }
+    func key(_ ch: String, _ code: Int, _ flags: NSEvent.ModifierFlags = []) -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                                       characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: UInt16(code)) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
+    func fn(_ f: Int) -> String { String(UnicodeScalar(UInt16(f))!) }
+    let cmd: NSEvent.ModifierFlags = .command
+    let answerTops = ids.compactMap { sc.top(ofAnswer: $0) }
+    let tops = ids.compactMap { sc.top(ofQuestion: $0) }
+    guard answerTops.count == 4, tops.count == 4 else { check("keys: anchors found", false, "\(answerTops) \(tops)"); return }
+    func target(_ i: Int) -> CGFloat { min(max(0, tops[i] - QCChatScroll.inset), sc.maxOffset()) }
+    // the field has the keyboard and some text, the caret in the middle of it
+    m.field = "hello world"; spin(0.2)
+    guard let tv = p.firstResponder as? NSTextView else { check("keys: the field has the keyboard", false, "\(String(describing: p.firstResponder))"); return }
+    tv.setSelectedRange(NSRange(location: 5, length: 0))
+    func fieldUntouched(_ what: String) {
+        check("keys: \(what): the field's text and caret are untouched", m.field == "hello world" && tv.string == "hello world" && tv.selectedRange() == NSRange(location: 5, length: 0),
+              "\(tv.string) \(tv.selectedRange())")
+    }
+    // ⌘J
+    user(scrollTo: 50); settle()
+    check("keys: scrolled up, not following", !sc.following && !sc.atBottom)
+    check("keys: ⌘J is taken and jumps to the latest, following again", key("j", kVK_ANSI_J, cmd) && sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
+    fieldUntouched("⌘J")
+    // ⌘[ and ⌘]
+    // (from the bottom ▲ goes to the nearest message whose landing moves the view: the last message's landing is cut to the
+    // bottom, where the view already is, so it is the one before)
+    let t1 = sc.previousTarget()
+    check("keys: ⌘[ goes to the previous message, final in one step, lit and not following", t1 != nil && key("[", kVK_ANSI_LeftBracket, cmd) && near(sc.offset(), t1!.offset) && sc.flash == t1!.id && !sc.following,
+          "offset \(sc.offset()) want \(String(describing: t1))")
+    let t2 = sc.previousTarget()
+    check("keys: ⌘[ again goes one back, and ⌘] one forward", t2 != nil && key("[", kVK_ANSI_LeftBracket, cmd) && near(sc.offset(), t2!.offset) && key("]", kVK_ANSI_RightBracket, cmd) && near(sc.offset(), t1!.offset),
+          "offset \(sc.offset()) \(String(describing: t2)) \(String(describing: t1))")
+    _ = target(0)
+    user(scrollTo: 0); settle()
+    let atTop = sc.offset()
+    check("keys: ⌘[ at the first message does nothing (and is taken)", key("[", kVK_ANSI_LeftBracket, cmd) && sc.offset() == atTop)
+    sc.jumpToLatest(); settle()
+    let atEnd = sc.offset()
+    check("keys: ⌘] at the last position does nothing (and is taken)", key("]", kVK_ANSI_RightBracket, cmd) && sc.offset() == atEnd)
+    fieldUntouched("⌘[ and ⌘]")
+    // ⇧⌘J: the start of the answer at the view's bottom edge (the last, at the bottom)
+    check("keys: ⇧⌘J at the bottom goes to the start of the last answer (cut to what can be scrolled to)", key("J", kVK_ANSI_J, [.command, .shift]) && near(sc.offset(), min(sc.maxOffset(), answerTops[3] - QCChatScroll.inset)),
+          "offset \(sc.offset()) want \(answerTops[3] - QCChatScroll.inset)")
+    user(scrollTo: answerTops[1] + 200); settle()
+    let edge = sc.answerAtBottomEdge()
+    check("keys: the answer at the view's bottom edge is the one being read", edge == ids[1] || edge == ids[2], "\(String(describing: edge)) offset \(sc.offset())")
+    _ = key("J", kVK_ANSI_J, [.command, .shift])
+    check("keys: ⇧⌘J goes to the start of that answer", edge.flatMap { e in ids.firstIndex(of: e) }.map { near(sc.offset(), min(sc.maxOffset(), answerTops[$0] - QCChatScroll.inset)) } == true, "offset \(sc.offset())")
+    fieldUntouched("⇧⌘J")
+    // ⇧⌘C: the answer in view once scrolled up, else the last one
+    let pbName = NSPasteboard.Name("cl-quick-nav-check-\(ProcessInfo.processInfo.processIdentifier)")
+    let pb = NSPasteboard(name: pbName)
+    let realPasteboard = m.pasteboard
+    m.pasteboard = pb
+    defer { pb.releaseGlobally(); m.pasteboard = realPasteboard }
+    user(scrollTo: answerTops[1] + 150); settle()
+    let inView = sc.answerAtBottomEdge().flatMap { id in m.turns.first { $0.id == id } }
+    pb.clearContents()
+    check("keys: ⇧⌘C is taken and copies the answer in view once scrolled up, with the footer's ✓", key("C", kVK_ANSI_C, [.command, .shift]) && inView != nil
+          && pb.string(forType: .string) == inView?.answer.trimmingCharacters(in: .whitespacesAndNewlines) && m.copied == inView?.id, "\(String(describing: pb.string(forType: .string)?.prefix(40)))")
+    sc.jumpToLatest(); settle()
+    pb.clearContents()
+    check("keys: ⇧⌘C at the bottom copies the last answer, as before", key("C", kVK_ANSI_C, [.command, .shift]) && pb.string(forType: .string) == m.turns[3].answer.trimmingCharacters(in: .whitespacesAndNewlines))
+    // Page Up, Page Down and End, with the field focused
+    sc.jumpToLatest(); settle()
+    let h = clip.bounds.height
+    check("keys: Page Up scrolls the answers by about a page and stops following (the field focused)",
+          key(fn(NSPageUpFunctionKey), kVK_PageUp, [.function]) && near(sc.maxOffset() - sc.offset(), h - 40) && !sc.following, "\(sc.maxOffset() - sc.offset()) vs \(h - 40)")
+    fieldUntouched("Page Up")
+    let up1 = sc.offset()
+    _ = key(fn(NSPageUpFunctionKey), kVK_PageUp, [.function])
+    check("keys: Page Up again goes another page up", near(up1 - sc.offset(), h - 40) || sc.offset() == 0, "\(up1) -> \(sc.offset())")
+    check("keys: Page Down goes a page down, still not following", key(fn(NSPageDownFunctionKey), kVK_PageDown, [.function]) && near(sc.offset(), up1) && !sc.following)
+    fieldUntouched("Page Down")
+    check("keys: End goes to the bottom and resumes following", key(fn(NSEndFunctionKey), kVK_End, [.function]) && sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset())")
+    fieldUntouched("End")
+    user(scrollTo: sc.maxOffset() - (h - 40) + 15); settle()
+    _ = key(fn(NSPageDownFunctionKey), kVK_PageDown, [.function])
+    check("keys: Page Down that reaches the bottom resumes following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    // plain arrows and fn-arrows stay the field's: not taken, caret and text as the field has them
+    check("keys: plain arrows, fn-arrows, Home and Delete are not taken", !key(fn(NSLeftArrowFunctionKey), kVK_LeftArrow, [.function]) && !key(fn(NSUpArrowFunctionKey), kVK_UpArrow, [.function])
+          && !key(fn(NSHomeFunctionKey), kVK_Home, [.function]) && !key(fn(NSDownArrowFunctionKey), kVK_DownArrow, [.function]))
+    // exact modifiers
+    let off0 = sc.offset()
+    let loose = [key("j", kVK_ANSI_J, [.command, .option]), key("j", kVK_ANSI_J, [.command, .control]), key("j", kVK_ANSI_J, []),
+                 key("[", kVK_ANSI_LeftBracket, [.command, .shift]), key("]", kVK_ANSI_RightBracket, [.command, .option]),
+                 key(fn(NSPageUpFunctionKey), kVK_PageUp, [.function, .shift]), key(fn(NSPageUpFunctionKey), kVK_PageUp, [.function, .command]),
+                 key(fn(NSEndFunctionKey), kVK_End, [.function, .option])]
+    check("keys: other modifier mixes are not taken and move nothing", loose.allSatisfy { !$0 } && sc.offset() == off0, "\(loose)")
+    // no clash with the ⌥⌘ arrows, the Edit keys and ⇧⌘ arrows
+    var steps: [(Bool, Int)] = []
+    let oldStep = p.onStep
+    p.onStep = { steps.append(($0, $1)) }
+    check("keys: ⌥⌘ arrows still step the model and thinking", key(fn(NSUpArrowFunctionKey), kVK_UpArrow, [.command, .option, .function]) && key(fn(NSRightArrowFunctionKey), kVK_RightArrow, [.command, .option, .function]) && steps.count == 2, "\(steps)")
+    p.onStep = oldStep
+    tv.setSelectedRange(NSRange(location: 0, length: 5))
+    check("keys: ⌘A, ⌘C and ⌘Z still go to the field (taken as Edit keys, the answers not scrolled)", key("a", kVK_ANSI_A, cmd) && sc.offset() == off0)
+    tv.setSelectedRange(NSRange(location: 5, length: 0))
+    check("keys: the tooltips end with their key",
+          QCNavHelp.latest.hasSuffix(" ⌘J") && QCNavHelp.start.hasSuffix(" ⇧⌘J") && QCNavHelp.previous.hasSuffix(" ⌘[") && QCNavHelp.next.hasSuffix(" ⌘]"))
+    let pages = QCKeysView.pages(opener: "⌃⇧Space")
+    check("keys: the keys list has three pages, none as tall as the 12 rows it had", pages.map(\.page) == QCKeysPage.allCases && pages.map { $0.rows.count }.max()! < 12, "\(pages.map { $0.rows.count })")
+    // with no chat (the bar) the navigation keys are not taken
+    m.newChat(); spin(0.3)
+    check("keys: in the bar (no chat) ⌘J, ⌘[, ⌘], Page Up and End are not taken", !key("j", kVK_ANSI_J, cmd) && !key("[", kVK_ANSI_LeftBracket, cmd) && !key("]", kVK_ANSI_RightBracket, cmd)
+          && !key(fn(NSPageUpFunctionKey), kVK_PageUp, [.function]) && !key(fn(NSEndFunctionKey), kVK_End, [.function]))
+    chat.hide(); spin(0.2)
+}
+chatKeyChecks()
+
+// ── the scrolling defaults: resizing, hiding and reopening, the "new text below" mark, the streaming answer's handle ─────────────────
+func chatBehaviourChecks() {
+    func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1.5 }
+    let m = chat.model
+    let sc = m.scroll
+    m.newChat(); m.field = ""
+    m.turns = (1...4).map { ChatScrollRig.turn($0, lines: 30) }
+    chat.open(); spin(0.3)
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    guard let sv = sc.scrollView else { check("behaviour: the chat's scroll view is found", false); return }
+    let clip = sv.contentView
+    func user(scrollTo o: CGFloat) { clip.scroll(to: NSPoint(x: 0, y: o)); sv.reflectScrolledClipView(clip) }
+    func settle() { spin(0.2) }
+    func resize(width: CGFloat? = nil, height: CGFloat? = nil) {
+        var f = p.frame
+        if let width { f.size.width = width + 2 * QuickChatRoot.margin }
+        if let height { f.origin.y += f.size.height - height; f.size.height = height }
+        p.setFrame(f, display: true); spin(0.3); spinQuiet(p)
+    }
+    let h0 = p.frame.height
+    // 1. a resize at the bottom stays at the bottom and keeps following
+    sc.jumpToLatest(); settle()
+    resize(height: h0 + 120)
+    check("behaviour: taller at the bottom: still at the bottom, following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    resize(width: 720)
+    check("behaviour: wider at the bottom: still at the bottom, following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    resize(width: 420, height: h0)
+    check("behaviour: smaller at the bottom: still at the bottom, following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    let max0 = sc.maxOffset()
+    m.turns[3].answer += "\n\n" + ChatScrollRig.lines(3, "after-resize"); m.scrollTick += 1; settle()
+    check("behaviour: after a resize new text still follows", sc.maxOffset() > max0 && sc.isAtBottom)
+    // 1b. a resize mid-chat keeps the text being read where it is (the same offset from the top)
+    user(scrollTo: 700); settle()
+    let held = sc.offset()
+    resize(height: h0 + 100)
+    check("behaviour: taller mid-chat: the view's top text stays, not following", near(sc.offset(), held) && !sc.following, "offset \(held) -> \(sc.offset())")
+    resize(width: 560)
+    check("behaviour: wider mid-chat: not following, not pulled to the end", !sc.following && !sc.isAtBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
+    resize(width: QuickChatRoot.width, height: h0)
+    // 2. hiding and reopening restores the position and the following state
+    user(scrollTo: 700); settle()
+    let before = sc.offset()
+    chat.hide(); spin(0.3); chat.open(); spin(0.4); spinQuiet(p)
+    check("behaviour: hidden and reopened scrolled up: the same place, not following", near(sc.offset(), before) && !sc.following, "offset \(before) -> \(sc.offset())")
+    sc.jumpToLatest(); settle()
+    chat.hide(); spin(0.3); chat.open(); spin(0.4); spinQuiet(p)
+    check("behaviour: hidden and reopened at the bottom: still at the bottom, following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    // 3. the "new" mark: text arrives below, the answer finishes, the mark stays until the bottom is reached
+    m.turns[3].phase = .streaming
+    user(scrollTo: 600); settle()
+    check("behaviour: scrolled up in a streaming chat: no mark yet", !sc.newBelow && !sc.following)
+    m.turns[3].answer += "\n\n" + ChatScrollRig.lines(2, "streaming"); m.scrollTick += 1; settle()
+    check("behaviour: text arrives below: the mark shows", sc.newBelow)
+    m.turns[3].phase = .done; m.turns[3].seconds = 2; m.scrollTick += 1; settle()
+    check("behaviour: the answer finishes: the mark stays", sc.newBelow && !sc.atBottom)
+    user(scrollTo: sc.maxOffset()); settle()
+    check("behaviour: reaching the bottom clears the mark", !sc.newBelow && sc.atBottom && sc.following)
+    // 4. the floating pair for a streaming answer: copy takes the text so far, ⤒ works
+    m.turns[3].phase = .streaming
+    m.turns[3].answer += "\n\n" + ChatScrollRig.lines(30, "long-stream"); m.scrollTick += 1; settle()
+    sc.jumpToLatest(); settle()
+    check("behaviour: following a streaming answer at the bottom: no left handle (its end is in view)", sc.pair == nil, "\(String(describing: sc.pair))")
+    let streamTop = sc.top(ofAnswer: m.turns[3].id) ?? 0
+    user(scrollTo: streamTop + 300); settle()
+    check("behaviour: scrolled up inside the streaming answer: the left handle belongs to it", sc.pair == m.turns[3].id, "\(String(describing: sc.pair))")
+    let pb = NSPasteboard(name: NSPasteboard.Name("cl-quick-behaviour-check-\(ProcessInfo.processInfo.processIdentifier)"))
+    let realPasteboard = m.pasteboard
+    m.pasteboard = pb
+    defer { pb.releaseGlobally(); m.pasteboard = realPasteboard }
+    pb.clearContents()
+    let soFar = m.turns[3].answer.trimmingCharacters(in: .whitespacesAndNewlines)
+    check("behaviour: the floating copy takes the text so far and says ✓ like the footer's", m.copyAnswer(of: m.turns[3]) && pb.string(forType: .string) == soFar && m.copied == m.turns[3].id)
+    sc.goToStart(ofAnswer: m.turns[3].id)
+    check("behaviour: ⤒ works on the streaming answer", near(sc.offset(), min(sc.maxOffset(), streamTop - QCChatScroll.inset)) && !sc.following, "offset \(sc.offset()) top \(streamTop)")
+    m.turns[3].phase = .done
+    m.newChat(); chat.hide(); spin(0.2)
+}
+chatBehaviourChecks()
+
 CheckQuiet.verify("at the end")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)

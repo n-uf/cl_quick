@@ -4,12 +4,29 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Moving in a chat.**
+  - **Edge handles.** Two thin pills stand in the answers' side gutters, above the field. The pointer resting on one for
+    about 0.15 s opens a stack beside it (inward, in a solid box); it closes about 0.5 s after the pointer leaves. Nothing
+    slides or fades. Right: ▲ ▼ (previous and next message of yours, lighter bubble for a second where you land) and ↓ jump
+    to latest; its pill is accent coloured while text has arrived below, until you reach the bottom. Left: ⤒ (start of the
+    answer, while its first line is above the view) and copy, for the answer at the view's bottom edge while its footer is
+    out of sight; both work while it streams. The handles keep clear of the resize band, the drag surfaces and the scroller;
+    the answers' text column is narrower by the gutters (19 pt left, 30 pt right).
+  - **Each answer's footer** is now ⤒ copy ↻ (⤒ only while the answer's first line is above the view).
+  - **Keys:** ⌘J jump to latest; ⇧⌘J start of the answer in view; ⌘[ ⌘] previous and next message of yours; ⇧⌘C copies the
+    answer in view once you have scrolled up (else the last answer); Page Up and Page Down scroll the answers (and stop
+    following) and End goes to the bottom, even while the field has the keyboard. Buttons' tooltips end with their key.
+  - **Behaviour:** a resize at the bottom keeps the bottom and following; a resize mid-chat keeps what you are reading;
+    hiding and reopening restores the place and whether it follows; Ask again jumps to the bottom and follows.
+  - **No animation anywhere in this:** every jump is instant, and the handles and the keys list's pages switch at once.
+- **The keys list has three pages** (MODEL & WINDOW · MOVE · WRITE, on the Settings tracks' primitive), always the height of the
+  tallest, so it never resizes; ← and → turn the pages while it is open, and the last page is remembered.
+- **Step controls** lose the dot under the step in use (the lit bars already show it); the bars are centred in their column.
 - **No forced scrolling while an answer streams.** The chat followed the end of the text even when you had scrolled up to
   read. Now it follows only while you are at the bottom (within a few points) when new text arrives. Scroll up by any
   means (wheel, trackpad, scroller, keys, selecting text) and new text never moves the view; scroll back down by hand,
-  press the new **jump to latest** button (floating at the bottom right of the answers, with a dot while text has
-  arrived below), or send a message, and it follows again. The button glides to the bottom, or jumps at once with Reduce
-  Motion; it is labelled "Jump to latest" and hides at the bottom.
+  press the new **jump to latest** button (labelled "Jump to latest", shown only while you are not at the bottom, with a
+  mark while text has arrived below), or send a message, and it follows again. The jump is instant.
 - **Shortcuts that don't clash with macOS.**
   - **Model and thinking keys are now ⌥⌘ arrows** (⌥⌘↑ ⌥⌘↓ thinking, ⌥⌘→ ⌥⌘← model). Plain ⌘ arrows were taken by the
     chat, but in a Mac text field they are the caret's jumps to the line's and the text's start and end; they now reach
