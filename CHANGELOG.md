@@ -4,6 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **The chat's prompt tells Claude about Preview.** Both prompts (with and without web links and search) now say that a
+  fenced `html` block gets a Preview button, that it should be self-contained (inline CSS and SVG only, no scripts, no
+  external images, fonts or links, as none of that loads), and that it is for when a visual layout helps or the user
+  asks; otherwise the answer stays Markdown. Answers should pick HTML more often when a visual helps, and the pages
+  should render whole.
 - **The chat's profile menu matches the menu bar's.** Under each profile's row, its standby accounts are rows
   ("<address> · standby", **Switch…** at the right, the address blurred until the pointer is on the row) and, after them,
   **Add an account…**. A standby row starts the same switch as the menu bar's row (same guards, same "Switch Main to this

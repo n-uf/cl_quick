@@ -477,7 +477,10 @@ struct QuickChatCommand: Equatable {
 
     private static let promptBase = """
         You are Claude, answering in a small floating chat window on the user's Mac. Answer directly and briefly unless \
-        asked for more. Use Markdown; put code in fenced blocks with the language named.
+        asked for more. Use Markdown; put code in fenced blocks with the language named. A fenced `html` block gets a \
+        Preview button that shows it as a page. Make it self-contained: inline CSS and SVG only, no scripts, and no \
+        external images, fonts or links (nothing loads from outside, and links do nothing). Use it when a visual layout \
+        helps or the user asks; otherwise answer in Markdown.
         """
 
     static let systemPrompt = promptBase + " You have no tools here."
