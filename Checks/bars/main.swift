@@ -21,6 +21,8 @@ import SwiftUI
 Files.readOnly = true
 let app = NSApplication.shared
 CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
+/// The user's clipboard: this suite never reads or writes it, and the last check says so.
+let clipboardAtStart = NSPasteboard.general.changeCount
 let chat = QuickChat.shared
 chat.start()
 // no real `claude`: opening the panel would start one on the user's own profile (QuickChatModel.warm) and its models
@@ -517,5 +519,7 @@ if let w = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .com
 } else { check("a ⌘W event can be made", false) }
 
 CheckQuiet.verify("at the end")
+check("clipboard: the whole suite left the general pasteboard as it was (a copy made by someone else meanwhile counts too: run again)",
+      NSPasteboard.general.changeCount == clipboardAtStart, "change count \(clipboardAtStart) → \(NSPasteboard.general.changeCount)")
 print("model and thinking control checks: \(passed)/\(passed + failed) passed")
 exit(failed == 0 ? 0 : 1)
