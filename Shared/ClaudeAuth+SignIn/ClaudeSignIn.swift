@@ -383,6 +383,8 @@ public final class ClaudeSignIn {
         AuthFolder.sha8(URL(fileURLWithPath: folder.path).resolvingSymlinksInPath().path)
     }
 
+    /// The folder's sign-in lock: an `flock` on `signin-<key>.lock`, one file per profile folder, never one per run. It is never
+    /// unlinked (unlinking a lock file races with a concurrent locker: one can lock the old file, one the new).
     private func takeLock() -> Bool {
         guard (try? FileManager.default.createDirectory(at: locks, withIntermediateDirectories: true)) != nil else { return false }
         let fd = open(lockURL.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
@@ -492,7 +494,7 @@ public final class ClaudeSignIn {
     private func openWindow(_ script: URL) -> Bool {
         switch window {
         case .settingsFile:
-            guard let data = settings(), SignInScript.write(data, to: settingsURL) else { return false }
+            guard let data = settings(), SignInScript.write(data, to: settingsURL, mode: 0o600) else { return false }
             return auth.tools.openTerminal(settingsURL)
         case .scripted:
             guard let r = Runner.run(Program("/usr/bin/osascript", ["-e", openScript], timeout: 30, keepOutput: true)), r.ok else { return false }

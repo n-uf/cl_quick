@@ -283,6 +283,22 @@ do {
     c.cleanUp()
 }
 
+// the files' modes: the settings file is only read (0600), the script runs (0700); both owner only. A Terminal that never runs
+// the script leaves it, so it can be looked at.
+do {
+    let c = Case("modes", login: ["login": "hang"])
+    c.terminal.neverStarts = true
+    c.start(wanted: wantedID(uuid(1)), startGrace: 20)
+    spin(until: { c.states.contains(.waitingForBrowser) })
+    func mode(_ u: URL) -> Int? { ((try? fm.attributesOfItem(atPath: u.path))?[.posixPermissions] as? NSNumber)?.intValue }
+    let settings = c.work.appendingPathComponent("Sample app sign-in.terminal")
+    let script = c.work.appendingPathComponent("sign-in-\(ClaudeSignIn.lockKey(c.authFolder)).command")
+    check("files: the Terminal settings file is owner read and write only (0600; it isn't run)", mode(settings) == 0o600, "\(String(describing: mode(settings)))")
+    check("files: …the script stays executable, owner only (0700)", mode(script) == 0o700, "\(String(describing: mode(script)))")
+    c.signIn.stop(); c.waitEnd()
+    c.cleanUp()
+}
+
 // ── each outcome ──────────────────────────────────────────────────────────────────────────────────────
 do {
     let c = Case("verified", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
