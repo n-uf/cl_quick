@@ -19,8 +19,11 @@
 //                                       the size: indicator-5h, indicator-wk, indicator-no5h, indicator-full.
 //                                       QC_RENDER_BUSY=1 draws it over a busy page of text; the profile menu:
 //                                       profilemenu (addresses blurred), profilemenu-address (the pointer on Main's),
-//                                       profilemenu-copied, profilemenu-highlight; the mic button: dictating,
-//                                       dictation-off
+//                                       profilemenu-copied, profilemenu-highlight, and with each profile's standby
+//                                       accounts and Add an account…: profilemenu-accounts, -accounts-lit,
+//                                       -accounts-waiting (a switch waited for, the hidden note's Show row); the waiting
+//                                       note: switching, switching-hidden (its × pressed: the picker's lamp waits),
+//                                       switching-stale; the mic button: dictating, dictation-off
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
 //                                       accounts-two, accounts-switching, accounts-wrong, accounts-wrong-also,
 //                                       accounts-timedout, accounts-declined, accounts-unverified, accounts-failed,
@@ -31,7 +34,8 @@
 //                                       general-nolist, general-noweb)
 //   --render-menu OUT.png STATE [dark]  the menu bar menu's profile blocks in a drawn menu, light or dark (STATE: menu,
 //                                       address (the pointer on the first profile's address), full, one, signedout;
-//                                       with standby rows: standby, standby-lit, standby-waiting, standby2)
+//                                       with standby rows: standby, standby-lit, standby-waiting, standby2; with Add an
+//                                       account… after them: add, add-lit, add-waiting, add2)
 //   --version
 
 import AppKit

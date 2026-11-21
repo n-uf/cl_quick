@@ -4,6 +4,19 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **The chat's profile menu matches the menu bar's.** Under each profile's row, its standby accounts are rows
+  ("<address> · standby", **Switch…** at the right, the address blurred until the pointer is on the row) and, after them,
+  **Add an account…**. A standby row starts the same switch as the menu bar's row (same guards, same "Switch Main to this
+  account?" question). Add an account… opens Settings on that profile with its form open; the menu bar's menu has the same
+  row after each profile's standby rows. Both are dimmed while a sign-in for the profile is waited for.
+- **The switch question's address unblurs under the pointer.** The alert runs modally and gets no mouse enter or exit
+  for its address, so it was blurred whatever the pointer did; the label now reads the pointer's place itself.
+- **The chat's waiting note can be hidden.** It has a × at its top right (it only hides the note; the sign-in keeps
+  waiting). While hidden, the lamp by the profile picker is the waiting one and the picker's menu has "Waiting for the
+  sign-in…  Show". The note returns by itself when the switch ends.
+- **No stale status line while a switch waits.** "Main is on … now." from the last switch goes as soon as a new switch
+  (or a sign-in again) begins.
+
 - **Tables in answers.** A Markdown table in an answer is drawn as a grid, not as raw text with pipes: a semibold
   header, thin row separators, columns aligned as the alignment row says, and bold, italics, `code` and links inside the
   cells. Columns fit their content and wrap in a narrow panel; a table with too many columns to fit scrolls sideways

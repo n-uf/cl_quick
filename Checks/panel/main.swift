@@ -872,6 +872,180 @@ do {
         NSApp.sendAction(a, to: item.target, from: item)
         check("menu: the row's item action (Return) picks the profile", picked == ["main", "main"], "\(picked)")
     } else { check("menu: the row's item has an action", false) }
+
+    // ── the profile menu's accounts: each profile's standby accounts and Add an account… under its row, as in the menu
+    // bar's menu, through the same switch path (stand-in switcher: no sign-in is ever started) ──────────────
+    do {
+        let mainP = Profile(id: "main", name: "Main", folder: "~/.claude-sample"), workP = Profile(id: "work", name: "Work", folder: "~/.claude-work")
+        let list: [(Profile, QuickChatLevel?)] = [(mainP, nil), (workP, nil)]
+        let standbyOf: [String: [KnownAccount]] = ["main": [KnownAccount(uuid: "u2", email: "alex.studio@example.com"), KnownAccount(uuid: "u3", email: "alex.old@example.org")]]
+        var switchedTo: [String] = [], addedFor: [String] = [], shown = 0
+        let realSwitch = QCStatusMenu.allowSwitch, realAdd = QCStatusMenu.allowAddAccount
+        QCStatusMenu.allowSwitch = { _, _ in true }; QCStatusMenu.allowAddAccount = { _ in true }
+        func accounts(standby: Bool = true, add: Bool = true, waiting: Set<String> = [], showWaiting: Bool = false) -> NSMenu {
+            QCMenu.profiles(list, on: "main", address: { $0.id == "main" ? "ultra-1@example.com" : nil }, settings: (name: "Main", open: {}),
+                            standby: { standbyOf[$0.id] ?? [] }, switching: { waiting.contains($0.id) },
+                            switchTo: standby ? { p, a in switchedTo.append("\(p.id):\(a.uuid)") } : nil,
+                            addAccount: add ? { addedFor.append($0.id) } : nil,
+                            showWaiting: showWaiting ? { shown += 1 } : nil, pick: { _ in }, add: {})
+        }
+        /// t a title only, P a profile row, R a standby row, A Add an account…, - a line.
+        func shape(_ m: NSMenu) -> String {
+            m.items.map { $0.isSeparatorItem ? "-" : $0.view is QCProfileMenuRow ? "P" : $0.view is QCStandbyMenuRow ? "R" : $0.view is QCAddAccountMenuRow ? "A" : "t" }.joined()
+        }
+        let acc = accounts()
+        check("accounts: under each profile its standby accounts, then Add an account…; after the line Settings and Add a profile…",
+              shape(acc) == "tPRRAPA-tt", shape(acc))
+        check("accounts: no standby account, no standby rows (Add an account… stays)", shape(accounts(standby: false)) == "tPAPA-tt", shape(accounts(standby: false)))
+        check("accounts: neither path given, the menu is as it was", shape(accounts(standby: false, add: false)) == "tPP-tt", shape(accounts(standby: false, add: false)))
+        check("accounts: Settings for Main… and Add a profile… stay after the line",
+              acc.items.suffix(2).map(\.title) == ["Settings for Main…", "Add a profile…"] && acc.items[acc.items.count - 3].isSeparatorItem)
+        let views = acc.items.compactMap(\.view)
+        check("accounts: every row of the menu is as wide as the widest", Set(views.map(\.frame.width)).count == 1, "\(views.map(\.frame.width))")
+        let srows = acc.items.compactMap { $0.view as? QCStandbyMenuRow }
+        check("accounts: the standby rows are the menu bar's (address, '· standby', Switch…), in the chat's columns under the in-use row's name",
+              srows.map(\.address) == ["alex.studio@example.com", "alex.old@example.org"] && srows.allSatisfy { $0.columns == .chat }
+              && QCStandbyMenuRow.Columns.chat.addressX == QCProfileMenuRow.textX, "\(srows.map(\.address))")
+        check("accounts: at rest an address is blurred and the row is not lit; the title and label hold it masked, never in full",
+              srows.allSatisfy { !$0.sharp && !$0.lit } && acc.items.filter { $0.view is QCStandbyMenuRow }.allSatisfy { !$0.title.contains("alex.") && $0.title.hasSuffix(" · standby") }
+              && srows[0].accessibilityLabel() == maskEmail("alex.studio@example.com") + ", standby, switch")
+        srows[0].highlighted = true
+        check("accounts: lit by the menu (the pointer on it) the address is clear, and the other is not", srows[0].sharp && srows[0].lit && !srows[1].sharp)
+        srows[0].highlighted = false
+        check("accounts: unlit it is blurred again", !srows[0].sharp)
+        // choosing one goes the menu bar's way: the same guard, then the switch path given
+        let items = acc.items.filter { $0.view is QCStandbyMenuRow }
+        switchedTo = []; srows[1].press(); spin(0.1)
+        check("accounts: a click on a standby row starts that profile's switch to that account (once)", switchedTo == ["main:u3"], "\(switchedTo)")
+        switchedTo = []
+        if let t = items[0].target, let a = items[0].action { _ = t.perform(a, with: items[0]) }
+        check("accounts: Return on it does the same", switchedTo == ["main:u2"], "\(switchedTo)")
+        QCStatusMenu.allowSwitch = { _, _ in false }
+        switchedTo = []; srows[0].press(); spin(0.1)
+        check("accounts: the menu bar's own guard holds here: a refused click starts nothing", switchedTo.isEmpty, "\(switchedTo)")
+        QCStatusMenu.allowSwitch = realSwitch
+        // the chat's own path to it: the controller's switch asks the same question as the menu bar's row (a stand-in
+        // answers Cancel: no sign-in starts), with the profile it was given
+        let keepAlert = AccountSwitcher.runAlert
+        var questions: [String] = []
+        AccountSwitcher.runAlert = { a in questions.append(a.messageText); return .alertSecondButtonReturn }
+        chat.model.switchProfile(mainP, KnownAccount(uuid: "u2", email: "alex.studio@example.com"))
+        AccountSwitcher.runAlert = keepAlert
+        check("accounts: the chat's switch asks 'Switch Main to this account?' and, on Cancel, begins nothing",
+              questions == ["Switch Main to this account?"] && AccountSwitcher.shared.waiting["main"] == nil, "\(questions)")
+        // Add an account…
+        let adds = acc.items.filter { $0.view is QCAddAccountMenuRow }
+        addedFor = []; (adds[0].view as? QCAddAccountMenuRow)?.press(); spin(0.1)
+        check("accounts: Add an account… under Main opens it for Main", addedFor == ["main"], "\(addedFor)")
+        addedFor = []; (adds[1].view as? QCAddAccountMenuRow)?.press(); spin(0.1)
+        check("accounts: and the one under Work opens it for Work", addedFor == ["work"], "\(addedFor)")
+        var asked: [String] = []
+        let keepAdd = chat.openAddAccount
+        chat.openAddAccount = { asked.append($0) }
+        chat.model.openAddAccount("work")
+        chat.openAddAccount = keepAdd
+        check("accounts: the chat's Add an account… reaches the controller's opener with the profile", asked == ["work"], "\(asked)")
+        // Settings opens on that profile with the form open
+        let st = SettingsState()
+        st.open(profile: "work", addAccount: true)
+        check("accounts: Settings opens on that profile's page with its Add an account… form open", st.page == .profile("work") && st.addingFor == "work")
+        st.open(profile: "main", addAccount: true)
+        check("accounts: and on another profile's with that one's form open (never two)", st.page == .profile("main") && st.addingFor == "main")
+        st.open(profile: "main")
+        check("accounts: opened without it the form stays as it was (closed pages stay closed)", st.page == .profile("main") && st.addingFor == "main")
+        st.page = .general
+        check("accounts: moving to another page closes the form", st.addingFor == nil)
+        st.open(profile: "work")
+        check("accounts: Settings opened on a profile with no ask has the form closed", st.page == .profile("work") && st.addingFor == nil)
+        st.open(profile: SettingsWindow.addPage, addAccount: true)
+        check("accounts: the Add a profile page has no such form", st.page == .add && st.addingFor == nil)
+        st.open(profile: nil, addAccount: true)
+        check("accounts: no profile, no form", st.page == .general && st.addingFor == nil)
+        // while a switch is waited for on the profile its rows are off, the other profile's are on
+        let wait = accounts(waiting: ["main"])
+        let wRows = wait.items.compactMap { $0.view as? QCStandbyMenuRow }, wAdds = wait.items.compactMap { $0.view as? QCAddAccountMenuRow }
+        check("accounts waiting: Main's standby rows and Add an account… are off (items too), Work's is on",
+              wRows.allSatisfy { !$0.enabled } && !wAdds[0].enabled && wAdds[1].enabled
+              && wait.items.filter { $0.view is QCStandbyMenuRow || $0.view === wAdds[0] }.allSatisfy { !$0.isEnabled } && wait.items.first { $0.view === wAdds[1] }?.isEnabled == true)
+        wRows[0].highlighted = true; wAdds[0].highlighted = true
+        switchedTo = []; addedFor = []
+        wRows[0].press(); wAdds[0].press(); _ = wRows[0].accessibilityPerformPress(); _ = wAdds[0].accessibilityPerformPress(); spin(0.1)
+        check("accounts waiting: a dimmed row is never lit and does nothing, by click or VoiceOver", !wRows[0].lit && !wAdds[0].lit && switchedTo.isEmpty && addedFor.isEmpty, "\(switchedTo) \(addedFor)")
+        QCStatusMenu.allowAddAccount = realAdd
+    }
+
+    // ── the chat's waiting note: its × only hides it; the sign-in keeps waiting ──────────────────────────────
+    do {
+        let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude-sample", wantedUUID: "u2", wantedEmail: "kim@example.org",
+                              fromUUID: "u1", fromEmail: "alex@example.com", origin: .chat)
+        let waitingNote = QuickChatSwitchNotice.waiting(wanted: "kim@example.org")
+        let m = QuickChatModel()
+        var dropped = 0
+        m.dropSwitch = { dropped += 1 }
+        func height(_ m: QuickChatModel) -> CGFloat {
+            let v = NSHostingView(rootView: QCSwitchView(model: m).frame(width: 440))
+            return v.fittingSize.height
+        }
+        m.update(target: nil, level: nil, offer: nil, notice: waitingNote)
+        check("waiting note: a sign-in is waited for, its note is shown (not hidden), with a height", m.switchWaiting && !m.waitingHidden && height(m) > 40, "\(height(m))")
+        m.hideSwitchNote()
+        check("waiting note: × hides it: hidden, the note draws nothing", m.waitingHidden && height(m) < 2, "\(height(m))")
+        check("waiting note: …and hides only that: still waiting for the sign-in, nothing stopped or dropped", m.switchWaiting && m.switchNotice == waitingNote && dropped == 0)
+        m.update(target: nil, level: nil, offer: nil, notice: waitingNote)
+        check("waiting note: the same waiting note, seen again by a refresh, stays hidden", m.waitingHidden)
+        m.showSwitchNote()
+        check("waiting note: Show brings it back as it was", !m.waitingHidden && m.switchNotice == waitingNote && height(m) > 40)
+        m.hideSwitchNote()
+        let endedNote = QuickChatSwitchNotice.ended(SwitchEnded(goal: goal, reason: .timedOut))
+        m.update(target: nil, level: nil, offer: nil, notice: endedNote)
+        check("waiting note: when the switch ends the note comes back by itself, as the ended note", !m.waitingHidden && m.switchNotice == endedNote && height(m) > 40)
+        m.hideSwitchNote()
+        check("waiting note: × on a note that isn't a waiting one hides nothing", !m.waitingHidden)
+        m.hideSwitchNote(); m.update(target: nil, level: nil, offer: nil, notice: nil)
+        check("waiting note: nothing to wait for any more: not hidden, no note", !m.waitingHidden && m.switchNotice == nil)
+        m.update(target: nil, level: nil, offer: nil, notice: waitingNote); m.hideSwitchNote()
+        m.update(target: nil, level: nil, offer: nil, notice: .waiting(wanted: "lee@example.com"))
+        check("waiting note: a new switch begun shows its note whatever was hidden before", !m.waitingHidden)
+        m.hideSwitchNote(); m.forgetAccount()
+        check("waiting note: another profile's chat starts with nothing hidden", !m.waitingHidden && m.switchNotice == nil)
+        // the picker's menu: a row that brings the note back, only while it is hidden
+        let one: [(Profile, QuickChatLevel?)] = [(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), nil)]
+        var shown = 0
+        let hiddenMenu = QCMenu.profiles(one, on: "main", address: { _ in nil }, showWaiting: { shown += 1 }, pick: { _ in }, add: {})
+        let plainMenu = QCMenu.profiles(one, on: "main", address: { _ in nil }, pick: { _ in }, add: {})
+        // (an attributed title is the item's title too: the grey "Show" follows the words)
+        let waitRow = hiddenMenu.items.first { $0.title.hasPrefix("Waiting for the sign-in…") }
+        check("waiting note: the picker's menu has 'Waiting for the sign-in…  Show' while it is hidden, first after the line, and not otherwise",
+              waitRow != nil && waitRow?.attributedTitle?.string.hasSuffix("Show") == true && plainMenu.items.allSatisfy { !$0.title.hasPrefix("Waiting for the sign-in…") }
+              && hiddenMenu.items.firstIndex { $0 === waitRow }.map { hiddenMenu.items[$0 - 1].isSeparatorItem } == true)
+        if let r = waitRow, let a = r.action { NSApp.sendAction(a, to: r.target, from: r) }
+        check("waiting note: choosing it brings the note back", shown == 1)
+    }
+
+    // ── a stale status line: "Main is on … now." goes when a new switch begins ─────────────────────────────
+    do {
+        let m = QuickChatModel()
+        let line = QCWords.isOn("Main", address: "ultra-1@example.com")
+        m.accountNote = line
+        m.update(target: nil, level: nil, offer: nil, notice: nil)
+        check("stale line: with no switch under way the line stays", m.accountNote != nil)
+        m.update(target: nil, level: nil, offer: nil, notice: .waiting(wanted: "kim@example.org"))
+        check("stale line: a new switch begins (waiting for its sign-in): the last one's line goes at once", m.accountNote == nil)
+        m.accountNote = line
+        m.update(target: nil, level: nil, offer: nil, notice: .waiting(wanted: "kim@example.org"))
+        check("stale line: the same waiting note seen again changes nothing (the line is not the old one's)", m.accountNote != nil)
+        m.update(target: nil, level: nil, offer: nil, notice: nil)
+        m.accountNote = line
+        m.update(target: nil, level: nil, offer: nil, notice: .waiting(wanted: "ultra-1@example.com"))
+        check("stale line: a sign-in again (waiting for the account in use) clears it as well", m.accountNote == nil)
+        m.accountNote = line
+        m.update(target: nil, level: nil, offer: nil, notice: .waiting(wanted: "lee@example.com"))
+        check("stale line: another switch begun over a waiting one clears it too", m.accountNote == nil)
+        let g = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude-sample", wantedUUID: "u2", wantedEmail: "kim@example.org", fromUUID: "u1", fromEmail: "a@example.com", origin: .chat)
+        m.accountNote = line
+        m.update(target: nil, level: nil, offer: nil, notice: .ended(SwitchEnded(goal: g, reason: .declined)))
+        check("stale line: a switch that ended (its note shows) does not clear a line that is there", m.accountNote != nil)
+    }
     pb.releaseGlobally()
 }
 

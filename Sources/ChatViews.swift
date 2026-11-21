@@ -658,9 +658,10 @@ struct QCCodeBlock: View {
 
 /// Claude's waiting mark: an orange dot that breathes.
 struct QCPulse: View {
+    var size: CGFloat = 9
     @State private var on = false
     var body: some View {
-        Circle().fill(QCColor.accent).frame(width: 9, height: 9)
+        Circle().fill(QCColor.accent).frame(width: size, height: size)
             .opacity(on ? 1 : 0.3)
             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: on)
             .onAppear { on = true }
@@ -762,6 +763,27 @@ struct QCProblemView: View {
     private func retry() { if model.isWindow { model.again() } else { model.barProblem = nil; model.send() } }
 }
 
+/// The × at a note's top right: a small, soft key that only hides the note.
+struct QCNoteClose: View {
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                .frame(width: 20, height: 20)
+                .foregroundColor(hover ? QCColor.text : QCColor.muted)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hover ? QCColor.hover : .clear))
+                .contentShape(Rectangle())
+                .qcControl()
+        }
+        .buttonStyle(.plain).help(help).onHover { hover = $0 }
+        .padding(.top, -3).padding(.trailing, -5)          // the corner's own air: the note's padding is 10 and 12
+        .accessibilityLabel("Hide this note")
+    }
+}
+
 /// A switch of the profile to another account: while Claude Code's sign-in is open, and when it ended without the account
 /// wanted (the browser signed in as someone else, no sign-in in 10 minutes, declined, not confirmed, failed: each says
 /// what happened, SwitchWords.ended; they can be dismissed). Drawn in place of the full limit's notice.
@@ -769,7 +791,8 @@ struct QCSwitchView: View {
     @ObservedObject var model: QuickChatModel
 
     var body: some View {
-        if let n = model.switchNotice {
+        // a waiting note hidden by its × draws nothing (the sign-in goes on; the picker's lamp and menu say so)
+        if let n = model.switchNotice, !model.waitingHidden {
             let waiting: Bool = { if case .waiting = n { return true } else { return false } }()
             let tint = waiting ? QCColor.accent : QCColor.crimson
             HStack(alignment: .top, spacing: 10) {
@@ -802,6 +825,8 @@ struct QCSwitchView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                // × at the top right: hides the note only, the sign-in keeps waiting
+                if waiting { QCNoteClose(help: "Hide this note (the sign-in keeps waiting)") { model.hideSwitchNote() } }
             }
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.opacity(0.08)))
@@ -882,7 +907,7 @@ struct QCControls: View {
             if let t = model.target {
                 // the dot takes the colour of the limit closest to full, as the usage indicator and the header do
                 QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.binding()?.p),
-                       help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
+                       waiting: model.waitingHidden, help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
                     .qcMark("profile")
             }
             // the model and thinking bars, always shown, in one outline, and at its end the keys button (tight: each
@@ -944,6 +969,7 @@ struct QCControls: View {
                                    switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
                                    switchTo: { [weak model] p, a in model?.switchProfile(p, a) },
                                    addAccount: { [weak model] p in model?.openAddAccount(p.id); model?.hide() },
+                                   showWaiting: model.waitingHidden ? { [weak model] in model?.showSwitchNote() } : nil,
                                    pick: { model.pickProfile($0) }, add: {
             model.openSettings(SettingsWindow.addPage); model.hide()
         }))
@@ -1494,6 +1520,8 @@ struct QCChip: View {
     let title: String
     /// A small dot before the title (the profile's level colour).
     var dot: Color? = nil
+    /// A sign-in is waited for and its note is hidden: the lamp is the waiting one (the note's pulsing dot) instead.
+    var waiting = false
     var help = ""
     let action: () -> Void
     @State private var hover = false
@@ -1501,7 +1529,8 @@ struct QCChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
+                if waiting { QCPulse(size: 7) }
+                else if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
                 // with no title (a narrow row) the dot alone, without its chevron, so the step controls keep their labels
                 if !title.isEmpty {
                     Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1)
@@ -1534,7 +1563,12 @@ enum QCMenu {
         let action: () -> Void
         /// Items of the profile's group, after its row: its standby accounts and Add an account….
         var after: [NSMenuItem] = []
+        /// A grey word after the title of an item after the line ("Show").
+        var hint: String? = nil
     }
+
+    /// The words of the row that brings a hidden waiting note back.
+    static let waitingTitle = "Waiting for the sign-in…", showHint = "Show"
 
     private final class Handler: NSObject {
         let run: () -> Void
@@ -1551,8 +1585,11 @@ enum QCMenu {
                          settings: (name: String, open: () -> Void)? = nil,
                          standby: (Profile) -> [KnownAccount] = { _ in [] }, switching: (Profile) -> Bool = { _ in false },
                          switchTo: ((Profile, KnownAccount) -> Void)? = nil, addAccount: ((Profile) -> Void)? = nil,
+                         showWaiting: (() -> Void)? = nil,
                          pick: @escaping (String) -> Void, add: @escaping () -> Void) -> NSMenu {
         var actions: [Item] = []
+        // the chat's waiting note is hidden: a row that brings it back (`showWaiting`), first after the line
+        if let show = showWaiting { actions.append(Item(title: waitingTitle, detail: "", action: show, hint: showHint)) }
         if let s = settings { actions.append(Item(title: "Settings for \(s.name)…", detail: "", action: s.open)) }
         actions.append(Item(title: "Add a profile…", detail: "", action: add))
         return build(header: "Profile", items: list.map { p, l in
@@ -1606,7 +1643,15 @@ enum QCMenu {
         let w = views.map(\.frame.width).max() ?? 0
         for v in views { v.setFrameSize(NSSize(width: w, height: v is QCProfileMenuRow ? QCProfileMenuRow.height : v.frame.height)) }
         if !actions.isEmpty { m.addItem(.separator()) }
-        for a in actions { m.addItem(item(a)) }
+        for a in actions {
+            let i = item(a)
+            if let h = a.hint {
+                let s = NSMutableAttributedString(string: a.title, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+                s.append(NSAttributedString(string: "   " + h, attributes: [.font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor]))
+                i.attributedTitle = s
+            }
+            m.addItem(i)
+        }
         return m
     }
 
@@ -2218,13 +2263,22 @@ enum QuickChatRender {
             let list: [(Profile, QuickChatLevel?)] = [(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), main),
                                                      (Profile(id: "work", name: "Work", folder: "~/.claude-work"), work)]
             let mails = ["main": "ultra-1@example.com", "work": "kim.sample@example.org"]
-            let menu = QCMenu.profiles(list, on: "main", address: { mails[$0.id] }, settings: (name: "Main", open: {}), pick: { _ in }, add: {})
+            // profilemenu-accounts: with each profile's standby accounts and Add an account… (Main two standby accounts, Work
+            // none); -lit: the first standby row highlighted (sharp address, Switch…); -waiting: a switch waited for on Main
+            // (its rows dimmed) and the waiting note hidden (the row that brings it back)
+            let accounts = state.contains("accounts")
+            let standbyOf: [String: [KnownAccount]] = ["main": [KnownAccount(uuid: "u2", email: "alex.studio@example.com"),
+                                                               KnownAccount(uuid: "u3", email: "alex.old@example.org")]]
+            let menu = QCMenu.profiles(list, on: "main", address: { mails[$0.id] }, settings: (name: "Main", open: {}),
+                                       standby: { standbyOf[$0.id] ?? [] }, switching: { _ in state.contains("waiting") },
+                                       switchTo: accounts ? { _, _ in } : nil, addAccount: accounts ? { _ in } : nil,
+                                       showWaiting: state.contains("waiting") ? {} : nil, pick: { _ in }, add: {})
             final class Flipped: NSView { override var isFlipped: Bool { true } }
             // fresh rows like the menu's (a view an item holds stays the item's)
             let rows = menu.items.compactMap { $0.view as? QCProfileMenuRow }
                 .map { QCProfileMenuRow(title: $0.title, detail: $0.detail, dot: $0.dot, on: $0.on, address: $0.address, pick: {}) }
             var nextRow = rows.makeIterator()
-            let w = max(220, rows.map(\.frame.width).max() ?? 0)
+            let w = max(220, menu.items.compactMap(\.view).map(\.frame.width).max() ?? 0)
             let page = Flipped(frame: NSRect(x: 0, y: 0, width: w + 40, height: 400))
             page.appearance = NSAppearance(named: .darkAqua)
             page.wantsLayer = true
@@ -2238,21 +2292,29 @@ enum QuickChatRender {
             box.layer?.borderColor = NSColor(white: 1, alpha: 0.15).cgColor
             page.addSubview(box)
             var y: CGFloat = 5
-            func words(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat) {
-                let l = NSTextField(labelWithString: s); l.font = font; l.textColor = color; l.sizeToFit()
+            func words(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat, attributed: NSAttributedString? = nil) {
+                let l = NSTextField(labelWithString: s); l.font = font; l.textColor = color
+                if let attributed { l.attributedStringValue = attributed }
+                l.sizeToFit()
                 l.frame.origin = NSPoint(x: x, y: y + (22 - l.frame.height) / 2); box.addSubview(l); y += 22
             }
+            var standbyRows: [QCStandbyMenuRow] = []
             for it in menu.items {
                 if it.view is QCProfileMenuRow, let r = nextRow.next() {
                     r.frame = NSRect(x: 0, y: y, width: w, height: QCProfileMenuRow.height); box.addSubview(r); y += QCProfileMenuRow.height
+                } else if let v = it.view {
+                    // a standby or Add an account… row: the item's own view (the menu itself is never shown)
+                    v.frame = NSRect(x: 0, y: y, width: w, height: v.frame.height); box.addSubview(v); y += v.frame.height
+                    if let s = v as? QCStandbyMenuRow { standbyRows.append(s) }
                 } else if it.isSeparatorItem {
                     let line = NSBox(frame: NSRect(x: 14, y: y + 5, width: w - 28, height: 1)); line.boxType = .separator; box.addSubview(line); y += 11
                 } else if !it.isEnabled || it.title == "Profile" {
                     words(it.title, .systemFont(ofSize: 11, weight: .semibold), .secondaryLabelColor, x: 14)
                 } else {
-                    words(it.title, NSFont.menuFont(ofSize: 0), .labelColor, x: QCProfileMenuRow.textX)
+                    words(it.title, NSFont.menuFont(ofSize: 0), .labelColor, x: QCProfileMenuRow.textX, attributed: it.attributedTitle)
                 }
             }
+            if state.contains("lit") { standbyRows.first?.highlighted = true }
             box.frame.size.height = y + 5
             page.frame.size.height = y + 50
             if let r = rows.first {
@@ -2459,7 +2521,7 @@ enum QuickChatRender {
             level.week = 100; level.weekResets = Date().addingTimeInterval(3 * 86400)
             level.fiveHour = 12; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); m.level = level
             var t = QuickChatTurn(question: "hi"); t.phase = .failed; t.problem = .limitFull; m.turns = [t]
-        case "switch", "switching", "wrong", "wrong-also", "timedout", "declined", "unverified":
+        case "switch", "switching", "switching-hidden", "switching-stale", "wrong", "wrong-also", "timedout", "declined", "unverified":
             // a full week, with the profile's standby account offered besides Ask on …
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
@@ -2469,6 +2531,14 @@ enum QuickChatRender {
                                   fromUUID: "u1", fromEmail: "ultra-1@example.com", origin: .chat)
             func ended(_ r: SwitchEndReason) -> QuickChatSwitchNotice { .ended(SwitchEnded(goal: goal, reason: r)) }
             if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
+            // the note hidden by its ×: the picker's lamp is the waiting one, the sign-in goes on
+            if state == "switching-hidden" { m.switchNotice = .waiting(wanted: "ultra-2@example.com"); m.hideSwitchNote() }
+            // the last switch's line ("Main is on … now.") was still there when a new one began: it goes at once
+            if state == "switching-stale" {
+                m.accountNote = .isOn("Main", address: "ultra-1@example.com")
+                m.update(target: m.target, level: m.level, offer: m.offer, switchOffer: m.switchOffer,
+                         notice: .waiting(wanted: "ultra-2@example.com"))
+            }
             if state == "wrong" { m.switchNotice = ended(.wrongAccount(signedIn: "ultra-3@example.com", alsoOn: nil)) }
             if state == "wrong-also" { m.switchNotice = ended(.wrongAccount(signedIn: "ultra-3@example.com", alsoOn: "Work")) }
             if state == "timedout" { m.switchNotice = ended(.timedOut) }

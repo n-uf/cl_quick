@@ -248,6 +248,15 @@ final class QuickChatModel: ObservableObject {
     @Published var switchOffer: QuickChatSwitchOffer?
     /// A switch under way or gone wrong, in place of the limit notice.
     @Published var switchNotice: QuickChatSwitchNotice?
+    /// The waiting note's ×: the note is out of sight, the sign-in keeps waiting (nothing is stopped). The picker's lamp
+    /// says so and its menu brings the note back; it also comes back by itself when the switch ends.
+    @Published private(set) var switchNoteHidden = false
+    /// A sign-in is waited for and its note is hidden.
+    var waitingHidden: Bool { switchNoteHidden && switchWaiting }
+    /// A sign-in is waited for (its note shown or hidden).
+    var switchWaiting: Bool { if case .waiting? = switchNotice { return true } else { return false } }
+    func hideSwitchNote() { if switchWaiting { switchNoteHidden = true } }
+    func showSwitchNote() { switchNoteHidden = false }
     /// One line after a switch: "Main is on <address> now." (the address apart from the words, to blur it).
     @Published var accountNote: QCWords?
     /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
@@ -807,7 +816,7 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// Another profile: its own account line, nothing carried over from the last one.
-    func forgetAccount() { level = nil; offer = nil; switchOffer = nil; switchNotice = nil; drawnBlocked = false }
+    func forgetAccount() { level = nil; offer = nil; switchOffer = nil; switchNotice = nil; switchNoteHidden = false; drawnBlocked = false }
 
     /// The profile, its account and its level as they are now, the offers while its limit is full, and a switch under way.
     func update(target new: QuickChatTarget?, level: QuickChatLevel?, offer: QuickChatOffer?,
@@ -820,7 +829,14 @@ final class QuickChatModel: ObservableObject {
         if o != self.offer { self.offer = o }
         let s = blocked ? switchOffer : nil
         if s != self.switchOffer { self.switchOffer = s }
-        if notice != self.switchNotice { self.switchNotice = notice }
+        if notice != self.switchNotice {
+            self.switchNotice = notice
+            // another note (a switch ended, a new one began): shown, whatever was hidden before
+            switchNoteHidden = false
+            // a new switch (or a sign-in again) begins: the line left by the last one ("Main is on … now.") would
+            // contradict the waiting note, so it goes at once
+            if case .waiting? = notice { accountNote = nil }
+        }
     }
 
     // MARK: talking to Claude Code

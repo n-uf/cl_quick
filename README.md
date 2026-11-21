@@ -77,7 +77,11 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   another one.
 - Then Claude Code's own sign-in (`claude auth login --email …`) opens in Terminal and finishes in your browser. While it
   waits, a short checklist says what to do there: finish it in the browser; before pressing Authorize, check that "Logged
-  in as" at the bottom of the page shows the address; if it doesn't, use Switch account there. The
+  in as" at the bottom of the page shows the address; if it doesn't, use Switch account there. In the chat the waiting
+  note has a **×** at its top right that only hides it: the sign-in keeps waiting, the lamp by the profile picker is the
+  amber waiting one meanwhile, and the picker's menu has a row "Waiting for the sign-in…  Show" that brings the note
+  back (it also returns by itself when the switch ends). The line left by the last switch ("Main is on … now.") goes as
+  soon as a new switch begins, so it never contradicts the waiting note. The
   browser's claude.ai session decides which account actually signs in, so cl_quick checks the result: it looks at the
   folder's `.claude.json` every 2 seconds, for at most 10 minutes, and once the login ends (or the file names another
   account) a short `claude` on the folder says which account it is. It never sees a password or a token and never
@@ -103,8 +107,10 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   folder is still on that account: an answer that arrives after the folder moved to another account is dropped.
 - Addresses are in full in Settings' account rows, and blurred in its switch notes. Everywhere else they are blurred until the pointer is on them (the switch question's
   alert holds it under its words, in an accessory view); the words VoiceOver reads have them masked (p•••@example.com). In
-  the chat's header there is none; the profile menu's rows have the address of the account in use (never a standby
-  one's), with a copy button beside it, and the chat's notes about an account change blur it too. **Settings ▸ General ▸
+  the chat's header there is none; the profile menu's rows have the address of the account in use, with a copy button
+  beside it, and under each, in the same rows as the menu bar's menu, the profile's standby accounts (blurred at rest, clear
+  while the pointer is on the row), and the chat's notes about an account change blur it too. The switch question's address
+  is clear under the pointer inside the alert as well. **Settings ▸ General ▸
   Blur addresses** (on by default) turns the blur off: addresses then show in full, sharp, and the words hold them in full.
 
 ## The menu bar menu
@@ -120,8 +126,17 @@ a profile with no numbers yet says "No usage yet". A profile's standby accounts 
 account in use and its bars: dimmed, with a hollow lamp, the address (blurred until the row is highlighted) and
 "· standby", and no usage. Point at one and it is highlighted, the address turns sharp and a quiet **Switch…** shows at
 the right; a click anywhere on the row asks the same question as Switch… in Settings. While a sign-in for the profile is
-waited for, its standby rows are dimmed further and do nothing. Lines separate profiles only, not a profile's block
-from its rows. The numbers are the ones Claude Code last gave cl_quick, shown at
+waited for, its standby rows are dimmed further and do nothing. After the standby rows (or straight after the block when
+there are none) comes **Add an account…**: a plus and the words, in the same dimmed look; it opens Settings on that profile
+with its Add an account… form open, and is dimmed while a sign-in for the profile is waited for. Lines separate profiles
+only, not a profile's block from its rows.
+
+The chat's profile menu (the picker's) is built from the same rows: each profile's row (its week, its account in use with
+the address blurred, a copy button) is followed by its standby accounts, each "<address> · standby" with **Switch…** at
+the right on the highlight, and **Add an account…**. Choosing a standby account asks the same question and starts the same
+switch as the menu bar's row (same guards: not while a sign-in is waited for on that profile, and only while the account
+is still on standby); Add an account… hides the chat and opens Settings on that profile with the form open. After the
+line come Settings for the chat's profile and Add a profile…, as before. The numbers are the ones Claude Code last gave cl_quick, shown at
 once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a
 time is sent `get_usage` and nothing else (no message to a model, no Keychain, no token), at most once every 3
 minutes for a profile.
@@ -310,7 +325,8 @@ each bar's centre picks that bar, a click on a label's right or left half goes r
 steps, the keys button opens and closes its list (a click elsewhere or Esc closes it), and the bar's usage indicator
 shows the limit closest to full with its label before the bars on that window's row.
 `Checks/menu.sh` checks the menu bar menu's profile blocks (their words, level colours, the address blurred until the
-pointer is on it, no usage for a standby account, "No usage yet") and the background refresh of old numbers against
+pointer is on it, no usage for a standby account, "No usage yet", the standby rows and Add an account… in each profile's
+group and what choosing them does) and the background refresh of old numbers against
 the stand-in `claude`: one at a time, throttled, only `get_usage` asked.
 `Checks/signin.sh` checks the sign-in (ClaudeSignIn and the switch on it) against a stand-in Terminal and a stand-in
 `claude auth login`: each outcome, a wrong account by id and by address and organisation, Stop and a new sign-in ending

@@ -209,9 +209,9 @@ let zedAddress = "zed@example.com", zedMasked = maskEmail(zedAddress)
 func standbyMenu(_ infos: [QCStatusMenu.Info], switching: @escaping (Profile) -> Bool = { _ in false }, live: ((Profile) -> QCStatusMenu.Info)? = nil) -> [NSMenuItem] {
     QCStatusMenu.items(infos, now: now, live: live, switching: switching, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") }) { _ in }
 }
-/// The menu's shape in one string: B a profile's block, R a standby row, - a separator.
+/// The menu's shape in one string: B a profile's block, R a standby row, A Add an account…, - a separator.
 func shape(_ items: [NSMenuItem]) -> String {
-    items.map { $0.isSeparatorItem ? "-" : $0.view is QCMenuUsageBlock ? "B" : $0.view is QCStandbyMenuRow ? "R" : "?" }.joined()
+    items.map { $0.isSeparatorItem ? "-" : $0.view is QCMenuUsageBlock ? "B" : $0.view is QCStandbyMenuRow ? "R" : $0.view is QCAddAccountMenuRow ? "A" : "?" }.joined()
 }
 let mainOne = QCStatusMenu.Info(profile: main, level: level(five: 13, week: 88), address: mainAddress, problem: nil, standby: [KnownAccount(uuid: "u9", email: zedAddress)])
 let mainTwo = QCStatusMenu.Info(profile: main, level: level(five: 13, week: 88), address: mainAddress, problem: nil, standby: [KnownAccount(uuid: "u9", email: zedAddress), yan])
@@ -405,6 +405,88 @@ do {
           !off.isEnabled && on.isEnabled && switched.isEmpty, "\(off.isEnabled) \(on.isEnabled) \(switched)")
     if let t = on.target, let a = on.action { _ = t.perform(a, with: on) }
     check("waiting: with autoenablesItems on, another profile's item still works", switched == ["work:w1"], "\(switched)")
+}
+
+// ── Add an account…: the last row of each profile's group, after its standby rows ──────────────────────
+do {
+    var added: [String] = []
+    let realAdd = QCStatusMenu.allowAddAccount
+    QCStatusMenu.allowAddAccount = { _ in true }
+    func addMenu(_ infos: [QCStatusMenu.Info], switching: @escaping (Profile) -> Bool = { _ in false }) -> [NSMenuItem] {
+        QCStatusMenu.items(infos, now: now, switching: switching, switchTo: { p, a in switched.append("\(p.id):\(a.uuid)") },
+                           addAccount: { added.append($0.id) }) { _ in }
+    }
+    let two = addMenu([mainTwo, workNone]), oneP = addMenu([mainOne]), noStandby = addMenu([workNone])
+    check("add: after the standby rows of each profile: its block, its rows, Add an account…, a line, the next profile's", shape(two) == "BRRA-BA", shape(two))
+    check("add: a profile with no standby account has its block and Add an account… only (no standby rows)", shape(noStandby) == "BA" && shape(oneP) == "BRA", "\(shape(noStandby)) \(shape(oneP))")
+    check("add: no addAccount path, no row (the menu is as before)", shape(standbyMenu([mainTwo, workNone])) == "BRR-B" && shape(items) == "B-B")
+    check("add: the block ends close to the rows after it even with no standby account",
+          (noStandby[0].view as? QCMenuUsageBlock)?.frame.height == QCMenuUsageBlock.height((noStandby[0].view as! QCMenuUsageBlock).model, joined: true))
+    let addItem = two[3], addRow = two[3].view as! QCAddAccountMenuRow
+    check("add: the item and the row say Add an account… (title, VoiceOver label), a menu item, no address in it",
+          addItem.title == "Add an account…" && addRow.accessibilityLabel() == "Add an account…" && addRow.accessibilityRole() == .menuItem
+          && addRow.isAccessibilityEnabled() && addItem.isEnabled && addItem.action != nil && !addItem.title.contains("@"))
+    check("add: every block and row of the menu is as wide as the widest", Set(two.compactMap { $0.view?.frame.width }).count == 1, "\(two.compactMap { $0.view?.frame.width })")
+    check("add: the columns are the standby row's (lamp and words where its lamp and address are)", addRow.columns == .bar && QCStandbyMenuRow.Columns.bar.addressX == QCStandbyMenuRow.addressX)
+    // a click, Return and VoiceOver's press open it on that profile (once each, after the menu closes)
+    added = []; addRow.press(); spin(0.1)
+    check("add: a click opens Add an account… for its own profile (the one its group is of)", added == ["main"], "\(added)")
+    added = []
+    if let t = addItem.target, let a = addItem.action { _ = t.perform(a, with: addItem) }
+    check("add: the item's own action (Return) does the same", added == ["main"], "\(added)")
+    added = []
+    _ = addRow.accessibilityPerformPress(); spin(0.1)
+    check("add: VoiceOver's press does the same", added == ["main"], "\(added)")
+    added = []; (two[6].view as? QCAddAccountMenuRow)?.press(); spin(0.1)
+    check("add: the second profile's own row opens it for that profile", added == ["work"], "\(added)")
+    // the click's own rule: nothing while a switch is waited for on the profile (a menu built a while ago)
+    check("add: the rule is no switch waited for on the profile",
+          QCStatusMenu.mayAddAccount(main, waiting: { _ in false }) && !QCStatusMenu.mayAddAccount(main, waiting: { $0.id == "main" }) && QCStatusMenu.mayAddAccount(main, waiting: { $0.id == "work" }))
+    QCStatusMenu.allowAddAccount = { _ in false }
+    added = []; addRow.press(); spin(0.1)
+    check("add: a click the rule refuses opens nothing", added.isEmpty, "\(added)")
+    QCStatusMenu.allowAddAccount = realAdd
+    check("add: the real rule is the one rows are built with (no switch is waited for here)", QCStatusMenu.mayAddAccount(main))
+    QCStatusMenu.allowAddAccount = { _ in true }
+    // waiting for a sign-in on the profile: its row is off (the item too), the other profile's is on
+    let waitingAdd = addMenu([mainOne, workOne], switching: { $0.id == "main" })
+    let offItem = waitingAdd[2], onItem = waitingAdd[6]       // BRA-BRA
+    check("add waiting: the waiting profile's row is off, like its standby rows, the other's on",
+          shape(waitingAdd) == "BRA-BRA" && !offItem.isEnabled && !(offItem.view as! QCAddAccountMenuRow).enabled && onItem.isEnabled && (onItem.view as! QCAddAccountMenuRow).enabled)
+    let offRow = offItem.view as! QCAddAccountMenuRow
+    offRow.highlighted = true
+    added = []; offRow.press(); _ = offRow.accessibilityPerformPress()
+    if let t = offItem.target, let a = offItem.action { _ = t.perform(a, with: offItem) }
+    spin(0.1)
+    check("add waiting: a dimmed row is never lit, does nothing on a click, a VoiceOver press or Return, and is off for VoiceOver",
+          !offRow.lit && added.isEmpty && !offRow.isAccessibilityEnabled(), "\(added)")
+    // the look: lit is not the look at rest, dimmed is fainter than at rest
+    func picture(_ v: NSView) -> Data? {
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return nil }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        return rep.tiffRepresentation
+    }
+    func ink(_ v: NSView) -> Double {
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return 0 }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        var total = 0.0
+        for y in 0..<rep.pixelsHigh { for x in 0..<rep.pixelsWide { total += Double(rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) } }
+        return total
+    }
+    let onRow = onItem.view as! QCAddAccountMenuRow
+    onRow.frame.size.width = 340; offRow.frame.size.width = 340
+    offRow.highlighted = false
+    let restPicture = picture(onRow)
+    onRow.highlighted = true
+    check("add look: lit by the menu it is drawn differently, and is lit", onRow.lit && picture(onRow) != restPicture)
+    onRow.highlighted = false
+    check("add look: dimmed while a sign-in is waited for it is fainter than at rest, and has ink", ink(offRow) < ink(onRow) && ink(offRow) > 0, "\(ink(offRow)) \(ink(onRow))")
+    // the chat's columns: the words start where the in-use row's name does
+    let chatRow = QCAddAccountMenuRow(enabled: true, columns: .chat) {}
+    check("add: in the chat's menu its words start at the in-use row's text, and its lamp at the dot's",
+          QCStandbyMenuRow.Columns.chat.addressX == QCProfileMenuRow.textX && QCStandbyMenuRow.Columns.chat.lampX == QCProfileMenuRow.dotX
+          && chatRow.frame.width == QCAddAccountMenuRow.width(columns: .chat) && QCAddAccountMenuRow.width(columns: .chat) > QCAddAccountMenuRow.width(columns: .bar))
+    QCStatusMenu.allowAddAccount = realAdd
 }
 
 // a click on the block is a release on it: one released outside it does nothing

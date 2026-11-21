@@ -675,7 +675,9 @@ final class QCMenuUsageRefresher {
 /// profile's address), full (a full 5-hour limit), one (a single profile in use), signedout. With standby accounts:
 /// standby (one profile and one standby row, at rest), standby-lit (the same, the row highlighted: sharp address and
 /// "Switch…"), standby-waiting (a sign-in waited for: the row dimmed further), standby2 (two profiles: Main with two
-/// standby rows, the first highlighted, and Work with none and no recent numbers).
+/// standby rows, the first highlighted, and Work with none and no recent numbers). With Add an account… after the
+/// standby rows: add (one profile, one standby row), add-lit (Add an account… highlighted), add-waiting (a sign-in waited
+/// for: both rows dimmed), add2 (Main with two standby rows, Work with none: Add an account… alone).
 enum QCMenuRender {
     static func write(to path: String, state: String, dark: Bool) {
         _ = NSApplication.shared
@@ -696,9 +698,22 @@ enum QCMenuRender {
             r.highlighted = lit
             return r
         }
+        func addRow(waiting: Bool = false, lit: Bool = false) -> QCAddAccountMenuRow {
+            let r = QCAddAccountMenuRow(enabled: !waiting) {}
+            r.highlighted = lit
+            return r
+        }
         var blocks: [QCMenuUsageBlock]
-        var standbyRows: [[QCStandbyMenuRow]] = []
+        var standbyRows: [[NSView]] = []
         switch state {
+        case "add", "add-lit", "add-waiting":
+            // Add an account… after the standby row (-lit: highlighted; -waiting: a sign-in waited for, both dimmed further)
+            blocks = [block("main", "Main", level(42, 68), "alex@example.com", joined: true)]
+            standbyRows = [[standby("alex.studio@example.com", waiting: state == "add-waiting"), addRow(waiting: state == "add-waiting", lit: state == "add-lit")]]
+        case "add2":
+            // two profiles: Main with two standby rows, Work with none (Add an account… alone)
+            blocks = [block("main", "Main", level(42, 68), "alex@example.com", joined: true), block("work", "Work", level(nil, nil, ago: 2 * 3600), "kim.work@example.org", joined: true)]
+            standbyRows = [[standby("alex.studio@example.com"), standby("alex.old@example.org"), addRow()], [addRow()]]
         case "standby", "standby-lit", "standby-waiting":
             blocks = [block("main", "Main", level(42, 68), "alex@example.com", joined: true)]
             standbyRows = [[standby("alex.studio@example.com", waiting: state == "standby-waiting", lit: state == "standby-lit")]]
