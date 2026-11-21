@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cl_quick chat design</title>
+<style>
+:root { --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --serif: "New York", ui-serif, "Iowan Old Style", Georgia, serif;
+  /* Claude's dark colours */
+  --bg: #262624; --surface: #30302e; --bubble: #141413; --code: #1f1e1d; --line: rgba(222,220,209,.15); --line2: rgba(222,220,209,.10);
+  --text: #faf9f5; --soft: #c2c0b6; --muted: #9c9a92; --accent: #d97757; --send: #c6613f; --hover: rgba(250,249,245,.07);
+  --green: #22c55e; --amber: #f59e0b; --red: #ef4444; --crimson: #eb445b; --ember: #e8875f;
+  --gut: 10px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: #121211; color: #e9e7df; font: 14px/1.5 var(--font); }
+.sk { max-width: 1340px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 21px; margin: 0 0 6px; }
+.lede { color: #a9a79f; max-width: 108ch; margin: 0 0 14px; font-size: 14px; }
+section { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; padding: 26px 0; border-top: 1px solid rgba(255,255,255,.08); }
+section > * { min-width: 0; }
+@media (max-width: 820px) { section { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
+.when .t { font: 600 11px var(--mono); letter-spacing: .1em; color: #ff9a66; }
+.when .t .new { color: #111; background: #ff9a66; border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+.when h2 { font-size: 16px; line-height: 1.3; margin: 4px 0 6px; }
+.when p { font-size: 12.5px; color: #9c9a92; margin: 0 0 6px; }
+.why { font-size: 12.5px; color: #c2c0b6; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.28); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); max-width: 110ch; }
+.why b { color: #faf9f5; }
+h3.sub { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #9c9a92; margin: 18px 0 8px; }
+code, kbd { font: 11.5px var(--mono); background: rgba(255,255,255,.08); padding: 0 4px; border-radius: 3px; }
+kbd { color: #faf9f5; box-shadow: inset 0 -1px 0 rgba(255,255,255,.12); }
+/* toggles */
+.ctl { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 0 0 14px; font-size: 12px; color: #9c9a92; }
+.seg { display: inline-flex; flex-wrap: wrap; padding: 2px; border-radius: 8px; background: rgba(255,255,255,.06); }
+.seg button { border: 0; background: none; color: #a9a79f; font: 500 12px var(--font); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+.seg button.on { background: rgba(255,255,255,.14); color: #fff; }
+/* stages: windows sit on a dark desk; a stage scrolls sideways on a phone instead of the page */
+.stage { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-end; padding: 22px; border-radius: 12px; overflow-x: auto;
+  background: radial-gradient(120% 90% at 20% 0%, #2f3a55 0%, #1a2033 50%, #0d0f17 100%); box-shadow: 0 0 0 1px #000; }
+.stage.top { align-items: flex-start; }
+.fig { display: grid; gap: 8px; justify-items: start; flex: none; }
+.cap { font: 600 10.5px var(--mono); letter-spacing: .08em; color: rgba(255,255,255,.55); text-transform: uppercase; }
+.cap em { font-style: normal; color: #ff9a66; }
+
+/* ── the window ── */
+.w { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font);
+  border-radius: 20px; box-shadow: 0 0 0 1px rgba(222,220,209,.18), 0 18px 48px rgba(0,0,0,.5); }
+.hd { position: relative; z-index: 2; flex: none; height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 3px 0 var(--gut); }
+.nm { flex: none; font: 600 13px var(--font); padding: 2px 6px; margin-left: -6px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hd.cut .nm { flex: 0 1 auto; }
+.hov .nm { background: var(--hover); }
+.addr { flex: none; display: inline-flex; align-items: center; height: 18px; max-width: 132px; padding: 0 7px; border-radius: 9px; overflow: hidden;
+  background: rgba(250,249,245,.06); box-shadow: inset 0 0 0 1px rgba(250,249,245,.05); font-size: 12px; color: var(--soft); white-space: nowrap; }
+.addr span { filter: blur(3.4px); }
+.hov .addr span, .addr.plain span { filter: none; }
+.addr.plain { background: none; box-shadow: none; padding: 0; }
+.sp { flex: 1; min-width: 0; }
+.mts { display: flex; gap: 12px; flex: none; }
+.mt { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.mt b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.m4 { display: inline-block; width: 24px; height: 4px; border-radius: 2px; background: rgba(250,249,245,.13); overflow: hidden; }
+.m4 i { display: block; height: 100%; border-radius: 2px; }
+.full { font: 600 10.5px var(--font); padding: 1px 6px; border-radius: 5px; background: rgba(235,68,91,.16); color: #ff8a98; }
+.ibs { display: flex; flex: none; }
+.ib { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; color: var(--soft); }
+.ib svg { width: 15px; height: 15px; }
+.ib.s { width: 24px; height: 24px; } .ib.s svg { width: 14px; height: 14px; }
+.card { position: absolute; z-index: 5; top: 38px; right: var(--gut); padding: 9px 12px; border-radius: 10px; background: var(--surface); box-shadow: 0 0 0 1px var(--line), 0 8px 22px rgba(0,0,0,.45);
+  display: grid; grid-template-columns: auto auto auto auto; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.card .m4 { width: 48px; } .card b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.card .ad { grid-column: 1 / -1; color: var(--soft); padding-bottom: 6px; margin-bottom: 1px; border-bottom: 1px solid var(--line2); }
+/* body */
+.bdw { position: relative; flex: 1; min-height: 0; }
+.bd { position: absolute; inset: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 4px var(--gut) 12px; }
+.fade { position: absolute; z-index: 1; left: 0; right: 0; top: 0; height: 28px; background: linear-gradient(var(--bg) 20%, rgba(38,38,36,0)); }
+.u { align-self: flex-end; max-width: 82%; margin-top: 24px; padding: 8px 12px; border-radius: 16px; background: var(--bubble); font-size: 14px; line-height: 20px; flex: none; }
+.u:first-child { margin-top: 0; }
+.th { flex: none; margin-top: 12px; height: 20px; display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.th svg { width: 9px; height: 9px; }
+.a { flex: none; margin-top: 10px; font: 14px/21px var(--font); color: var(--text); }
+.th + .a { margin-top: 4px; }
+.serif .a { font: 15px/23px var(--serif); }
+.a p { margin: 0 0 10px; }
+.a p:last-child { margin-bottom: 0; }
+.ic { font: 12.5px var(--mono); color: #eba48b; background: rgba(250,249,245,.06); padding: 0 4px; border-radius: 4px; }
+.cb { margin: 2px 0 10px; border-radius: 8px; background: var(--code); box-shadow: inset 0 0 0 1px var(--line2); overflow: hidden; }
+.cb:last-child { margin-bottom: 0; }
+.cb .h { height: 28px; display: flex; align-items: center; padding: 0 2px 0 12px; font: 11.5px var(--font); color: var(--muted); border-bottom: 1px solid var(--line2); }
+.cb .h .sp { flex: 1; }
+.cb pre { margin: 0; padding: 8px 12px 10px; font: 12.5px/18px var(--mono); color: #e9e7df; white-space: pre-wrap; word-break: break-all; }
+.meta { flex: none; margin: 4px 0 0 -5px; height: 24px; display: flex; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.meta span:last-child { margin-left: 4px; overflow: hidden; text-overflow: ellipsis; }
+.meta + .u { margin-top: 8px; }
+.meta.ghost + .u { margin-top: 0; }
+.meta.ghost { opacity: 0; }
+.meta.ghost.show { opacity: 1; }
+/* the field box; on its own it is the bar */
+.ft { position: relative; flex: none; margin: 0 var(--gut) var(--gut); padding: 10px 12px 8px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.w.bar { background: var(--surface); }
+.w.bar .ft { margin: 0; border-radius: 20px; padding: 12px 12px 10px; box-shadow: none; background: none; }
+.fx { font-size: 15px; line-height: 22px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx.typed { color: var(--text); }
+.cr { margin-top: 8px; height: 28px; display: flex; align-items: center; gap: 2px; }
+.ch { flex: none; height: 28px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 5px; font: 500 13px var(--font); color: var(--soft); white-space: nowrap; }
+.cr > :first-child { margin-left: -8px; }
+.ch.open { background: var(--hover); color: var(--text); }
+.ch .dot { width: 7px; height: 7px; border-radius: 50%; }
+.ch svg.cv { width: 9px; height: 9px; opacity: .7; }
+.cr .sp { flex: 1; }
+.lvl { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; font: 600 11.5px var(--font); font-variant-numeric: tabular-nums; }
+.send { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: rgba(250,249,245,.1); color: rgba(250,249,245,.45); }
+.send.go { background: var(--send); color: #fff; }
+.send svg { width: 14px; height: 14px; }
+
+/* ── step controls (model, thinking) ── */
+.st { position: relative; flex: none; height: 28px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 6px; font: 500 13px var(--font); color: var(--soft); white-space: nowrap; }
+.st.hv { background: var(--hover); color: var(--text); }
+.st.t1 { background: rgba(217,119,87,.13); color: #f1c3ae; }
+.st.t2 { background: rgba(217,119,87,.27); color: #ffdccb; box-shadow: inset 0 0 0 1px rgba(232,135,95,.4); }
+.st.t1.hv { background: rgba(217,119,87,.19); } .st.t2.hv { background: rgba(217,119,87,.33); }
+/* A: rising bars */
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.bars i { width: 3px; border-radius: 1px; background: rgba(250,249,245,.17); }
+.bars i.on { background: currentColor; }
+.bars i.hot { background: rgba(232,135,95,.38); }
+.bars i.hot.on { background: var(--ember); }
+.bars i.peek { background: rgba(250,249,245,.5); }
+/* B: chevrons */
+.chev { display: grid; place-items: center; width: 14px; height: 20px; border-radius: 4px; color: var(--muted); font-size: 15px; line-height: 1; }
+.chev.dim { opacity: .3; }
+.chev.hv { background: rgba(250,249,245,.1); color: var(--text); }
+.st.alt-b { padding: 0 2px; gap: 2px; }
+/* C: stacked stepper */
+.ud { display: grid; gap: 1px; }
+.ud i { display: block; width: 12px; height: 9px; border-radius: 2px; color: var(--muted); font-size: 7px; line-height: 9px; text-align: center; font-style: normal; }
+.ud i.hv { background: rgba(250,249,245,.12); color: var(--text); }
+.ud i.dim { opacity: .3; }
+/* the hint over a control */
+.tip { position: absolute; z-index: 20; bottom: 34px; left: 50%; transform: translateX(-50%); padding: 6px 9px; border-radius: 8px; background: #1c1c1b; box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(0,0,0,.5);
+  font: 12px/1.35 var(--font); color: var(--soft); white-space: nowrap; display: grid; gap: 2px; text-align: left; }
+.tip b { color: var(--text); font-weight: 600; }
+.tip .k { color: var(--muted); font-size: 11px; }
+.tip .warn { color: #f1b59b; font-size: 11.5px; }
+.tip .row { display: flex; gap: 10px; justify-content: space-between; }
+
+/* guides */
+.guides .w::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 9;
+  background: linear-gradient(90deg, transparent 9px, rgba(80,200,255,.75) 9px, rgba(80,200,255,.75) 10px, transparent 10px, transparent calc(100% - 10px), rgba(80,200,255,.75) calc(100% - 10px), rgba(80,200,255,.75) calc(100% - 9px), transparent calc(100% - 9px)); }
+.guides .w .hd { box-shadow: inset 0 0 0 1px rgba(80,200,255,.35); }
+.guides .w.before::after { display: none; }
+
+/* ── before: build 77, drawn from its measurements ── */
+.w.before { border-radius: 22px; }
+.before .hd { height: auto; padding: 10px 13px 6px 12px; }
+.before .nm { margin-left: 0; }
+.before .smudge { font-size: 12px; color: var(--soft); filter: blur(4.5px); padding: 0 4px; }
+.before .bd { padding: 0 20px 12px; }
+.before .a { font: 15.5px/22px var(--serif); }
+.before .ft { margin: 0 12px 12px; padding: 12px 8px 8px; border-radius: 18px; }
+.before .fx { padding: 0 8px; }
+.before .cr > :first-child { margin-left: 0; }
+.mk { position: absolute; z-index: 9; font: 600 10px var(--mono); color: #111; background: #ffd25a; border-radius: 4px; padding: 1px 4px; pointer-events: none; white-space: nowrap; }
+.mkl { position: absolute; z-index: 8; top: 0; bottom: 0; width: 1px; background: rgba(255,210,90,.55); pointer-events: none; }
+.mkh { position: absolute; z-index: 8; height: 1px; background: rgba(255,210,90,.55); pointer-events: none; }
+
+/* ── macOS menus (native NSMenu, dark) ── */
+.menu { flex: none; padding: 5px; border-radius: 11px; background: rgba(36,36,38,.94); box-shadow: 0 0 0 .5px rgba(255,255,255,.18), 0 0 0 1px rgba(0,0,0,.6), 0 12px 32px rgba(0,0,0,.55);
+  font: 13px/1 var(--font); color: #ececec; min-width: 150px; width: max-content; max-width: 100%; }
+.mh { padding: 5px 10px 4px 10px; font: 600 11px var(--font); color: rgba(255,255,255,.5); }
+.mi { display: grid; grid-template-columns: 14px 12px auto; column-gap: 6px; align-items: center; padding: 4px 12px 4px 8px; border-radius: 6px; min-height: 22px; }
+.mi.no-dot { grid-template-columns: 14px auto; }
+.mi .ck { font-size: 12px; font-weight: 700; text-align: center; }
+.mi .md { width: 8px; height: 8px; border-radius: 50%; justify-self: center; }
+.mi .tx { display: grid; gap: 2px; }
+.mi .sub { font-size: 11px; color: rgba(255,255,255,.5); }
+.mi.hi { background: #2f6fd6; } .mi.hi .sub { color: rgba(255,255,255,.75); }
+.msep { height: 1px; margin: 5px 10px; background: rgba(255,255,255,.12); }
+.mi.foot { color: rgba(255,255,255,.4); white-space: nowrap; }
+.mi.inline .tx { display: block; white-space: nowrap; } .mi.inline .sub { font-size: 11px; margin-left: 10px; }
+
+/* tables, lists */
+table.tok { border-collapse: collapse; font-size: 12.5px; color: #c2c0b6; width: 100%; max-width: 900px; }
+.tok th { text-align: left; font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #9c9a92; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.tok td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: top; }
+.tok td:first-child { color: #faf9f5; white-space: nowrap; }
+.tok td b { color: #faf9f5; font-variant-numeric: tabular-nums; }
+.tok td.no { color: #ff8a98; } .tok td.ok { color: #6ee7a0; }
+.tw { overflow-x: auto; }
+.ba { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .ba { grid-template-columns: minmax(0, 1fr); } }
+.ba > div { padding: 12px 14px; border-radius: 10px; background: rgba(0,0,0,.26); font-size: 12.5px; color: #c2c0b6; }
+.ba h3 { margin: 0 0 8px; font-size: 13px; color: #ececee; }
+.ba ul { margin: 0; padding-left: 18px; } .ba li { margin: 4px 0; } .ba b { color: #faf9f5; }
+.dec { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; max-width: 112ch; }
+.dec li { padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.26); font-size: 13px; color: #c2c0b6; }
+.dec li > b:first-child { color: #ff9a66; font-family: var(--mono); margin-right: 6px; }
+.dec .o { display: block; margin: 4px 0 0 22px; }
+.dec .o b { color: #faf9f5; }
+.rec { font: 600 10px var(--font); letter-spacing: .06em; text-transform: uppercase; color: #1a0d07; background: #d97757; padding: 1px 5px; border-radius: 4px; margin-left: 4px; }
+.settled { margin: 0 0 12px; padding: 10px 12px 10px 30px; border-radius: 8px; background: rgba(34,197,94,.06); box-shadow: inset 0 0 0 1px rgba(34,197,94,.25); font-size: 12.5px; color: #c2c0b6; max-width: 112ch; }
+.settled li { margin: 3px 0; } .settled b { color: #faf9f5; }
+</style></head>
+<body><div class="sk">
+
+<h1>cl_quick: the chat window, redesigned</h1>
+<p class="lede">A design pass on the bar, the chat window, its pickers and the profile menu after build 77. What changes: a 10 pt outer gap that the header, the answers and the field box all share; a 40 pt header with the usage numbers on the right; the address in a capsule with a clear edge; <b>model and thinking as step controls</b> instead of menus, tinted when a choice uses your limits faster; a profile menu without the long footer sentence. Sample profiles, addresses and numbers. Nothing is built; the drag and resize work going on now isn't affected.</p>
+
+<!-- ============================================================ before / after -->
+<section>
+  <div class="when"><div class="t">BEFORE → AFTER</div><h2>What's off in build 77</h2><p>Measured from <code>--render-quick-chat</code> at 440 pt.</p></div>
+  <div>
+    <div class="ctl"><span>Guides</span><span class="seg" data-k="g"><button data-v="0">Off</button><button data-v="1">On</button></span></div>
+    <div class="stage" id="ba-stage"></div>
+    <div class="ba" style="margin-top:14px">
+      <div><h3>Build 77</h3><ul>
+        <li><b>A thick frame around the field</b>: the box sits 12 pt in from the sides and the bottom (24 px on a Retina screen), on top of its own 8 pt padding, so a band of window shows all round it.</li>
+        <li><b>Four left edges</b>: the field box at 12 pt, the name at 18, the answers at 20, the field text at about 28.</li>
+        <li><b>Header crowds the corner</b>: 10 pt from the top under a 22 pt corner radius.</li>
+        <li><b>Uneven header gaps</b>, and the blur has no edge, so it reads as a smear.</li>
+        <li><b>Reset times inline</b>: the line changes length as the window narrows.</li>
+        <li><b>Two type families</b>: a 15.5 pt serif for answers next to sans everywhere else.</li>
+        <li><b>Model and thinking are menus</b> with a lightbulb, two clicks to change either.</li>
+      </ul></div>
+      <div><h3>Proposed</h3><ul>
+        <li><b>One 10 pt outer gap</b> on all sides: the field box sits 10 pt from the window's left, right and bottom edges; the header's name and the answers start on the same 10 pt line. Inside the box, 12 pt of padding stays.</li>
+        <li><b>Header 40 pt high</b>, content centred, corner radius 20 and the box's 12 nested inside it.</li>
+        <li><b>Identity left, usage right</b>: name, address capsule, space, the meters next to ✎ ✕. Reset times go to the hover card.</li>
+        <li><b>The address in a capsule</b>: clipped blur with a clear edge at rest, readable on hover.</li>
+        <li><b>One family</b>: system sans, answers at 14/21.</li>
+        <li><b>Model and thinking step up and down</b> with one click or one key, no icon; a warm tint when the step costs more.</li>
+        <li><b>Actions only under the last answer</b>, and on hover under the others.</li>
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ spacing system -->
+<section>
+  <div class="when"><div class="t">SPACING SYSTEM</div><h2>One outer gap, a 4 pt grid, three icon sizes</h2><p>Every number in the build comes from this table.</p></div>
+  <div class="tw">
+    <table class="tok">
+      <tr><th>Token</th><th>Value</th><th>Used for</th></tr>
+      <tr><td>Outer gap</td><td><b>10 pt</b></td><td>Window edge to: the field box (left, right, bottom), the header's name, the answers and bubbles. Window corner radius 20.</td></tr>
+      <tr><td>Field box</td><td>padding <b>10 · 12 · 8</b></td><td>Radius 12. Field line 15/22, 8 pt gap, the controls row 28: 76 pt high. The first control's text lines up with the field text, 12 pt in.</td></tr>
+      <tr><td>Header</td><td><b>40 pt</b> high</td><td>Content centred. Name 13 semibold; address capsule 18 high, 12 pt text, at most 132 wide; meters 11.5 pt with a 24 × 4 bar; 8 pt between groups, 12 between meters.</td></tr>
+      <tr><td>Body</td><td><b>4</b> top · <b>12</b> bottom</td><td>Answers 14/21; bubble 14/20, padding 8 × 12, radius 16, at most 82% wide. 24 pt before each question, 10 before the answer (4 after "Thought for"). Paragraphs 10 apart.</td></tr>
+      <tr><td>Code block</td><td>radius <b>8</b></td><td>Top row 28 (language, copy icon); code 12.5/18 mono, padding 8 × 12.</td></tr>
+      <tr><td>Actions row</td><td><b>24 pt</b></td><td>Copy and retry at 24 pt each, then "Opus 5.5 · high · 1.0 s" in 12 pt grey.</td></tr>
+      <tr><td>Controls</td><td><b>28 pt</b> high</td><td>Profile picker and the two step controls: 8 pt side padding, radius 7, 13 pt medium. Step bars 3 pt wide, 2 apart, 4 to 12 pt tall.</td></tr>
+      <tr><td>Send</td><td><b>28 × 28</b></td><td>Radius 8, its right edge 12 pt inside the box.</td></tr>
+      <tr><td>Icons</td><td><b>15</b> · <b>14</b> · <b>9</b></td><td>15 pt in 28 pt targets (header ✎ ✕), 14 in 24 (answer actions, code copy, send arrow), 9 for chevrons. No lightbulb.</td></tr>
+      <tr><td>Smallest window</td><td><b>320 × 220</b></td><td>Header 40 + at least 94 of answers + box 76 + gap 10.</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ the window -->
+<section>
+  <div class="when"><div class="t">THE WINDOW</div><h2>At 320, 440 and 640 pt</h2><p>Same conversation in all three. The switches are decisions 1, 3 and 6.</p></div>
+  <div>
+    <div class="ctl">
+      <span>Header</span><span class="seg" data-k="hov"><button data-v="0">At rest</button><button data-v="1">Pointer on it</button></span>
+      <span>Address</span><span class="seg" data-k="ad"><button data-v="blur">Blurred capsule</button><button data-v="mask">Masked</button><button data-v="hide">Hidden</button></span>
+      <span>Steps</span><span class="seg" data-k="alt"><button data-v="a">Bars</button><button data-v="b">Chevrons</button><button data-v="c">Stepper</button></span>
+      <span>Answers</span><span class="seg" data-k="sf"><button data-v="sans">Sans</button><button data-v="serif">Serif</button></span>
+      <span>Guides</span><span class="seg" data-k="g"><button data-v="0">Off</button><button data-v="1">On</button></span>
+    </div>
+    <div class="stage" id="win-stage"></div>
+    <p class="why" style="margin-top:10px">At <b>640</b> everything fits with full labels. At <b>440</b> the meter labels shorten to 5h and wk. At <b>320</b> the address leaves the header line (it's in the hover card) so the percentages can stay, and the model shows its family only ("Opus"; the version is in the hint). The <b>short window</b> keeps its header and field box; the answers scroll under a 28 pt fade.</p>
+  </div>
+</section>
+
+<!-- ============================================================ step controls -->
+<section>
+  <div class="when"><div class="t">MODEL AND THINKING <span class="new">NEW</span></div><h2>Step controls instead of menus</h2><p>One click or one key moves a step. The lists come from Claude Code, so a control may have 2 to 6 steps.</p></div>
+  <div>
+    <div class="ctl"><span>Show</span><span class="seg" data-k="alt"><button data-v="a">A · Bars</button><button data-v="b">B · Chevrons</button><button data-v="c">C · Stepper</button></span></div>
+
+    <h3 class="sub">The three alternatives, 320 pt window, at rest and with the pointer on them</h3>
+    <div class="stage top" id="alt-stage"></div>
+    <div class="tw" style="margin-top:12px"><table class="tok">
+      <tr><th>Alternative</th><th>Click</th><th>Scroll / drag</th><th>Shows where you are</th><th>Width at 320</th></tr>
+      <tr><td>A · Bars <span class="rec">recommended</span></td><td>Left half of the control: a step down; right half: a step up. Click a bar to jump to it.</td><td>Scroll up or right: a step up.</td><td>Yes: rising bars, filled to the current step; costly steps are ember.</td><td>Model 72, thinking 73</td></tr>
+      <tr><td>B · Chevrons</td><td>‹ down, › up. The name itself does nothing.</td><td>Scroll on it steps.</td><td>Only by the ends: a chevron dims at the first or last step.</td><td>Model 66, thinking 82</td></tr>
+      <tr><td>C · Stepper</td><td>▴ up, ▾ down, like macOS's own stepper.</td><td>Scroll on it steps.</td><td>Only by the ends, same as B. Smallest targets (12 × 9).</td><td>Model 61, thinking 76</td></tr>
+    </table></div>
+    <p class="why" style="margin-top:10px"><b>Why A:</b> the bars say "more or less" without words, show how far up you are, and give a bigger target than B's chevrons or C's tiny arrows. Hovering a half lights the next bar and the hint names that step, so you see the result before you click. No lightbulb: the bars carry the meaning, and the hint says "Thinking: High". Off is a control with no bar filled.</p>
+
+    <h3 class="sub">Uses your limits faster: the tint</h3>
+    <div class="stage top" id="tint-stage"></div>
+    <p class="why" style="margin-top:10px">A control turns <b>warm</b> when its own step costs more: the model at <b>Fable</b>, or thinking at <b>Extra</b> or <b>Max</b>. When both are costly, both controls take the <b>stronger</b> tint with a thin ember edge. The costly steps' bars are ember even before you reach them, so the top of the scale warns ahead. The hint adds "Uses your limits faster". It's a tint, not a warning colour: nothing turns red.</p>
+
+    <h3 class="sub">Variable step counts</h3>
+    <div class="stage top" id="var-stage"></div>
+    <p class="why" style="margin-top:10px">The model control has one step per family Claude Code offers, <b>Haiku → Sonnet → Opus → Fable</b>, each the newest (its <code>displayName</code> from the initialize response). A family the plan lacks is left out, so 2 to 4 steps. Thinking is <b>Off</b> plus the chosen model's <code>supportedEffortLevels</code> (Low, Medium, High, Extra, Max), so 1 to 6 steps; the bars are the levels, and Off fills none. When the model changes and the current level isn't offered, thinking moves to the nearest lower one and the hint says so for a moment ("Haiku has no Max: High").</p>
+
+    <h3 class="sub">Keys (while the field has focus)</h3>
+    <div class="tw"><table class="tok">
+      <tr><th>Keys</th><th>Does</th><th>Checked against</th></tr>
+      <tr><td><kbd>⌥⌘↑</kbd> <kbd>⌥⌘↓</kbd></td><td>Thinking a step up / down</td><td class="ok">Not bound in the text field (this Mac's StandardKeyBinding.dict, no ~/Library/KeyBindings) and not a system hotkey (this Mac's only arrow hotkeys are ⌃ and ⌃⇧ arrows: Spaces, Mission Control).</td></tr>
+      <tr><td><kbd>⌥⌘→</kbd> <kbd>⌥⌘←</kbd></td><td>Model a step up / down</td><td class="ok">Same: free. Left and right match the bars' direction.</td></tr>
+      <tr><td><kbd>⌥↑</kbd> <kbd>⌥↓</kbd></td><td>Not used</td><td class="no">The field moves to the start or end of the paragraph.</td></tr>
+      <tr><td><kbd>⌥⇧↑</kbd> <kbd>⌥⇧↓</kbd></td><td>Not used</td><td class="no">The field selects by paragraph.</td></tr>
+      <tr><td><kbd>⌘↑</kbd> <kbd>⌘↓</kbd></td><td>Not used</td><td class="no">The field goes to the start or end of the text.</td></tr>
+      <tr><td><kbd>⌃↑</kbd> <kbd>⌃↓</kbd></td><td>Not used</td><td class="no">Mission Control and App Exposé.</td></tr>
+      <tr><td><kbd>⌘]</kbd> <kbd>⌘[</kbd> · <kbd>⌘⇧]</kbd> <kbd>⌘⇧[</kbd></td><td>Alternative (decision 8B): thinking ⌘] ⌘[, model ⌘⇧] ⌘⇧[</td><td class="ok">Free in the field; but ⌘⇧[ ] switches tabs in most apps, so the hands may expect that.</td></tr>
+    </table></div>
+    <p class="why" style="margin-top:10px">A key press shows the hint over its control for a second, so you see the new step without looking for it. At the first or last step the key does nothing and the control nudges once. The keys are listed in each control's hint and in Settings ▸ General.</p>
+
+    <h3 class="sub">For the builder</h3>
+    <p class="why"><code>QuickChatModelChoice</code> (<code>Sources/Chat.swift:17</code>) loses <code>profile</code> ("Profile's default" goes) and gains <code>fable</code>; the steps are built from the initialize response, not hard-coded. <code>--model</code> takes the aliases <code>haiku</code>, <code>sonnet</code>, <code>opus</code>, <code>fable</code>, so the newest of each comes for free. If a switch is refused (a plan without Fable), the parsed control_response error steps the control back to where it was and the hint shows the reason. <code>QCChip</code> stays for the profile picker only; the model and thinking menus and their footers go.</p>
+  </div>
+</section>
+
+<!-- ============================================================ the bar -->
+<section>
+  <div class="when"><div class="t">THE BAR</div><h2>Before the first message</h2><p>The bar is the field box on its own.</p></div>
+  <div>
+    <div class="stage top" id="bar-stage"></div>
+    <p class="why" style="margin-top:10px">With no header, the week meter sits next to Send; at 320 it drops its number. The bar has no outer gap of its own: it is the box, with the window's 20 pt radius. When the first answer arrives the window grows above it and the box takes its 10 pt gap.</p>
+  </div>
+</section>
+
+<!-- ============================================================ header detail -->
+<section>
+  <div class="when"><div class="t">HEADER</div><h2>Every state of the line</h2><p>At rest and with the pointer on it, at the three widths.</p></div>
+  <div>
+    <div class="stage top" id="hd-stage" style="flex-direction:column;align-items:flex-start;flex-wrap:nowrap"></div>
+    <div class="tw" style="margin-top:12px">
+    <table class="tok">
+      <tr><th>The line drops, in order</th><th>When</th></tr>
+      <tr><td>1. Reset times</td><td>Always: they're in the card under the header, on hover (decision 2).</td></tr>
+      <tr><td>2. Labels shorten</td><td>"session" / "week" become "5h" / "wk", both together.</td></tr>
+      <tr><td>3. The address</td><td>Leaves the line; the hover card shows it on its first row.</td></tr>
+      <tr><td>4. Percentages</td><td>Bars only; "full" always stays.</td></tr>
+      <tr><td>5. Labels</td><td>Bars alone; a long profile name is the last to give way and is cut with an ellipsis.</td></tr>
+    </table></div>
+    <p class="why" style="margin-top:10px">Pointing anywhere on the header does two things: the address turns readable in place (the capsule keeps its width, so nothing shifts), and a card appears under the meters, right-aligned to the 10 pt line, with both windows' percentage and reset time. Clicking the name still opens the profile in Settings. Dragging anywhere else on the line moves the window.</p>
+  </div>
+</section>
+
+<!-- ============================================================ menus -->
+<section>
+  <div class="when"><div class="t">PROFILE MENU</div><h2>The one menu left</h2><p>Native macOS menu, kept narrow: grey words go under the item, and the footer sentence is gone.</p></div>
+  <div>
+    <div class="stage top" id="menu-stage"></div>
+    <p class="why" style="margin-top:10px"><b>One profile:</b> Main with its week, then <b>Add a profile…</b>, which opens Settings on the + page, so the menu has something to do. <b>Several profiles:</b> a dot in each profile's level colour, its week and reset under the name; a full one stays pickable and says when it frees up. The grey second line is the menu item subtitle (macOS 14.4 and later; on 14.0 to 14.3 it goes to the tooltip; not yet checked against the SDK). What the footer said moves to the picker's tooltip: "For this chat. A new chat starts on the default."</p>
+  </div>
+</section>
+
+<!-- ============================================================ decisions -->
+<section>
+  <div class="when"><div class="t">YOUR PICK</div><h2>Decisions</h2><p>Reply with one letter per number, e.g. "1A 2A 7A". The recommended option is first. Numbers changed since the first version of this page.</p></div>
+  <div>
+    <ul class="settled">
+      <li><b>Settled by you</b>, drawn as such: a 10 pt outer gap for the field box, header and answers; the field stays a box with comfortable padding inside.</li>
+      <li>Model and thinking are <b>step controls</b>, not menus, with no lightbulb. Model steps: <b>Haiku → Sonnet → Opus → Fable</b>, the newest of each, from Claude Code's list; <b>"Profile's default" goes</b>.</li>
+      <li>Thinking steps: Off, then the model's own levels up to <b>Max</b>. Fable, Extra and Max get a <b>warm tint</b>, stronger when both are costly.</li>
+    </ul>
+    <ol class="dec">
+      <li><b>1</b><b>Address at rest</b>
+        <span class="o"><b>A</b> blurred inside a capsule with a clear edge, readable on hover <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> masked as "a•••@example.com", no blur, readable on hover. Sharpest, but shows the first letter and the domain.</span>
+        <span class="o"><b>C</b> hidden at rest, readable in the hover card only. The calmest line.</span></li>
+      <li><b>2</b><b>Usage in the header</b>
+        <span class="o"><b>A</b> percentages on the line, reset times only in the hover card, drop order as in the table; the line never grows on hover <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> as today: reset times inline when there's room, the address kept longer than the percentages.</span></li>
+      <li><b>3</b><b>Answer type</b>
+        <span class="o"><b>A</b> system sans 14/21, one family across the window <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> serif (New York) 15/23, tuned from today's 15.5/22: closer to the Claude app, wraps more at 320.</span></li>
+      <li><b>4</b><b>Actions under answers</b>
+        <span class="o"><b>A</b> under the last answer always, under earlier ones on hover; the words shorten to "Opus 5.5 · high · 1.0 s" <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> under every answer, as today, with the shorter words.</span></li>
+      <li><b>5</b><b>Profile menu</b>
+        <span class="o"><b>A</b> native macOS menu, grey words as a second line, no footer sentence, ending in Add a profile… <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> a custom popover in Claude's colours. Matches the window, but it's more code and a second window to manage.</span></li>
+      <li><b>6</b><b>One profile</b>
+        <span class="o"><b>A</b> the profile picker stays; its menu is Main + Add a profile… <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> no profile picker until there are two; the header already names the profile, and adding one is in Settings only.</span></li>
+      <li><b>7</b><b>Step control</b>
+        <span class="o"><b>A</b> rising bars beside the name: click a half to step, click a bar to jump, scroll to step <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> chevrons around the name, ‹ Opus ›.</span>
+        <span class="o"><b>C</b> the name with a small stacked ▴▾ stepper, like macOS's own.</span></li>
+      <li><b>8</b><b>Keys</b>
+        <span class="o"><b>A</b> ⌥⌘↑ ⌥⌘↓ for thinking, ⌥⌘→ ⌥⌘← for the model <span class="rec">recommended</span></span>
+        <span class="o"><b>B</b> ⌘] ⌘[ for thinking, ⌘⇧] ⌘⇧[ for the model.</span></li>
+    </ol>
+  </div>
+</section>
+
+</div>
+<script>
+const S = { g: '0', hov: '0', ad: 'blur', sf: 'sans', alt: 'a' };
+const ADDR = 'alex@example.com';
+const IC = {
+  edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 9v3.5A1.5 1.5 0 0 1 11.5 14h-8A1.5 1.5 0 0 1 2 12.5v-8A1.5 1.5 0 0 1 3.5 3H7"/><path d="M12.3 1.9a1.3 1.3 0 0 1 1.8 1.8L8.3 9.5 6 10l.5-2.3z"/></svg>',
+  x: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>',
+  copy: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><rect x="5" y="5" width="8.5" height="9" rx="1.6"/><path d="M3.5 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v.5"/></svg>',
+  retry: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 1.8v2.9H9.1"/></svg>',
+  cv: '<svg class="cv" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5l3 3 3-3"/></svg>',
+  cr: '<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2l3 3-3 3"/></svg>',
+  up: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.8 7.2L8 3l4.2 4.2"/></svg>',
+};
+const col = (p) => p >= 95 ? 'var(--crimson)' : p >= 80 ? 'var(--red)' : p >= 50 ? 'var(--amber)' : 'var(--green)';
+const meter = (p, w) => `<span class="m4"${w ? ` style="width:${w}px"` : ''}><i style="width:${Math.min(100, p)}%;background:${col(p)}"></i></span>`;
+
+/* model and thinking steps, as Claude Code would report them */
+const M4 = ['Haiku 5.5', 'Sonnet 5.5', 'Opus 5.5', 'Fable 5.2'];
+const M3 = ['Haiku 5.5', 'Sonnet 5.5', 'Opus 5.5'];
+const M2 = ['Haiku 5.5', 'Sonnet 5.5'];
+const T6 = ['Off', 'Low', 'Medium', 'High', 'Extra', 'Max'];
+const T5 = ['Off', 'Low', 'Medium', 'High', 'Extra'];
+const T4 = ['Off', 'Low', 'Medium', 'High'];
+const costlyM = (n) => n.startsWith('Fable');
+const costlyT = (n) => n === 'Extra' || n === 'Max';
+
+/* The header line at a width. lv: {s, w, sr, wr, full}. step: how much it has dropped (fit() measures and steps on). */
+const STEPS = [['full', true, true], ['short', true, true], ['short', true, false], ['full', false, false], ['short', false, false], ['', false, false], ['', false, false, 'cut']];
+const H = [];
+function header(W, o = {}, step = 0) {
+  const lv = o.lv === undefined ? { s: 41, w: 67, sr: 'Tue 01:08', wr: 'Sun 13:00' } : o.lv;
+  const name = o.name || 'Main';
+  const hov = o.hov ?? S.hov === '1';
+  const ad = o.ad || S.ad;
+  const ms = [];
+  if (lv && lv.s != null) ms.push(['session', '5h', lv.s, lv.full === 's']);
+  if (lv && lv.w != null) ms.push(['week', 'wk', lv.w, lv.full === 'w']);
+  const id = H.push({ W, o, step }) - 1;
+  const st = STEPS[step];
+  const [lab, pct, showAd] = st;
+  const adHtml = !showAd || ad === 'hide' ? '' : ad === 'mask'
+    ? `<span class="addr plain"><span>${hov ? ADDR : 'a•••@example.com'}</span></span>`
+    : `<span class="addr"><span>${ADDR}</span></span>`;
+  const mHtml = ms.map(([l, sh, p, full]) => `<span class="mt">${lab ? (lab === 'full' ? l : sh) : ''}${full ? `<span class="full">full</span>` : meter(p) + (pct ? `<b style="color:${col(p)}">${p}%</b>` : '')}</span>`).join('');
+  const card = hov && lv ? `<div class="card">${(!showAd || ad === 'hide') ? `<span class="ad">${name} · ${ADDR}</span>` : ''}${ms.map(([l, , p, full]) => `<span>${l}</span>${full ? '<span class="full">full</span>' : meter(p, 48)}<b style="color:${col(p)}">${full ? '' : p + '%'}</b><span>resets ${l === 'week' ? lv.wr : lv.sr}</span>`).join('')}</div>` : '';
+  return `<div class="hd${hov ? ' hov' : ''}${st[3] ? ' cut' : ''}" data-hid="${id}"><span class="nm">${name}</span>${adHtml}<span class="sp"></span><span class="mts">${mHtml}</span><span class="ibs"><span class="ib">${IC.edit}</span><span class="ib">${IC.x}</span></span>${card}</div>`;
+}
+
+/* A step control. kind 'm' (model) or 't' (thinking); list; cur index; tint 0/1/2; hover: 'up' | 'down' | null; narrow: family only. */
+function stepper(kind, list, cur, o = {}) {
+  const alt = o.alt || S.alt;
+  const name = list[cur];
+  const costly = kind === 'm' ? costlyM : costlyT;
+  let label = kind === 't' && name === 'Off' ? (o.narrow ? 'Off' : 'Thinking off') : name;
+  if (kind === 'm' && o.narrow) label = name.split(' ')[0];
+  const tint = costly(name) ? (o.both ? 2 : 1) : 0;
+  const nxt = o.hover === 'up' ? cur + 1 : o.hover === 'down' ? cur - 1 : null;
+  const cls = `st alt-${alt}${tint ? ' t' + tint : ''}${o.hover && alt === 'a' ? ' hv' : ''}`;
+  let inner = '';
+  if (alt === 'a') {
+    const levels = kind === 't' ? list.slice(1) : list;          // Off is no bar
+    const off = kind === 't' ? 1 : 0;
+    const n = levels.length;
+    const bars = levels.map((l, i) => {
+      const idx = i + off, h = n === 1 ? 12 : Math.round(4 + 8 * i / (n - 1));
+      const on = idx <= cur && !(kind === 't' && cur === 0);
+      const peek = nxt != null && idx === nxt && nxt > cur;
+      return `<i class="${on ? 'on' : ''}${costly(l) ? ' hot' : ''}${peek ? (costly(l) ? ' on' : ' peek') : ''}" style="height:${h}px"></i>`;
+    }).join('');
+    inner = `<span>${label}</span><span class="bars">${bars}</span>`;
+  } else if (alt === 'b') {
+    inner = `<span class="chev${cur === 0 ? ' dim' : ''}${o.hover === 'down' ? ' hv' : ''}">‹</span><span>${label}</span><span class="chev${cur === list.length - 1 ? ' dim' : ''}${o.hover === 'up' ? ' hv' : ''}">›</span>`;
+  } else {
+    inner = `<span>${label}</span><span class="ud"><i class="${cur === list.length - 1 ? 'dim' : ''}${o.hover === 'up' ? ' hv' : ''}">▲</i><i class="${cur === 0 ? 'dim' : ''}${o.hover === 'down' ? ' hv' : ''}">▼</i></span>`;
+  }
+  let tip = '';
+  if (o.hover) {
+    const keys = kind === 'm' ? '⌥⌘← ⌥⌘→' : '⌥⌘↓ ⌥⌘↑';
+    const what = kind === 'm' ? 'Model' : 'Thinking';
+    const target = nxt != null && nxt >= 0 && nxt < list.length ? list[nxt] : null;
+    const lo = cur > 0 ? list[cur - 1] : '—', hi = cur < list.length - 1 ? list[cur + 1] : '—';
+    tip = `<span class="tip"><span>${what}: <b>${name}</b></span>`
+      + (target ? `<span>${o.hover === 'up' ? 'Click: up to' : 'Click: down to'} <b>${target}</b>${costly(target) ? ' · costs more' : ''}</span>` : '')
+      + `<span class="row k"><span>‹ ${lo}</span><span>${hi} ›</span></span>`
+      + (tint ? `<span class="warn">Uses your limits faster</span>` : '')
+      + `<span class="k">${keys}</span></span>`;
+  }
+  return `<span class="${cls}">${inner}${tip}</span>`;
+}
+
+function controls(W, o = {}) {
+  const narrow = W < 400;
+  const ml = o.ml || M4, tl = o.tl || T6;
+  const mi = o.mi ?? 2, ti = o.ti ?? 3;
+  const both = costlyM(ml[mi]) && costlyT(tl[ti]);
+  return `<span class="ch"><span class="dot" style="background:${col(67)}"></span>Main${IC.cv}</span>`
+    + stepper('m', ml, mi, { narrow, both, alt: o.alt, hover: o.hm })
+    + stepper('t', tl, ti, { narrow, both, alt: o.alt, hover: o.ht });
+}
+function footer(W, o = {}) {
+  const lvl = o.lvl ? `<span class="lvl" style="color:${col(o.lvl)}">${meter(o.lvl)}${o.lvlNum ? o.lvl + '%' : ''}</span>` : '';
+  return `<div class="ft"><div class="fx${o.typed ? ' typed' : ''}">${o.typed || o.ph || 'Reply…'}</div><div class="cr">${controls(W, o)}<span class="sp"></span>${lvl}<span class="send${o.typed ? ' go' : ''}">${IC.up}</span></div></div>`;
+}
+
+const meta = (txt, ghost) => `<div class="meta${ghost ? ' ghost' : ''}"><span class="ib s">${IC.copy}</span><span class="ib s">${IC.retry}</span><span>${txt}</span></div>`;
+const TURNS = () => `
+  <div class="u">How do I find which process is using port 3000 on macOS?</div>
+  <div class="a"><p>Use <span class="ic">lsof</span>:</p>
+    <div class="cb"><div class="h">zsh<span class="sp"></span><span class="ib s">${IC.copy}</span></div><pre>lsof -nP -iTCP:3000 -sTCP:LISTEN</pre></div>
+    <p>The PID column is the process. Stop it with <span class="ic">kill &lt;PID&gt;</span>.</p></div>
+  ${meta('Haiku 5.5 · 2.4 s', true)}
+  <div class="u">And only the PID, for a script?</div>
+  <div class="th">Thought for 5.0 s ${IC.cr}</div>
+  <div class="a"><p>Add <span class="ic">-t</span>, which prints bare PIDs:</p>
+    <div class="cb"><div class="h">zsh<span class="sp"></span><span class="ib s">${IC.copy}</span></div><pre>kill $(lsof -t -iTCP:3000 -sTCP:LISTEN)</pre></div></div>
+  ${meta('Opus 5.5 · high · 7.8 s')}`;
+
+function win(W, Hh, o = {}) {
+  const serif = (o.sf || S.sf) === 'serif';
+  return `<div class="w${serif ? ' serif' : ''}" style="width:${W}px;height:${Hh}px">${header(W, o)}<div class="bdw"><div class="fade"></div><div class="bd">${o.turns ? o.turns() : TURNS()}</div></div>${footer(W, o)}</div>`;
+}
+const bar = (W, o) => `<div class="w bar" style="width:${W}px">${footer(W, Object.assign({ ph: 'Ask anything' }, o))}</div>`;
+/* a field box alone, as it sits at the bottom of a window */
+const box = (W, o) => `<div class="w" style="width:${W}px;overflow:visible;padding-top:10px">${footer(W, o)}</div>`;
+const fig = (cap, html) => `<div class="fig"><div class="cap">${cap}</div>${html}</div>`;
+
+/* before: build 77 at 440, from its measurements */
+function before() {
+  const W = 440;
+  const chipsOld = `<span class="ch"><span class="dot" style="background:${col(67)}"></span>Main${IC.cv}</span><span class="ch">Opus 5.5${IC.cv}</span><span class="ch">💡 High${IC.cv}</span>`;
+  return `<div class="w before" style="width:${W}px;height:520px">
+    <div class="hd"><span class="nm" style="padding:2px 6px">Main</span><span class="smudge">alex@examp</span><span style="width:12px"></span><span class="mt" style="font-size:12px">week ${meter(67, 38)}<b style="color:${col(67)}">67%</b> resets Sun 13:00</span><span class="sp"></span><span class="ibs"><span class="ib">${IC.edit}</span><span class="ib">${IC.x}</span></span></div>
+    <div class="bdw"><div class="bd">
+      <div class="u" style="font-size:14.5px;padding:9px 14px;border-radius:18px">And only the PID, for a script?</div>
+      <div class="th" style="font-size:13px">Thought for 5.0 s ${IC.cr}</div>
+      <div class="a"><p>Add <span class="ic">-t</span>, which prints bare PIDs:</p><div class="cb" style="border-radius:10px"><div class="h" style="height:34px;font-size:12px">zsh<span class="sp"></span><span style="display:inline-flex;gap:4px;align-items:center;padding-right:8px">${IC.copy.replace('<svg', '<svg width="13" height="13"')}Copy</span></div><pre>kill $(lsof -t -iTCP:3000 -sTCP:LISTEN)</pre></div></div>
+      <div class="meta" style="margin-left:0"><span class="ib s">${IC.copy}</span><span class="ib s">${IC.retry}</span><span>answered by Opus 5.5, thinking high · 7.8 s</span></div>
+    </div></div>
+    <div class="ft"><div class="fx">Reply…</div><div class="cr">${chipsOld}<span class="sp"></span><span class="send">${IC.up}</span></div></div>
+    ${[[12, 116, 'field box 12'], [18, 44, 'name 18'], [20, 80, 'answers 20'], [28, 152, 'field text 28']].map(([x, y, t]) => `<span class="mkl" style="left:${x}px"></span><span class="mk" style="left:${x + 3}px;top:${y}px">${t}</span>`).join('')}
+    <span class="mkh" style="left:0;right:0;bottom:12px"></span><span class="mk" style="right:16px;bottom:-1px">gap 12</span>
+  </div>`;
+}
+
+function render() {
+  H.length = 0;
+  document.body.classList.toggle('guides', S.g === '1');
+  document.querySelectorAll('.seg').forEach(sg => sg.querySelectorAll('button').forEach(b => b.classList.toggle('on', S[sg.dataset.k] === b.dataset.v)));
+  document.getElementById('ba-stage').innerHTML =
+    fig('Build 77 · 440', before()) +
+    fig('<em>Proposed</em> · 440', win(440, 520, { hov: false, ad: 'blur', sf: 'sans' }));
+  document.getElementById('win-stage').innerHTML =
+    fig('320 × 520', win(320, 520)) +
+    fig('440 × 520', win(440, 520)) +
+    fig('640 × 520', win(640, 520)) +
+    fig('Short · 320 × 220 (smallest)', win(320, 220)) +
+    fig('Short · 640 × 260', win(640, 260));
+  /* step controls: the three alternatives at 320, rest / hover up on the model / hover down on thinking */
+  const pad = (h) => `<div style="padding-top:78px">${h}</div>`;
+  document.getElementById('alt-stage').innerHTML = ['a', 'b', 'c'].map(a => {
+    const nm = { a: 'A · Bars', b: 'B · Chevrons', c: 'C · Stepper' }[a];
+    return fig(`${nm} · at rest`, pad(box(320, { alt: a })))
+      + fig(`${nm} · pointer on model, up`, pad(box(320, { alt: a, hm: 'up' })))
+      + fig(`${nm} · pointer on thinking, down`, pad(box(320, { alt: a, ht: 'down' })))
+      + '<div style="flex-basis:100%;height:0"></div>';
+  }).join('');
+  document.getElementById('tint-stage').innerHTML =
+    fig('Normal · Opus, High', box(440, { mi: 2, ti: 3 })) +
+    fig('Fable · tint', box(440, { mi: 3, ti: 3 })) +
+    fig('Extra · tint', box(440, { mi: 2, ti: 4 })) +
+    fig('Max · tint', box(440, { mi: 2, ti: 5 })) +
+    fig('Fable + Max · stronger', box(440, { mi: 3, ti: 5 })) +
+    fig('Fable + Max · pointer on thinking', pad(box(440, { mi: 3, ti: 5, ht: 'down' })));
+  document.getElementById('var-stage').innerHTML =
+    fig('4 models · 6 thinking steps · Opus, Medium', box(440, { ml: M4, tl: T6, mi: 2, ti: 2 })) +
+    fig('3 models (no Fable) · 5 steps · Opus, Extra', box(440, { ml: M3, tl: T5, mi: 2, ti: 4 })) +
+    fig('2 models · Haiku with 4 steps · thinking off', box(440, { ml: M2, tl: T4, mi: 0, ti: 0 })) +
+    fig('4 models at 320 · Fable, Max', box(320, { ml: M4, tl: T6, mi: 3, ti: 5 }));
+  document.getElementById('bar-stage').innerHTML =
+    fig('Bar · 320', bar(320, { lvl: 67, lvlNum: false, mi: 0, ti: 0 })) +
+    fig('Bar · 440', bar(440, { lvl: 67, lvlNum: true, mi: 0, ti: 0 })) +
+    fig('Bar · 640, typing', bar(640, { lvl: 67, lvlNum: true, mi: 0, ti: 0, typed: 'How do I find which process is using port 3000?' }));
+  const hd = (W, o) => `<div class="w" style="width:${W}px;overflow:visible">${header(W, o)}</div>`;
+  const row = (cap, o) => `<div class="fig" style="gap:6px"><div class="cap">${cap}</div><div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">`
+    + [320, 440, 640].map(W => `<div style="display:grid;gap:6px;align-content:start${o.hov ? ';padding-bottom:84px' : ''}"><div class="cap" style="opacity:.6">${W}</div>${hd(W, o)}</div>`).join('') + '</div></div>';
+  document.getElementById('hd-stage').innerHTML =
+    row('Session and week · at rest', { hov: false }) +
+    row('Session and week · pointer on it', { hov: true }) +
+    row('Week only (no session number reported yet)', { hov: false, lv: { w: 67, wr: 'Sun 13:00' } }) +
+    row('Session full', { hov: false, lv: { s: 100, w: 88, sr: 'Tue 01:08', wr: 'Sun 13:00', full: 's' } }) +
+    row('No numbers yet', { hov: false, lv: null }) +
+    row('A long profile name', { hov: false, name: 'Client work (shared)' });
+  /* the profile menu */
+  const mi = (o) => `<div class="mi${o.hi ? ' hi' : ''}${o.dot === undefined ? ' no-dot' : ''}"><span class="ck">${o.on ? '✓' : ''}</span>${o.dot !== undefined ? `<span class="md" style="background:${o.dot}"></span>` : ''}<span class="tx"><span>${o.t}</span>${o.s ? `<span class="sub">${o.s}</span>` : ''}</span></div>`;
+  const sep = '<div class="msep"></div>';
+  const beforeMenu = `<div class="menu"><div class="mh">Profile</div><div class="mi inline no-dot"><span class="ck">✓</span><span class="tx">Main<span class="sub">week 67%</span></span></div>${sep}<div class="mi foot no-dot"><span class="ck"></span><span>Weeks as last reported. A new chat goes back to the default. Add or change profiles in Settings.</span></div></div>`;
+  document.getElementById('menu-stage').innerHTML =
+    fig('Build 77', beforeMenu) +
+    `<div style="flex-basis:100%;height:0"></div>` +
+    fig('<em>Proposed</em> · one profile', `<div class="menu"><div class="mh">Profile</div>${mi({ on: 1, dot: col(67), t: 'Main', s: 'week 67%, resets Sun 13:00' })}${sep}${mi({ t: 'Add a profile…', hi: 1 })}</div>`) +
+    fig('<em>Proposed</em> · several', `<div class="menu"><div class="mh">Profile</div>${mi({ on: 1, dot: col(67), t: 'Main', s: 'week 67%, resets Sun 13:00' })}${mi({ dot: col(12), t: 'Work', s: 'week 12%', hi: 1 })}${mi({ dot: 'var(--crimson)', t: 'Spare', s: 'week full until Thu 09:00' })}${mi({ dot: 'rgba(255,255,255,.3)', t: 'Lab', s: 'no numbers yet' })}${sep}${mi({ t: 'Add a profile…' })}</div>`);
+  fit();
+  /* last answer's actions show; earlier ones only on hover */
+  document.querySelectorAll('.w').forEach(w => {
+    w.addEventListener('mouseover', e => { const a = e.target.closest('.a'); if (!a) return; const m = a.nextElementSibling; if (m && m.classList.contains('meta')) m.classList.add('show'); });
+    w.addEventListener('mouseout', e => { const a = e.target.closest('.a'); if (!a) return; const m = a.nextElementSibling; if (m && m.classList.contains('meta')) m.classList.remove('show'); });
+  });
+}
+/* Drops parts of each header until its line fits its window, like ViewThatFits. */
+function fit() {
+  for (let guard = 0; guard < 400; guard++) {
+    let changed = false;
+    document.querySelectorAll('.hd[data-hid]').forEach(hd => {
+      const h = H[+hd.dataset.hid];
+      if (!h || h.step >= STEPS.length - 1) return;
+      const kids = [...hd.children].filter(c => !c.classList.contains('sp') && !c.classList.contains('card'));
+      const need = kids.reduce((a, c) => a + c.getBoundingClientRect().width, 0) + 8 * (kids.length) + 10 + 3 - 6;
+      if (need > h.W + 0.5) { const t = document.createElement('div'); t.innerHTML = header(h.W, h.o, h.step + 1); hd.replaceWith(t.firstElementChild); changed = true; }
+    });
+    if (!changed) break;
+  }
+}
+document.querySelectorAll('.seg').forEach(sg => sg.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S[sg.dataset.k] = b.dataset.v; render(); }));
+render();
+</script>
+</body></html>
