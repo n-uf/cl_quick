@@ -48,7 +48,11 @@ check("stored: it is written under its own key and read back whole",
 check("stored: for the app, not per profile (a profile holds no instructions)",
       !String(decoding: (try? JSONEncoder().encode(Profile(id: "p", name: "P", folder: "~/.claude-sample"))) ?? Data(), as: UTF8.self).contains("instructions"))
 check("stored: in settings.json, inside the folder Remove… moves to the Trash",
-      Files.settings.lastPathComponent == "settings.json" && Files.settings.deletingLastPathComponent().standardizedFileURL == Files.folder.standardizedFileURL)
+      Files.settings.lastPathComponent == "settings.json"
+      // Paths, not URLs: a URL made for a folder that is not there yet (a fresh machine, the CI runner) has no trailing
+      // slash, while the one cut from the file's URL has, and the two URLs then differ for the same folder.
+      && Files.settings.deletingLastPathComponent().standardizedFileURL.path == Files.folder.standardizedFileURL.path,
+      "\(Files.settings.deletingLastPathComponent().standardizedFileURL.path) vs \(Files.folder.standardizedFileURL.path)")
 
 // MARK: the box, in the real text view: the built-in part above the user's, protected; the cap on the user's part
 
