@@ -1935,19 +1935,6 @@ final class QuickChatPanel: NSPanel {
             return true
         }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // Page Up, Page Down and End (no modifier at all, the function flag aside) move the answers even while the field has the
-        // keyboard; the arrows keep their text meaning in the field. Page keys scroll and stop following; End goes to the bottom.
-        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]).isEmpty {
-            switch Int(e.keyCode) {
-            case kVK_PageUp: if onNavigate(.pageUp) { return true }
-            case kVK_PageDown: if onNavigate(.pageDown) { return true }
-            case kVK_End: if onNavigate(.end) { return true }
-            // while the keys list is open, ← and → turn its pages (otherwise they are the field's, as ever)
-            case kVK_LeftArrow: if QCKeys.shared.turnPage(-1) { return true }
-            case kVK_RightArrow: if QCKeys.shared.turnPage(1) { return true }
-            default: break
-            }
-        }
         // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model. Plain ⌘ arrows are macOS's own (in a text field the caret's jump to the
         // line's or the text's start and end, in a selected answer's view a scroll to its ends), so they are not taken and reach
         // the field and the view. A key with ⌥⌘ is offered here first and taken, so neither the field nor a scroll view ever
@@ -2048,6 +2035,15 @@ final class QuickChatPanel: NSPanel {
             takeDigit(action, event)
             return
         }
+        // Page Up, Page Down and End (no modifier at all, the function and numeric-pad flags aside) move the answers even while
+        // the field has the keyboard: read here, before the event goes to the field (which would scroll or move its own
+        // caret), as the digit keys are. Not while the field is composing (marked text: an input method owns these keys). The
+        // arrows are never taken: they keep their text meaning.
+        if event.type == .keyDown, isKeyWindow, event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .intersection([.command, .option, .control, .shift]).isEmpty,
+           let nav = Self.pageNav(Int(event.keyCode)), (firstResponder as? NSTextView)?.hasMarkedText() != true, onNavigate(nav) {
+            return
+        }
         if event.type == .flagsChanged, !event.modifierFlags.contains(.capsLock) {
             for w in childWindows ?? [] where String(describing: type(of: w)).hasPrefix("TUI") && w.alphaValue == 0 {
                 w.alphaValue = 1
@@ -2055,6 +2051,16 @@ final class QuickChatPanel: NSPanel {
             }
         }
         super.sendEvent(event)
+    }
+
+    /// The navigation a bare Page Up, Page Down or End key code is.
+    static func pageNav(_ keyCode: Int) -> QCNav? {
+        switch keyCode {
+        case kVK_PageUp: return .pageUp
+        case kVK_PageDown: return .pageDown
+        case kVK_End: return .end
+        default: return nil
+        }
     }
 
     /// Titled (for the system's resize zones), resizable, the content under the title bar, and never activating cl_quick.
