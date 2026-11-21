@@ -97,8 +97,9 @@ final class FakeTerminal {
     /// Says it opened the file, but never runs it (a Terminal that never started the script).
     var neverStarts = false
     /// Runs this shell body in place of the script's command (it gets the script's path, so the shell's command line names it):
-    /// a window whose shell the check shapes (one that ignores TERM). Nothing is passed to it but that path.
-    var shellBody: String?
+    /// a window whose shell the check shapes (one that ignores TERM). Nothing is passed to it but that path. Made when the
+    /// window opens (the sign-in's own file names are known by then).
+    var shellBody: (() -> String)?
     init(conf: URL) { self.conf = conf }
 
     func open(_ url: URL) -> Bool {
@@ -114,7 +115,7 @@ final class FakeTerminal {
         settings = p
         let sh = Process(), input = Pipe()
         sh.executableURL = URL(fileURLWithPath: "/bin/sh")
-        if let body = shellBody {
+        if let body = shellBody?() {
             // the command is "exec '<script>'": the script's path is what a window's shell carries in its command line
             let path = cmd.hasPrefix("exec '") && cmd.hasSuffix("'") ? String(cmd.dropFirst(6).dropLast()) : cmd
             sh.arguments = ["-c", body, "stand-in", path]
@@ -178,8 +179,8 @@ final class Case {
     /// A stand-in word that answers only once the login has ended (the script wrote its status 0; up to 5 s, polled every 20 ms;
     /// the word is asked on its own queue): every ask it counts is then after the end, which is the asks the product counts.
     func afterEnd(_ answer: @escaping ClaudeSignIn.Confirm) -> ClaudeSignIn.Confirm {
-        let status = work.appendingPathComponent("sign-in.status")
-        return { folder in
+        return { [self] folder in
+            let status = signIn.statusURL
             let until = Date().addingTimeInterval(5)
             while Date() < until {
                 if let s = try? String(contentsOf: status, encoding: .utf8), Int32(s.trimmingCharacters(in: .whitespacesAndNewlines)) == 0 { break }
@@ -341,8 +342,8 @@ do {
     let c = Case("early-ask", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "hold": "1"])
     let lock = NSLock()
     var before = 0, after = 0
-    let status = c.work.appendingPathComponent("sign-in.status")
     c.start(wanted: SignedInAccount(email: "Ann@Example.com", origin: .record), confirm: { _ in
+        let status = c.signIn.statusURL
         let ended = (try? String(contentsOf: status, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } == 0
         lock.lock(); if ended { after += 1 } else { before += 1 }; lock.unlock()
         return nil
@@ -412,7 +413,7 @@ do {
     let c = Case("slowword", login: ["login": "ok", "email": "ann@example.com", "uuid": uuid(1), "org": uuid(51), "orgName": "Sample Org"])
     let gate = DispatchSemaphore(value: 0)
     c.start(wanted: wantedID(uuid(1)), confirm: { _ in _ = gate.wait(timeout: .now() + 20); return SignedInAccount.process(["email": "ann@example.com"]) })
-    spin(until: { fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.status").path) }, max: 10)
+    spin(until: { fm.fileExists(atPath: c.signIn.statusURL.path) }, max: 10)
     spin(0.5)
     let t = Date()
     c.signIn.stop()
@@ -434,7 +435,7 @@ do {
     let c = Case("quit", login: ["login": "hang"])
     c.start(wanted: wantedID(uuid(1)))
     let login = c.waitLogin()
-    spin(until: { fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.pid").path) }, max: 5)
+    spin(until: { fm.fileExists(atPath: c.signIn.pidURL.path) }, max: 5)
     check("quit: Terminal holds the window's profile while it is open", prefs.left(in: c.work).count == 1, "\(prefs.names)")
     c.signIn.stopNow()
     check("quit mid-sign-in (stopNow): the login is ended before it returns", !pidAlive(login))
@@ -539,13 +540,13 @@ do {
     let c = Case("closed", login: ["login": "hang"])
     c.start(wanted: wantedID(uuid(1)))
     let login = c.waitLogin()
-    spin(until: { fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.pid").path) }, max: 5)
+    spin(until: { fm.fileExists(atPath: c.signIn.pidURL.path) }, max: 5)
     // Terminal closing the window hangs up its whole session
     if let s = c.terminal.last { kill(s.processIdentifier, SIGHUP) }
     kill(login, SIGHUP)
     check("window closed while the login ran: failed, window closed", c.waitEnd() == .failed(.windowClosed), "\(String(describing: c.outcome))")
     check("…the hung-up login is gone, and no status was written", !pidAlive(login)
-          && !fm.fileExists(atPath: c.work.appendingPathComponent("sign-in.status").path))
+          && !fm.fileExists(atPath: c.signIn.statusURL.path))
     c.cleanUp()
 }
 
@@ -621,7 +622,7 @@ do {
     // is a case of its own (below), whose script is ended only once it shows, and with it the sweeps. And the earlier
     // sign-in's late sweep, which this start set off when it ended that one (0.3 s), has come and gone: on the same stand-in
     // it would otherwise be the second write counted below, in this sign-in's own late sweep's place.
-    c.waitLogin()
+    _ = c.waitLogin()
     spin(0.5)
     c.signIn.stop(); c.waitEnd()
     // the stop's own sweep took the profile Terminal kept for the window (a write); it has run by the time the outcome came
@@ -651,26 +652,31 @@ do {
 /// to start a login shell): removing the script file in that time doesn't keep it from running. The script's path stays in
 /// the shell's command line, as a window's does.
 func slowStart(_ delay: Double) -> String { "exec 9<\"$1\" || exit 1; sleep \(delay); exec /bin/zsh /dev/fd/9 \"$1\"" }
+/// Waits for a slow-start window's shell to hold the script open (its `sleep` runs): on a busy Mac a stop could otherwise
+/// remove the file first.
+func waitHeld(_ c: Case) {
+    let shellPid = c.terminal.last?.processIdentifier ?? -1
+    spin(until: { ProcessTable.table()?.contains { $0.ppid == shellPid && $0.name == "sleep" } == true }, max: 5)
+}
 do {
     // a stop while Terminal is still starting the window's script (its pid not written yet): the stop ends nothing it can see,
     // but once the script shows it is ended, window and all (a clean end), its login with it, and its profile swept (late too:
     // a profile Terminal writes after the window closed goes)
     prefs.reset()
     let c = Case("late-start", login: ["login": "hang"])
-    c.terminal.shellBody = slowStart(1)
+    c.terminal.shellBody = { slowStart(1) }
     c.start(wanted: wantedID(uuid(1)), lateSweep: 2)
     spin(until: { c.states.contains(.waitingForBrowser) })
-    // the shell has the script open once its `sleep` runs (on a busy Mac the stop could otherwise remove the file first)
-    let shellPid = c.terminal.last?.processIdentifier ?? -1
-    spin(until: { ProcessTable.table()?.contains { $0.ppid == shellPid && $0.name == "sleep" } == true }, max: 5)
+    waitHeld(c)
     c.signIn.stop()
     check("late start: stopped before the window's script ran", c.waitEnd() == .stopped && c.shellRunning && !pidAlive(c.loginPid),
           "\(String(describing: c.outcome)) \(c.shellRunning) \(c.loginPid)")
     check("late start: …the script, once it shows, is ended: its shell ends cleanly (its window closes)", c.shellEnded(12) == 0,
           "\(c.shellRunning) \(String(describing: c.terminal.last.map { $0.isRunning ? nil : $0.terminationStatus }))")
     // (the sign-in sees the shell gone on its own clock, a moment apart from this one's: it removes the pid file then)
-    let pidFile = c.work.appendingPathComponent("sign-in.pid").path
-    check("late start: …no login left running, no pid file left", spin(until: { !pidAlive(c.loginPid) && !fm.fileExists(atPath: pidFile) }, max: 3),
+    let pidFile = c.signIn.pidURL.path
+    check("late start: …its login did run (it is ended once it runs), and none is left running, nor a pid file",
+          c.loginPid > 0 && spin(until: { !pidAlive(c.loginPid) && !fm.fileExists(atPath: pidFile) }, max: 3),
           "login \(c.loginPid) alive \(pidAlive(c.loginPid)), pid file \(fm.fileExists(atPath: pidFile))")
     prefs.put("Sample app sign-in late", command: "exec " + SignInScript.q(c.work.path + "/sign-in-12345678.command"))
     check("late start: …and its profile is swept after it, late too", spin(until: { prefs.left(in: c.work).isEmpty }, max: 6), "\(prefs.names)")
@@ -679,7 +685,7 @@ do {
 }
 do {
     // the static sweep's pid-file guard, alone (the only guard at start-up, when no sign-in of this run is `current`): a window
-    // of an earlier run, its script's pid in the work folder's sign-in.pid and the script in its command line, keeps its
+    // of an earlier run, its script's pid in a pid file of the work folder and the script in its command line, keeps its
     // profile. The work folder is one no sign-in of this run has used, so what the process's own last sign-in knows
     // about its window can't be what holds it. Its own Terminal-preferences stand-in: an earlier block's late sweep, on the
     // shared one, can't be counted as a read here.
@@ -696,7 +702,7 @@ do {
         spin(until: { ProcessTable.launch(of: p.processIdentifier)?.args.contains(named) == true }, max: 3)
         return p
     }
-    func names(_ p: Process) { try? "\(p.processIdentifier)\n".write(to: earlier.appendingPathComponent("sign-in.pid"), atomically: true, encoding: .utf8) }
+    func names(_ p: Process) { try? "\(p.processIdentifier)\n".write(to: earlier.appendingPathComponent("sign-in-0000abcd.pid"), atomically: true, encoding: .utf8) }
     func put() { mine.reset(); mine.put("Sample app sign-in", command: "exec " + SignInScript.q(script)) }
     let standIn = mine.tool
     func sweep() { ClaudeSignIn.sweep(work: earlier, terminalProfiles: standIn) }
@@ -719,7 +725,7 @@ do {
 /// A window's shell that ignores TERM (and the TERM its children get), ends cleanly on HUP (Terminal's hang-up), and has
 /// declined its sign-in: the window stays open to be read, as a real declined one does.
 func deafShell(_ c: Case) -> String {
-    "trap '' TERM; trap 'exit 0' HUP; printf '%s\\n' $$ > '\(c.work.path)/sign-in.pid'; : > '\(c.work.path)/sign-in.declined'; "
+    "trap '' TERM; trap 'exit 0' HUP; printf '%s\\n' $$ > '\(c.signIn.pidURL.path)'; : > '\(c.signIn.declinedURL.path)'; "
         + "while :; do (trap - TERM; exec sleep 0.1); done"
 }
 /// Waits for whatever the sign-in's queue still does (a stop's wait for the shell): the static sweep takes that queue, and
@@ -729,7 +735,7 @@ do {
     // stopping an ended window whose shell doesn't end when asked: the profile stays; once the shell dies, a stop takes it
     prefs.reset()
     let c = Case("deaf", login: ["login": "hang"])
-    c.terminal.shellBody = deafShell(c)
+    c.terminal.shellBody = { deafShell(c) }
     c.start(wanted: wantedID(uuid(1)))
     check("deaf shell: its sign-in is declined, the window left open to be read", c.waitEnd() == .declined && c.shellRunning, "\(String(describing: c.outcome))")
     c.signIn.stop()
@@ -748,10 +754,10 @@ do {
     // through every later sweep
     prefs.reset()
     let d = Case("deaf-earlier", login: ["login": "hang"])
-    d.terminal.shellBody = deafShell(d)
+    d.terminal.shellBody = { deafShell(d) }
     d.start(wanted: wantedID(uuid(1)))
     check("deaf shell: its sign-in is declined, the window left open", d.waitEnd() == .declined && d.shellRunning, "\(String(describing: d.outcome))")
-    let pidFile = d.work.appendingPathComponent("sign-in.pid")
+    let pidFile = d.signIn.pidURL
     let pidBefore = try? String(contentsOf: pidFile, encoding: .utf8)
     let n = Case("deaf-next", login: ["login": "hang"])
     n.start(wanted: wantedID(uuid(1)))
