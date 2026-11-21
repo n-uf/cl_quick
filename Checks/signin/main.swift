@@ -714,7 +714,7 @@ do {
     // quitting (stopNow) while Terminal is still starting the window's script: it waits for the script (3 s at most) and ends
     // it before it returns
     let c = Case("late-quit", login: ["login": "hang"])
-    c.terminal.shellBody = { slowStart(1) }
+    c.terminal.shellBody = { slowStart(0.5) }                // 2.5 s of the 3 s left for the script and its login
     c.start(wanted: wantedID(uuid(1)))
     spin(until: { c.states.contains(.waitingForBrowser) })
     waitHeld(c)

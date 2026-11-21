@@ -229,7 +229,7 @@ public final class ClaudeSignIn {
                 while Date() < until, !loginStarted() { usleep(50_000) }
             }
             endScript(shell: true)
-            if late, scriptPid() == nil { lateEnd = false }
+            if late, scriptPid() == nil { lateEnd = false; removeRunFiles() }
             if !Self.workBusy(work) { sweepProfiles(late: true) }          // swept only once it is gone (a shell that outlived the wait keeps its profile)
         }
     }
@@ -243,7 +243,14 @@ public final class ClaudeSignIn {
         if let earlier = Self.current, earlier !== self { earlier.end(.stopped); ended = earlier.pidURL.standardizedFileURL }
         Self.current = self
         // any other run's script (an earlier run of the app, a sign-in whose window started after it ended), by its pid file
-        for f in Self.pidFiles(in: work) where f.standardizedFileURL != ended { endScript(shell: true, pidFile: f) }
+        // (one whose sign-in still waits for it, `endLateScript`, once its login runs: 2 s at most)
+        for f in Self.pidFiles(in: work) where f.standardizedFileURL != ended {
+            if Self.pendingLate.contains(f.standardizedFileURL.path) {
+                let until = Date().addingTimeInterval(2)
+                while Date() < until, !loginStarted(f) { usleep(50_000) }
+            }
+            endScript(shell: true, pidFile: f)
+        }
         // a shell that outlived the wait (it ignored the TERM) is a window still open: its pid file stays its only handle (no
         // sweep, no second window: one per app), and nothing is started on top of it
         if Self.scriptRuns(in: work) { return finish(.failed(.windowStillOpen)) }
@@ -267,7 +274,7 @@ public final class ClaudeSignIn {
         let watched = SignInScript.Watch(pid: pidURL, status: statusURL, declined: declinedURL)
         switch Authenticator(folder, tools: tools).startSignIn(claude: claude, email: wanted?.email, script: scriptURL,
                                                                removesItself: true, shown: shown, watch: watched) {
-        case .done: break
+        case .done: opened = true
         case .folderNotReady: return finish(.failed(.folderNotReady))
         case .otherAccount, .failed: return finish(.failed(.notOpened))
         }
@@ -380,7 +387,7 @@ public final class ClaudeSignIn {
             case .declined, .failed: endScript(shell: false)
             }
             // Terminal may still be starting it (a stop or a timeout before its pid, or `notOpened` at the grace's end)
-            if unstarted { lateEnd = true; endLateScript(until: max(started.addingTimeInterval(startGrace), Date().addingTimeInterval(5))) }
+            if unstarted, opened { lateEnd = true; endLateScript(until: max(started.addingTimeInterval(startGrace), Date().addingTimeInterval(5))) }
         }
         releaseLock()
         for u in [statusURL, declinedURL, settingsURL, scriptURL] { try? FileManager.default.removeItem(at: u) }
@@ -598,11 +605,17 @@ public final class ClaudeSignIn {
     }
 
     /// A script Terminal started after its sign-in ended (`endLateScript`): pending until it is ended or the wait is over.
-    private var lateEnd = false
+    /// Its pid file is in `pendingLate` meanwhile (a start that ends it for it waits for its login too).
+    private var lateEnd = false {
+        didSet { if lateEnd { Self.pendingLate.insert(pidURL.standardizedFileURL.path) } else { Self.pendingLate.remove(pidURL.standardizedFileURL.path) } }
+    }
+    private static var pendingLate: Set<String> = []
+    /// The window was asked of Terminal (`startSignIn` opened it): only then can a script start late.
+    private var opened = false
 
-    /// The script's `claude auth login` runs (among its shell's children).
-    private func loginStarted() -> Bool {
-        guard let pid = scriptPid() else { return false }
+    /// The script's `claude auth login` runs (among its shell's children); `file`: another run's pid file.
+    private func loginStarted(_ file: URL? = nil) -> Bool {
+        guard let pid = scriptPid(file) else { return false }
         let table = ProcessTable.table() ?? []
         return Self.descendants(of: pid, in: table).contains { p in
             table.first { $0.pid == p }?.launch.map(ProcessTable.isClaudeCode) == true
@@ -617,8 +630,14 @@ public final class ClaudeSignIn {
         endScript(shell: true)
         guard scriptPid() == nil else { return false }
         lateEnd = false
+        removeRunFiles()
         if !Self.workBusy(work) { sweepProfiles(late: true) }
         return true
+    }
+
+    /// The status and refusal mark a late script may have written after `finish` removed them.
+    private func removeRunFiles() {
+        for u in [statusURL, declinedURL] { try? FileManager.default.removeItem(at: u) }
     }
 
     /// Terminal's kept profiles whose command runs in this app's work folder go (`TerminalProfiles`). `late`: once more after
