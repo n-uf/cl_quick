@@ -502,8 +502,6 @@ enum QCEdgeLayout {
     static let collapseAfter: TimeInterval = 0.5
     /// The stack opens BESIDE the handle, inward toward the text, this far clear of the pill, centred on it vertically.
     static let boxGap: CGFloat = 6
-    /// Keyboard or VoiceOver opening: it stays this long when nothing holds it open.
-    static let keptAfterActivation: TimeInterval = 4
 
     /// The box's distance from the window's edge (the pill is `clear` or `scroller` in, and `pillWidth` wide).
     static var leftBoxInset: CGFloat { clear + pillWidth + boxGap }
@@ -536,18 +534,22 @@ final class QCEdgeState: ObservableObject {
         settle()
     }
 
-    /// Keyboard focus is on the handle.
+    /// Keyboard focus (Full Keyboard Access) came to the handle or a button in its stack, or left them: it opens the stack at once
+    /// and keeps it open while focus is inside; moving between the handle and the buttons (focus off, then on) closes nothing.
     func focus(_ f: Bool) {
         focused = f
         if f { open() }
         settle()
     }
 
-    /// Opens it at once (the keyboard, VoiceOver): it stays until the pointer or focus has come and gone, or for a few seconds.
+    /// Pressing the handle (VoiceOver's press, the keyboard's Space on it): opens the stack at once and PINS it open, with no
+    /// timer, so it never closes under a VoiceOver cursor on ▲ or ▼; pressing the handle again, or the panel hiding, closes it.
     func activate() {
+        if onStrip { open(); return }          // a click with the pointer on it: the pointer holds it, nothing to pin
+        if pinned { pinned = false; reset(); return }
+        pinned = true
         open()
-        cancel(&closing)
-        if !onStrip, !onBox, !focused { close(after: QCEdgeLayout.keptAfterActivation) }
+        settle()
     }
 
     /// A picture can't wait for a pointer: the state it shows.
@@ -558,12 +560,14 @@ final class QCEdgeState: ObservableObject {
     /// Closes it at once (the panel hid, or the handle has nothing to show).
     func reset() {
         cancel(&opening); cancel(&closing)
-        onBox = false; focused = false
+        onBox = false; focused = false; pinned = false
         if onStrip { onStrip = false }
         if expanded { expanded = false }
     }
 
-    private var engaged: Bool { onStrip || onBox || focused }
+    /// Held open by a press on the handle (`activate`).
+    private(set) var pinned = false
+    private var engaged: Bool { onStrip || onBox || focused || pinned }
 
     private func settle() {
         if engaged {
@@ -614,6 +618,8 @@ struct QCEdgeHandle<Box: View>: View {
     /// The pill is in the accent colour (new text below).
     var accent = false
     @ViewBuilder let box: () -> Box
+    /// Keyboard focus (Full Keyboard Access) on the handle: it opens the stack and keeps it open (the stack's buttons say so too).
+    @FocusState private var stripFocus: Bool
 
     var body: some View {
         let left = side == .left
@@ -631,6 +637,8 @@ struct QCEdgeHandle<Box: View>: View {
             }
             .buttonStyle(.plain)
             .onHover { state.strip($0) }
+            .focused($stripFocus)
+            .onChange(of: stripFocus) { state.focus($0) }
             .accessibilityLabel(Text(label))
             .accessibilityValue(Text(value))
             .report(scroll, "\(name).strip")
@@ -678,10 +686,10 @@ struct QCEdgeHandles: View {
                 QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, label: "This answer") {
                     if scroll.answersAbove.contains(id) {
                         QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
-                                     label: "Go to the start of this answer") { scroll.goToStart(ofAnswer: id) }
+                                     label: "Go to the start of this answer", onFocus: { scroll.left.focus($0) }) { scroll.goToStart(ofAnswer: id) }
                     }
                     QCIconButton(symbol: model.copied == id ? "checkmark" : "doc.on.doc", help: "Copy this answer ⇧⌘C", small: true,
-                                 label: "Copy this answer") { _ = model.copyAnswer(of: turn) }
+                                 label: "Copy this answer", onFocus: { scroll.left.focus($0) }) { _ = model.copyAnswer(of: turn) }
                 }
             }
             if QCChatScroll.showsPrompts(turns: model.turns.count) || !scroll.atBottom {
@@ -689,12 +697,13 @@ struct QCEdgeHandles: View {
                              value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
                     if QCChatScroll.showsPrompts(turns: model.turns.count) {
                         QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
-                                     enabled: scroll.canPrevious) { scroll.previousPrompt() }
+                                     enabled: scroll.canPrevious, onFocus: { scroll.right.focus($0) }) { scroll.previousPrompt() }
                         QCIconButton(symbol: "chevron.down", help: QCNavHelp.next, small: true, label: "Next message of mine",
-                                     enabled: scroll.canNext) { scroll.nextPrompt() }
+                                     enabled: scroll.canNext, onFocus: { scroll.right.focus($0) }) { scroll.nextPrompt() }
                     }
                     if !scroll.atBottom {
-                        QCIconButton(symbol: "arrow.down.to.line", help: QCNavHelp.latest, small: true, label: "Jump to latest") { scroll.jumpToLatest() }
+                        QCIconButton(symbol: "arrow.down.to.line", help: QCNavHelp.latest, small: true, label: "Jump to latest",
+                                     onFocus: { scroll.right.focus($0) }) { scroll.jumpToLatest() }
                     }
                 }
             }

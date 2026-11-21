@@ -1820,8 +1820,12 @@ struct QCIconButton: View {
     var label: String? = nil
     /// False: dimmed and inert (▲ at the first message).
     var enabled = true
+    /// Told when keyboard focus (Full Keyboard Access) comes to the button or leaves it (the edge handles' stacks stay open
+    /// while focus is inside them).
+    var onFocus: ((Bool) -> Void)? = nil
     let action: () -> Void
     @State private var hover = false
+    @FocusState private var focused: Bool
     var body: some View {
         let side = size ?? (small ? QCSpace.small : QCSpace.row)
         Button(action: action) {
@@ -1833,6 +1837,8 @@ struct QCIconButton: View {
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
         .disabled(!enabled)
+        .focused($focused)
+        .onChange(of: focused) { onFocus?($0) }
         .accessibilityLabel(Text(label ?? help))
     }
 }

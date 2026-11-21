@@ -4747,11 +4747,32 @@ func chatHandleChecks() {
         spin(0.45)
         check("handles: \(name): it closes after that", !state.expanded && !state.lit)
         // the pointer on the stack holds it open
-        state.activate()
-        state.box(true); spin(0.7)
+        state.strip(true); spin(0.25)
+        state.strip(false); state.box(true); spin(0.7)
         check("handles: \(name): the pointer on the stack keeps it open", state.expanded)
         state.box(false); spin(0.7)
         check("handles: \(name): and it closes after it leaves", !state.expanded)
+        // keyboard focus (Full Keyboard Access): opens it at once, keeps it open while focus is inside (moving from the handle to a
+        // button of the stack, focus off then on, closes nothing), and closes it half a second after focus has left
+        state.focus(true)
+        check("handles: \(name): keyboard focus on the handle opens the stack at once", state.expanded)
+        spin(0.8)
+        check("handles: \(name): and keeps it open while focus is on it", state.expanded)
+        state.focus(false); state.focus(true); spin(0.8)
+        check("handles: \(name): focus moving to a button of the stack (off, then on) closes nothing", state.expanded)
+        state.focus(false); spin(0.3)
+        check("handles: \(name): focus gone: still open for a moment", state.expanded)
+        spin(0.4)
+        check("handles: \(name): and closed after it", !state.expanded)
+        // VoiceOver's press (the pointer elsewhere) pins it: no timer closes it under the VoiceOver cursor on ▲ or ▼
+        state.activate()
+        check("handles: \(name): a press on the handle opens the stack at once", state.expanded)
+        spin(4.6)
+        check("handles: \(name): and it is still open after 4.6 s (no timer)", state.expanded)
+        state.strip(true); state.strip(false); spin(0.8)
+        check("handles: \(name): a pointer visit while pinned does not close it", state.expanded)
+        state.activate()
+        check("handles: \(name): a second press closes it", !state.expanded)
         state.reset()
     }
     // the zones at the edges, at every panel size: the strips and the open stacks keep clear of the resize band (under 4 pt deep,
