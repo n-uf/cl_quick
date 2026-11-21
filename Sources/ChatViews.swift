@@ -1173,8 +1173,7 @@ struct QCStepControl: View {
             if pointed { RoundedRectangle(cornerRadius: 3, style: .continuous).fill(QCColor.hover).frame(width: Self.column, height: 24).padding(.bottom, 2) }
             RoundedRectangle(cornerRadius: 1).fill(color)
                 .frame(width: isOff ? 6 : Self.bar, height: height)
-                .padding(.bottom, 8)
-            if index == j { Circle().fill(litColour).frame(width: 3, height: 3).padding(.bottom, 3) }
+                .padding(.bottom, (QCSpace.row - 15) / 2)
         }
         .frame(width: Self.column, height: QCSpace.row, alignment: .bottom)
         .qcControl()
@@ -1752,6 +1751,7 @@ struct QCMicButton: View {
                 .foregroundColor(on ? QCColor.accent : hover ? QCColor.text : QCColor.muted)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(on ? QCColor.accent.opacity(0.18) : hover ? QCColor.hover : .clear))
+        .accessibilityLabel(Text(label ?? help))
                 .qcControl()
         }
         .buttonStyle(.plain)
