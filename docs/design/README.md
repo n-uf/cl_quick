@@ -7,6 +7,10 @@ A sketch shows what was proposed at the time. The app and the CHANGELOG say what
 
 ## Current
 
+- [chat-navigation-sketch.html](chat-navigation-sketch.html): the chat's new navigation, six states at real size: no
+  forced scrolling, the floating ▲ ▼ ↓ control (New mark while text arrives), ⤒ in an answer's footer, the keys list
+  with Thinking and Model on ⌥⌘ arrows, and the Shortcut row's new presets with the ⌥Space note. Proposed 2026-11-21,
+  not approved yet.
 - [chat-settings-instructions-sketch.html](chat-settings-instructions-sketch.html): Settings ▸ General split into
   App and Chat, and the Instructions row (the built-in text and your own, one document with jump links). Option E,
   the track with a raised key under the tiles, approved 2026-11-21.
