@@ -35,6 +35,8 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     static let ruleListName = "cl_quick.preview.block-all"
     /// What gets compiled: `blockAll`. A check sets another to see a rule list that can't be compiled.
     static var encodedRules = blockAll
+    /// Checks only: false leaves the rules out, to see that the network probe notices (never false in the app).
+    static var addRules = true
 
     /// Preview pressed: the window (made on the first press) shows `html` as a page, replacing what it showed.
     func show(_ html: String) {
@@ -117,8 +119,10 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         // Safe Browsing asks Google/Apple about a navigation's URL before the delegate is asked: no lookups
         config.preferences.isFraudulentWebsiteWarningEnabled = false
-        config.userContentController.add(rules)
-        trace("add rules")
+        if addRules {
+            config.userContentController.add(rules)
+            trace("add rules")
+        }
         let view = QCPreviewWebView(frame: .zero, configuration: config)
         // on by default on macOS: a force-click on a link would open a Quick Look popover that loads the real page, outside
         // every rule above
@@ -231,6 +235,7 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { trace("finished") }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { trace("failed load") }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { trace("failed load") }
 
     /// No new windows, whatever asks (target=_blank, window.open).
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

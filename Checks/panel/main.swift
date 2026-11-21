@@ -13,6 +13,7 @@ import ClaudeAuth
 import Carbon.HIToolbox
 import PDFKit
 import SwiftUI
+import Network
 import WebKit
 
 Files.readOnly = true
@@ -4120,7 +4121,8 @@ do {
     let rules = (try? JSONSerialization.jsonObject(with: Data(QCHTMLPreview.blockAll.utf8))) as? [[String: [String: String]]]
     check("preview: the rule list blocks every load (url-filter .* and action block)",
           rules?.count == 1 && rules?[0]["trigger"]?["url-filter"] == ".*" && rules?[0]["action"]?["type"] == "block")
-    check("preview: the initial load was allowed once and then the flag went", spinUntil(15) { !pv.allowInitialLoad } && !steps.contains("failed load"), "\(steps)")
+    spinUntil(15) { steps.contains("finished") || steps.contains("failed load") }
+    check("preview: the initial load was allowed once, finished, and the flag went", steps.contains("finished") && !steps.contains("failed load") && !pv.allowInitialLoad, "\(steps)")
     check("preview: after it, even a main-frame load is cancelled", pv.decide(isMainFrame: true, type: .other, download: false) == .cancel)
     check("preview: …and a link click, a reload, a back-forward", [WKNavigationType.linkActivated, .reload, .backForward, .formResubmitted]
         .allSatisfy { pv.decide(isMainFrame: true, type: $0, download: false) == .cancel })
@@ -4160,6 +4162,81 @@ do {
     check("preview: a second press shows in the same window, with a new web view", pv.window === firstWindow && pv.page != nil && pv.page !== firstView)
     spinUntil(5) { firstView == nil }
     check("preview: the first web view is released when replaced", firstView == nil)
+
+    // the behaviour probe: a listener on 127.0.0.1 and a page that points every vector at it. With the isolation in place not
+    // one connection arrives and the page's script never runs; with the rules left out (a mutation) connections do arrive, so a
+    // regression in the parts that isolate would be seen. The web view stays offscreen (the window is never ordered in).
+    final class Loopback {
+        private var listener: NWListener?
+        private(set) var connections = 0
+        private(set) var requests: [String] = []
+        private(set) var port: UInt16 = 0
+        func start() -> Bool {
+            let params = NWParameters.tcp
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+            guard let l = try? NWListener(using: params) else { return false }
+            l.newConnectionHandler = { [weak self] c in
+                self?.connections += 1
+                c.start(queue: .main)
+                c.receive(minimumIncompleteLength: 1, maximumLength: 2048) { data, _, _, _ in
+                    if let d = data, let s = String(data: d, encoding: .utf8) { self?.requests.append(String(s.prefix { $0 != "\r" && $0 != "\n" })) }
+                    c.cancel()
+                }
+            }
+            var ready = false
+            l.stateUpdateHandler = { if case .ready = $0 { ready = true } }
+            l.start(queue: .main)
+            spinUntil(5) { ready }
+            port = l.port?.rawValue ?? 0
+            listener = l
+            return ready && port != 0
+        }
+        func stop() { listener?.cancel(); listener = nil }
+    }
+    func probeHTML(_ port: UInt16) -> String {
+        let u = { (tag: String) in "http://127.0.0.1:\(port)/\(tag)" }
+        return """
+        <!doctype html><html><head><title>probe</title>
+        <meta http-equiv="refresh" content="1;url=\(u("refresh"))">
+        <link rel="preconnect" href="\(u("preconnect"))"><link rel="prefetch" href="\(u("prefetch"))">
+        <link rel="dns-prefetch" href="\(u("dns-prefetch"))"><link rel="stylesheet" href="\(u("css-link"))">
+        <style>@import url("\(u("css-import"))");
+        @font-face { font-family: F; src: url("\(u("font"))"); }
+        body { font-family: F; background: url("\(u("css-url"))"); }</style>
+        <script>document.title = 'js'</script></head>
+        <body><img src="\(u("img"))"><iframe src="\(u("iframe"))"></iframe><object data="\(u("object"))"></object>
+        <video poster="\(u("poster"))"></video>
+        <a id="a" href="\(u("href"))" ping="\(u("ping"))">link</a></body></html>
+        """
+    }
+    /// Loads the probe page in the preview, waits for it to finish and a second more, clicks its link through the policy (a
+    /// script of ours: the page's own are off), waits again; the connections the listener saw, the title and the trace.
+    func probe() -> (connections: Int, requests: [String], title: String?, steps: [String])? {
+        let lb = Loopback()
+        guard lb.start() else { check("probe: a listener on 127.0.0.1 started", false); return nil }
+        defer { lb.stop() }
+        var st: [String] = []
+        pv.trace = { st.append($0) }
+        autoreleasepool { pv.show(probeHTML(lb.port)) }
+        spinUntil(15) { st.contains("finished") || st.contains("failed load") }
+        spin(1.0)
+        var title: String??
+        pv.page?.evaluateJavaScript("document.getElementById('a').click(); document.title") { r, _ in title = .some(r as? String) }
+        spinUntil(5) { title != nil }
+        spin(1.5)
+        return (lb.connections, lb.requests, title ?? nil, st)
+    }
+
+    QCHTMLPreview.addRules = false
+    let leaky = probe()
+    QCHTMLPreview.addRules = true
+    check("probe: with the rules left out the probe sees connections (so it can see a regression)", (leaky?.connections ?? 0) > 0,
+          "\(String(describing: leaky))")
+    let sealed = probe()
+    check("probe: the probe page loaded and finished", sealed?.steps.contains("finished") == true && sealed?.steps.contains("failed load") == false && sealed?.steps.first == "compile" && sealed?.steps.dropFirst().first == "add rules", "\(String(describing: sealed?.steps))")
+    check("probe: not one connection reached 127.0.0.1 (img, css url and @import, font, preconnect, prefetch, dns-prefetch, iframe, object, poster, ping, link, meta refresh)",
+          sealed?.connections == 0, "\(String(describing: sealed?.connections)) \(String(describing: sealed?.requests))")
+    check("probe: the page's script did not run (the title is still the page's own)", sealed?.title == "probe", "\(String(describing: sealed?.title))")
 
     // a rule list that can't be compiled: nothing is loaded, a short message stands in
     let goodRules = QCHTMLPreview.encodedRules
