@@ -3,9 +3,9 @@
 # names it; scripts/vendor.sh copies a tag). The build recipe is cl_kit's own (its scripts/modules.sh); this file only
 # points it at the vendored copy and always leaves Auth/Keychain.swift out: cl_quick never reads the Keychain.
 #
-# and AddressPrivacy, a fourth, standalone one (Shared/AddressPrivacy/*.swift: Foundation, AppKit and SwiftUI, no other module
-# of ours; cl_audit adopts it too): the blurred stand-in of an address, its views and the plain text API. It stays here until
-# it moves to cl_kit.
+# and AddressPrivacy, a fourth, standalone one (cl_kit's Privacy/, vendored: Apple's UI frameworks, no other module of ours;
+# cl_audit uses it too): the blurred stand-in of an address, its views and the plain text API. Built by the copy's own
+# kit_build_privacy; the names below stay as cl_quick's scripts know them.
 #
 #   build_modules OUT no-keychain [swiftc flags...]   builds the four into OUT
 #   build_address_privacy OUT [swiftc flags...]       builds AddressPrivacy alone into OUT (its own suite)
@@ -22,17 +22,9 @@ kit_root="$modules_kit"
 
 module_sources() { kit_sources "$@"; }
 
-modules_addresses="$repo/Shared/AddressPrivacy"
-
-# build_address_privacy OUT [swiftc flags...]: AddressPrivacy as a static library (Swift 5 mode, macOS 13, imports nothing of ours)
-build_address_privacy() {
-  local out="$1"; shift
-  mkdir -p "$out"
-  rm -f "$out"/libAddressPrivacy.a
-  swiftc -swift-version 5 -parse-as-library -target arm64-apple-macos13.0 "$@" -module-name AddressPrivacy \
-    -emit-module -emit-module-path "$out/AddressPrivacy.swiftmodule" -emit-library -static -o "$out/libAddressPrivacy.a" \
-    "$modules_addresses"/*.swift
-}
+# build_address_privacy OUT [swiftc flags...]: AddressPrivacy as a static library (Swift 5 mode, macOS 13, imports nothing of
+# ours), from the vendored copy's Privacy/
+build_address_privacy() { kit_build_privacy "$@"; }
 
 build_modules() {
   local out="$1" keychain="$2"; shift 2
