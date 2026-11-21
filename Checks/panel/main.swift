@@ -4111,6 +4111,7 @@ do {
         check("preview: JavaScript is off", c.defaultWebpagePreferences.allowsContentJavaScript == false)
         check("preview: link previews (the force-click popover) are off", v.allowsLinkPreview == false)
         check("preview: Safe Browsing lookups are off", c.preferences.isFraudulentWebsiteWarningEnabled == false)
+        check("preview: the link-click guard script is in", c.userContentController.userScripts.count == 1 && c.userContentController.userScripts[0].source == QCHTMLPreview.guardScript)
         check("preview: the window is titled Preview, titled and resizable, about 720 × 560",
               w.title == "Preview" && w.styleMask.contains(.titled) && w.styleMask.contains(.resizable) && w.styleMask.contains(.closable)
               && abs(w.contentLayoutRect.width - 720) < 1 && abs(w.contentLayoutRect.height - 560) < 1, "\(w.contentLayoutRect)")

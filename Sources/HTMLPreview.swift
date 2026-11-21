@@ -1,12 +1,23 @@
 // A fenced `html` block in an answer can be looked at: its Preview control opens the block's text as a web page in one
 // reusable window. The answer itself never draws HTML (it stays Markdown and text); the page is a separate, isolated
-// document, as Claude Code treats HTML. Isolation, all of it set before the first load:
-//   - a non-persistent website data store (nothing is stored on the Mac), JavaScript off;
-//   - a content rule list that blocks every load (url-filter ".*"), compiled before the page is loaded; when it can't
-//     be compiled nothing is loaded and the window says so;
+// document, as Claude Code treats HTML. Every setting that isolates it, all in place before the first load (and the
+// loopback probe in Checks/panel sees whether the whole still keeps every vector off the network):
+//   - a non-persistent website data store (nothing is stored on the Mac);
+//   - JavaScript off (`allowsContentJavaScript`, also set again in every navigation's preferences);
+//   - Safe Browsing off (`isFraudulentWebsiteWarningEnabled`): it asks a service about a URL before the delegate is asked;
+//   - link previews off (`allowsLinkPreview`): a force-click would open a Quick Look popover loading the real page;
+//   - a content rule list that blocks every load (url-filter ".*"), compiled once per run in a temporary folder that is
+//     removed at once (stale ones are swept at launch) and added before the page is loaded; when it can't be compiled
+//     nothing is loaded and the window says so;
 //   - `loadHTMLString(_, baseURL: nil)`; a navigation delegate that allows that one load and cancels every other
-//     navigation (a clicked link opens nothing), no new windows, no downloads.
-// The web view exists only from a press on Preview to the window's closing; closing releases the window and the view.
+//     navigation (a clicked link, a redirect, a meta refresh, a frame opens nothing), no new windows, and any download
+//     WebKit begins anyway is cancelled at once;
+//   - a user script of ours (in its own world, not switched off with the page's JavaScript) that stops a click on a link:
+//     WebKit connects to the link's host, and sends an <a ping>, before the delegate is asked;
+//   - the right-click menu keeps only its Copy items (Download Linked File / Image / Media start a download without
+//     asking the delegate or the rules; the Open items navigate).
+// The window opens beside the chat panel (floating when there is no room, so the floating panel can't hide it). The web
+// view exists only from a press on Preview to the window's closing; closing releases the window and the view.
 
 import AppKit
 import SwiftUI
@@ -37,6 +48,21 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     static var encodedRules = blockAll
     /// Checks only: false leaves the rules out, to see that the network probe notices (never false in the app).
     static var addRules = true
+    /// Capturing listeners on the window: a click on an A or AREA (and a form submit) does nothing, so the link's own
+    /// default action, with its ping and WebKit's preconnect, never starts.
+    static let guardScript = """
+    (function () {
+      var stop = function (e) { e.preventDefault(); e.stopImmediatePropagation(); };
+      var link = function (e) {
+        for (var t = e.target; t && t.nodeType === 1; t = t.parentNode) {
+          if (t.nodeName === 'A' || t.nodeName === 'AREA') { stop(e); return; }
+        }
+      };
+      window.addEventListener('click', link, true);
+      window.addEventListener('auxclick', link, true);
+      window.addEventListener('submit', stop, true);
+    })();
+    """
 
     /// Preview pressed: the window (made on the first press) shows `html` as a page, replacing what it showed.
     func show(_ html: String) {
@@ -123,6 +149,11 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
             config.userContentController.add(rules)
             trace("add rules")
         }
+        // a click on a link (or an <area>) is stopped before WebKit acts on it: WebKit opens a connection to the link's host
+        // ahead of asking the delegate, and sends an <a ping> beforehand, whatever the rules and the policy then say. This
+        // runs in a world of our own, which the JavaScript switch above (the page's scripts) doesn't turn off.
+        config.userContentController.addUserScript(WKUserScript(source: guardScript, injectionTime: .atDocumentStart,
+                                                                  forMainFrameOnly: false, in: .defaultClient))
         let view = QCPreviewWebView(frame: .zero, configuration: config)
         // on by default on macOS: a force-click on a link would open a Quick Look popover that loads the real page, outside
         // every rule above
@@ -263,8 +294,9 @@ final class QCPreviewWebView: WKWebView {
         var i = 0
         while i < menu.items.count {
             let sep = menu.items[i].isSeparatorItem
-            if sep && (i == 0 || i == menu.items.count - 1 || menu.items[i - 1].isSeparatorItem) { menu.removeItem(at: i) } else { i += 1 }
+            if sep && (i == 0 || menu.items[i - 1].isSeparatorItem) { menu.removeItem(at: i) } else { i += 1 }
         }
+        while let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
     }
 }
 
