@@ -116,7 +116,7 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   is clear under the pointer inside the alert as well. A blurred address is the fixed stand-in blurred, never the address
   (`Checks/addressprivacy.sh` and the menu and panel suites assert it on what each piece draws); an address is given the
   stand-in's room and no more (a longer address is cut while revealed), so its length is never in a neighbour's place. A
-  reveal ends when the pointer leaves, the app loses focus, a window closes or a menu opens. **Settings ▸ General ▸
+  reveal ends when the pointer leaves, the app loses focus, a window closes or a menu opens. **Settings ▸ General ▸ App ▸
   Blur addresses** (on by default) turns the blur off: addresses then show in full, sharp, and the words hold them in full.
 
 ## The menu bar menu
@@ -190,7 +190,7 @@ minutes for a profile.
   the keyboard as it does for the shortcut, so Dictation types into the field, not the app behind); ⌘D does the same
   as a click, on and off (also for a Dictation macOS's own shortcut started); a click again,
   sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on. Return while
-  dictating stops it and shows the text, and Return again sends it (Settings ▸ General ▸ **Dictation** can make the
+  dictating stops it and shows the text, and Return again sends it (Settings ▸ General ▸ App ▸ **Dictation** can make the
   first Return send at once). The field grows with what you dictate.
 - **⌘⇧C** copies the latest complete answer, in any chat, the same as its Copy button.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
@@ -320,7 +320,7 @@ cl_quick's data to the Trash.
   asks GitHub for cl_quick's latest release (`api.github.com/repos/n-uf/cl_quick/releases/latest`, anonymous, with the
   User-Agent "cl_quick"), compares the version and, if a newer one exists, adds "Update available" to the menu, which
   opens the release's page; nothing is downloaded or installed. It keeps the time of the last check and the newest
-  version seen in `updates.json`. Settings ▸ General ▸ Updates turns it off, and then no request is made.
+  version seen in `updates.json`. Settings ▸ General ▸ App ▸ Updates turns it off, and then no request is made.
 - Links and search (on by default; Settings ▸ General ▸ Chat): Claude Code gets its two web tools, WebFetch and WebSearch
   (`--tools WebFetch,WebSearch --allowedTools WebFetch,WebSearch`), and nothing else, so it can read a page you link or
   search the web. The pages are fetched by Claude Code for that answer only, and the text goes to the model as part of

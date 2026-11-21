@@ -10,7 +10,7 @@ import AddressPrivacy
 // What stays here is the chat's sentence in pieces, which draws its addresses through it.
 
 extension AddressPrivacy {
-    /// Takes cl_quick's own setting (Settings ▸ General ▸ Blur addresses; on unless turned off): as the app starts and
+    /// Takes cl_quick's own setting (Settings ▸ General ▸ App ▸ Blur addresses; on unless turned off): as the app starts and
     /// whenever Settings changes it. The module keeps no setting of its own.
     func apply(_ s: QuickChatSettings) { apply(blur: s.blurAddresses) }
 }

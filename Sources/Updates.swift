@@ -5,7 +5,7 @@
 // User-Agent, "cl_quick". The release's tag (vYY.M.R) is compared with the app's own version (YY.M.R), each part as a
 // number. A newer one shows "Update available: 26.11.3" in the menu bar menu; the item opens the release's page in the
 // browser. No releases yet (404) shows nothing. 403 or 429 (GitHub's rate limit) is tried again the next day.
-// Settings ▸ General ▸ Updates turns it off; off makes no request at all.
+// Settings ▸ General ▸ App ▸ Updates turns it off; off makes no request at all.
 //
 // It keeps two things in updates.json beside settings.json: when it last asked and the newest release seen (version and
 // page). Nothing about chats. Foundation only, so Checks/run.sh checks all of it (a stand-in fetcher, no network).

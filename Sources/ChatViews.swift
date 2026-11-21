@@ -1311,10 +1311,10 @@ final class QCKeys: ObservableObject {
         monitors = []
     }
 
-    /// The shortcut that opens cl_quick, as set in Settings ▸ General.
+    /// The shortcut that opens cl_quick, as set in Settings ▸ General ▸ App.
     static func opener() -> String {
         let s = QuickChat.shared.settings
-        return s.shortcutOn ? s.shortcut.title : "Off (Settings ▸ General)"
+        return s.shortcutOn ? s.shortcut.title : "Off (Settings ▸ General ▸ App)"
     }
 }
 

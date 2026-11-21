@@ -104,7 +104,7 @@ enum Files {
 }
 
 extension UpdateChecker {
-    /// The app's one update check: this version (the bundle's YY.M.R), Settings ▸ General ▸ Updates, updates.json.
+    /// The app's one update check: this version (the bundle's YY.M.R), Settings ▸ General ▸ App ▸ Updates, updates.json.
     static let shared = UpdateChecker(
         current: (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.0",
         enabled: { QuickChat.shared.settings.checkForUpdates },
