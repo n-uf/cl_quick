@@ -19,6 +19,8 @@ import WebKit
 Files.readOnly = true
 let app = NSApplication.shared
 CheckQuiet.start()          // nothing on any screen, never the keyboard, never active (Checks/quiet.swift)
+/// The user's clipboard: no check reads or writes it (each uses a pasteboard of its own), and the last check says so.
+let clipboardAtStart = NSPasteboard.general.changeCount
 let chat = QuickChat.shared
 chat.start()
 // Nothing of this Mac's own is read. The store holds one sample profile on a sample Claude Code folder, signed in, with
@@ -2054,11 +2056,13 @@ do {
 // ── ⌘V in the bar ──────────────────────────────────────────────────────────────────────────────────
 do {
     chat.hide(); chat.model.newChat(); chat.open(); spin(0.5)
-    let pb = NSPasteboard.general
-    let saved = pb.pasteboardItems?.map { it -> [(NSPasteboard.PasteboardType, Data)] in it.types.compactMap { t in it.data(forType: t).map { (t, $0) } } }
+    // a pasteboard of this check's own (never the user's clipboard): the field's paste, copy and cut use the one it is given
+    let pb = NSPasteboard(name: NSPasteboard.Name("cl_quick.checks.keys.\(UUID().uuidString)"))
+    defer { pb.releaseGlobally() }
     func put(_ f: (NSPasteboard) -> Void) { pb.clearContents(); f(pb) }
     /// A ⌘ key press as a layout makes it: the character the layout gives the key, and the key's physical code.
     func cmdKey(_ ch: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = .command) -> Bool {
+        (p.firstResponder as? QCTextView)?.pasteboard = pb
         guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
                                        context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
         return p.performKeyEquivalent(with: e)
@@ -2251,8 +2255,7 @@ do {
     check("the keys list has no plain ⌘ arrows, no ⌃⌘ or ⌃⌥ and no ⌘1 – ⌘4 presets",
           !arrowRows.contains { $0.hasPrefix("⌘↑") || $0.hasPrefix("⌘→") || $0.contains("⌃⌘") || $0.contains("⌃⌥") || $0.hasPrefix("⌘1  ⌘2") || $0.hasPrefix("⌘3  ⌘4") }, arrowRows.joined(separator: "\n"))
     check("the keys list ends with the opener it is given", arrowRows.contains { $0.hasPrefix("⌃⇧Space Open cl_quick") }, arrowRows.joined(separator: "\n"))
-    pb.clearContents()
-    if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
+    (p.firstResponder as? QCTextView)?.pasteboard = .general
 }
 
 // ── The digit keys (Sources/DigitKeys.swift): ⌘ digits pick the model and thinking ─────────────────────────────────
@@ -2649,7 +2652,9 @@ do {
     check("copy: another letter does not copy", pb.string(forType: .string) == "other")
     // ⌘C (no shift) is still the selection's: with nothing selected it copies nothing of the answer
     pb.clearContents(); pb.setString("other", forType: .string)
+    (p.firstResponder as? QCTextView)?.pasteboard = pb         // the field's own copy writes to its pasteboard: this one's, not the user's
     _ = key("c", 8, [.command]); spin(0.2)
+    (p.firstResponder as? QCTextView)?.pasteboard = .general
     check("copy: ⌘C without Shift does not copy the answer", pb.string(forType: .string) != answer || answer == "other")
     // the footer's Copy button copies the same (and flashes the same tick)
     pb.clearContents(); m.copied = nil
@@ -2805,16 +2810,16 @@ do {
     while m0.removeLastImage() {}
     spin(0.4)
     check("images: all removed, the bar is its old height again", m0.images.isEmpty && abs(p.frame.height - tall0) < 0.5, "\(tall0) → \(p.frame.height)")
-    // text paste is the text view's own: a picture is not taken when the paste is text (here on the general pasteboard, saved and put back)
-    let gen = NSPasteboard.general
-    let savedGen = gen.pasteboardItems?.map { it -> [(NSPasteboard.PasteboardType, Data)] in it.types.compactMap { t in it.data(forType: t).map { (t, $0) } } }
+    // text paste is the text view's own: a picture is not taken when the paste is text (on a pasteboard of this check's own,
+    // never the user's clipboard)
+    let gen = NSPasteboard(name: NSPasteboard.Name("cl_quick.checks.images-text.\(UUID().uuidString)"))
+    defer { gen.releaseGlobally() }
     tv.pasteboard = gen
     gen.clearContents(); gen.setString("pasted words", forType: .string); gen.setData(png(10, 10), forType: .png)
     _ = cmdV(); spin(0.3)
     check("images: ⌘V with text and a picture on it pastes the text and attaches nothing", tv.string == "pasted words" && m0.images.isEmpty, "\(tv.string.debugDescription) \(m0.images.count)")
     tv.string = ""; m0.field = ""
     gen.clearContents()
-    if let savedGen { for it in savedGen { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; gen.writeObjects([n]) } }
     tv.pasteboard = ipb
     // a drop of files: images attach, others are said; a drop of nothing the chat takes is left alone
     putI { _ = $0.writeObjects([fileA as NSURL, fileT as NSURL]) }
@@ -5178,5 +5183,7 @@ func chatBehaviourChecks() {
 chatBehaviourChecks()
 
 CheckQuiet.verify("at the end")
+check("clipboard: the whole suite left the general pasteboard as it was (a copy made by someone else meanwhile counts too: run again)",
+      NSPasteboard.general.changeCount == clipboardAtStart, "change count \(clipboardAtStart) → \(NSPasteboard.general.changeCount)")
 print(failed == 0 ? "panel checks: \(passed)/\(passed) passed" : "panel checks: \(failed) failed, \(passed) passed")
 exit(failed == 0 ? 0 : 1)
