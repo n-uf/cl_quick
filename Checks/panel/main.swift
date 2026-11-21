@@ -5069,6 +5069,14 @@ func chatBehaviourChecks() {
     resize(width: 560)
     check("behaviour: wider mid-chat: not following, not pulled to the end", !sc.following && !sc.isAtBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
     resize(width: QuickChatRoot.width, height: h0)
+    // a window that grows by as much as the text left below the view ends with the view at the bottom, and follows again
+    sc.jumpToLatest(); settle()
+    user(scrollTo: sc.maxOffset() - 60); settle()
+    check("behaviour: 60 pt above the bottom: not following", !sc.following && !sc.isAtBottom)
+    resize(height: h0 + 140)
+    check("behaviour: the window grew past the 60 pt left below: the view is at the bottom and follows again", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset()) following \(sc.following)")
+    resize(height: h0)
+    sc.jumpToLatest(); settle()
     // 2. hiding and reopening restores the position and the following state
     user(scrollTo: 700); settle()
     let before = sc.offset()

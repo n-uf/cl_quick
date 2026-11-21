@@ -170,9 +170,11 @@ final class QCChatScroll: ObservableObject {
         scheduleRefresh()
     }
 
-    /// The window was resized under it: when following, the end stays in view.
+    /// The window was resized under it: when following, the end stays in view; a view that a growing window leaves at the bottom
+    /// (the window grew by as much as the text below it) follows again, as any view at the bottom does.
     private func viewportResized() {
-        if following { stick() }
+        if following { stick() } else if isAtBottom { following = true }
+        lastOffset = offset()
         scheduleRefresh()
     }
 
