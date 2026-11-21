@@ -312,8 +312,8 @@ tile): **APP** (first; the last one shown is remembered) and **CHAT**, then, und
   the limit). The box is one text view of about seven lines that scrolls inside itself: the window never changes height
   with what is typed. Its first lines are the built-in instructions in force, dimmed and read-only (a small lock; the web
   or the no-web text, by Links and search, swapped live), then a hairline, then your text; it opens scrolled to your text.
-  Two light links on the label line, "Built in · Custom", scroll the box to either part (about 200 ms, at once with
-  Reduce Motion on); the one in view is underlined in orange. Only your part is edited, counted, capped and stored; the
+  Two light links on the label line, "Built in · Custom", scroll the box to either part (at once; nothing
+  animates); the one in view is underlined in orange. Only your part is edited, counted, capped and stored; the
   caret can't enter the built-in part, and selecting and copying it is fine. Saved as you type, for the app (not per profile). Your text is
   added **after** cl_quick's fixed instructions, under "The user's own instructions:", and never replaces them (with
   Links and search on, the fixed text is what says that a page's text is data, not instructions); an empty box adds

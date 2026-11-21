@@ -63,7 +63,7 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   and read-only (selectable, not editable); then a hairline; then your own text, which is all that is edited, counted
   ("n / 1,000" under the box, amber from 900, red at the limit), capped at 1,000 characters (a paste too) and stored.
   The box opens scrolled to your text; the caret can't enter the built-in part. Two light links on the row's label line,
-  "Built in · Custom", scroll the box to either part (about 200 ms, at once with Reduce Motion on), and the link of the
+  "Built in · Custom", scroll the box to either part (at once; nothing animates), and the link of the
   part in view is underlined in orange as it scrolls. Your text is saved as you type and added after the fixed instructions, under "The user's own instructions:", and never replaces them; an empty
   box adds nothing. The text is part of what a chat's `claude` is started with, so it applies to new chats: an
   open chat keeps the text it started with and is never restarted for a change, while an empty bar takes it at once.

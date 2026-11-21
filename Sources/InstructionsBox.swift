@@ -2,8 +2,8 @@
 // fixed height (about seven lines) that scrolls inside itself, so what is typed never changes the size of what holds it:
 // the built-in instructions first (dimmed, a small lock before them, selectable but not editable), a hairline, then the
 // user's own text, which is the only part that is edited, counted, capped at 1,000 characters (a paste too) and stored.
-// It opens scrolled to the user's part. "Built in · Custom" scroll it to either part (about 200 ms, at once with Reduce
-// Motion on) and the link of the part in view is lit as it scrolls. Links and search swaps the built-in part live.
+// It opens scrolled to the user's part. "Built in · Custom" scroll it to either part at once (nothing animates) and the link
+// of the part in view is lit as it scrolls. Links and search swaps the built-in part live.
 //
 // One NSTextView with the built-in part as a protected prefix, not a read-only view stacked above an editable one: one scroll
 // view, one selection and one set of scroll bars for the whole box (selecting across the hairline and copying just work, the
@@ -267,7 +267,7 @@ struct SInstructionsTextView: NSViewRepresentable {
             watch.append(nc.addObserver(forName: NSView.frameDidChangeNotification, object: s, queue: .main) { [weak self] _ in
                 self?.fitSpace(); self?.placeIfReady()
             })
-            // scroll-spy: the link of the part in view follows the scrolling (also while a jump animates)
+            // scroll-spy: the link of the part in view follows the scrolling (a jump included)
             watch.append(nc.addObserver(forName: NSView.boundsDidChangeNotification, object: s.contentView, queue: .main) { [weak self] _ in
                 self?.spy()
             })
@@ -320,7 +320,7 @@ struct SInstructionsTextView: NSViewRepresentable {
                 tv.setSelectedRange(QuickChatInstructions.caret(tv.selectedRange(), protected: pl))
                 tv.undoManager?.removeAllActions()       // an undo would act on text that is no longer there
             }
-            if let j = parent.jump, j.id != lastJump { lastJump = j.id; scrollTo(j.part, animated: true) }
+            if let j = parent.jump, j.id != lastJump { lastJump = j.id; scrollTo(j.part) }
             tv.needsDisplay = true
         }
 
@@ -346,30 +346,21 @@ struct SInstructionsTextView: NSViewRepresentable {
         /// something is typed or a link is used).
         private func placeIfReady() {
             guard !edited, !settled, let scroll, scroll.frame.width > 20 else { return }
-            move(to: .custom, animated: false)
+            move(to: .custom)
         }
 
-        /// Scrolls to a part: about 200 ms, at once with Reduce Motion on (or when not animated).
-        func scrollTo(_ part: QuickChatInstructions.Part, animated: Bool) {
+        /// Scrolls to a part at once (nothing animates): the box is at its target when this returns.
+        func scrollTo(_ part: QuickChatInstructions.Part) {
             settled = true
-            move(to: part, animated: animated)
+            move(to: part)
         }
 
-        private func move(to part: QuickChatInstructions.Part, animated: Bool) {
+        private func move(to part: QuickChatInstructions.Part) {
             guard let scroll, let tv else { return }
             let clip = scroll.contentView
             let most = tv.frame.height - clip.bounds.height
             let y = QuickChatInstructions.scrollTarget(part, divider: dividerY, most: most)
-            let point = NSPoint(x: 0, y: y)
-            if animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.2
-                    ctx.allowsImplicitAnimation = true
-                    clip.animator().setBoundsOrigin(point)
-                }
-            } else {
-                clip.setBoundsOrigin(point)
-            }
+            clip.setBoundsOrigin(NSPoint(x: 0, y: y))
             scroll.reflectScrolledClipView(clip)
         }
 

@@ -95,31 +95,34 @@ do {
           hairlineY() > 20 && atCustom(), "scrolled to \(top()), the hairline is at \(hairlineY())")
     check("box: …and Custom is the part in view (its link lit)", coord.partInView == .custom && spied == .custom)
     // jump links and scroll-spy
-    coord.scrollTo(.builtIn, animated: false)
+    coord.scrollTo(.builtIn)
+    check("box: Built in is at the top the moment the call returns (one step)", top() == 0 && coord.partInView == .builtIn, "\(top())")
     spin { spied == .builtIn }
     check("box: Built in scrolls to the top, and its link is the one lit", top() == 0 && coord.partInView == .builtIn && spied == .builtIn, "\(top()) \(spied)")
-    coord.scrollTo(.custom, animated: false)
+    coord.scrollTo(.custom)
+    check("box: Custom is at the hairline the moment the call returns (one step)", atCustom(), "\(top())")
     spin { spied == .custom }
     check("box: Custom scrolls back to the hairline, and its link is lit again", atCustom() && spied == .custom, "\(top()) \(spied)")
     // part way: the link follows the middle of the view
     scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 10)); scroll.reflectScrolledClipView(scroll.contentView)
     spin { spied == .builtIn }
     check("box: scrolling by hand lights the link of the part in view", spied == .builtIn && coord.partInView == .builtIn, "\(top()) \(spied)")
-    // a link's request (a new id each time): about 200 ms, at once with Reduce Motion on
+    // a link's request (a new id each time): instant, the final position right after the click, whatever Reduce Motion says
     coord.parent = parent(web: false, jump: SJump(part: .custom, id: 1)); coord.apply()
-    spin { atCustom() && spied == .custom }
-    check("box: a link's request scrolls to its part, and the spy follows", atCustom() && spied == .custom, "\(top()) \(spied)")
+    check("box: a link's request is at its part right after the click (no animation)", atCustom(), "\(top())")
+    spin { spied == .custom }
+    check("box: …and the spy follows", atCustom() && spied == .custom, "\(top()) \(spied)")
     scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 0)); scroll.reflectScrolledClipView(scroll.contentView)
     coord.apply()
     spin(0.3) { false }
     check("box: the same request is not run twice", top() == 0, "\(top())")
     coord.parent = parent(web: false, jump: SJump(part: .custom, id: 2)); coord.apply()
-    spin { atCustom() }
-    check("box: …a new one is", atCustom(), "\(top())")
+    check("box: …a new one is, at once", atCustom(), "\(top())")
     coord.parent = parent(web: false, jump: SJump(part: .builtIn, id: 3)); coord.apply()
-    spin { top() == 0 }
-    check("box: …and Built in's request goes to the top", top() == 0 && spied == .builtIn, "\(top()) \(spied)")
-    coord.scrollTo(.custom, animated: false)
+    check("box: …and Built in's request goes to the top at once", top() == 0, "\(top())")
+    spin { spied == .builtIn }
+    check("box: …and its link is lit", spied == .builtIn, "\(spied)")
+    coord.scrollTo(.custom)
     // the links' hit areas
     check("box: a jump link's hit area is at least 44 × 22 pt", SJumpLink.hit.width >= 44 && SJumpLink.hit.height >= 22)
 
