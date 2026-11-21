@@ -61,6 +61,10 @@ struct QuickChatSettings: Codable, Equatable {
     /// Account addresses are blurred until the pointer is on them (AddressPrivacy); off: drawn in full. On by default; a
     /// key missing from the file is on. It applies at once to the chat and to the menus the next time they open.
     var blurAddresses = true
+    /// Custom instructions: the user's own lines, added after the fixed system prompt of every new chat (Engine.swift,
+    /// QuickChatInstructions). At most 1,000 characters; empty adds nothing. Saved as it is typed, for the app (not per
+    /// profile, like the rest of these); it applies to the next new chat, an open one keeps the text it started with.
+    var instructions = ""
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -75,6 +79,7 @@ struct QuickChatSettings: Codable, Equatable {
         checkForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checkForUpdates)) ?? true
         webLinks = (try? c.decodeIfPresent(Bool.self, forKey: .webLinks)) ?? true
         blurAddresses = (try? c.decodeIfPresent(Bool.self, forKey: .blurAddresses)) ?? true
+        instructions = QuickChatInstructions.clamp((try? c.decodeIfPresent(String.self, forKey: .instructions)) ?? "")
     }
 
     static func load() -> QuickChatSettings { Files.read(QuickChatSettings.self, Files.settings) ?? .init() }
@@ -235,6 +240,18 @@ final class QuickChatModel: ObservableObject {
     }
     /// A new chat starts from the setting as it is now.
     private func takeWebDefault() { web = defaults().webLinks; wantedWeb = nil }
+
+    /// The custom instructions this chat's `claude` is started with (or was): part of what the process is keyed on, like
+    /// `web`, but an open chat keeps its own: a change in Settings reaches only a chat that isn't there yet (an empty bar,
+    /// or the next new chat), so an open one is never restarted because of it, silently or otherwise.
+    var instructions = ""
+    /// Settings changed the text: an empty bar (no turns on screen) takes it at once, and its idle `claude` is replaced
+    /// by the next message; with a chat on screen nothing changes, the next new chat takes it (`takeInstructionsDefault`).
+    func instructionsSettingChanged(_ text: String) {
+        if turns.isEmpty { instructions = text }
+    }
+    /// A new chat starts from the setting as it is now.
+    private func takeInstructionsDefault() { instructions = defaults().instructions }
     /// The full name each choice answered with last ("Haiku 5.5"), for its key.
     @Published var knownModels: [QuickChatModelChoice: String] = [:]
     /// Asks the field to take the keyboard.
@@ -478,7 +495,7 @@ final class QuickChatModel: ObservableObject {
         images = []; files = []; imageNote = nil
         barProblem = nil
         // the chat on screen ended: this message starts a new one, with nothing from the old one
-        if ended != nil { turns = []; ended = nil; accountNote = nil; takeWebDefault() }
+        if ended != nil { turns = []; ended = nil; accountNote = nil; takeWebDefault(); takeInstructionsDefault() }
         turns.append(QuickChatTurn(question: q, images: sent, files: sentFiles, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
         scrollTick += 1
         ask(q, images: sent, files: sentFiles)
@@ -641,7 +658,7 @@ final class QuickChatModel: ObservableObject {
             let q = turns[i].question, imgs = turns[i].images, fls = turns[i].files
             turns = [QuickChatTurn(question: q, images: imgs, files: fls, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title)]
             ended = nil; accountNote = nil
-            takeWebDefault()
+            takeWebDefault(); takeInstructionsDefault()
             scrollTick += 1
             ask(q, images: imgs, files: fls)
             return
@@ -674,7 +691,7 @@ final class QuickChatModel: ObservableObject {
         ended = nil
         if let q = waitingQuestion { field = q; images = waitingImages; files = waitingFiles }
         turns = []
-        takeWebDefault()
+        takeWebDefault(); takeInstructionsDefault()
         accountNote = nil
         barProblem = nil
         scrollTick += 1
@@ -713,7 +730,7 @@ final class QuickChatModel: ObservableObject {
         accountNote = nil
         if dropsSwitch { dropSwitch() }
         let d = defaults()
-        choice = d.model; thinking = d.thinking; web = d.webLinks; wantedWeb = nil
+        choice = d.model; thinking = d.thinking; web = d.webLinks; wantedWeb = nil; instructions = d.instructions
         focusTick += 1
     }
 
@@ -871,9 +888,10 @@ final class QuickChatModel: ObservableObject {
     }
 
     private func start(_ q: String, images: [QCImage], files: [QCFile], path: String, target: QuickChatTarget) {
-        let cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
-                                   workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort, web: web)
-        let key = keyFor(path, target)
+        var cmd = QuickChatCommand(claude: path, configDir: target.configDir, isDefaultDir: target.isDefaultDir,
+                                   workFolder: target.workFolder, model: resolvedModel.value, effort: effectiveThinking.effort, web: web,
+                                   instructions: instructions)
+        var key = keyFor(path, target)
         // (target is the folder as read just now, freshTarget: the process must still be its account)
         let goesOn = process?.isRunning == true && key == processKey && (!trail.running || reportOwner == target.accountUUID)
         if goesOn {
@@ -884,7 +902,10 @@ final class QuickChatModel: ObservableObject {
             if cmd.effort != appliedEffort { process?.setThinking(cmd.effort); appliedEffort = cmd.effort }
         } else {
             // another account, folder or `claude`, or none running: a new chat begins, so nothing said before is on
-            // screen as if the new `claude` knew it
+            // screen as if the new `claude` knew it. It starts from the custom instructions as Settings has them now
+            // (a chat that goes on never does: it keeps the text it started with)
+            takeInstructionsDefault()
+            cmd.instructions = instructions; key = keyFor(path, target)
             closeProcess()
             if turns.count > 1, let last = turns.last {
                 turns = [last]
@@ -906,9 +927,12 @@ final class QuickChatModel: ObservableObject {
     /// The same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
     /// aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
     /// accounts may share one, and must not share a running claude. Web links and search is part of it too: the tools are
-    /// fixed when `claude` starts, so a message in a chat whose setting differs from its process starts a new chat.
+    /// fixed when `claude` starts, so a message in a chat whose setting differs from its process starts a new chat. So are
+    /// the custom instructions, which sit in its system prompt (QuickChatCommand.processKey); they differ from the process's
+    /// only for a bar with nothing on screen, since an open chat keeps its own.
     private func keyFor(_ path: String, _ target: QuickChatTarget) -> String {
-        [path, target.configDir, target.workFolder, target.accountUUID ?? target.email ?? "", web ? "web" : "noweb"].joined(separator: "|")
+        QuickChatCommand.processKey(claude: path, configDir: target.configDir, workFolder: target.workFolder,
+                                    account: target.accountUUID ?? target.email ?? "", web: web, instructions: instructions)
     }
 
     /// A new `claude` for the target, asked at once for the account's models and limits (nothing goes to a model).
@@ -968,7 +992,7 @@ final class QuickChatModel: ObservableObject {
             guard let self, let path, gen == self.generation, self.process == nil, !self.busy, let t = self.target else { return }
             let cmd = QuickChatCommand(claude: path, configDir: t.configDir, isDefaultDir: t.isDefaultDir,
                                        workFolder: t.workFolder, model: self.resolvedModel.value, effort: self.effectiveThinking.effort,
-                                       web: self.web)
+                                       web: self.web, instructions: self.instructions)
             if self.launch(cmd, key: self.keyFor(path, t), target: t) == nil { self.armIdle(Self.warmIdleSeconds) }
         }
     }
@@ -1302,6 +1326,7 @@ final class QuickChat {
         model.choice = settings.model
         model.thinking = settings.thinking
         model.web = settings.webLinks
+        model.instructions = settings.instructions
         AddressPrivacy.shared.apply(settings)
         model.resolveClaude = { [weak self] done in self?.resolveClaude(done) ?? done(nil) }
         model.hide = { [weak self] in self?.hide() }
@@ -1377,13 +1402,26 @@ final class QuickChat {
     }
 
     /// Settings changed (the settings window): the shortcut is registered again and the next new chat uses the defaults
-    /// (web links and search too; a bar with no chat on screen takes it at once).
+    /// (web links and search too; a bar with no chat on screen takes it at once). The custom instructions are saved on every
+    /// key typed, so a change of them alone leaves the shortcut registered (it is not let go and taken again per key);
+    /// they reach an empty bar at once and otherwise the next new chat.
     func settingsChanged(_ s: QuickChatSettings) {
+        var rest = s; rest.instructions = settings.instructions
+        let onlyInstructions = s.instructions != settings.instructions && rest == settings
         settings = s
         s.save()
         model.webSettingChanged(s.webLinks)
+        model.instructionsSettingChanged(s.instructions)
+        if onlyInstructions { return }
         AddressPrivacy.shared.apply(s)
         applyShortcut()
+    }
+
+    /// Remove cl_quick data… clears the custom instructions with the rest of cl_quick's own data: settings.json goes to the
+    /// Trash with them, and nothing here keeps the text (nothing is saved on the way, which would write the file again).
+    func clearInstructions() {
+        settings.instructions = ""
+        model.instructionsSettingChanged("")
     }
 
     /// The chat's profile, its account and its level now, and while its limit is full the profile with the most room.
@@ -1569,7 +1607,7 @@ final class QuickChat {
     func shutdown() { hotKey.unregister(); model.shutdown() }
 
     /// Its data is about to go (Remove cl_quick data…): the chat closes and its claude with it.
-    func closeForRemoval() { hide(); model.newChat(); model.forgetAccount() }
+    func closeForRemoval() { clearInstructions(); hide(); model.newChat(); model.forgetAccount() }
 
     private func makePanel() -> QuickChatPanel {
         let p = QuickChatPanel()
