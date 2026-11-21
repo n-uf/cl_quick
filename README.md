@@ -64,7 +64,7 @@ Account addresses are shown in full in Settings. Everywhere else they are blurre
 words VoiceOver reads and an item's title say "hidden address" (nothing of the address: no first letter, length or domain). What is blurred is not the address: it is one fixed stand-in
 (`abcdefghijkl@mnopqrst.com`), the same for every address, so a screenshot of the blur gives nothing back (a blur over the
 real text keeps its length and letter shapes); the real address is drawn only while the pointer is on it. This is the
-`AddressPrivacy` module, `Shared/AddressPrivacy/`, shared with cl_audit (README there).
+`AddressPrivacy` module, shared with cl_audit in [cl_kit](https://github.com/n-uf/cl_kit) (`Privacy/`, README there).
 
 The **+** tile adds a profile: a folder found on this Mac (Add, or Sign in… for one that isn't signed in), Choose a
 folder… (it must be a signed-in Claude Code folder), or "A new account, in a new folder", which takes a name, makes

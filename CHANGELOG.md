@@ -4,6 +4,9 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **AddressPrivacy comes from cl_kit.** The module that hides an account address moved to
+  [cl_kit](https://github.com/n-uf/cl_kit) (v26.11.3, `Privacy/`); cl_quick now builds it from the vendored copy, like the
+  other shared modules, and no longer keeps its own in `Shared/`. Nothing changes in the app: the code is the same.
 - **The chat's prompt tells Claude about Preview.** Both prompts (with and without web links and search) now say that a
   fenced `html` block gets a Preview button, that it should be self-contained (inline CSS and SVG only, no scripts, no
   external images, fonts or links, as none of that loads), and that it is for when a visual layout helps or the user
