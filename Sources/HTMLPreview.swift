@@ -134,9 +134,9 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
 
     /// Allows the initial load of our HTML once, in the main frame; cancels everything else (a click on a link, a
     /// redirect, a frame, a form, a script's navigation).
-    func decide(_ action: WKNavigationAction) -> WKNavigationActionPolicy {
-        guard allowInitialLoad, action.targetFrame?.isMainFrame ?? false, action.navigationType == .other,
-              !action.shouldPerformDownload else { return .cancel }
+    /// (Plain values, so a check can ask without WebKit's own action objects.)
+    func decide(isMainFrame: Bool, type: WKNavigationType, download: Bool) -> WKNavigationActionPolicy {
+        guard allowInitialLoad, isMainFrame, type == .other, !download else { return .cancel }
         allowInitialLoad = false
         return .allow
     }
@@ -144,13 +144,16 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences,
                  decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
         preferences.allowsContentJavaScript = false
-        decisionHandler(decide(navigationAction), preferences)
+        decisionHandler(decide(isMainFrame: navigationAction.targetFrame?.isMainFrame ?? false, type: navigationAction.navigationType,
+                               download: navigationAction.shouldPerformDownload), preferences)
     }
 
     /// Never a download, and nothing that isn't a page.
+    static func responsePolicy(canShow: Bool) -> WKNavigationResponsePolicy { canShow ? .allow : .cancel }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .cancel)
+        decisionHandler(Self.responsePolicy(canShow: navigationResponse.canShowMIMEType))
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { trace("finished") }
