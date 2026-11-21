@@ -58,5 +58,9 @@ jobs:
       - name: Checks/signin.sh
         run: Checks/signin.sh
 
+      # the shared modules: the vendored cl_kit copy is exactly its tag, and cl_kit's own suites pass on it
+      - name: scripts/vendor.sh --check
+        run: scripts/vendor.sh --check
+
       - name: Checks/vendor.sh
         run: Checks/vendor.sh

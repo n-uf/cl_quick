@@ -1,7 +1,7 @@
 // Switch: changing which account a profile is on. A profile is one Claude Code folder and the folder holds one signed-in
 // account at a time, so switching is signing in again in the same folder, as another account: Claude Code's own
-// `claude auth login`, in Terminal, finished in the browser, through ClaudeAuth's ClaudeSignIn (shared with cl_audit:
-// Shared/ClaudeAuth+SignIn/). It opens the window, follows the folder every 2 s for at most 10 minutes, decides which
+// `claude auth login`, in Terminal, finished in the browser, through ClaudeAuth's ClaudeSignIn (shared with cl_audit in
+// cl_kit, Vendor/). It opens the window, follows the folder every 2 s for at most 10 minutes, decides which
 // account signed in, and closes the window after it. Every other sign-in (a signed-out folder, a folder found, a new one)
 // goes through it too, one at a time. cl_quick never sees a password or a token, and never reads the Keychain: the
 // account is confirmed by a short `claude` on the folder (its `initialize` answer, SignInWord), and until then the
