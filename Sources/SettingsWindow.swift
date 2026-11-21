@@ -14,7 +14,10 @@ enum SettingsPage: Hashable {
 }
 
 final class SettingsState: ObservableObject {
-    @Published var page: SettingsPage = .general
+    /// A move to another page closes the Add an account… form (it belongs to one profile's page).
+    @Published var page: SettingsPage = .general { didSet { if page != oldValue { addingFor = nil } } }
+    /// The profile whose page has its Add an account… form open (nil: none).
+    @Published var addingFor: String?
     @Published var settings = QuickChat.shared.settings
     /// Folders being signed in (Sign in another account…): the box says so until their sign-in (ClaudeSignIn) has ended.
     @Published var signingIn: Set<String> = []
@@ -28,6 +31,16 @@ final class SettingsState: ObservableObject {
         }
     }
     deinit { if let switchWatch { NotificationCenter.default.removeObserver(switchWatch) } }
+
+    /// The page a `show` lands on: a profile's card, Add a profile (`SettingsWindow.addPage`) or General; the first run
+    /// goes to the first profile found, or Add a profile when none was. `addAccount` opens the profile's Add an account…
+    /// form (only for a profile that is there to have one).
+    func open(profile: String?, addAccount: Bool = false, firstProfile: String? = nil, firstRun: Bool = false) {
+        page = profile == SettingsWindow.addPage ? .add
+            : profile.map(SettingsPage.profile) ?? (firstRun ? (firstProfile.map(SettingsPage.profile) ?? .add) : .general)
+        // (set after the page: moving to another page closes the form)
+        if addAccount, let profile, profile != SettingsWindow.addPage { addingFor = profile }
+    }
 
     // MARK: Record another…
 
@@ -98,15 +111,13 @@ final class SettingsWindow {
     static let addPage = "+add"
 
     /// Opens the window (and brings cl_quick forward, as a settings window should) on a profile's card, Add a profile
-    /// (`addPage`), or General.
-    func show(profile: String?, firstRun: Bool = false) {
+    /// (`addPage`), or General. `addAccount`: the profile's Add an account… form is open (the menus' Add an account…).
+    func show(profile: String?, addAccount: Bool = false, firstRun: Bool = false) {
         state.settings = QuickChat.shared.settings
         ProfileStore.shared.noteAccounts()
         ProfileStore.shared.reload()
         let first = ProfileStore.shared.profiles.first?.id
-        // the first run: the first profile found, or Add a profile when none was
-        state.page = profile == Self.addPage ? .add
-            : profile.map(SettingsPage.profile) ?? (firstRun ? (first.map(SettingsPage.profile) ?? .add) : .general)
+        state.open(profile: profile, addAccount: addAccount, firstProfile: first, firstRun: firstRun)
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 660), styleMask: [.titled, .closable, .resizable],
                              backing: .buffered, defer: false)
@@ -694,11 +705,15 @@ struct ProfilePage: View {
     let profile: Profile
     @State private var name = ""
     @State private var address = ""
-    @State private var adding = false
     @State private var problem: String?
     @Environment(\.face) private var face
 
     private var switcher: AccountSwitcher { .shared }
+    /// The Add an account… form's open state: it lives in the window's state (SettingsState.addingFor), so the menus' Add
+    /// an account… can open it.
+    private var adding: Binding<Bool> {
+        Binding(get: { state.addingFor == profile.id }, set: { state.addingFor = $0 ? profile.id : nil })
+    }
 
     var body: some View {
         let waiting = switcher.waiting[profile.id]
@@ -710,9 +725,9 @@ struct ProfilePage: View {
         ProfileContent(model: model, actions: actions) {
             SField(placeholder: "Name", text: $name, width: 240, size: 16, weight: .semibold, onCommit: rename)
                 .onAppear { name = profile.name; store.noteAccount(of: profile.id) }
-                .onChange(of: profile.id) { _ in name = profile.name; problem = nil; address = ""; adding = false }
+                .onChange(of: profile.id) { _ in name = profile.name; problem = nil; address = "" }
         } addAccount: {
-            AddAccountForm(open: $adding, address: $address, problem: problem, inUse: store.inUse(profile)?.email,
+            AddAccountForm(open: adding, address: $address, problem: problem, inUse: store.inUse(profile)?.email,
                            busy: model.busy, signIn: addAccount, cancel: { problem = nil })
         }
     }
@@ -770,7 +785,7 @@ struct ProfilePage: View {
         let known = profile.accounts.first { $0.email.lowercased() == a.lowercased() }
         switcher.confirmAndSwitch(profile, uuid: known?.uuid, email: known?.email ?? a, origin: .settings)
         address = ""
-        adding = false
+        adding.wrappedValue = false
     }
 
     private func rename() {
