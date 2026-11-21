@@ -151,7 +151,7 @@ minutes for a profile.
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
 - Answers stream in as Markdown; tables (header, alignment row, rows) are drawn as a grid whose cells wrap to the
-  panel's width and scroll sideways when there are too many columns; code blocks have Copy, and an `html` block also has Preview (the page in its own window: no scripts, no network, no links followed); under each answer Copy and a line like "answered by Haiku 5.5 ·
+  panel's width and scroll sideways when there are too many columns; code blocks have Copy, and an `html` block also has Preview (the page in its own window: no scripts, nothing fetched from the network, links and downloads do nothing); under each answer Copy and a line like "answered by Haiku 5.5 ·
   2.4 s"; under the last one also Ask again.
 - The header (once the bar has become a chat window) shows only the usage meters, "5h" and "wk", each with its bar,
   its share and, when there's room, when it resets, and, at the right, a darker capsule with **+** (new chat) and **✕**
