@@ -2065,6 +2065,8 @@ final class QuickChatPanel: NSPanel {
     override func orderOut(_ sender: Any?) {
         QCFloat.shared.hide()            // the usage card goes with the panel (hidden under the pointer gets no mouse-exit)
         QCKeys.shared.close()            // and the keys list
+        QuickChat.shared.model.scroll.left.reset()    // and the edge handles' stacks (no mouse-exit under a hidden window either)
+        QuickChat.shared.model.scroll.right.reset()
         AddressPrivacy.shared.endHover() // and a revealed address goes blurred again (no mouse-exit either)
         super.orderOut(sender)
         quietKey = false

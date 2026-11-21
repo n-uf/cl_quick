@@ -4790,6 +4790,18 @@ func chatHandleChecks() {
         user(scrollTo: (sc.top(ofAnswer: ids[1]) ?? 0) + 100); settle()
         zones("\(Int(w)) pt wide")
     }
+    // hidden with the pointer over a handle (a hidden window gets no mouse-exit): the stacks are closed and the pills plain, and
+    // they are still closed when the panel is opened again
+    var wide = p.frame; wide.size.width = QuickChatRoot.width + 2 * QuickChatRoot.margin; p.setFrame(wide, display: true); spin(0.3)
+    user(scrollTo: (sc.top(ofAnswer: ids[1]) ?? 0) + 100); settle()
+    sc.left.strip(true); sc.right.strip(true); spin(0.4)
+    check("handles: both stacks are open under the pointer before the panel hides", sc.left.expanded && sc.right.expanded)
+    chat.hide(); spin(0.1)
+    check("handles: hiding the panel closes both stacks and unlights the pills at once", !sc.left.expanded && !sc.right.expanded && !sc.left.lit && !sc.right.lit)
+    spin(0.7)
+    check("handles: and nothing opens again by itself", !sc.left.expanded && !sc.right.expanded)
+    chat.open(); spin(0.4)
+    check("handles: reopened, they are closed", !sc.left.expanded && !sc.right.expanded)
     m.newChat(); chat.hide(); spin(0.2)
 }
 chatHandleChecks()
