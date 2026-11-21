@@ -324,16 +324,21 @@ final class QCChatScroll: ObservableObject {
         go(to: top(of: v) - Self.inset, follow: false)
     }
 
-    /// The answer at the view's bottom edge: the last one whose first line is above that edge (so, with the view at the bottom,
-    /// the last answer). The left handle's, ⇧⌘J's and ⇧⌘C's.
+    /// The answer ⇧⌘J and ⇧⌘C act on: at the bottom the last answer; otherwise the floating pair's answer when there is one,
+    /// else the answer that covers the view's middle (or the nearest one above it). Never the next answer whose first line has
+    /// only just peeked into the view's bottom edge.
     func answerAtBottomEdge() -> UUID? {
         guard let g = geometry else { return nil }
-        let bottom = offset() + g.clip.bounds.height
-        return answers.compactMap { id, w -> (UUID, CGFloat)? in
+        let placed = answers.compactMap { id, w -> (id: UUID, top: CGFloat, end: CGFloat)? in
             guard let v = attached(w.view) else { return nil }
             let t = top(of: v)
-            return t < bottom ? (id, t) : nil
-        }.max { $0.1 < $1.1 }?.0
+            let end = attached(footers[id]?.view).map { top(of: $0) + $0.frame.height } ?? t + v.frame.height
+            return (id, t, end)
+        }.sorted { $0.top < $1.top }
+        if isAtBottom { return placed.last?.id }
+        if let p = pairedAnswer() { return p }
+        let mid = offset() + g.clip.bounds.height / 2
+        return (placed.first { $0.top <= mid && mid <= $0.end } ?? placed.last { $0.top < mid })?.id
     }
 
     /// A key that moves in the chat. False when there is nothing to move (no scroll view yet): the key is not taken.

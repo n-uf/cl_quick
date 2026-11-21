@@ -4913,6 +4913,15 @@ func chatKeyChecks() {
     sc.jumpToLatest(); settle()
     pb.clearContents()
     check("keys: ⇧⌘C at the bottom copies the last answer, as before", key("C", kVK_ANSI_C, [.command, .shift]) && pb.string(forType: .string) == m.turns[3].answer.trimmingCharacters(in: .whitespacesAndNewlines))
+    // the next answer's first line peeking 3 pt into the view's bottom edge is not "the answer in view": the one being read is
+    user(scrollTo: answerTops[2] + 3 - clip.bounds.height); settle()
+    check("keys: a next answer peeking 3 pt in is not the answer in view (the one covering the view's middle is)", sc.answerAtBottomEdge() == ids[1] && sc.pair != ids[2],
+          "\(String(describing: sc.answerAtBottomEdge())) pair \(String(describing: sc.pair)) ids \(ids)")
+    pb.clearContents()
+    check("keys: ⇧⌘C with the next answer peeking copies the one being read", key("C", kVK_ANSI_C, [.command, .shift]) && pb.string(forType: .string) == m.turns[1].answer.trimmingCharacters(in: .whitespacesAndNewlines))
+    _ = key("J", kVK_ANSI_J, [.command, .shift])
+    check("keys: ⇧⌘J with the next answer peeking goes to the start of the one being read", near(sc.offset(), min(sc.maxOffset(), answerTops[1] - QCChatScroll.inset)), "offset \(sc.offset()) want \(answerTops[1] - QCChatScroll.inset)")
+    sc.jumpToLatest(); settle()
     // Page Up, Page Down and End, with the field focused
     sc.jumpToLatest(); settle()
     let h = clip.bounds.height
