@@ -4145,15 +4145,26 @@ do {
         for id in drop.dropFirst(4) { add(id) }
         add(nil)
         menu.addItem(.separator())
-        QCPreviewWebView.filter(menu)
+        // through the view's own override, with an event made here (never posted): deleting the override fails this
+        let rightDown = NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                           context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        pv.page?.willOpenMenu(menu, with: rightDown)
         let left = menu.items.map { $0.identifier?.rawValue ?? ($0.isSeparatorItem ? "-" : "?") }
-        check("preview: the context menu keeps only the Copy items, with no separator first, last or doubled",
+        check("preview: the view's willOpenMenu keeps only the Copy items, with no separator first, last or doubled",
               left == keep.map { "WKMenuItemIdentifier" + $0 }, "\(left)")
+        check("preview: …and no Services submenu (plug-ins off)", menu.allowsContextMenuPlugIns == false)
     }
+    check("preview: nothing can be dropped on the page (no dragged types, and none can be registered)", {
+        pv.page?.registerForDraggedTypes([.fileURL, .URL, .string])
+        return pv.page?.registeredDraggedTypes.isEmpty == true
+    }())
+    check("preview: the delegate takes both didBecome download callbacks",
+          pv.responds(to: #selector(WKNavigationDelegate.webView(_:navigationAction:didBecome:)))
+          && pv.responds(to: #selector(WKNavigationDelegate.webView(_:navigationResponse:didBecome:))))
 
     // another press replaces the content in the same window (a new view each time: the old one is released)
-    weak var firstView = pv.page
-    weak var firstWindow = pv.window          // weak: this check must not keep the window it later sees closed
+    weak let firstView = pv.page
+    weak let firstWindow = pv.window         // weak: this check must not keep the window it later sees closed
     var allowed: WKNavigationActionPolicy?
     steps = []
     pv.trace = { s in steps.append(s); if s == "load" { allowed = pv.decide(isMainFrame: true, type: .other, download: false) } }
@@ -4170,7 +4181,9 @@ do {
     final class Loopback {
         private var listener: NWListener?
         private(set) var connections = 0
-        private(set) var requests: [String] = []
+        /// The request path of each plain-HTTP request that arrived ("img" for GET /img); a bare connection (a preconnect, a
+        /// TLS hello) counts as a connection but has no path.
+        private(set) var paths: [String] = []
         private(set) var port: UInt16 = 0
         func start() -> Bool {
             let params = NWParameters.tcp
@@ -4180,7 +4193,10 @@ do {
                 self?.connections += 1
                 c.start(queue: .main)
                 c.receive(minimumIncompleteLength: 1, maximumLength: 2048) { data, _, _, _ in
-                    if let d = data, let s = String(data: d, encoding: .utf8) { self?.requests.append(String(s.prefix { $0 != "\r" && $0 != "\n" })) }
+                    if let d = data, let s = String(data: d, encoding: .utf8) {
+                        let parts = s.prefix { $0 != "\r" && $0 != "\n" }.split(separator: " ")
+                        if parts.count >= 2 { self?.paths.append(String(parts[1].dropFirst())) }
+                    }
                     c.cancel()
                 }
             }
@@ -4194,50 +4210,151 @@ do {
         }
         func stop() { listener?.cancel(); listener = nil }
     }
+    /// Every vector, each at its own path on the listener, plain HTTP and (img, preconnect, link, ping) HTTPS too: a TLS hello
+    /// is an accepted connection as well. The page's own script (`document.title = 'js'`) must not run.
     func probeHTML(_ port: UInt16) -> String {
         let u = { (tag: String) in "http://127.0.0.1:\(port)/\(tag)" }
+        let s = { (tag: String) in "https://127.0.0.1:\(port)/\(tag)" }
         return """
         <!doctype html><html><head><title>probe</title>
         <meta http-equiv="refresh" content="1;url=\(u("refresh"))">
-        <link rel="preconnect" href="\(u("preconnect"))"><link rel="prefetch" href="\(u("prefetch"))">
-        <link rel="dns-prefetch" href="\(u("dns-prefetch"))"><link rel="stylesheet" href="\(u("css-link"))">
+        <link rel="preconnect" href="\(u("preconnect"))"><link rel="preconnect" href="\(s("preconnect-s"))">
+        <link rel="prefetch" href="\(u("prefetch"))"><link rel="dns-prefetch" href="\(u("dns-prefetch"))">
+        <link rel="stylesheet" href="\(u("css-link"))"><link rel="preload" as="image" href="\(u("preload"))">
         <style>@import url("\(u("css-import"))");
         @font-face { font-family: F; src: url("\(u("font"))"); }
-        body { font-family: F; background: url("\(u("css-url"))"); }</style>
+        body { font-family: F; background: url("\(u("css-url"))"); }
+        .cur { cursor: url("\(u("cursor"))"), auto; width: 40px; height: 20px; }
+        .iset { background-image: image-set(url("\(u("image-set"))") 1x); width: 40px; height: 20px; }</style>
         <script>document.title = 'js'</script></head>
-        <body><img src="\(u("img"))"><iframe src="\(u("iframe"))"></iframe><object data="\(u("object"))"></object>
-        <video poster="\(u("poster"))"></video>
-        <a id="a" href="\(u("href"))" ping="\(u("ping"))">link</a></body></html>
+        <body><a id="t" href="\(u("trusted"))" ping="\(u("trusted-ping"))">trusted link</a>
+        <img src="\(u("img"))"><img src="\(s("img-s"))"><img srcset="\(u("srcset")) 1x">
+        <picture><source srcset="\(u("picture"))"><img alt="p"></picture>
+        <svg width="20" height="20"><image href="\(u("svg-image"))" width="20" height="20"></image></svg>
+        <input type="image" src="\(u("input-image"))">
+        <iframe src="\(u("iframe"))"></iframe><object data="\(u("object"))"></object><video poster="\(u("poster"))"></video>
+        <video src="\(u("video"))" preload="auto"></video><audio src="\(u("audio"))" preload="auto"></audio>
+        <video><source src="\(u("source"))"><track default kind="captions" src="\(u("track"))"></video>
+        <div class="cur">cursor</div><div class="iset">image-set</div>
+        <a id="a1" href="\(u("href"))" ping="\(u("ping"))">link</a>
+        <a id="a2" href="\(s("href-s"))" ping="\(s("ping-s"))">https link</a>
+        <svg width="100" height="20"><a id="a3" href="\(u("svg-a"))"><text y="15">svg a</text></a></svg>
+        <img usemap="#m" width="50" height="50" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><map name="m"><area id="a4" shape="rect" coords="0,0,50,50" href="\(u("area"))" ping="\(u("area-ping"))"></map>
+        <div id="host"><template shadowrootmode="open"><a id="a5" href="\(u("shadow"))" ping="\(u("shadow-ping"))">shadow a</a></template></div>
+        <form id="f" action="\(u("form"))"><input name="q" value="x"><button id="sb" type="submit">go</button></form>
+        </body></html>
         """
     }
-    /// Loads the probe page in the preview, waits for it to finish and a second more, clicks its link through the policy (a
-    /// script of ours: the page's own are off), waits again; the connections the listener saw, the title and the trace.
-    func probe() -> (connections: Int, requests: [String], title: String?, steps: [String])? {
+    /// What the client world (the guard's own) answers to the guard's deterministic check: a cancelable, composed click on an
+    /// HTML a, an area, an SVG a, a MathML element with an href, an a in an open and one in a closed shadow root (made here, so the
+    /// closed root's reference is ours), a submit button; an auxclick; a submit event; an Enter in an input, a textarea, in a
+    /// closed root's input and on a div; and, which must NOT be cancelled, a mousedown (selecting) and ⌘C.
+    let guardCheckScript = """
+    (function () {
+      var url = 'http://127.0.0.1:1/g', out = {};
+      function click(el) { var e = new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }); el.dispatchEvent(e); return e.defaultPrevented; }
+      function add(el) { document.body.appendChild(el); return el; }
+      function key(el, k, mods) { var e = new KeyboardEvent('keydown', Object.assign({ key: k, bubbles: true, cancelable: true, composed: true }, mods || {})); el.dispatchEvent(e); return e.defaultPrevented; }
+      var a = add(document.createElement('a')); a.href = url; a.ping = url; out.html_a = click(a);
+      var map = add(document.createElement('map')), area = document.createElement('area'); area.href = url; map.appendChild(area); out.area = click(area);
+      var svg = add(document.createElementNS('http://www.w3.org/2000/svg', 'svg')), sa = document.createElementNS('http://www.w3.org/2000/svg', 'a'); sa.setAttribute('href', url); svg.appendChild(sa); out.svg_a = click(sa);
+      var math = add(document.createElementNS('http://www.w3.org/1998/Math/MathML', 'math')), ma = document.createElementNS('http://www.w3.org/1998/Math/MathML', 'mrow'); ma.setAttribute('href', url); math.appendChild(ma); out.mathml = click(ma);
+      var open = add(document.createElement('div')).attachShadow({ mode: 'open' }), oa = document.createElement('a'); oa.href = url; oa.ping = url; open.appendChild(oa); out.open_shadow_a = click(oa);
+      var closed = add(document.createElement('div')).attachShadow({ mode: 'closed' }), ca = document.createElement('a'); ca.href = url; ca.ping = url; closed.appendChild(ca); out.closed_shadow_a = click(ca);
+      var form = add(document.createElement('form')), b = document.createElement('button'); form.action = url; b.type = 'submit'; form.appendChild(b); out.submit_button = click(b);
+      var cform = add(document.createElement('div')).attachShadow({ mode: 'closed' }), f2 = document.createElement('form'), i2 = document.createElement('input'); f2.appendChild(i2); cform.appendChild(f2);
+      out.enter_in_closed_shadow_input = key(i2, 'Enter');
+      var i3 = add(document.createElement('input')); out.enter_in_input = key(i3, 'Enter');
+      out.enter_in_textarea = key(add(document.createElement('textarea')), 'Enter');
+      out.enter_in_div = key(add(document.createElement('div')), 'Enter');
+      var aux = new MouseEvent('auxclick', { bubbles: true, cancelable: true, composed: true, button: 1 }); a.dispatchEvent(aux); out.auxclick = aux.defaultPrevented;
+      var sub = new Event('submit', { bubbles: true, cancelable: true }); form.dispatchEvent(sub); out.submit_event = sub.defaultPrevented;
+      var md = new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }); a.dispatchEvent(md); out.NOT_mousedown = md.defaultPrevented;
+      out.NOT_cmd_c = key(i3, 'c', { metaKey: true });
+      return JSON.stringify(out);
+    })()
+    """
+    struct ProbeRun {
+        var connections = 0, paths: [String] = [], steps: [String] = []
+        var title: String?, clientFlag: Any?, pageFlag: Any?, guardCheck: [String: Bool] = [:]
+    }
+    /// Evaluates `code` in the preview's page in `world`; nil when it fails or answers nothing.
+    func evaluate(_ code: String, in world: WKContentWorld) -> Any? {
+        var out: Any??
+        pv.page?.evaluateJavaScript(code, in: nil, in: world) { r in if case .success(let v) = r { out = .some(v) } else { out = .some(nil) } }
+        spinUntil(5) { out != nil }
+        return out ?? nil
+    }
+    /// Loads the probe page in the preview, waits for it to finish and a second more, then clicks every link three ways: a
+    /// script of ours dispatching a click (the page's own scripts are off), then trusted ones, a mouseMoved, mouseDown and mouseUp
+    /// handed straight to the view over the first link's rectangle (no system event is posted); waits again. Then the guard's
+    /// deterministic check and its flag are read in the client world.
+    func probe() -> ProbeRun? {
         let lb = Loopback()
         guard lb.start() else { check("probe: a listener on 127.0.0.1 started", false); return nil }
         defer { lb.stop() }
-        var st: [String] = []
-        pv.trace = { st.append($0) }
+        var run = ProbeRun()
+        pv.trace = { run.steps.append($0) }
         autoreleasepool { pv.show(probeHTML(lb.port)) }
-        spinUntil(15) { st.contains("finished") || st.contains("failed load") }
+        spinUntil(15) { run.steps.contains("finished") || run.steps.contains("failed load") }
         spin(1.0)
-        var title: String??
-        pv.page?.evaluateJavaScript("document.getElementById('a').click(); document.title") { r, _ in title = .some(r as? String) }
-        spinUntil(5) { title != nil }
-        spin(1.5)
-        return (lb.connections, lb.requests, title ?? nil, st)
+        let rect = evaluate("var r = document.getElementById('t').getBoundingClientRect(); [r.x, r.y, r.width, r.height]", in: .defaultClient) as? [Double]
+        _ = evaluate("var c = function (el) { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true })); }; ['a1', 'a2', 'a3', 'a4', 'sb'].forEach(function (i) { c(document.getElementById(i)); }); c(document.getElementById('host').shadowRoot.getElementById('a5')); 1", in: .page)
+        if let r = rect, r.count == 4, let v = pv.page, let w = pv.window {
+            let p = v.convert(NSPoint(x: r[0] + r[2] / 2, y: r[1] + r[3] / 2), to: nil)
+            func event(_ t: NSEvent.EventType, _ n: Int) -> NSEvent {
+                NSEvent.mouseEvent(with: t, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: w.windowNumber,
+                                   context: nil, eventNumber: n, clickCount: 1, pressure: 1)!
+            }
+            v.mouseMoved(with: event(.mouseMoved, 1)); spin(0.2)
+            v.mouseDown(with: event(.leftMouseDown, 2)); spin(0.1)
+            v.mouseUp(with: event(.leftMouseUp, 3))
+        } else { check("probe: the trusted link's rectangle was found", false, "\(String(describing: rect))") }
+        spin(2.0)
+        run.title = evaluate("document.title", in: .page) as? String
+        run.clientFlag = evaluate("window.__qcGuard", in: .defaultClient)
+        run.pageFlag = evaluate("typeof window.__qcGuard", in: .page)
+        if let json = evaluate(guardCheckScript, in: .defaultClient) as? String, let d = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Bool] { run.guardCheck = d }
+        run.connections = lb.connections; run.paths = lb.paths
+        return run
     }
+    func decided(_ r: ProbeRun?, _ type: Int, _ path: String) -> Bool { r?.steps.contains("decide \(type) /\(path) cancel") == true }
 
+    // mutation 1: rules left out. Every fetch vector that WebKit really starts reaches the listener (the paths below fired
+    // in every run; `prefetch`, `dns-prefetch` and `track` do not fire in WKWebView even unprotected).
     QCHTMLPreview.addRules = false
-    let leaky = probe()
+    let noRules = probe()
     QCHTMLPreview.addRules = true
-    check("probe: with the rules left out the probe sees connections (so it can see a regression)", (leaky?.connections ?? 0) > 0,
-          "\(String(describing: leaky))")
+    let fetched = ["img", "css-url", "css-import", "css-link", "font", "srcset", "picture", "svg-image", "input-image", "poster", "video", "audio",
+                   "source", "preload", "image-set", "cursor"]
+    check("probe: with the rules left out the listener sees connections and the specific requests (so a lost rule list would be seen)",
+          (noRules?.connections ?? 0) > 0 && fetched.allSatisfy { noRules?.paths.contains($0) == true },
+          "\(noRules?.connections ?? -1) missing \(fetched.filter { noRules?.paths.contains($0) != true })")
+    // mutation 2: click guard left out. A click makes WebKit connect (no request is sent, the rules block it) before the
+    // policy is asked and cancels; the policy was asked about every link, the trusted click included.
+    QCHTMLPreview.addGuard = false
+    let noGuard = probe()
+    QCHTMLPreview.addGuard = true
+    let clicked = ["href", "href-s", "svg-a", "area", "shadow", "trusted"]
+    check("probe: with the click guard left out the clicks reach WebKit (connections, and the policy cancels each link, the trusted click's too)",
+          (noGuard?.connections ?? 0) > 0 && clicked.allSatisfy { decided(noGuard, 0, $0) }, "\(noGuard?.connections ?? -1) \(clicked.filter { !decided(noGuard, 0, $0) })")
+    check("probe: …and the guard's deterministic check fails without it (an HTML a click is not cancelled)", noGuard?.guardCheck["html_a"] == false && (noGuard?.clientFlag as? Int) == nil,
+          "\(String(describing: noGuard?.guardCheck)) \(String(describing: noGuard?.clientFlag))")
+    // the real thing
     let sealed = probe()
-    check("probe: the probe page loaded and finished", sealed?.steps.contains("finished") == true && sealed?.steps.contains("failed load") == false && sealed?.steps.first == "compile" && sealed?.steps.dropFirst().first == "add rules", "\(String(describing: sealed?.steps))")
-    check("probe: not one connection reached 127.0.0.1 (img, css url and @import, font, preconnect, prefetch, dns-prefetch, iframe, object, poster, ping, link, meta refresh)",
-          sealed?.connections == 0, "\(String(describing: sealed?.connections)) \(String(describing: sealed?.requests))")
+    check("probe: the page loaded and finished, rules added before it", sealed?.steps.contains("finished") == true && sealed?.steps.contains("failed load") == false && sealed?.steps.first == "compile" && sealed?.steps.dropFirst().first == "add rules", "\(String(describing: sealed?.steps))")
+    check("probe: not one connection reached 127.0.0.1 (img, https img, srcset, picture, svg image, input image, css url, @import, link, preload, font, cursor, image-set, preconnect, https preconnect, prefetch, dns-prefetch, iframe, object, poster, video, audio, source, track, http and https links and pings, svg a, area, shadow-root a, form submit, meta refresh, trusted mouse clicks)",
+          sealed?.connections == 0, "\(String(describing: sealed?.connections)) \(String(describing: sealed?.paths))")
+    check("probe: the vectors did fire: the meta refresh and the iframe were asked and cancelled, and no click ever reached the policy",
+          decided(sealed, -1, "refresh") && decided(sealed, -1, "iframe") && (sealed?.steps.contains(where: { $0.hasPrefix("decide 0 ") || $0.hasPrefix("decide 2 ") }) ?? true) == false, "\(String(describing: sealed?.steps))")
     check("probe: the page's script did not run (the title is still the page's own)", sealed?.title == "probe", "\(String(describing: sealed?.title))")
+    check("probe: the guard ran with JavaScript off, in its own world (the flag is there and not in the page's)", (sealed?.clientFlag as? Int) == 1 && (sealed?.pageFlag as? String) == "undefined",
+          "\(String(describing: sealed?.clientFlag)) \(String(describing: sealed?.pageFlag))")
+    let mustCancel = ["html_a", "area", "svg_a", "mathml", "open_shadow_a", "closed_shadow_a", "submit_button", "enter_in_closed_shadow_input", "enter_in_input",
+                      "enter_in_textarea", "enter_in_div", "auxclick", "submit_event"]
+    check("probe: in the guard's world a click on an HTML, SVG and MathML link, an area, a link in an open and a closed shadow root, and a submit button, an auxclick, a submit and an Enter (also in a closed root) are all cancelled",
+          mustCancel.allSatisfy { sealed?.guardCheck[$0] == true }, "\(String(describing: sealed?.guardCheck))")
+    check("probe: …and a mousedown (selecting) and ⌘C are not", sealed?.guardCheck["NOT_mousedown"] == false && sealed?.guardCheck["NOT_cmd_c"] == false, "\(String(describing: sealed?.guardCheck))")
 
     // a rule list that can't be compiled: nothing is loaded, a short message stands in
     let goodRules = QCHTMLPreview.encodedRules
@@ -4256,8 +4373,8 @@ do {
     steps = []
     pv.trace = { steps.append($0) }
     func weakPair() -> (() -> Bool, () -> Bool) {
-        weak var w = pv.window
-        weak var v = pv.page
+        weak let w = pv.window
+        weak let v = pv.page
         return ({ w == nil }, { v == nil })
     }
     var windowGone = { false }, viewGone = { false }
@@ -4275,15 +4392,20 @@ do {
     check("preview: the rules were compiled once for the good list (and once for the bad one), not once per press",
           QCHTMLPreview.compiles - compiles0 == 2, "\(QCHTMLPreview.compiles - compiles0)")
     check("preview: each rule store folder is gone once its compile is done", !folders.isEmpty && folders.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }, "\(folders)")
-    do {      // a stale folder from a crash is swept at launch; nothing else is
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent("cl_quick-sweep-check-\(UUID().uuidString)", isDirectory: true)
-        let stale = dir.appendingPathComponent(QCHTMLPreview.folderPrefix + "old", isDirectory: true), other = dir.appendingPathComponent("other", isDirectory: true)
-        try? FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+    check("preview: lists are compiled under the app's own parent (<tmp>/<bundle id>/preview-rules)",
+          !folders.isEmpty && folders.allSatisfy { $0.deletingLastPathComponent().path == QCHTMLPreview.rulesParent.path }
+          && QCHTMLPreview.rulesParent.path.hasSuffix("/preview-rules"), "\(QCHTMLPreview.rulesParent.path)")
+    do {      // a stale folder from a crash is swept at launch: only inside the parent, and only one 60 s old
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent("cl_quick-sweep-check-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("preview-rules", isDirectory: true)
+        let old = dir.appendingPathComponent("old"), young = dir.appendingPathComponent("young"), bystander = root.appendingPathComponent("cl_quick-preview-bystander")
+        for u in [old, young, bystander] { try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true) }
+        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: old.path)
+        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: bystander.path)
         QCHTMLPreview.sweepStaleFolders(in: dir)
-        check("preview: the launch sweep removes cl_quick-preview-* folders and leaves the rest",
-              !FileManager.default.fileExists(atPath: stale.path) && FileManager.default.fileExists(atPath: other.path))
-        try? FileManager.default.removeItem(at: dir)
+        check("preview: the launch sweep removes a folder over 60 s old in its parent, keeps a young one, and touches nothing outside the parent",
+              !FileManager.default.fileExists(atPath: old.path) && FileManager.default.fileExists(atPath: young.path) && FileManager.default.fileExists(atPath: bystander.path))
+        try? FileManager.default.removeItem(at: root)
     }
     steps = []
     pv.trace = { steps.append($0) }

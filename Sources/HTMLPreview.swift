@@ -12,11 +12,14 @@
 //   - `loadHTMLString(_, baseURL: nil)`; a navigation delegate that allows that one load and cancels every other
 //     navigation (a clicked link, a redirect, a meta refresh, a frame opens nothing), no new windows, and any download
 //     WebKit begins anyway is cancelled at once;
-//   - a user script of ours (in its own world, not switched off with the page's JavaScript) that stops a click on a link:
-//     WebKit connects to the link's host, and sends an <a ping>, before the delegate is asked;
-//   - the right-click menu keeps only its Copy items (Download Linked File / Image / Media start a download without
-//     asking the delegate or the rules; the Open items navigate).
-// The window opens beside the chat panel (floating when there is no room, so the floating panel can't hide it). The web
+//   - a user script of ours (in its own world, not switched off with the page's JavaScript) that cancels every click,
+//     auxclick, submit and Enter, with no test of the target: WebKit connects to a link's host, and sends an <a ping>,
+//     before the delegate is asked (HTML, SVG and MathML links and links in shadow roots alike);
+//   - the right-click menu keeps only its Copy items, without Services (Download Linked File / Image / Media start a
+//     download without asking the delegate or the rules; the Open items navigate); Quick Look is a no-op; nothing can
+//     be dropped on the page (no dragged types).
+// The window opens beside the chat panel (floating when there is no room, so the floating panel can't hide it; it then
+// hides when cl_quick isn't the active app). Rule lists compile under `<tmp>/<bundle id>/preview-rules`. The web
 // view exists only from a press on Preview to the window's closing; closing releases the window and the view.
 
 import AppKit
@@ -48,19 +51,24 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     static var encodedRules = blockAll
     /// Checks only: false leaves the rules out, to see that the network probe notices (never false in the app).
     static var addRules = true
-    /// Capturing listeners on the window: a click on an A or AREA (and a form submit) does nothing, so the link's own
-    /// default action, with its ping and WebKit's preconnect, never starts.
+    /// Checks only: false leaves the click guard out (never false in the app).
+    static var addGuard = true
+    /// Capturing listeners on the window that cancel EVERY click and auxclick, with no test of the target (an HTML, SVG or
+    /// MathML link, or one inside a shadow root, which retargets the event to its host, all have the click as their
+    /// default action: the link's ping and WebKit's preconnect start from it), every form submit, and every Enter key (an
+    /// input's implicit submit: a submit inside a shadow root never reaches the window, and a closed root hides its input
+    /// from the event's path, so the key can't be told by its target). Selecting and copying text are neither. It sets
+    /// `window.__qcGuard` in its own world, which a check reads.
     static let guardScript = """
     (function () {
+      window.__qcGuard = 1;
       var stop = function (e) { e.preventDefault(); e.stopImmediatePropagation(); };
-      var link = function (e) {
-        for (var t = e.target; t && t.nodeType === 1; t = t.parentNode) {
-          if (t.nodeName === 'A' || t.nodeName === 'AREA') { stop(e); return; }
-        }
-      };
-      window.addEventListener('click', link, true);
-      window.addEventListener('auxclick', link, true);
+      window.addEventListener('click', stop, true);
+      window.addEventListener('auxclick', stop, true);
       window.addEventListener('submit', stop, true);
+      ['keydown', 'keypress'].forEach(function (k) {
+        window.addEventListener(k, function (e) { if (e.key === 'Enter') stop(e); }, true);
+      });
     })();
     """
 
@@ -102,7 +110,13 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     /// Checks: how many lists were compiled, and the folders they were compiled in (each removed as soon as it was done).
     private(set) static var compiles = 0
     private(set) static var compileFolders: [URL] = []
-    static let folderPrefix = "cl_quick-preview-"
+    /// Where lists are compiled: a parent of our own under the temporary folder (`<tmp>/<bundle id>/preview-rules`), one
+    /// folder per compile. Nothing outside it is ever touched.
+    static var rulesParent: URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "local.n-uf.cl-quick", isDirectory: true)
+            .appendingPathComponent("preview-rules", isDirectory: true)
+    }
 
     /// The block-all list: the one compiled before, or a new one (main thread; `done` gets nil when it can't be compiled).
     static func withRules(_ done: @escaping (WKContentRuleList?) -> Void) {
@@ -112,8 +126,8 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         guard !compiling else { return }
         compiling = true
         compiles += 1
-        let folder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent(folderPrefix + UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: rulesParent, withIntermediateDirectories: true)
+        let folder = rulesParent.appendingPathComponent(UUID().uuidString, isDirectory: true)
         compileFolders.append(folder)
         func finish(_ list: WKContentRuleList?) {
             try? FileManager.default.removeItem(at: folder)          // the compiled list is in memory: nothing stays on disk
@@ -132,10 +146,16 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     /// Checks: the next press compiles again.
     static func forgetCompiledRules() { compiled = nil }
 
-    /// At launch: folders a crash left behind (one is made only while a list compiles) go.
-    static func sweepStaleFolders(in dir: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)) {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        for n in names where n.hasPrefix(folderPrefix) { try? FileManager.default.removeItem(at: dir.appendingPathComponent(n)) }
+    /// At launch: folders a crash left behind (one is made only while a list compiles) go. Only inside `dir` (our own
+    /// parent), and not the ones younger than `age` seconds: a second instance may be compiling in one right now.
+    static func sweepStaleFolders(in dir: URL = rulesParent, olderThan age: TimeInterval = 60) {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        for n in names {
+            let url = dir.appendingPathComponent(n)
+            let made = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date ?? .distantPast
+            if Date().timeIntervalSince(made) >= age { try? fm.removeItem(at: url) }
+        }
     }
 
     /// A web view with the isolation set and the block-all rules added; nothing is loaded yet.
@@ -152,8 +172,10 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         // a click on a link (or an <area>) is stopped before WebKit acts on it: WebKit opens a connection to the link's host
         // ahead of asking the delegate, and sends an <a ping> beforehand, whatever the rules and the policy then say. This
         // runs in a world of our own, which the JavaScript switch above (the page's scripts) doesn't turn off.
-        config.userContentController.addUserScript(WKUserScript(source: guardScript, injectionTime: .atDocumentStart,
-                                                                  forMainFrameOnly: false, in: .defaultClient))
+        if addGuard {
+            config.userContentController.addUserScript(WKUserScript(source: guardScript, injectionTime: .atDocumentStart,
+                                                                      forMainFrameOnly: false, in: .defaultClient))
+        }
         let view = QCPreviewWebView(frame: .zero, configuration: config)
         // on by default on macOS: a force-click on a link would open a Quick Look popover that loads the real page, outside
         // every rule above
@@ -180,6 +202,7 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
         let r = Self.placement(panel: panel?.frame, screen: screen, size: w.frame.size)
         w.setFrameOrigin(r.origin)
         w.level = r.floating ? .floating : .normal
+        w.hidesOnDeactivate = r.floating          // floating over every app would stay on top of the one in use
     }
 
     private func makeWindow() -> NSWindow {
@@ -240,8 +263,11 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences,
                  decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
         preferences.allowsContentJavaScript = false
-        decisionHandler(decide(isMainFrame: navigationAction.targetFrame?.isMainFrame ?? false, type: navigationAction.navigationType,
-                               download: navigationAction.shouldPerformDownload), preferences)
+        let policy = decide(isMainFrame: navigationAction.targetFrame?.isMainFrame ?? false, type: navigationAction.navigationType,
+                            download: navigationAction.shouldPerformDownload)
+        // the step the checks read: "decide <navigation type> <path> allow|cancel"
+        trace("decide \(navigationAction.navigationType.rawValue) \(navigationAction.request.url?.path ?? "-") \(policy == .allow ? "allow" : "cancel")")
+        decisionHandler(policy, preferences)
     }
 
     /// Never a download, and nothing that isn't a page.
@@ -281,13 +307,24 @@ final class QCPreviewWebView: WKWebView {
     static let keptMenuItems: Set<String> = ["WKMenuItemIdentifierCopy", "WKMenuItemIdentifierCopyImage",
                                              "WKMenuItemIdentifierCopyLink", "WKMenuItemIdentifierCopyMediaLink"]
 
+    override init(frame: NSRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        unregisterDraggedTypes()          // nothing is dropped on the page (a dropped link or file would navigate to it)
+    }
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+    override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {}
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         Self.filter(menu)
     }
 
-    /// Takes every item but the kept ones out, then the separators left first, last or doubled.
+    /// Quick Look on a force-click (or the three-finger tap) is a link preview by another route: nothing.
+    override func quickLook(with event: NSEvent) {}
+
+    /// Takes every item but the kept ones out, then the separators left first, last or doubled; no Services submenu.
     static func filter(_ menu: NSMenu) {
+        menu.allowsContextMenuPlugIns = false
         for item in menu.items where !item.isSeparatorItem {
             if !(item.identifier.map { keptMenuItems.contains($0.rawValue) } ?? false) { menu.removeItem(item) }
         }
