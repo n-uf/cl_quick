@@ -88,7 +88,7 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   browser's claude.ai session decides which account actually signs in, so cl_quick checks the result: it looks at the
   folder's `.claude.json` every 2 seconds, for at most 10 minutes, and once the login ends (or the file names another
   account) a short `claude` on the folder says which account it is. It never sees a password or a token and never
-  touches the Keychain. The sign-in is the one shared with cl_audit (`Shared/ClaudeAuth+SignIn/`): one window at a time,
+  touches the Keychain. The sign-in is the one shared with cl_audit ([cl_kit](https://github.com/n-uf/cl_kit)'s ClaudeSignIn): one window at a time,
   closed after a sign-in, a wrong account, Stop or the timeout (Stop and the timeout end `claude auth login` too); one
   declined or failed stays open to be read until Return, the next sign-in or Stop.
 - A switch that ends without the account wanted says what happened, in the chat and on the profile's page in Settings,
@@ -315,8 +315,10 @@ minutes for a profile.
 ## With cl_audit
 
 cl_quick runs with or without [cl_audit](https://github.com/n-uf/cl_audit) and shares nothing with it while running
-but a folder's sign-in lock (`~/Library/Caches/n-uf/signin-*.lock`), so the two never sign one folder in at once. It
-compiles cl_audit's shared modules from source (`Vendor/`).
+but a folder's sign-in lock (`~/Library/Caches/n-uf/signin-*.lock`), so the two never sign one folder in at once. Both
+compile the same shared modules from source: a tagged release of [cl_kit](https://github.com/n-uf/cl_kit), copied into
+`Vendor/cl_kit-<tag>/` by `scripts/vendor.sh <tag>` and never edited here (a change is a pull request to cl_kit and a new
+tag). cl_quick builds them without cl_kit's `Auth/Keychain.swift`.
 On its first run it copies cl_audit's old quick chat settings (the shortcut, model and thinking), if there are any.
 
 ## Checks
@@ -337,8 +339,8 @@ the stand-in `claude`: one at a time, throttled, only `get_usage` asked.
 `Checks/signin.sh` checks the sign-in (ClaudeSignIn and the switch on it) against a stand-in Terminal and a stand-in
 `claude auth login`: each outcome, a wrong account by id and by address and organisation, Stop and a new sign-in ending
 the login, the lock and the process guard, a folder that isn't ready; first its lint that nothing cl_quick compiles can
-read the Keychain. `Checks/vendor.sh` runs cl_audit's own checks of the shared modules (`Vendor/`) on what cl_quick
-compiles.
+read the Keychain. `Checks/vendor.sh` runs cl_kit's own checks of the shared modules on the vendored copy cl_quick
+compiles, and `scripts/vendor.sh --check` confirms that copy is exactly its tag.
 `Checks/real.sh` asks one real question on a throwaway, signed-out folder; with `QC_CONFIG=<folder>` it uses that
 folder's account (a little of its usage) and checks the incognito chat end to end: a multi-turn conversation in one
 `claude` still remembers, Stop keeps the conversation, the model changes in the running chat, and no transcript
