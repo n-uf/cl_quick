@@ -11,6 +11,15 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   row after each profile's standby rows. Both are dimmed while a sign-in for the profile is waited for.
 - **The switch question's address unblurs under the pointer.** The alert runs modally and gets no mouse enter or exit
   for its address, so it was blurred whatever the pointer did; the label now reads the pointer's place itself.
+- **A blurred address is no longer the address.** A blur over the real text keeps its length and letter shapes, which a
+  screenshot gives back by trying candidates. Everywhere an address is blurred (the chat's notes and keys, the profile
+  menu, the menu bar's blocks and standby rows, the switch question) what is drawn is now one fixed stand-in, blurred, the
+  same for every address; the real address is drawn only while the pointer is on it. An address is given the stand-in's room
+  and no more (a longer one is cut while revealed), so its length is in no neighbour's place; a reveal ends when the pointer
+  leaves, the app loses focus, a window closes or a menu opens, and nothing fades between the two. In words (VoiceOver, an
+  item's title) it is now "hidden address", not its first letter and domain. Old screenshots of the blur or of the words
+  show the length and letter shapes, or the first letter and the domain. The blur is the new `AddressPrivacy` module (`Shared/AddressPrivacy/`,
+  shared with cl_audit, with its own checks in `Checks/addressprivacy.sh` and CI).
 - **The chat's waiting note can be hidden.** It has a × at its top right (it only hides the note; the sign-in keeps
   waiting). While hidden, the lamp by the profile picker is the waiting one and the picker's menu has "Waiting for the
   sign-in…  Show". The note returns by itself when the switch ends.

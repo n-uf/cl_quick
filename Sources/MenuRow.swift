@@ -4,11 +4,12 @@
 // rest to the menu: the arrow keys highlight it, Return picks it (the item's action), a click picks it.
 //
 // The rule for addresses: blurred on screen everywhere, masked only as words (VoiceOver, an item's title, the checks).
-// This file draws them blurred in the menus (QCProfileMenuRow, QCStandbyMenuRow) and in an alert's accessory view
-// (QCAddressLabel); the chat's views do it in AddressViews.swift.
+// This file draws them blurred in the menus (QCProfileMenuRow, QCStandbyMenuRow). What is blurred is a fixed stand-in, never
+// the address (the AddressPrivacy module: AddressInk draws it, AddressLabel is the one in an alert's accessory view); the
+// chat's views do it in AddressViews.swift.
 
+import AddressPrivacy
 import AppKit
-import CoreImage
 
 final class QCProfileMenuRow: NSView {
     let title: String
@@ -58,11 +59,19 @@ final class QCProfileMenuRow: NSView {
     static func width(title: String, detail: String, address: String?) -> CGFloat {
         let t = (title as NSString).size(withAttributes: [.font: titleFont]).width
         let d = (detail as NSString).size(withAttributes: [.font: detailFont]).width
-        let a = address.map { ($0 as NSString).size(withAttributes: [.font: addressFont]).width + addressGap + copySize + copyGap } ?? 0
+        let a = address.map { sizer.room(for: $0, blur: AddressPrivacy.shared.blur) + addressGap + copySize + copyGap } ?? 0
         return ceil(textX + max(t + a, d) + trailing)
     }
 
-    private var addressWidth: CGFloat { address.map { ceil(($0 as NSString).size(withAttributes: [.font: Self.addressFont]).width) } ?? 0 }
+    /// Measures the room an address is given (AddressInk).
+    private static let sizer = AddressInk(font: addressFont)
+    /// Draws the address (its own text while readable, else the stand-in blurred) and keeps the blurred pictures.
+    private let ink = AddressInk(font: QCProfileMenuRow.addressFont)
+
+    /// The room of the address: the wider of it and the stand-in (nothing moves when it is revealed).
+    private var addressWidth: CGFloat { address.map { Self.sizer.room(for: $0, blur: AddressPrivacy.shared.blur) } ?? 0 }
+    /// The text drawn for the address now: its own while it is readable, the stand-in at rest (never any part of it).
+    var drawnAddress: String? { address.map { AddressText.drawn(address: $0, revealed: sharp, blur: true) } }
     /// Where the copy glyph is: at the row's right, on the name's line.
     var copyRect: NSRect {
         NSRect(x: bounds.maxX - Self.trailing - Self.copySize, y: 5, width: Self.copySize, height: 18)
@@ -174,12 +183,8 @@ final class QCProfileMenuRow: NSView {
             }
             return
         }
-        if sharp {
-            let s = (address as NSString).size(withAttributes: [.font: Self.addressFont])
-            (address as NSString).draw(at: NSPoint(x: a.minX, y: a.midY - s.height / 2), withAttributes: [.font: Self.addressFont, .foregroundColor: sub])
-        } else if let img = blurredAddress(sub, lit: lit) {
-            img.draw(in: NSRect(x: a.minX - Self.blurPad, y: a.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
-        }
+        // both end at the room's right edge, by the copy glyph
+        ink.draw(address: address, readable: sharp, color: sub, x: a.maxX, midY: a.midY, alignRight: true, blur: AddressPrivacy.shared.blur)
         if rowHover || lit, let copy = Self.symbol("doc.on.doc", size: 11, weight: .regular, color: copyHover ? fg : sub) {
             copy.draw(in: NSRect(x: copyRect.midX - copy.size.width / 2, y: copyRect.midY - copy.size.height / 2, width: copy.size.width, height: copy.size.height))
         }
@@ -190,40 +195,11 @@ final class QCProfileMenuRow: NSView {
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: weight).applying(.init(paletteColors: [color])))
     }
 
-    /// The blurred address, made once for each look (lit or not), not on every draw; made again if the appearance
-    /// changes (its colours are the system's).
-    private var blurCache: [Bool: NSImage] = [:]
-    private func blurredAddress(_ color: NSColor, lit: Bool) -> NSImage? {
-        guard let address else { return nil }
-        if let img = blurCache[lit] { return img }
-        let img = Self.blurred(address, color: color)
-        blurCache[lit] = img
-        return img
-    }
+    // (the blurred stand-in is made once per colour by `ink`, and made again if the appearance changes: its colours are the system's)
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        blurCache = [:]
+        ink.reset()
         needsDisplay = true
-    }
-
-    static let blurPad: CGFloat = 6
-    /// The address drawn and blurred (a Gaussian blur, so it reads as an address's shape and nothing more), in the
-    /// address font or the one given.
-    static func blurred(_ text: String, color: NSColor, font: NSFont = addressFont) -> NSImage? {
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-        let s = (text as NSString).size(withAttributes: attrs)
-        let size = NSSize(width: ceil(s.width) + 2 * blurPad, height: ceil(s.height) + 2 * blurPad)
-        let sharp = NSImage(size: size, flipped: false) { _ in
-            (text as NSString).draw(at: NSPoint(x: blurPad, y: blurPad), withAttributes: attrs)
-            return true
-        }
-        guard let cg = sharp.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let ci = CIImage(cgImage: cg)
-        let soft = ci.clampedToExtent().applyingGaussianBlur(sigma: 2.4).cropped(to: ci.extent)
-        let rep = NSCIImageRep(ciImage: soft)
-        let out = NSImage(size: size)
-        out.addRepresentation(rep)
-        return out
     }
 }
 
@@ -270,7 +246,7 @@ final class QCStandbyMenuRow: NSView {
     let columns: Columns
     /// As tall as the blurred address's picture (the text's height and the blur's reach above and below), so the blur
     /// is never cut; the highlight is a native item's height, centred.
-    static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: addressFont]).height) + 2 * QCProfileMenuRow.blurPad
+    static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: addressFont]).height) + 2 * AddressInk.blurPad
     static let highlightH: CGFloat = 22
 
     /// The item's title (type-ahead, Return): the address masked, and that it stands by.
@@ -292,10 +268,17 @@ final class QCStandbyMenuRow: NSView {
     override var isFlipped: Bool { true }
 
     private static func w(_ s: String, _ f: NSFont) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: f]).width) }
-    /// The least width that shows it all (nothing is cut): the address (as wide blurred as sharp), its tag and "Switch…".
+    /// Measures the room an address is given, and draws it (AddressInk).
+    private static let sizer = AddressInk(font: addressFont)
+    private let ink = AddressInk(font: QCStandbyMenuRow.addressFont)
+    /// The room of the address: the wider of it and the stand-in, so the tag after it doesn't move on a reveal.
+    static func room(_ address: String) -> CGFloat { sizer.room(for: address, blur: AddressPrivacy.shared.blur) }
+    /// The least width that shows it all (nothing is cut): the address's room, its tag and "Switch…".
     static func width(_ address: String, columns: Columns = .bar) -> CGFloat {
-        columns.addressX + w(address, addressFont) + w(tag, tagFont) + hintGap + w(hint, tagFont) + QCMenuUsageBlock.padX
+        columns.addressX + room(address) + w(tag, tagFont) + hintGap + w(hint, tagFont) + QCMenuUsageBlock.padX
     }
+    /// The text drawn for the address now: its own while the row is lit (or addresses are not blurred), else the stand-in.
+    var drawnAddress: String { AddressText.drawn(address: address, revealed: sharp, blur: true) }
 
     /// Whether the row is lit by the menu (the address is sharp then); a dimmed row never is.
     var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
@@ -335,30 +318,18 @@ final class QCStandbyMenuRow: NSView {
         let sub: NSColor = on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.75) : fg
         let mid = bounds.midY
         QCMenuUsageBlock.drawLamp(on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.85) : fg, hollow: true, x: columns.lampX, midY: mid)
-        let width = Self.w(address, Self.addressFont)
-        if sharp {
-            QCMenuUsageBlock.drawText(address, Self.addressFont, sub, x: columns.addressX, midY: mid)
-        } else if let img = blurredAddress(fg) {
-            img.draw(in: NSRect(x: columns.addressX - QCProfileMenuRow.blurPad, y: mid - img.size.height / 2, width: img.size.width, height: img.size.height))
-        }
-        QCMenuUsageBlock.drawText(Self.tag, Self.tagFont, sub, x: columns.addressX + width, midY: mid)
+        ink.draw(address: address, readable: sharp, color: on ? sub : fg, x: columns.addressX, midY: mid, blur: AddressPrivacy.shared.blur)
+        QCMenuUsageBlock.drawText(Self.tag, Self.tagFont, sub, x: columns.addressX + Self.room(address), midY: mid)
         if on {
             let hintW = Self.w(Self.hint, Self.tagFont)
             QCMenuUsageBlock.drawText(Self.hint, Self.tagFont, sub, x: bounds.maxX - QCMenuUsageBlock.padX - hintW, midY: mid)
         }
     }
 
-    /// The blurred address, made once for the look it is drawn in (the lit look never shows it), made again if the
-    /// appearance changes (its colour is the system's).
-    private var blurCache: NSImage?
-    private func blurredAddress(_ color: NSColor) -> NSImage? {
-        if let blurCache { return blurCache }
-        blurCache = QCProfileMenuRow.blurred(address, color: color, font: Self.addressFont)
-        return blurCache
-    }
+    // (the blurred stand-in is made once per colour by `ink`, and made again if the appearance changes)
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        blurCache = nil
+        ink.reset()
         needsDisplay = true
     }
 }
@@ -433,77 +404,5 @@ final class QCAddAccountMenuRow: NSView {
         plus.lineWidth = 1.2; plus.lineCapStyle = .round
         fg.setStroke(); plus.stroke()
         QCMenuUsageBlock.drawText(Self.title, QCStandbyMenuRow.addressFont, fg, x: columns.addressX, midY: mid)
-    }
-}
-
-/// An address on its own line in an alert's accessory view (an NSAlert's text can't blur): drawn blurred, sharp while
-/// the pointer is on it. The whole address is for drawing only; its accessibility label is the masked one.
-final class QCAddressLabel: NSView {
-    let address: String
-    /// The pointer is on it: drawn readable.
-    private(set) var revealed = false
-
-    static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-    /// The frame holds the blur's reach on every side.
-    static var pad: CGFloat { QCProfileMenuRow.blurPad }
-
-    init(address: String) {
-        self.address = address
-        let s = (address as NSString).size(withAttributes: [.font: Self.font])
-        super.init(frame: NSRect(x: 0, y: 0, width: ceil(s.width) + 2 * Self.pad, height: ceil(s.height) + 2 * Self.pad))
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
-        setAccessibilityLabel(AddressPrivacy.words(address))
-    }
-    required init?(coder: NSCoder) { fatalError("not from a nib") }
-
-    override var isFlipped: Bool { true }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
-    }
-    override func mouseEntered(with e: NSEvent) { reveal(true) }
-    override func mouseExited(with e: NSEvent) { reveal(false) }
-    func reveal(_ on: Bool) { guard on != revealed else { return }; revealed = on; needsDisplay = true }
-
-    // A modal alert (NSAlert.runModal) gets no enter and exit from the tracking area above, so while the label is in a
-    // window the pointer's place is also read every 50 ms, in every run loop mode (the modal one included), and the
-    // address is readable exactly while the pointer is on the label.
-    private var poll: Timer?
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        poll?.invalidate(); poll = nil
-        guard let w = window else { reveal(false); return }
-        w.acceptsMouseMovedEvents = true
-        var shown = false
-        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] t in
-            guard let self, let w = self.window else { t.invalidate(); return }
-            if w.isVisible { shown = true; self.follow(inWindow: w.mouseLocationOutsideOfEventStream) }
-            else if shown { t.invalidate(); self.reveal(false) }     // the alert has closed
-        }
-        RunLoop.main.add(t, forMode: .common)
-        poll = t
-    }
-    /// The pointer at a point of the window (nil: it is nowhere): the address is readable while it is on the label.
-    func follow(inWindow p: NSPoint?) { reveal(p.map { bounds.contains(convert($0, from: nil)) } ?? false) }
-
-    /// Drawn readable: the pointer is on it, or addresses are not blurred (AddressPrivacy).
-    var sharp: Bool { revealed || !AddressPrivacy.shared.blur }
-
-    override func draw(_ dirty: NSRect) {
-        if sharp {
-            (address as NSString).draw(at: NSPoint(x: Self.pad, y: Self.pad), withAttributes: [.font: Self.font, .foregroundColor: NSColor.labelColor])
-        } else if let img = blurCache ?? QCProfileMenuRow.blurred(address, color: .labelColor, font: Self.font) {
-            blurCache = img
-            img.draw(in: NSRect(origin: .zero, size: img.size))
-        }
-    }
-    private var blurCache: NSImage?
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        blurCache = nil
-        needsDisplay = true
     }
 }

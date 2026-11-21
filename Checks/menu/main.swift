@@ -1,6 +1,7 @@
 // The menu bar menu's checks (Checks/menu.sh): see that script. Nothing here shows a window or reads the user's profiles'
 // numbers: levels live in memory (Files.readOnly), the folders are made under build/, and `claude` is the stand-in.
 
+import AddressPrivacy
 import AppKit
 
 Files.readOnly = true
@@ -191,7 +192,7 @@ let blocks = items.compactMap { $0.view as? QCMenuUsageBlock }
 check("the menu: a block per profile and a line between them", blocks.count == 2 && items.count == 3 && items[1].isSeparatorItem)
 check("the menu: the first has its bars, the second 'No usage yet'", blocks.first?.model.lines.contains("Week 88% in 1d 5h") == true && blocks.last?.model.lines.contains("No usage yet") == true)
 let menuText = blocks.flatMap { $0.model.lines }.joined(separator: "\n")
-check("the menu: no standby account's address in it, even masked", !menuText.contains(maskEmail("zed@example.com")) && !menuText.contains("zed"))
+check("the menu: no standby account's address in it (the words are 'hidden address', the same for every address)", !menuText.contains("zed") && menuText.contains(AddressText.hidden))
 check("the menu: no address in full in it (masked only)", !menuText.contains("ultra-"))
 check("the menu: the blocks are all as wide as the widest", Set(blocks.map(\.frame.width)).count == 1)
 blocks.last?.press(); spin(0.1)
@@ -257,15 +258,17 @@ let longAddress = "a-very-long-standby-account-address-for-a-wide-row@example.or
 let wide = standbyMenu([mainOne, .init(profile: work2, level: nil, address: "ultra-2@example.com", problem: nil, standby: [KnownAccount(uuid: "L", email: longAddress)])])
 let wideViews = wide.compactMap { $0.view }
 check("widths: every block and row is as wide as the widest", Set(wideViews.map(\.frame.width)).count == 1 && wideViews.count == 4, "\(wideViews.map(\.frame.width))")
-check("widths: a long address widens them all (nothing is cut)", QCStandbyMenuRow.width(longAddress) > 300 && wideViews[0].frame.width == QCStandbyMenuRow.width(longAddress),
+check("widths: a long address widens nothing (the room is the stand-in's alone: a longer address is cut while it is revealed, never in a neighbour's place)",
+      QCStandbyMenuRow.width(longAddress) == QCStandbyMenuRow.width(zedAddress) && wideViews[0].frame.width == QCStandbyMenuRow.width(longAddress),
       "\(wideViews.map(\.frame.width)) \(QCStandbyMenuRow.width(longAddress))")
 check("widths: the rows are as wide as the blocks in a plain menu too", Set(twoProfiles.compactMap { $0.view?.frame.width }).count == 1)
-check("widths: a longer address needs more", QCStandbyMenuRow.width(zedAddress) > QCStandbyMenuRow.width("z@e.co"))
+check("widths: a short, a usual and a very long address are all given the same room (the stand-in's): the room says nothing of an address",
+      QCStandbyMenuRow.width(zedAddress) == QCStandbyMenuRow.width("z@e.co") && QCStandbyMenuRow.width(longAddress) == QCStandbyMenuRow.width(zedAddress))
 let groupBlockOfTwo = twoProfiles[0].view as! QCMenuUsageBlock
 check("places: the lamp column, the address's x and the font are the block's account line's",
       QCStandbyMenuRow.lampX == QCMenuUsageBlock.padX && QCStandbyMenuRow.addressX == groupBlockOfTwo.addressRect.minX
       && QCStandbyMenuRow.addressFont === QCProfileMenuRow.addressFont && QCStandbyMenuRow.tagFont === QCMenuUsageBlock.accountFont)
-let blurPicture = QCProfileMenuRow.blurred(zedAddress, color: .labelColor, font: QCStandbyMenuRow.addressFont)
+let blurPicture = AddressInk.blurred(AddressText.standIn, color: .labelColor, font: QCStandbyMenuRow.addressFont)
 check("places: the row is as tall as the whole blurred picture of the address, so the blur is not cut",
       blurPicture != nil && blurPicture!.size.height <= QCStandbyMenuRow.height && QCStandbyMenuRow.height >= QCStandbyMenuRow.highlightH, "\(String(describing: blurPicture?.size)) in \(QCStandbyMenuRow.height)")
 
@@ -519,11 +522,59 @@ do {
         v.cacheDisplay(in: v.bounds, to: rep)
         return rep.tiffRepresentation
     }
-    let before = picture(open)          // draws the first address blurred, and keeps its picture
+    let before = picture(open)          // draws the first address blurred
     open.reload(second)
     check("live: another account in use is taken in place", open.model.account == second.account)
-    check("live: and it is drawn blurred as its own address, not as the old one's kept picture",
-          before != nil && picture(open) != before && picture(open) == picture(fresh))
+    // what is blurred is the stand-in, the same for every address: the two accounts look alike at rest, and the block
+    // draws the stand-in for both
+    check("live: at rest the new account is drawn as the stand-in, exactly as the old one was (nothing of either address in the picture)",
+          before != nil && picture(open) == before && picture(open) == picture(fresh)
+          && open.drawnAddress == AddressText.standIn && fresh.drawnAddress == AddressText.standIn)
+}
+
+// ── a blurred address is a stand-in: nothing of the real one is drawn at rest ─────────────────────────────
+do {
+    func parts(of a: String) -> [String] {
+        // the pieces a candidate could be matched on: the local part, the domain, its words and any 3 letters of it
+        let at = a.firstIndex(of: "@")!
+        var out = [String(a[..<at]), String(a[a.index(after: at)...])]
+        out += a.split(whereSeparator: { !$0.isLetter }).map(String.init).filter { $0.count >= 3 && $0 != "com" }
+        return out
+    }
+    func leaks(_ drawn: String, _ a: String) -> Bool { parts(of: a).contains { drawn.contains($0) } }
+    AddressPrivacy.shared.apply(blur: true)
+    let one = "zed.sample@example.com", two = "q@e.co"
+    // the usage block's account line
+    let b1 = QCMenuUsageBlock(make(level(five: 13, week: 88), address: one)) {}, b2 = QCMenuUsageBlock(make(level(five: 13, week: 88), address: two)) {}
+    check("stand-in: the block draws the stand-in at rest, nothing of the address", b1.drawnAddress == AddressText.standIn && !leaks(b1.drawnAddress ?? "", one))
+    check("stand-in: the same for a different (and a much shorter) address", b1.drawnAddress == b2.drawnAddress)
+    b1.hover(at: NSPoint(x: b1.addressRect.midX, y: b1.addressRect.midY))
+    check("stand-in: with the pointer on the address the block draws the address itself", b1.drawnAddress == one)
+    b1.hover(at: nil)
+    check("stand-in: and the stand-in again when it leaves", b1.drawnAddress == AddressText.standIn)
+    check("stand-in: the block is as wide for either address (a usual address moves nothing, and says nothing)",
+          QCMenuUsageBlock.width(make(level(five: 13, week: 88), address: one)) == QCMenuUsageBlock.width(make(level(five: 13, week: 88), address: two))
+          && b1.addressRect.width == b2.addressRect.width)
+    // a very long address in the same containers: what follows the address ("· in use", "· standby") stays where it is
+    let bLong = QCMenuUsageBlock(make(level(five: 13, week: 88), address: longAddress)) {}
+    check("stand-in: a very long address leaves its neighbours where a short one does (the block, the address's room, what follows it)",
+          bLong.frame.width == b1.frame.width && bLong.addressRect == b1.addressRect && QCStandbyMenuRow.room(longAddress) == QCStandbyMenuRow.room(one)
+          && QCStandbyMenuRow(address: longAddress, enabled: true) {}.frame.width == QCStandbyMenuRow(address: one, enabled: true) {}.frame.width)
+    bLong.hover(at: NSPoint(x: bLong.addressRect.midX, y: bLong.addressRect.midY))
+    check("stand-in: …revealed, its frame and room are the same (it is cut to the room, never wider)", bLong.drawnAddress == longAddress && bLong.addressRect == b1.addressRect && bLong.frame.width == b1.frame.width)
+    // the standby row
+    let r1 = QCStandbyMenuRow(address: one, enabled: true) {}, r2 = QCStandbyMenuRow(address: two, enabled: true) {}
+    check("stand-in: the standby row draws the stand-in at rest, nothing of the address, the same for another address",
+          r1.drawnAddress == AddressText.standIn && r2.drawnAddress == AddressText.standIn && !leaks(r1.drawnAddress, one))
+    r1.highlighted = true
+    check("stand-in: lit, the standby row draws the address", r1.drawnAddress == one)
+    r1.highlighted = false
+    check("stand-in: the standby row is as wide for both addresses, so a reveal moves nothing", r1.frame.width == r2.frame.width)
+    // blur off: the address
+    var offS = QuickChatSettings(); offS.blurAddresses = false
+    AddressPrivacy.shared.apply(offS)
+    check("stand-in: with Blur addresses off everything draws the address", b1.drawnAddress == one && r1.drawnAddress == one && r2.drawnAddress == two)
+    AddressPrivacy.shared.apply(QuickChatSettings())
 }
 
 // ── Settings ▸ Blur addresses: on (the default) blurs at rest; off draws every address in full and sharp, and the words hold

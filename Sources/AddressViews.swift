@@ -4,26 +4,15 @@
 
 import SwiftUI
 import AppKit
+import AddressPrivacy
 
-/// Whether account addresses are blurred (Settings ▸ General ▸ Blur addresses; on unless it was turned off). On: an
-/// address is blurred until the pointer is on it, and as words (VoiceOver, an item's title) it is masked. Off: it is
-/// drawn in full and sharp, and the words hold it in full. Drawn views read it as they are drawn, so a change reaches the
-/// chat at once and the menus the next time they open.
-final class AddressPrivacy: ObservableObject {
-    static let shared = AddressPrivacy()
-    @Published var blur = true
+// The blur itself (the stand-in, the hover gate, the views, the setting) is the AddressPrivacy module, Shared/AddressPrivacy/.
+// What stays here is the chat's sentence in pieces, which draws its addresses through it.
 
-    /// Counts the times a pointer's hover was cut short without a mouse-exit: the panel ordered out under the pointer
-    /// (it gets no exit), a modal alert that took the pointer, the window covered. Views that reveal an address on hover
-    /// drop it when this changes (QCHoverGate).
-    @Published private(set) var hoverEnded = 0
-    func endHover() { hoverEnded += 1 }
-
-    /// Takes the setting (as the app starts and whenever Settings changes it).
-    func apply(_ s: QuickChatSettings) { if blur != s.blurAddresses { blur = s.blurAddresses } }
-
-    /// An address as words: masked while blurring, else in full.
-    static func words(_ address: String) -> String { shared.blur ? maskEmail(address) : address }
+extension AddressPrivacy {
+    /// Takes cl_quick's own setting (Settings ▸ General ▸ Blur addresses; on unless turned off): as the app starts and
+    /// whenever Settings changes it. The module keeps no setting of its own.
+    func apply(_ s: QuickChatSettings) { apply(blur: s.blurAddresses) }
 }
 
 /// A sentence in pieces: words and, apart from them, the addresses in it (whole, for drawing only).
@@ -56,74 +45,15 @@ struct QCWords: Equatable {
 
     /// The whole addresses in it, in order (for drawing).
     var addresses: [String] { pieces.filter(\.isAddress).map(\.text) }
+    /// The text the sentence draws while no address is revealed: with the blur on, the stand-in where each address is
+    /// (never any part of it); with the blur off, the address.
+    func drawn(revealed: Bool = false, blur: Bool = AddressPrivacy.shared.blur) -> String {
+        pieces.map { $0.isAddress ? AddressText.drawn(address: $0.text, revealed: revealed, blur: blur) : $0.text }.joined()
+    }
     /// The sentence as words (VoiceOver, the checks): every address masked, never in full (in full only with the
     /// blur turned off, AddressPrivacy).
     var spoken: String { pieces.map { $0.isAddress ? AddressPrivacy.words($0.text) : $0.text }.joined() }
     var isEmpty: Bool { pieces.isEmpty }
-}
-
-/// Whether the pointer is on something that reveals an address. SwiftUI's onHover reports only enters and exits, and a
-/// window hidden or covered under the pointer, or a modal alert, sends no exit: so the hover also ends when
-/// `AddressPrivacy.hoverEnded` changes, and is not taken up again until the pointer enters anew.
-struct QCHoverGate: Equatable {
-    private(set) var on = false
-    private var seen: Int
-    init(seen: Int = AddressPrivacy.shared.hoverEnded) { self.seen = seen }
-    /// The pointer entered (true) or left (false).
-    mutating func pointer(_ inside: Bool) { on = inside }
-    /// The counter's value now: a change ends the hover.
-    mutating func sync(_ ended: Int) { if ended != seen { seen = ended; on = false } }
-}
-
-/// An address that is blurred at rest and sharp while the pointer is on it (or while `revealed`, when a button around
-/// it carries the pointer). Its accessibility label is the masked address. The blur is the menu's: a Gaussian blur of
-/// about a fifth of the text size (the menu's is 2.4 pt on 11.5 pt text).
-struct QCBlurredAddress: View {
-    let address: String
-    var size: CGFloat = 12.5
-    var revealed = false
-    @State private var gate = QCHoverGate()
-    @ObservedObject private var privacy = AddressPrivacy.shared
-
-    /// The blur radius for a text size: none while the address is meant to be read (or the blur is turned off).
-    static func blurRadius(size: CGFloat, revealed: Bool, blur: Bool = true) -> CGFloat {
-        revealed || !blur ? 0 : (size * 0.21).rounded(toPlaces: 2)
-    }
-
-    var body: some View {
-        Text(address)
-            .lineLimit(1)
-            .blur(radius: Self.blurRadius(size: size, revealed: gate.on || revealed, blur: privacy.blur))
-            .contentShape(Rectangle())
-            .onHover { gate.pointer($0) }
-            .onChange(of: privacy.hoverEnded) { gate.sync($0) }
-            .accessibilityLabel(AddressPrivacy.words(address))
-    }
-}
-
-private extension CGFloat {
-    func rounded(toPlaces n: Int) -> CGFloat { let m = pow(10, CGFloat(n)); return (self * m).rounded() / m }
-}
-
-/// The label of a key with an address in it ("Try again as <address>"): the address is blurred until the pointer is on the
-/// key, and masked in the key's accessibility label. The key's own style sets the font and colour.
-struct QCAddressKeyLabel: View {
-    let title: String
-    let address: String
-    var size: CGFloat = 11.5
-    @State private var gate = QCHoverGate()
-    @ObservedObject private var privacy = AddressPrivacy.shared
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Text(title)
-            QCBlurredAddress(address: address, size: size, revealed: gate.on)
-        }
-        .onHover { gate.pointer($0) }
-        .onChange(of: privacy.hoverEnded) { gate.sync($0) }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title + AddressPrivacy.words(address))
-    }
 }
 
 /// Lays tokens out in lines that wrap at the width given, a space between them: the way text wraps, for a sentence
@@ -180,7 +110,7 @@ struct QCFlow: Layout {
 }
 
 /// A sentence of QCWords. With no address in it, it is one Text, as every note always was; with one, the words flow
-/// in lines like text and the address is a QCBlurredAddress among them. The sentence is one element for VoiceOver,
+/// in lines like text and the address is a BlurredAddress among them. The sentence is one element for VoiceOver,
 /// with the addresses masked. The font is the caller's.
 struct QCSentence: View {
     let words: QCWords
@@ -196,7 +126,7 @@ struct QCSentence: View {
         p.strong ? Text(p.text).fontWeight(.semibold).foregroundColor(strongColor) : Text(p.text).foregroundColor(color)
     }
     private func blurred(_ p: QCWords.Piece) -> some View {
-        QCBlurredAddress(address: p.text, size: size).fontWeight(p.strong ? .semibold : .regular).foregroundColor(p.strong ? strongColor : color)
+        BlurredAddress(address: p.text, size: size, reserve: false).fontWeight(p.strong ? .semibold : .regular).foregroundColor(p.strong ? strongColor : color)
     }
 
     /// The pieces cut at their spaces into tokens that don't break: an address keeps the punctuation next to it.

@@ -4,6 +4,7 @@
 // and between answers) and hands the drag to the window. The field, the controls, the buttons and the selectable text sit
 // in front and keep their clicks; scrolling goes up the responder chain to the scroll view, as it does for any view.
 
+import AddressPrivacy
 import AppKit
 import SwiftUI
 

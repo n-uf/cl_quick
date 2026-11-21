@@ -7,7 +7,11 @@
 #                cl_quick leaves Auth/Keychain.swift out: it never reads the Keychain.
 # The vendored copy is never edited here (Vendor/README.md); the patch is what cl_audit is asked to take.
 #
-#   build_modules OUT keychain|no-keychain [swiftc flags...]   builds the three into OUT
+# and AddressPrivacy, a fourth, standalone one (Shared/AddressPrivacy/*.swift: Foundation, AppKit and SwiftUI, no other module
+# of ours; cl_audit adopts it too): the blurred stand-in of an address, its views and the plain text API.
+#
+#   build_modules OUT keychain|no-keychain [swiftc flags...]   builds the four into OUT
+#   build_address_privacy OUT [swiftc flags...]                builds AddressPrivacy alone into OUT (its own suite)
 #   modules_link OUT                                           prints the flags that link them
 
 modules_vendor="$repo/Vendor/cl_audit-6bce89f"
@@ -32,6 +36,18 @@ module_sources() {
   done
 }
 
+modules_addresses="$repo/Shared/AddressPrivacy"
+
+# build_address_privacy OUT [swiftc flags...]: AddressPrivacy as a static library (Swift 5 mode, macOS 13, imports nothing of ours)
+build_address_privacy() {
+  local out="$1"; shift
+  mkdir -p "$out"
+  rm -f "$out"/libAddressPrivacy.a
+  swiftc -swift-version 5 -parse-as-library -target arm64-apple-macos13.0 "$@" -module-name AddressPrivacy \
+    -emit-module -emit-module-path "$out/AddressPrivacy.swiftmodule" -emit-library -static -o "$out/libAddressPrivacy.a" \
+    "$modules_addresses"/*.swift
+}
+
 build_modules() {
   local out="$1" keychain="$2"; shift 2
   local common=(-swift-version 5 -parse-as-library -target arm64-apple-macos13.0 "$@")
@@ -52,6 +68,7 @@ build_modules() {
     -emit-module -emit-module-path "$out/Runs.swiftmodule" -emit-library -static -o "$out/libRuns.a" "${runs[@]}"
   swiftc "${common[@]}" -module-name ClaudeAuth -I "$out" \
     -emit-module -emit-module-path "$out/ClaudeAuth.swiftmodule" -emit-library -static -o "$out/libClaudeAuth.a" "${auth[@]}"
+  build_address_privacy "$out" "$@"
 }
 
-modules_link() { printf '%s\n' -I "$1" -L "$1" -lClaudeAuth -lRuns -lProfileCore; }
+modules_link() { printf '%s\n' -I "$1" -L "$1" -lClaudeAuth -lRuns -lProfileCore -lAddressPrivacy; }

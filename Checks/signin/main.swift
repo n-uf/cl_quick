@@ -5,6 +5,7 @@
 // under build/; sample addresses (example.com) only; nothing is read from or written to this Mac's own folders, and only
 // processes this run started are signalled, by their pids.
 
+import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import Runs
@@ -1307,10 +1308,10 @@ do {
     check("words: the addresses are pieces of their own (blurred), never in the plain words",
           w.lead.addresses == ["bob@example.com", "kim@example.com"] && w.rest.addresses == ["bob@example.com", "bob@example.com"]
           && !w.lead.pieces.filter { !$0.isAddress }.contains { $0.text.contains("@") })
-    AddressPrivacy.shared.blur = false
+    AddressPrivacy.shared.apply(blur: false)
     check("words: with Blur addresses off the words hold them in full", line(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil)))
           == "The browser was signed in as bob@example.com, not kim@example.com. Main is on bob@example.com now.")
-    AddressPrivacy.shared.blur = true
+    AddressPrivacy.shared.apply(blur: true)
     check("words: declined is its own note, at once", line(ended(.declined)) == "The sign-in was declined in the browser. The account in use hasn't changed.")
     check("words: a timeout says no sign-in came", line(ended(.timedOut)) == "No sign-in in 10 minutes. The account in use hasn't changed.")
     check("words: unconfirmed doesn't say the account hasn't changed (the folder may have)",

@@ -61,7 +61,10 @@ the account in use. A profile's page has:
 touched; the account comes back if it signs in on that folder again.
 
 Account addresses are shown in full in Settings. Everywhere else they are blurred until the pointer is on them; the
-words VoiceOver reads have them masked (p•••@example.com).
+words VoiceOver reads and an item's title say "hidden address" (nothing of the address: no first letter, length or domain). What is blurred is not the address: it is one fixed stand-in
+(`abcdefghijkl@mnopqrst.com`), the same for every address, so a screenshot of the blur gives nothing back (a blur over the
+real text keeps its length and letter shapes); the real address is drawn only while the pointer is on it. This is the
+`AddressPrivacy` module, `Shared/AddressPrivacy/`, shared with cl_audit (README there).
 
 The **+** tile adds a profile: a folder found on this Mac (Add, or Sign in… for one that isn't signed in), Choose a
 folder… (it must be a signed-in Claude Code folder), or "A new account, in a new folder", which takes a name, makes
@@ -89,8 +92,8 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   closed after a sign-in, a wrong account, Stop or the timeout (Stop and the timeout end `claude auth login` too); one
   declined or failed stays open to be read until Return, the next sign-in or Stop.
 - A switch that ends without the account wanted says what happened, in the chat and on the profile's page in Settings,
-  each way in its own words. If another account signed in: "The browser was signed in as b•••@example.com, not
-  a•••@example.com. Main is on b•••@example.com now." (and "b•••@example.com is also in use on Work." when it is), with two
+  each way in its own words. If another account signed in: "The browser was signed in as <b>, not
+  <a>. Main is on <b> now." (and "<b> is also in use on Work." when it is; each address blurred), with two
   compact keys, **Try again as** the account wanted (the same switch again) and **Keep** the one it is on now; when that
   account is also in use on another profile there is no Keep, only Try again as and a plain Dismiss (OK in Settings). Declined in
   the browser: "The sign-in was declined in the browser. The account in use hasn't changed." Signed in but Claude Code
@@ -106,11 +109,14 @@ folder… (it must be a signed-in Claude Code folder), or "A new account, in a n
   Numbers are kept only for the account the answering `claude` says it is (its `initialize` answer) and only while the
   folder is still on that account: an answer that arrives after the folder moved to another account is dropped.
 - Addresses are in full in Settings' account rows, and blurred in its switch notes. Everywhere else they are blurred until the pointer is on them (the switch question's
-  alert holds it under its words, in an accessory view); the words VoiceOver reads have them masked (p•••@example.com). In
+  alert holds it under its words, in an accessory view); the words VoiceOver reads say "hidden address". In
   the chat's header there is none; the profile menu's rows have the address of the account in use, with a copy button
   beside it, and under each, in the same rows as the menu bar's menu, the profile's standby accounts (blurred at rest, clear
   while the pointer is on the row), and the chat's notes about an account change blur it too. The switch question's address
-  is clear under the pointer inside the alert as well. **Settings ▸ General ▸
+  is clear under the pointer inside the alert as well. A blurred address is the fixed stand-in blurred, never the address
+  (`Checks/addressprivacy.sh` and the menu and panel suites assert it on what each piece draws); an address is given the
+  stand-in's room and no more (a longer address is cut while revealed), so its length is never in a neighbour's place. A
+  reveal ends when the pointer leaves, the app loses focus, a window closes or a menu opens. **Settings ▸ General ▸
   Blur addresses** (on by default) turns the blur off: addresses then show in full, sharp, and the words hold them in full.
 
 ## The menu bar menu
@@ -233,9 +239,9 @@ minutes for a profile.
 - When a profile's 5-hour limit or week is full, the chat's notice names the window that is full ("Main's 5-hour limit
   is full, resets 23:20.") and offers the profile with the most room: **Ask on Work** sends your question there. If the
   profile has a standby account, it also offers the one seen most recently, with no numbers (a standby account shows no
-  usage: "p•••@example.com is on standby."), as
-  **Switch to p•••@example.com…**: after the sign-in the chat starts a new chat on the same profile (a chat may not
-  carry across accounts) and sends what you had typed, with a line saying "Main is on p•••@example.com now."
+  usage: "<address> is on standby."), as
+  **Switch to <address>…** (the address blurred): after the sign-in the chat starts a new chat on the same profile (a chat may not
+  carry across accounts) and sends what you had typed, with a line saying "Main is on <address> now."
 - If a profile's Claude Code isn't signed in, the notice offers **Sign in…** (Claude Code's own sign-in, in Terminal)
   and Try again, which asks the question in a new chat.
 - **Stop** ends the answer where it is and the chat goes on (an interrupt to the same `claude`, which still remembers

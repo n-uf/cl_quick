@@ -15,14 +15,6 @@ func tilde(_ path: String) -> String {
     return path == home ? "~" : path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
 }
 
-/// you@example.com → y••••••@example.com. The words' stand-in for an address (VoiceOver, an item's title, the checks):
-/// on screen an address is blurred, never masked.
-func maskEmail(_ email: String) -> String {
-    guard let at = email.firstIndex(of: "@") else { return email }
-    let local = email[..<at]
-    return String(local.prefix(1)) + String(repeating: "•", count: max(3, min(local.count - 1, 7))) + email[at...]
-}
-
 /// One Claude Code folder cl_quick chats on, with the accounts that have been signed in to it. One of them is in use
 /// (the one its .claude.json says); the others are standby: signing in again in the same folder switches to one.
 struct Profile: Codable, Identifiable, Equatable, Hashable {

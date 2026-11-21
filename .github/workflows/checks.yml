@@ -37,6 +37,9 @@ jobs:
       - name: Build
         run: ./build.sh --no-install
 
+      - name: Checks/addressprivacy.sh
+        run: Checks/addressprivacy.sh
+
       - name: Checks/run.sh
         run: Checks/run.sh
 

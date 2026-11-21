@@ -4,6 +4,7 @@
 // (the default, the picker); then Remove. General: one grid for the shortcut, the model and thinking new chats start
 // with, Open at login and Updates (the daily look for a newer release), then one strip for cl_quick's own data. No (i): a plain line where something needs saying.
 
+import AddressPrivacy
 import AppKit
 import Carbon.HIToolbox
 import ServiceManagement
@@ -504,10 +505,10 @@ struct SwitchNotice: View {
                 // Sign in again…; after a wrong account, Keep the one it is on now
                 let again = SwitchWords.retry(m)
                 Button { retry(m.goal) } label: {
-                    if let a = again.address { QCAddressKeyLabel(title: again.title, address: a) } else { Text(again.title + "…") }
+                    if let a = again.address { AddressKeyLabel(title: again.title, address: a) } else { Text(again.title + "…") }
                 }
                 if let keep = SwitchWords.keep(m) {
-                    Button(action: drop) { QCAddressKeyLabel(title: keep.title, address: keep.address) }
+                    Button(action: drop) { AddressKeyLabel(title: keep.title, address: keep.address) }
                 } else {
                     Button("OK", action: drop)
                 }
@@ -1326,7 +1327,7 @@ enum SettingsRender {
                     Text(confirm ? AccountBook.switchWords(folder: "~/.claude", isDefault: true)
                                  : ForgetWords.detail(profile: "Main")).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
                     // the switch question's address sits under its words, blurred until the pointer is on it (the real alert's accessory)
-                    if confirm { QCBlurredAddress(address: "kim@example.org", size: 13) }
+                    if confirm { BlurredAddress(address: "kim@example.org", size: 13) }
                     HStack(spacing: 8) {
                         Spacer()
                         Button("Cancel") {}

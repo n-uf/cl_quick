@@ -16,6 +16,7 @@
 // background: a short-lived `claude` per profile, one at a time, that is sent `get_usage` and nothing else (no message
 // to a model), and ends as soon as it has answered. Nothing is read from the Keychain; no token is ever seen.
 
+import AddressPrivacy
 import AppKit
 import Combine
 
@@ -220,13 +221,17 @@ final class QCMenuUsageBlock: NSView {
     // MARK: size
 
     private static func w(_ s: String, _ f: NSFont) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: f]).width) }
+    /// Measures the room an address is given: the wider of it and the stand-in (nothing moves when it is revealed).
+    private static let sizer = AddressInk(font: QCProfileMenuRow.addressFont)
+    /// Draws the address (its own text while it is readable, else the stand-in blurred).
+    private let ink = AddressInk(font: QCProfileMenuRow.addressFont)
 
     /// The least width that shows it all (nothing is cut): the widest of the header, the account line, the rows, the note.
     static func width(_ m: QCMenuProfile) -> CGFloat {
         let head = padX + textGap + w(m.title, titleFont) + (m.fullNote.map { 16 + w($0, noteFont) } ?? 0) + padX
         let account: CGFloat
         switch m.account {
-        case .inUse(let a): account = padX + textGap + w(a, QCProfileMenuRow.addressFont) + w(" · in use", accountFont) + padX
+        case .inUse(let a): account = padX + textGap + sizer.room(for: a, blur: AddressPrivacy.shared.blur) + w(" · in use", accountFont) + padX
         case .problem(let words): account = padX + textGap + w(words, accountFont) + padX
         }
         let reset = m.rows.map { w($0.resets, resetFont) }.max() ?? 0
@@ -249,8 +254,13 @@ final class QCMenuUsageBlock: NSView {
     private var accountY: CGFloat { Self.top + Self.headH }
     private func rowY(_ i: Int) -> CGFloat { accountY + Self.accountH + 4 + CGFloat(i) * (Self.rowH + Self.rowGap) }
     private var addressWidth: CGFloat {
-        if case .inUse(let a) = model.account { return Self.w(a, QCProfileMenuRow.addressFont) }
+        if case .inUse(let a) = model.account { return Self.sizer.room(for: a, blur: AddressPrivacy.shared.blur) }
         return 0
+    }
+    /// The text drawn for the account's address now: its own while it is readable, else the stand-in.
+    var drawnAddress: String? {
+        if case .inUse(let a) = model.account { return AddressText.drawn(address: a, revealed: sharp, blur: true) }
+        return nil
     }
     /// Where the address is drawn: after the lamp, on the account line.
     var addressRect: NSRect {
@@ -300,8 +310,6 @@ final class QCMenuUsageBlock: NSView {
     /// and it still fits the width the menu gave it (a header note that grew would be cut).
     func reload(_ m: QCMenuProfile) {
         guard m != model, m.shape == model.shape, Self.width(m) <= frame.width else { return }
-        // another account in use (a sign-in finished while the menu is open): the old address's picture goes
-        if m.account != model.account { blurCache = nil }
         model = m
         setAccessibilityLabel(m.spoken)
         needsDisplay = true
@@ -366,11 +374,7 @@ final class QCMenuUsageBlock: NSView {
         case .inUse(let address):
             lamp(.systemGreen, glow: true, midY: accMid)
             let a = addressRect
-            if sharp {
-                text(address, QCProfileMenuRow.addressFont, .secondaryLabelColor, x: a.minX, midY: accMid)
-            } else if let img = blurred(address) {
-                img.draw(in: NSRect(x: a.minX - QCProfileMenuRow.blurPad, y: a.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
-            }
+            ink.draw(address: address, readable: sharp, color: .secondaryLabelColor, x: a.minX, midY: accMid, blur: AddressPrivacy.shared.blur)
             text(" · in use", Self.accountFont, .secondaryLabelColor, x: a.maxX, midY: accMid)
         case .problem(let words):
             lamp(.tertiaryLabelColor, glow: false, midY: accMid)
@@ -395,16 +399,10 @@ final class QCMenuUsageBlock: NSView {
         }
     }
 
-    /// The blurred address, made once for each appearance (its colour is the system's).
-    private var blurCache: NSImage?
-    private func blurred(_ address: String) -> NSImage? {
-        if let blurCache { return blurCache }
-        blurCache = QCProfileMenuRow.blurred(address, color: .secondaryLabelColor)
-        return blurCache
-    }
+    // (the blurred stand-in is made once per colour by `ink`, and made again if the appearance changes: its colour is the system's)
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        blurCache = nil
+        ink.reset()
         needsDisplay = true
     }
 }

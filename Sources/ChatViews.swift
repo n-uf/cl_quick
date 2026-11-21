@@ -5,6 +5,7 @@
 // model gave it. The profile is a picker that opens a menu; the model and thinking are bars picked directly
 // (QCStepControl).
 
+import AddressPrivacy
 import AppKit
 import PDFKit
 import SwiftUI
@@ -1683,14 +1684,14 @@ struct QCButton: View {
     var after = ""
     var ghost = false
     let action: () -> Void
-    @State private var gate = QCHoverGate()
+    @State private var gate = AddressHoverGate()
     @ObservedObject private var privacy = AddressPrivacy.shared
     var body: some View {
         Button(action: action) {
             HStack(spacing: 0) {
                 Text(title)
                 if let address {
-                    QCBlurredAddress(address: address, revealed: gate.on)
+                    BlurredAddress(address: address, revealed: gate.on)
                     Text(after)
                 }
             }
@@ -2302,10 +2303,14 @@ enum QuickChatRender {
             for it in menu.items {
                 if it.view is QCProfileMenuRow, let r = nextRow.next() {
                     r.frame = NSRect(x: 0, y: y, width: w, height: QCProfileMenuRow.height); box.addSubview(r); y += QCProfileMenuRow.height
-                } else if let v = it.view {
-                    // a standby or Add an account… row: the item's own view (the menu itself is never shown)
-                    v.frame = NSRect(x: 0, y: y, width: w, height: v.frame.height); box.addSubview(v); y += v.frame.height
-                    if let s = v as? QCStandbyMenuRow { standbyRows.append(s) }
+                } else if let s = it.view as? QCStandbyMenuRow {
+                    // a standby row, fresh like the profile rows (a view an item holds is kept in place by the item)
+                    let c = QCStandbyMenuRow(address: s.address, enabled: s.enabled, columns: s.columns, pick: {})
+                    c.frame = NSRect(x: 0, y: y, width: w, height: QCStandbyMenuRow.height); box.addSubview(c); y += QCStandbyMenuRow.height
+                    standbyRows.append(c)
+                } else if let a = it.view as? QCAddAccountMenuRow {
+                    let c = QCAddAccountMenuRow(enabled: a.enabled, columns: a.columns, pick: {})
+                    c.frame = NSRect(x: 0, y: y, width: w, height: QCStandbyMenuRow.height); box.addSubview(c); y += QCStandbyMenuRow.height
                 } else if it.isSeparatorItem {
                     let line = NSBox(frame: NSRect(x: 14, y: y + 5, width: w - 28, height: 1)); line.boxType = .separator; box.addSubview(line); y += 11
                 } else if !it.isEnabled || it.title == "Profile" {

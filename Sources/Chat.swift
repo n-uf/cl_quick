@@ -6,6 +6,7 @@
 // conversation lives only in the running `claude`, and it ends with it (15 minutes idle, ⌘N, a crash, another profile
 // or account, quitting); the next message starts a new chat. The bar and the window are ChatViews.swift.
 
+import AddressPrivacy
 import AppKit
 import Carbon.HIToolbox
 import Combine

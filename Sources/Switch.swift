@@ -7,6 +7,7 @@
 // account is confirmed by a short `claude` on the folder (its `initialize` answer, SignInWord), and until then the
 // folder's .claude.json is only a guess.
 
+import AddressPrivacy
 import AppKit
 import ClaudeAuth
 
@@ -148,7 +149,7 @@ final class AccountSwitcher {
         let a = NSAlert()
         a.messageText = "Switch \(p.name) to this account?"
         a.informativeText = AccountBook.switchWords(folder: tilde(p.path), isDefault: ClaudeFolder.isDefault(p.path))
-        a.accessoryView = QCAddressLabel(address: email)
+        a.accessoryView = AddressLabel(address: email)
         a.addButton(withTitle: "Switch"); a.addButton(withTitle: "Cancel")
         return a
     }

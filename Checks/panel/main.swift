@@ -7,6 +7,7 @@
 // (read-only: nothing is written under the user's folders) and moved far from the screen's middle.
 //   Checks/panel.sh
 
+import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import Carbon.HIToolbox
@@ -1071,7 +1072,7 @@ do {
     check("address words: the wrapping tokens keep each address with the punctuation after it",
           tokens == ["Signed", "in", "as", a + ",", "not", b + "."] && wrong.addresses == [a, b] && !wrong.spoken.contains("ultra-"), "\(tokens)")
     check("address words: the blur is at rest and gone while the pointer is on it",
-          QCBlurredAddress.blurRadius(size: 12.5, revealed: false) > 2 && QCBlurredAddress.blurRadius(size: 12.5, revealed: true) == 0)
+          BlurredAddress.blurRadius(size: 12.5, revealed: false) > 2 && BlurredAddress.blurRadius(size: 12.5, revealed: true) == 0)
     // drawn: the note with an address is as wide as the same sentence in plain text (the wrapping is unchanged), and its
     // address is not sharp (less edge energy than the plain one)
     func drawn(_ w: QCWords) -> (size: CGSize, edges: Double) {
@@ -1088,8 +1089,10 @@ do {
     let blurredDraw = drawn(note), sharpDraw = drawn(QCWords("Main is on \(a) now."))
     check("address chat: the note's address is drawn blurred at rest (less sharp than the plain text)",
           blurredDraw.edges > 0 && blurredDraw.edges < sharpDraw.edges * 0.8, "\(blurredDraw) \(sharpDraw)")
-    check("address chat: the note keeps its layout (as wide and as high as the plain sentence)",
-          abs(blurredDraw.size.width - sharpDraw.size.width) <= 2 && abs(blurredDraw.size.height - sharpDraw.size.height) <= 2, "\(blurredDraw.size) \(sharpDraw.size)")
+    // what is blurred is the stand-in, so the note is as wide as the plain sentence with the stand-in in the address's place
+    let standDraw = drawn(QCWords("Main is on \(AddressText.standIn) now."))
+    check("address chat: the note keeps its layout (as wide and as high as the plain sentence with the stand-in in its place)",
+          abs(blurredDraw.size.width - standDraw.size.width) <= 2 && abs(blurredDraw.size.height - standDraw.size.height) <= 2, "\(blurredDraw.size) \(standDraw.size)")
 
     // the switch notes in Settings (waiting for the sign-in, and a wrong account with its keys) blur their addresses like the
     // chat's: with the blur on they are less sharp than with it off, and as wide and as high
@@ -1113,14 +1116,15 @@ do {
             ("wrong account, on no other profile (Keep B)", SwitchNotice(ended: SwitchEnded(goal: g, reason: .wrongAccount(signedIn: "robin@example.net", alsoOn: nil)))),
             ("signed in again", SwitchNotice(signedAgain: "robin@example.net"))]
         for (what, notice) in notes {
-            AddressPrivacy.shared.blur = true
+            AddressPrivacy.shared.apply(blur: true)
             let on = look(notice)
-            AddressPrivacy.shared.blur = false
+            AddressPrivacy.shared.apply(blur: false)
             let off = look(notice)
-            AddressPrivacy.shared.blur = true
+            AddressPrivacy.shared.apply(blur: true)
             check("settings note (\(what)): its addresses are drawn blurred at rest (less sharp than with Blur addresses off)",
                   on.edges > 0 && on.edges < off.edges * 0.99, "\(on) \(off)")
-            check("settings note (\(what)): …and the note keeps its size", abs(on.size.width - off.size.width) <= 2 && abs(on.size.height - off.size.height) <= 2, "\(on.size) \(off.size)")
+            // (the stand-in is a little wider than a usual address: at most a line more where the text wraps)
+            check("settings note (\(what)): …and the note keeps its size", abs(on.size.width - off.size.width) <= 2 && abs(on.size.height - off.size.height) <= 20, "\(on.size) \(off.size)")
         }
     }
 
@@ -1167,7 +1171,7 @@ do {
           alert.informativeText.hasSuffix(AccountBook.browserFirst) && alert.informativeText.contains("claude.ai")
           && alert.informativeText.contains("switch it there first"), alert.informativeText)
     check("alert: its buttons are Switch and Cancel", alert.buttons.map(\.title) == ["Switch", "Cancel"])
-    if let label = alert.accessoryView as? QCAddressLabel {
+    if let label = alert.accessoryView as? AddressLabel {
         check("alert: the accessory holds the whole address for drawing, blurred at rest", label.address == "kim@example.org" && !label.revealed)
         check("alert: its accessibility label is the masked address", label.accessibilityLabel() == maskEmail("kim@example.org") && label.isAccessibilityElement())
         func look() -> Data? {
@@ -1207,7 +1211,7 @@ do {
 
     // a hover cut short (the panel hidden under the pointer, a modal alert, the window covered) sends no mouse-exit: the
     // revealed address goes blurred again when the hover-ended count changes, and stays so until the pointer enters anew
-    var gate = QCHoverGate()
+    var gate = AddressHoverGate()
     gate.pointer(true)
     gate.sync(AddressPrivacy.shared.hoverEnded)
     check("hover: the pointer on an address reveals it, and nothing else changes that", gate.on)
@@ -1241,23 +1245,23 @@ do {
           && (try? JSONDecoder().decode(QuickChatSettings.self, from: Data(#"{"blurAddresses":"no"}"#.utf8)))?.blurAddresses == true)
     let offRow = QCProfileMenuRow(title: "Main", detail: "week 40%", dot: nil, on: true, address: a, pick: {})
     check("blur setting: on, the picker row's address is blurred at rest and the words are masked",
-          !offRow.sharp && QCBlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) > 2 && note.spoken.contains(maskEmail(a)))
+          !offRow.sharp && BlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) > 2 && note.spoken.contains(maskEmail(a)))
     var offSettings = QuickChatSettings(); offSettings.blurAddresses = false
     AddressPrivacy.shared.apply(offSettings)
     check("blur setting: off, the picker row draws the full address sharp at rest", offRow.sharp && !offRow.revealed)
-    check("blur setting: off, the blur radius is none even at rest", QCBlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0)
+    check("blur setting: off, the blur radius is none even at rest", BlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0)
     check("blur setting: off, the words hold the full address (no mask)", note.spoken == "Main is on \(a) now." && wrong.spoken.contains(a) && wrong.spoken.contains(b) && !wrong.spoken.contains("•"))
     let offDraw = drawn(note)
     check("blur setting: off, the note draws the address sharp (as the plain sentence) at the same size",
           abs(offDraw.edges - sharpDraw.edges) < sharpDraw.edges * 0.02 && abs(offDraw.size.width - sharpDraw.size.width) <= 1 && abs(offDraw.size.height - sharpDraw.size.height) <= 1,
           "\(offDraw) \(sharpDraw)")
     let offAlert = AccountSwitcher.confirmAlert(Profile(id: "main", name: "Main", folder: "~/.claude"), email: "kim@example.org")
-    if let label = offAlert.accessoryView as? QCAddressLabel {
+    if let label = offAlert.accessoryView as? AddressLabel {
         check("blur setting: off, the alert's address is drawn sharp at rest, its label is the full address",
               label.sharp && !label.revealed && label.accessibilityLabel() == "kim@example.org")
     } else { check("blur setting: off, the alert still has its address accessory", false) }
     let button = QCButton(title: "Switch to ", address: a, after: "…") {}
-    check("blur setting: off, the button's address is not blurred", QCBlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0 && button.address == a)
+    check("blur setting: off, the button's address is not blurred", BlurredAddress.blurRadius(size: 12.5, revealed: false, blur: AddressPrivacy.shared.blur) == 0 && button.address == a)
     AddressPrivacy.shared.apply(QuickChatSettings())
     check("blur setting: on again, blurred at rest and masked as words",
           !offRow.sharp && note.spoken == "Main is on \(maskEmail(a)) now." && drawn(note).edges < sharpDraw.edges * 0.8)
