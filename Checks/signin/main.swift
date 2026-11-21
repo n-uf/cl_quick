@@ -684,6 +684,47 @@ do {
     prefs.reset()
 }
 do {
+    // the same, with the next sign-in started at once: the late script is still ended (its sign-in follows its own files after
+    // it was superseded), and writes nothing of the next one's, which goes on
+    prefs.reset()
+    let a = Case("late-restart-a", login: ["login": "hang"])
+    a.terminal.shellBody = { slowStart(1) }
+    a.start(wanted: wantedID(uuid(1)), lateSweep: 2)
+    spin(until: { a.states.contains(.waitingForBrowser) })
+    waitHeld(a)
+    a.signIn.stop()
+    let b = Case("late-restart-b", login: ["login": "hang"])
+    b.start(wanted: wantedID(uuid(2)))
+    check("late restart: the first stopped, the next one waits for the browser", a.waitEnd() == .stopped
+          && spin(until: { b.states.contains(.waitingForBrowser) || b.outcome != nil }) && b.outcome == nil, "\(String(describing: a.outcome)) \(String(describing: b.outcome))")
+    let bLogin = b.waitLogin()
+    check("late restart: …the first one's late script, once it shows, is ended cleanly; its login ran and is gone",
+          a.shellEnded(12) == 0 && a.loginPid > 0 && spin(until: { !pidAlive(a.loginPid) }, max: 3),
+          "\(a.shellRunning) login \(a.loginPid) alive \(pidAlive(a.loginPid))")
+    spin(1)
+    check("late restart: …and the next one goes on: its login runs, its pid file is its own window's, no outcome",
+          b.outcome == nil && pidAlive(bLogin) && (try? String(contentsOf: b.signIn.pidURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+              == b.terminal.last.map { "\($0.processIdentifier)" } && a.signIn.pidURL != b.signIn.pidURL,
+          "\(String(describing: b.outcome)) \(pidAlive(bLogin))")
+    b.stopAndSettle()
+    a.cleanUp(); b.cleanUp()
+    prefs.reset()
+}
+do {
+    // quitting (stopNow) while Terminal is still starting the window's script: it waits for the script (3 s at most) and ends
+    // it before it returns
+    let c = Case("late-quit", login: ["login": "hang"])
+    c.terminal.shellBody = { slowStart(1) }
+    c.start(wanted: wantedID(uuid(1)))
+    spin(until: { c.states.contains(.waitingForBrowser) })
+    waitHeld(c)
+    c.signIn.stopNow()
+    check("late quit: stopNow ended the late script's login before it returned", c.loginPid > 0 && !pidAlive(c.loginPid),
+          "login \(c.loginPid) alive \(pidAlive(c.loginPid))")
+    check("late quit: …and its shell ends cleanly", c.shellEnded(3) == 0)
+    c.waitEnd(); c.cleanUp()
+}
+do {
     // the static sweep's pid-file guard, alone (the only guard at start-up, when no sign-in of this run is `current`): a window
     // of an earlier run, its script's pid in a pid file of the work folder and the script in its command line, keeps its
     // profile. The work folder is one no sign-in of this run has used, so what the process's own last sign-in knows
