@@ -4802,6 +4802,22 @@ func chatHandleChecks() {
         check("handles: \(name): a second press closes it", !state.expanded)
         state.reset()
     }
+    // focus on the ↓ button, which hides when the view reaches the bottom: the focus goes with it, and the stack is not held open
+    // (and so deaf to the pointer) by a focus that is gone
+    user(scrollTo: 0); settle()
+    check("handles: the view is above the bottom, so ↓ is there", !sc.atBottom)
+    sc.right.focus(true, QCEdgeLayout.latestButton)
+    check("handles: focus on ↓ opens the right stack", sc.right.expanded)
+    sc.jumpToLatest(); settle()
+    check("handles: ↓ hides at the bottom", sc.atBottom)
+    spin(0.7)
+    check("handles: and the focus went with it: the right stack closes", !sc.right.expanded, "expanded \(sc.right.expanded)")
+    sc.right.focus(true, 1); sc.right.focus(true, QCEdgeLayout.latestButton); spin(0.2)
+    sc.right.focus(false, QCEdgeLayout.latestButton); spin(0.8)
+    check("handles: a button's focus going leaves another's: the stack stays open", sc.right.expanded)
+    sc.right.focus(false, 1); spin(0.8)
+    check("handles: when the last focus goes, it closes", !sc.right.expanded)
+    sc.right.reset()
     // the zones at the edges, at every panel size: the strips and the open stacks keep clear of the resize band (under 4 pt deep,
     // 20 pt at a corner), the scroller (its track on the right), and are controls, never a drag surface
     func zones(_ label: String) {

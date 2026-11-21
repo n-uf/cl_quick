@@ -219,7 +219,11 @@ final class QCChatScroll: ObservableObject {
     func refresh() {
         guard geometry != nil else { return }
         let at = isAtBottom
-        if atBottom != at { atBottom = at }
+        if atBottom != at {
+            atBottom = at
+            // the ↓ button hides at the bottom: a focus that was on it goes with it (the stack must not stay held open by it)
+            if at { right.focus(false, QCEdgeLayout.latestButton) }
+        }
         if at, newBelow { newBelow = false }
         let p = previousTarget() != nil, n = nextTarget() != nil
         if canPrevious != p { canPrevious = p }
@@ -514,6 +518,8 @@ enum QCEdgeLayout {
     /// A box is at most this tall (three buttons in a stack and its padding), so a handle stays in line at any content.
     static let boxMaxHeight: CGFloat = 3 * QCSpace.small + 2 * boxPadding
     static let boxPadding: CGFloat = 2
+    /// The right stack's ↓ button's focus id (it hides at the bottom, with focus possibly on it).
+    static let latestButton = 3
 
     // MARK: How a stack opens (the operator is finalising this: change it here)
     /// The pointer rests on a handle this long before its stack opens (a pass over it opens nothing).
@@ -536,7 +542,8 @@ final class QCEdgeState: ObservableObject {
     var lit: Bool { onStrip || expanded }
     @Published private(set) var onStrip = false
     private var onBox = false
-    private var focused = false
+    private var focusedIDs = Set<Int>()
+    private var focused: Bool { !focusedIDs.isEmpty }
     private var opening: DispatchWorkItem?
     private var closing: DispatchWorkItem?
     var dwell = QCEdgeLayout.dwell
@@ -556,8 +563,10 @@ final class QCEdgeState: ObservableObject {
 
     /// Keyboard focus (Full Keyboard Access) came to the handle or a button in its stack, or left them: it opens the stack at once
     /// and keeps it open while focus is inside; moving between the handle and the buttons (focus off, then on) closes nothing.
-    func focus(_ f: Bool) {
-        focused = f
+    /// Each control that can hold focus has its own id (the handle 0, the stack's buttons 1, 2, ...), so one going away with focus
+    /// on it (the ↓ button hides at the bottom) clears only its own, and the stack is not held open by a focus that is gone.
+    func focus(_ f: Bool, _ id: Int = 0) {
+        if f { focusedIDs.insert(id) } else { focusedIDs.remove(id) }
         if f { open() }
         settle()
     }
@@ -580,7 +589,7 @@ final class QCEdgeState: ObservableObject {
     /// Closes it at once (the panel hid, or the handle has nothing to show).
     func reset() {
         cancel(&opening); cancel(&closing)
-        onBox = false; focused = false; pinned = false
+        onBox = false; focusedIDs = []; pinned = false
         if onStrip { onStrip = false }
         if expanded { expanded = false }
     }
@@ -706,10 +715,10 @@ struct QCEdgeHandles: View {
                 QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, label: "This answer") {
                     if scroll.answersAbove.contains(id) {
                         QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
-                                     label: "Go to the start of this answer", onFocus: { scroll.left.focus($0) }) { scroll.goToStart(ofAnswer: id) }
+                                     label: "Go to the start of this answer", onFocus: { scroll.left.focus($0, 1) }) { scroll.goToStart(ofAnswer: id) }
                     }
                     QCIconButton(symbol: model.copied == id ? "checkmark" : "doc.on.doc", help: "Copy this answer ⇧⌘C", small: true,
-                                 label: "Copy this answer", onFocus: { scroll.left.focus($0) }) { _ = model.copyAnswer(of: turn) }
+                                 label: "Copy this answer", onFocus: { scroll.left.focus($0, 2) }) { _ = model.copyAnswer(of: turn) }
                 }
             }
             if QCChatScroll.showsPrompts(turns: model.turns.count) || !scroll.atBottom {
@@ -717,13 +726,13 @@ struct QCEdgeHandles: View {
                              value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
                     if QCChatScroll.showsPrompts(turns: model.turns.count) {
                         QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
-                                     enabled: scroll.canPrevious, onFocus: { scroll.right.focus($0) }) { scroll.previousPrompt() }
+                                     enabled: scroll.canPrevious, onFocus: { scroll.right.focus($0, 1) }) { scroll.previousPrompt() }
                         QCIconButton(symbol: "chevron.down", help: QCNavHelp.next, small: true, label: "Next message of mine",
-                                     enabled: scroll.canNext, onFocus: { scroll.right.focus($0) }) { scroll.nextPrompt() }
+                                     enabled: scroll.canNext, onFocus: { scroll.right.focus($0, 2) }) { scroll.nextPrompt() }
                     }
                     if !scroll.atBottom {
                         QCIconButton(symbol: "arrow.down.to.line", help: QCNavHelp.latest, small: true, label: "Jump to latest",
-                                     onFocus: { scroll.right.focus($0) }) { scroll.jumpToLatest() }
+                                     onFocus: { scroll.right.focus($0, QCEdgeLayout.latestButton) }) { scroll.jumpToLatest() }
                     }
                 }
             }

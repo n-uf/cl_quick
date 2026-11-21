@@ -1841,6 +1841,7 @@ struct QCIconButton: View {
         .disabled(!enabled)
         .focused($focused)
         .onChange(of: focused) { onFocus?($0) }
+        .onDisappear { if focused { onFocus?(false) } }        // a button that goes with focus on it takes the focus with it
         .accessibilityLabel(Text(label ?? help))
     }
 }
