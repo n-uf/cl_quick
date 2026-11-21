@@ -22,7 +22,8 @@
 // - The account: the record is a guess until the app's word confirms it. A login still running is never ended on a guess
 //   or on two sources that disagree; once it ended, the word is asked again a few times, and a sign-in it never confirms
 //   ends `unverified`, never `signedIn`.
-// - The window closes on a sign-in, a wrong account, a stop and a timeout. One that was declined or failed stays open to be
+// - The window closes on a sign-in, a wrong account, a stop and a timeout; one whose script Terminal was still starting
+//   when it ended closes as soon as its script shows (`endLateScript`). One that was declined or failed stays open to be
 //   read, until Return, the next start or a stop.
 // - The window: a Terminal settings file (`.terminal`: the command, run inside the login shell with `exec`, and "close if the
 //   shell exited cleanly"), opened like any document, which needs no permission to control Terminal. `.scripted` (Terminal's
@@ -351,8 +352,11 @@ public final class ClaudeSignIn {
         // a start refused before it made its own script has no window to end: the pid file is an earlier window's, whose
         // shell and login are none of its business (a later stop ends that window: `end` on the sign-in that has it)
         if ownsScript {
+            let unstarted = scriptPid() == nil                             // the script hasn't written its pid (yet)
             switch outcome {
-            case .signedIn, .wrongAccount, .unverified, .stopped, .timedOut: endScript(shell: true)
+            case .signedIn, .wrongAccount, .unverified, .stopped, .timedOut:
+                endScript(shell: true)
+                if unstarted { endLateScript() }                           // Terminal may still be starting it
             // left open to be read: only the login ends (one still waiting after a decline), the script then holds its window
             case .declined, .failed: endScript(shell: false)
             }
@@ -537,6 +541,32 @@ public final class ClaudeSignIn {
         if shell, !ProcessTable.runs(pid) {
             try? FileManager.default.removeItem(at: pidURL)
             closeWindow()
+        }
+    }
+
+    /// A script whose sign-in ended before it wrote its pid (a stop or a timeout while Terminal was still starting it: its
+    /// shell already had the script open, so removing the file doesn't keep it from running) ends as soon as it shows: its
+    /// pid is looked for every `poll` (half a second at most) until `startGrace` after the start, while this is still the
+    /// app's last sign-in (the next start ends whatever the pid file names itself). Once its `claude auth login` runs (2 s
+    /// at most after the pid showed): asked to end between its pid and its login, the script's shell would end and leave
+    /// the login it was just starting behind, not among the children asked to end. Ended, window and all, its profile is
+    /// swept (and late). A shell that outlives the ask is asked again, a few times.
+    private func endLateScript(seen: Date? = nil, tries: Int = 3) {
+        let until = started.addingTimeInterval(startGrace)
+        Self.queue.asyncAfter(deadline: .now() + min(poll, 0.5)) { [weak self] in
+            guard let self, Self.current === self, self.phase == .ended else { return }
+            guard let pid = self.scriptPid() else {
+                if Date() < until { self.endLateScript(tries: tries) }
+                return
+            }
+            let since = seen ?? Date()
+            let table = ProcessTable.table() ?? []
+            let loginRuns = Self.descendants(of: pid, in: table).contains { p in
+                table.first { $0.pid == p }?.launch.map(ProcessTable.isClaudeCode) == true
+            }
+            if !loginRuns, Date().timeIntervalSince(since) < 2 { return self.endLateScript(seen: since, tries: tries) }
+            self.endScript(shell: true)
+            if !self.windowIsOpen { self.sweepProfiles(late: true) } else if tries > 1 { self.endLateScript(seen: since, tries: tries - 1) }
         }
     }
 
