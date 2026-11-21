@@ -28,10 +28,17 @@ final class SettingsState: ObservableObject {
     init() {
         // a switch of account began, ended or was dropped (the chat's or this window's): the cards are drawn again
         switchWatch = NotificationCenter.default.addObserver(forName: AccountSwitcher.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.switchMoved()
             self?.tick += 1
         }
     }
     deinit { if let switchWatch { NotificationCenter.default.removeObserver(switchWatch) } }
+
+    /// A switch began, ended or was dropped: a profile whose sign-in is now waited for (begun in the chat or the menu bar,
+    /// say) has its Add an account… form closed: nothing in it may start a second sign-in.
+    func switchMoved(waiting: (String) -> Bool = { AccountSwitcher.shared.waiting[$0] != nil }) {
+        if let id = addingFor, waiting(id) { addingFor = nil }
+    }
 
     /// The page a `show` lands on: a profile's card, Add a profile (`SettingsWindow.addPage`) or General; the first run
     /// goes to the first profile found, or Add a profile when none was. `addAccount` opens the profile's Add an account…

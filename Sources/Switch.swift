@@ -134,6 +134,9 @@ final class AccountSwitcher {
         // the alert took the pointer: whatever was under it (the Switch to … button) got no exit, so its address goes blurred
         AddressPrivacy.shared.endHover()
         guard answer == .alertFirstButtonReturn else { return }
+        // the question was modal: a switch may have begun on the profile meanwhile (its sign-in is waited for), and a second
+        // one would replace it
+        guard waiting[p.id] == nil else { return }
         begin(p, uuid: uuid, email: email, origin: origin)
     }
 

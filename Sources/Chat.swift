@@ -1315,7 +1315,9 @@ final class QuickChat {
         model.openAddAccount = { [weak self] id in self?.openAddAccount(id) }
         model.switchProfile = { [weak self] p, a in
             guard let self else { return }
-            self.switcher.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .chat)
+            // the menu's switch is the menu bar's (origin .settings): when it lands a new chat is on the profile with the draft kept
+            // and nothing sent; only the limit-full "Switch to X…" offer (model.switchTo) continues the chat's own question
+            self.switcher.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .settings)
             self.panel?.makeKey()
         }
         model.defaults = { [weak self] in self?.settings ?? .init() }
