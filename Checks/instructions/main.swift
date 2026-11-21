@@ -330,6 +330,162 @@ do {
                            instructions: chat.model.instructions).prompt == QuickChatCommand.systemPrompt)
 }
 
+// MARK: the box's other ways in: transformations, undo and redo, paste, the Edit keys, the user's own scrolling
+
+do {
+    var bound = ""
+    var spied = QuickChatInstructions.Part.custom
+    // each box sits in a window of its own that is never shown (a text view has an undo manager only in a window)
+    var windows: [NSWindow] = []
+    func fixture() -> (coord: SInstructionsTextView.Coordinator, scroll: SScrollView, tv: SProtectedTextView, win: SettingsNSWindow) {
+        let parent = SInstructionsTextView(text: Binding(get: { bound }, set: { bound = $0 }), active: Binding(get: { spied }, set: { spied = $0 }),
+                                           jump: nil, builtIn: QuickChatCommand.fixedPrompt(web: false), placeholder: "Example", limit: 1000,
+                                           label: "Instructions", ink: .white, dim: .gray)
+        let coord = parent.makeCoordinator()
+        let (scroll, tv) = SProtectedTextView.make(delegate: coord, label: "Instructions")
+        let win = SettingsNSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 108), styleMask: [.titled], backing: .buffered, defer: true)
+        win.isReleasedWhenClosed = false
+        windows.append(win)
+        win.contentView = scroll
+        scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 108)
+        coord.attach(scroll, tv)
+        coord.apply()
+        scroll.layoutSubtreeIfNeeded()
+        return (coord, scroll, tv, win)
+    }
+    func spin(_ s: TimeInterval = 2, until done: () -> Bool) {
+        let end = Date().addingTimeInterval(s)
+        while !done(), Date() < end { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+    let (coord, scroll, tv, _) = fixture()
+    func whole() -> NSString { tv.string as NSString }
+    func built() -> String { whole().substring(to: tv.protectedLength) }
+    func user() -> String { whole().substring(from: tv.protectedLength) }
+    func put(_ s: String, at range: NSRange) { tv.insertText(s, replacementRange: range) }
+    func selectAll() { tv.setSelectedRange(NSRange(location: 0, length: whole().length)) }
+    let pl = tv.protectedLength, builtFirst = built()
+
+    // what an edit may change (rangesForUserTextChange): cut to the user's part
+    put("Mine", at: NSRange(location: pl, length: 0))
+    selectAll()
+    check("clip: select all offers the user's part alone", tv.rangesForUserTextChange == [NSValue(range: NSRange(location: pl, length: 4))], "\(String(describing: tv.rangesForUserTextChange))")
+    tv.setSelectedRange(NSRange(location: 3, length: 12))
+    check("clip: a selection inside the built-in part offers nothing", tv.rangesForUserTextChange == nil, "\(String(describing: tv.rangesForUserTextChange))")
+    tv.setSelectedRange(NSRange(location: pl - 5, length: 8))
+    check("clip: a selection reaching into the user's part offers the part of it that is there", tv.rangesForUserTextChange == [NSValue(range: NSRange(location: pl, length: 3))])
+    tv.setSelectedRange(NSRange(location: pl + 2, length: 0))
+    check("clip: a caret in the user's part is as it is", tv.rangesForUserTextChange == [NSValue(range: NSRange(location: pl + 2, length: 0))])
+
+    // transformations over a select-all (right-click ▸ Transformations): the built-in text is never carried into the user's
+    selectAll(); tv.uppercaseWord(nil)
+    check("transform: Make Upper Case after select all changes the user's part only", built() == builtFirst && user() == "MINE" && bound == "MINE", "\(user()) | \(bound)")
+    selectAll(); tv.lowercaseWord(nil)
+    check("transform: Make Lower Case", built() == builtFirst && user() == "mine" && bound == "mine", "\(user()) | \(bound)")
+    selectAll(); tv.capitalizeWord(nil)
+    check("transform: Capitalize", built() == builtFirst && user() == "Mine" && bound == "Mine", "\(user()) | \(bound)")
+    check("transform: what is stored is the user's text, with none of the built-in text in it", !bound.contains("floating chat window") && !bound.contains("You are Claude"))
+
+    // undo and redo reach the page
+    guard let um = tv.undoManager else { check("undo: the box has an undo manager", false); exit(1) }
+    um.groupsByEvent = false
+    um.removeAllActions()
+    selectAll()
+    um.beginUndoGrouping(); put("", at: NSRange(location: 0, length: whole().length)); um.endUndoGrouping()
+    um.beginUndoGrouping(); put("mine", at: NSRange(location: pl, length: 0)); um.endUndoGrouping()
+    um.beginUndoGrouping(); put("x", at: NSRange(location: pl + 4, length: 0)); um.endUndoGrouping()
+    check("undo: typed text is on the page", user() == "minex" && bound == "minex", "\(user()) | \(bound)")
+    um.undo()
+    check("undo: undo takes the typed key off the box and off the page (the stored text, the counter)", user() == "mine" && bound == "mine" && built() == builtFirst, "\(user()) | \(bound)")
+    um.redo()
+    check("undo: redo puts it back, on the page too", user() == "minex" && bound == "minex" && built() == builtFirst, "\(user()) | \(bound)")
+    um.undo(); um.undo()
+    check("undo: undoing the typing leaves the user's part empty and the built-in part whole", user().isEmpty && bound.isEmpty && built() == builtFirst, "\(user()) | \(bound)")
+    check("undo: undo never reaches into the built-in part", !um.canUndo || { um.undo(); return built() == builtFirst }())
+    um.groupsByEvent = true      // as in the app: an edit outside a group opens one
+    // an outside clear leaves nothing to undo (and an undo then can't act on text that is gone)
+    um.beginUndoGrouping(); put("abc", at: NSRange(location: pl, length: 0)); um.endUndoGrouping()
+    bound = ""
+    coord.apply()
+    check("undo: a text cleared from outside empties the box and leaves no undo to reach it", user().isEmpty && !um.canUndo && !um.canRedo)
+    um.undo()
+    check("undo: …and an undo then does nothing (no exception)", user().isEmpty && built() == builtFirst)
+
+    // paste: the real path (paste: reads the pasteboard and inserts through the same checks); a private pasteboard here
+    let pb = NSPasteboard(name: NSPasteboard.Name("cl-quick-instructions-check-\(ProcessInfo.processInfo.processIdentifier)"))
+    pb.clearContents(); pb.setString(String(repeating: "p", count: 5000), forType: .string)
+    tv.setSelectedRange(NSRange(location: pl, length: 0))
+    let pasted = tv.readSelection(from: pb, type: .string)
+    check("paste: a long paste at the user's start is cut to 1,000 of the user's part", pasted && user().count == 1000 && bound.count == 1000 && built() == builtFirst, "\(pasted) \(user().count)")
+    selectAll(); _ = tv.readSelection(from: pb, type: .string)
+    check("paste: a paste over a select-all replaces the user's part only", user().count == 1000 && built() == builtFirst && !bound.contains("Claude"))
+    tv.setSelectedRange(NSRange(location: 4, length: 0))
+    pb.clearContents(); pb.setString("zz", forType: .string)
+    _ = tv.readSelection(from: pb, type: .string)
+    check("paste: with the caret put in the built-in part, the paste is refused or lands in the user's part, never in the built-in text",
+          built() == builtFirst && (user().count == 1000), "\(user().count)")
+    pb.releaseGlobally()
+
+    // the Edit keys in the settings window (the app has no Edit menu): they reach the box
+    func key(_ ch: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags, window: NSWindow) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                         characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code)!
+    }
+    let (coord2, scroll2, tv2, win) = fixture()
+    _ = scroll2
+    win.makeFirstResponder(tv2)
+    bound = ""; coord2.apply()
+    let sels: [(String, UInt16, NSEvent.ModifierFlags, Selector?)] = [("x", 7, [.command], #selector(NSText.cut(_:))), ("c", 8, [.command], #selector(NSText.copy(_:))),
+        ("v", 9, [.command], #selector(NSText.paste(_:))), ("a", 0, [.command], #selector(NSText.selectAll(_:))), ("z", 6, [.command], Selector(("undo:"))),
+        ("z", 6, [.command, .shift], Selector(("redo:"))), ("v", 9, [.command, .option], nil), ("v", 9, [.command, .control], nil), ("v", 9, [], nil),
+        ("c", 8, [.command, .shift], nil), ("q", 12, [.command], nil)]
+    check("keys: ⌘X ⌘C ⌘V ⌘A ⌘Z and ⇧⌘Z stand for cut, copy, paste, select all, undo and redo; no other key does",
+          sels.allSatisfy { QCEditKeys.action(for: key($0.0, $0.1, $0.2, window: win)) == $0.3 })
+    tv2.insertText("hello", replacementRange: NSRange(location: tv2.protectedLength, length: 0))
+    check("keys: the box is the window's first responder", win.firstResponder === tv2)
+    let didA = win.performKeyEquivalent(with: key("a", 0, [.command], window: win))
+    check("keys: ⌘A in the settings window selects all of the box", didA && tv2.selectedRange() == NSRange(location: 0, length: (tv2.string as NSString).length), "\(didA) \(tv2.selectedRange())")
+    let um2 = tv2.undoManager!
+    um2.groupsByEvent = false; um2.removeAllActions()
+    tv2.setSelectedRange(NSRange(location: (tv2.string as NSString).length, length: 0))
+    um2.beginUndoGrouping(); tv2.insertText("!", replacementRange: NSRange(location: (tv2.string as NSString).length, length: 0)); um2.endUndoGrouping()
+    let didZ = win.performKeyEquivalent(with: key("z", 6, [.command], window: win))
+    check("keys: ⌘Z in the settings window undoes the last typing, and the page follows", didZ && bound == "hello", "\(didZ) \(bound)")
+    let didR = win.performKeyEquivalent(with: key("z", 6, [.command, .shift], window: win))
+    check("keys: ⇧⌘Z redoes it", didR && bound == "hello!", "\(didR) \(bound)")
+    check("keys: a key that is no edit key is left alone", !win.performKeyEquivalent(with: key("q", 12, [], window: win)))
+
+    // scrolled by the user (the wheel): the box is not put back on Custom when it is resized afterwards
+    bound = ""
+    let (coord3, scroll3, tv3, _) = fixture()
+    _ = coord3; _ = tv3
+    scroll3.contentView.setBoundsOrigin(NSPoint(x: 0, y: 0)); scroll3.reflectScrolledClipView(scroll3.contentView)
+    if let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 3, wheel2: 0, wheel3: 0), let ev = NSEvent(cgEvent: cg) {
+        scroll3.scrollWheel(with: ev)
+    } else { check("wheel: a scroll event can be made", false) }
+    scroll3.setFrameSize(NSSize(width: 380, height: 108))
+    spin(0.5) { false }
+    let (_, scroll4, _, _) = fixture()
+    let custom = scroll4.contentView.bounds.origin.y
+    check("wheel: after the user scrolled, a resize doesn't snap the box back to Custom", custom > 30 && scroll3.contentView.bounds.origin.y < custom - 10,
+          "\(scroll3.contentView.bounds.origin.y) against Custom at \(custom)")
+    let y4 = custom
+    scroll4.setFrameSize(NSSize(width: 380, height: 108))
+    spin(0.3) { false }
+    check("wheel: untouched, it stays on Custom through a resize", y4 > 20 && scroll4.contentView.bounds.origin.y > 20, "\(y4) \(scroll4.contentView.bounds.origin.y)")
+    _ = scroll; _ = coord; _ = spin
+}
+
+// the track keeps the tray's height on a profile's page, and is not there to be reached
+do {
+    func tray(_ page: SettingsPage) -> NSSize {
+        let host = NSHostingView(rootView: SettingsTiles(profiles: [.init(id: "main", name: "Main", sub: "default · alex@example.com", lamp: .ok)], page: page).face(.std))
+        return host.fittingSize
+    }
+    check("tabs: the tray is as tall on a profile's page as on General's (the track's room is kept)", tray(.general).height == tray(.profile("main")).height,
+          "\(tray(.general)) \(tray(.profile("main")))")
+    check("tabs: the track is 26 pt high", SettingsTiles.trackHeight == 26)
+}
+
 // General ▸ APP | CHAT: the state, the pages Settings opens on, the track's metrics
 do {
     let st = SettingsState()
