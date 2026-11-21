@@ -424,8 +424,11 @@ do {
               "\(f): imports only Foundation, CryptoKit, ProfileCore and Runs (the one runner): \(imports)")
         check(!s.contains("Process()"), "\(f): starts no process of its own (Runs' Runner does)")
         for bad in ["print(", "NSLog", "Logger(", "os_log", "debugPrint", "dump("] { check(!s.contains(bad), "\(f): never logs or prints (\(bad))") }
+        // ClaudeSignIn's one exception: Terminal's own preferences, where it removes the window profiles its sign-ins left
+        // (TerminalProfiles); nothing of its own is kept there or anywhere else
+        let kept = f == "ClaudeSignIn.swift" ? s.replacingOccurrences(of: "UserDefaults(suiteName: \"com.apple.Terminal\")", with: "") : s
         for bad in ["add-generic-password", "delete-generic-password", "SecItemAdd", "SecItemUpdate", "SecItemDelete", "UserDefaults"] {
-            check(!s.contains(bad), "\(f): never writes the Keychain or keeps anything (\(bad))")
+            check(!kept.contains(bad), "\(f): never writes the Keychain or keeps anything (\(bad))")
         }
         // the Keychain read is Keychain.swift's alone (an app that never reads it leaves that file out and still builds)
         if f != "Keychain.swift" {
