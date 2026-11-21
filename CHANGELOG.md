@@ -25,7 +25,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   sign-in…  Show". The note returns by itself when the switch ends.
 - **No stale status line while a switch waits.** "Main is on … now." from the last switch goes as soon as a new switch
   (or a sign-in again) begins.
-
+- **Preview for HTML blocks.** A code block marked `html` (or `htm`) in an answer has a small **Preview** button beside
+  Copy. It shows the block as a web page in one separate "Preview" window (a second press replaces the page and brings
+  the window forward). The answer itself never draws HTML; the page is isolated: JavaScript is off, every network and
+  file load is blocked (a page shows only what its own text holds), links open nothing, no new windows or downloads
+  open, and nothing is stored on the Mac. The web view exists only while the window is open.
 - **Tables in answers.** A Markdown table in an answer is drawn as a grid, not as raw text with pipes: a semibold
   header, thin row separators, columns aligned as the alignment row says, and bold, italics, `code` and links inside the
   cells. Columns fit their content and wrap in a narrow panel; a table with too many columns to fit scrolls sideways
