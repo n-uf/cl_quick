@@ -2239,7 +2239,25 @@ final class QCTextView: NSTextView {
     var dragImages: ((Bool) -> Void)?
     override func paste(_ sender: Any?) {
         if pasteImages?(pasteboard) == true { return }
-        super.paste(sender)
+        // the general pasteboard is the text view's own (the app); another one is a check's, so that no check ever reads or
+        // writes the user's clipboard
+        guard pasteboard !== NSPasteboard.general else { return super.paste(sender) }
+        guard let type = preferredPasteboardType(from: pasteboard.types ?? [], restrictedToTypesFrom: readablePasteboardTypes),
+              shouldChangeText(in: selectedRange(), replacementString: nil) else { return }
+        _ = readSelection(from: pasteboard, type: type)
+        didChangeText()
+    }
+    override func copy(_ sender: Any?) {
+        guard pasteboard !== NSPasteboard.general else { return super.copy(sender) }
+        guard selectedRange().length > 0 else { return }
+        pasteboard.clearContents()
+        _ = writeSelection(to: pasteboard, types: writablePasteboardTypes)
+    }
+    override func cut(_ sender: Any?) {
+        guard pasteboard !== NSPasteboard.general else { return super.cut(sender) }
+        guard selectedRange().length > 0 else { return }
+        copy(sender)
+        deleteBackward(sender)
     }
     /// Paste (the context menu's, Edit ▸ Paste) is available with only a picture (or image files) on the pasteboard: the
     /// text view alone finds nothing to paste there and greys it out, though paste() would attach it.
