@@ -4710,9 +4710,13 @@ func chatHandleChecks() {
     check("handles: its ⤒ is there (the first line is above the view)", sc.answersAbove.contains(ids[1]))
     user(scrollTo: a2 - 60); settle()
     check("handles: with the second answer's first line in view the handle is still its (copy only, no ⤒)", sc.pair == ids[1] && !sc.answersAbove.contains(ids[1]), "\(String(describing: sc.pair))")
-    // the view's bottom edge just above the third message: the second answer's end and its footer are in view
-    user(scrollTo: (sc.top(ofQuestion: ids[2]) ?? 0) - 5 - clip.bounds.height); settle()
+    // the view's bottom edge just below the second answer's footer: its end and its footer are in view
+    user(scrollTo: (sc.bottom(ofFooter: ids[1]) ?? 0) + 2 - clip.bounds.height); settle()
     check("handles: once the answer's own footer is in view the left handle goes", sc.pair != ids[1], "\(String(describing: sc.pair))")
+    user(scrollTo: a3 + 3 - clip.bounds.height); settle()
+    check("handles: the next answer peeking 3 pt into the bottom edge has no handle yet (and the one before has its footer in view)", sc.pair == nil, "\(String(describing: sc.pair))")
+    user(scrollTo: a3 + 40 - clip.bounds.height); settle()
+    check("handles: once its first line is really in view (40 pt) the handle is its", sc.pair == ids[2], "\(String(describing: sc.pair))")
     user(scrollTo: a2 + 100); settle()
 
     // the frames, in points

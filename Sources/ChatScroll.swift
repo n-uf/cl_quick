@@ -31,6 +31,9 @@ final class QCChatScroll: ObservableObject {
     static let slack: CGFloat = 4
     /// A message scrolled to sits this far under the view's top, so its bubble and the flash show whole.
     static let inset: CGFloat = 8
+    /// An answer whose first line is less than this far into the view's bottom edge is only peeking in: it is not the answer in
+    /// view, and it has no left handle yet.
+    static let peek: CGFloat = 24
     /// A message scrolled to is lit for this long, then plain again (no fade).
     static let flashFor: TimeInterval = 1
 
@@ -240,7 +243,8 @@ final class QCChatScroll: ObservableObject {
             guard let v = attached(w.view) else { continue }
             let t = top(of: v)
             let end = attached(footers[id]?.view).map { top(of: $0) + $0.frame.height } ?? t + v.frame.height
-            if t < bottom, end > bottom + 0.5 { return id }
+            // (its first line is really in view, not just peeking in at the edge)
+            if t < bottom - Self.peek, end > bottom + 0.5 { return id }
         }
         return nil
     }
