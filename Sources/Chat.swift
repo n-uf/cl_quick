@@ -1935,6 +1935,15 @@ final class QuickChatPanel: NSPanel {
             return true
         }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // ⌘[ and ⌘] (exactly ⌘): the previous and next message of the user's, matched by KEY CODE, so they work on any layout (the
+        // Ukrainian х and ї are on those keys, and ї and ґ keep typing: shortcutLetter, which the Edit keys use, is left alone)
+        if flags.intersection([.command, .option, .control, .shift]) == [.command] {
+            switch Int(e.keyCode) {
+            case kVK_ANSI_LeftBracket: if onNavigate(.previousPrompt) { return true }
+            case kVK_ANSI_RightBracket: if onNavigate(.nextPrompt) { return true }
+            default: break
+            }
+        }
         // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model. Plain ⌘ arrows are macOS's own (in a text field the caret's jump to the
         // line's or the text's start and end, in a selected answer's view a scroll to its ends), so they are not taken and reach
         // the field and the view. A key with ⌥⌘ is offered here first and taken, so neither the field nor a scroll view ever
@@ -1963,11 +1972,9 @@ final class QuickChatPanel: NSPanel {
         case "a": action = #selector(NSText.selectAll(_:))
         case "z": action = shift ? Selector(("redo:")) : Selector(("undo:"))
         case "d" where !shift: onDictate(); return true
-        // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view, ⌘[ ⌘] the previous and next message of the user's):
-        // taken only when the chat window has something to scroll, and never a text edit, so the field keeps its keys
+        // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view; ⌘[ ⌘] are above, by key code): taken only
+        // when the chat window has something to scroll, and never a text edit, so the field keeps its keys
         case "j": if onNavigate(shift ? .answerStart : .latest) { return true }
-        case "[" where !shift: if onNavigate(.previousPrompt) { return true }
-        case "]" where !shift: if onNavigate(.nextPrompt) { return true }
         case "n" where !shift: onNewChat(); return true
         case "w" where !shift: onClose(); return true
         default: break

@@ -4911,6 +4911,19 @@ func chatKeyChecks() {
     let atEnd = sc.offset()
     check("keys: ⌘] at the last position does nothing (and is taken)", key("]", kVK_ANSI_RightBracket, cmd) && sc.offset() == atEnd)
     fieldUntouched("⌘[ and ⌘]")
+    // by key code, on any layout: the Ukrainian layout has х on the [ key and ї on the ] key (ї and ґ keep typing: no ⌘, no key
+    // equivalent; shortcutLetter is untouched, so the Edit keys and the existing Ukrainian check stand)
+    sc.jumpToLatest(); settle()
+    let uk1 = sc.previousTarget()
+    check("keys: ⌘ with the Ukrainian х (the [ key) is ⌘[ : previous message", uk1 != nil && key("х", kVK_ANSI_LeftBracket, cmd) && near(sc.offset(), uk1!.offset), "offset \(sc.offset()) \(String(describing: uk1))")
+    let uk2 = sc.nextTarget()
+    check("keys: ⌘ with the Ukrainian ї (the ] key) is ⌘] : next message", uk2 != nil && key("ї", kVK_ANSI_RightBracket, cmd) && near(sc.offset(), uk2!.offset), "offset \(sc.offset()) \(String(describing: uk2))")
+    let offUk = sc.offset()
+    check("keys: ї typed alone (no ⌘) is not a key equivalent, and ⇧⌘ with it is not ⌘]", !key("ї", kVK_ANSI_RightBracket, []) && !key("Ї", kVK_ANSI_RightBracket, [.command, .shift]) && sc.offset() == offUk)
+    check("keys: the Ukrainian letters on those keys still name themselves for the Edit keys (shortcutLetter untouched)",
+          { let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber, context: nil, characters: "ї", charactersIgnoringModifiers: "ї", isARepeat: false, keyCode: UInt16(kVK_ANSI_RightBracket))
+              return e.flatMap(QuickChatPanel.shortcutLetter) == "ї" }())
+    sc.jumpToLatest(); settle()
     // ⇧⌘J: the start of the answer at the view's bottom edge (the last, at the bottom)
     check("keys: ⇧⌘J at the bottom goes to the start of the last answer (cut to what can be scrolled to)", key("J", kVK_ANSI_J, [.command, .shift]) && near(sc.offset(), min(sc.maxOffset(), answerTops[3] - QCChatScroll.inset)),
           "offset \(sc.offset()) want \(answerTops[3] - QCChatScroll.inset)")
