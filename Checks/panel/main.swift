@@ -4858,12 +4858,14 @@ func chatShortAnswerChecks() {
     check("short: the second answer is shorter than the view", end2 - top2 < clip.bounds.height, "\(end2 - top2) vs \(clip.bounds.height)")
     user(scrollTo: end2 - 10 - clip.bounds.height); settle()     // the view's bottom edge 10 pt above the footer's end: half the footer in view
     check("short: the answer is in view but its footer is cut by the bottom edge: it has the left handle", sc.pair == ids[1], "\(String(describing: sc.pair))")
-    user(scrollTo: top2 + 20 - clip.bounds.height + 0); settle()                    // the edge inside the answer's text
+    user(scrollTo: top2 + 60 - clip.bounds.height); settle()                        // the edge inside the answer's text (past the peek)
     check("short: the edge inside the short answer: it has the left handle", sc.pair == ids[1], "\(String(describing: sc.pair))")
     user(scrollTo: end2 + 1 - clip.bounds.height); settle()                         // the whole footer in view
     check("short: the whole footer in view: no left handle for it", sc.pair != ids[1], "\(String(describing: sc.pair))")
     user(scrollTo: top2 - 40 - clip.bounds.height); settle()                        // the answer not yet begun at the edge
     check("short: before the answer has begun at the edge, it has none", sc.pair != ids[1], "\(String(describing: sc.pair))")
+    user(scrollTo: top2 + 10 - clip.bounds.height); settle()                        // only its first line's edge peeking in
+    check("short: just peeking in at the edge (10 pt), it has none yet", sc.pair != ids[1], "\(String(describing: sc.pair))")
     m.newChat(); chat.hide(); spin(0.2)
 }
 chatShortAnswerChecks()
