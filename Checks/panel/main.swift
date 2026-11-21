@@ -296,6 +296,10 @@ func interactive() -> [(String, NSRect)] {
     return out
 }
 func movesFromEmptyOnly(_ label: String) {
+    // First let the panel settle: a fit() try still waiting (the content's height measured a moment late, as on a slow CI
+    // runner) would otherwise come in at the end of the move, where QCDragView retries a skipped fit() on purpose, and
+    // read as a move that changed the size (160 → 155 pt). The size rule below is unchanged.
+    spinQuiet(p)
     check("\(label): moving is on (QCDragView.movesWindow)", QCDragView.movesWindow)
     check("\(label): the panel is movable (performDrag needs it), never by its background", p.isMovable && !p.isMovableByWindowBackground)
     // the transparent title bar is no drag region of its own: the hosting view covers it and says no, and so does every
