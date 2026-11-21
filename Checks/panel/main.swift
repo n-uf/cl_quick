@@ -4522,7 +4522,6 @@ struct ChatScrollRig {
 func chatScrollChecks() {
     let m = chat.model
     let sc = m.scroll
-    sc.reduceMotion = { true }
     m.newChat(); m.field = ""
     m.turns = (1...4).map { ChatScrollRig.turn($0) }
     chat.open(); spin(0.3)
@@ -4547,7 +4546,7 @@ func chatScrollChecks() {
     stream("\n\n" + ChatScrollRig.lines(4, "more"))
     check("scroll: after a scroll up, new text does not move the view, and says there is new text below", sc.offset() == held && !sc.following && sc.newBelow && !sc.atBottom, "offset \(held) -> \(sc.offset()) new \(sc.newBelow)")
     // the button: back to the bottom, following again
-    sc.jumpToLatest(animated: false); settle()
+    sc.jumpToLatest(); settle()
     check("scroll: the button returns to the bottom and resumes following (the dot and the button go)", sc.isAtBottom && sc.following && sc.atBottom && !sc.newBelow, "offset \(sc.offset()) max \(sc.maxOffset())")
     let max1 = sc.maxOffset()
     stream("\n\n" + ChatScrollRig.lines(3, "after-jump"))
@@ -4568,15 +4567,72 @@ func chatScrollChecks() {
     // sending jumps to the bottom and follows
     m.followTick += 1; settle()
     check("scroll: a message sent (followTick) jumps to the bottom and follows", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
-    // the animated glide ends where it was asked to (and at once with Reduce Motion, above)
-    sc.reduceMotion = { false }
+    // a jump is one step: final the moment the call returns (no spin, no animation to wait for)
     user(scrollTo: 0); settle()
-    sc.jumpToLatest(animated: true)
-    check("scroll: the glide follows from the moment of the press (following again at once)", sc.following)
-    spinUntil(5) { sc.isAtBottom }
-    spin(0.2)
-    check("scroll: the animated jump ends at the bottom, following", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
-    sc.reduceMotion = { true }
+    check("scroll: at the top the button shows", !sc.atBottom && !sc.following)
+    sc.jumpToLatest()
+    check("scroll: the jump-to-latest button is final in one step (at the bottom, following, the button gone)",
+          sc.isAtBottom && sc.following && sc.atBottom && !sc.newBelow, "offset \(sc.offset()) max \(sc.maxOffset())")
+
+    // ▲ ▼: the messages of the user's own, found from where the view is
+    let ids = m.turns.map(\.id)
+    let tops = ids.compactMap { sc.top(ofQuestion: $0) }
+    check("prompts: each message of the user's tells where it is, in order", tops.count == 4 && tops == tops.sorted() && tops[0] < tops[1], "\(tops)")
+    func target(_ i: Int) -> CGFloat { min(max(0, tops[i] - QCChatScroll.inset), sc.maxOffset()) }
+    func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1 }
+    sc.jumpToLatest(); settle()
+    check("prompts: at the bottom ▼ has nothing to go to and ▲ has", !sc.canNext && sc.canPrevious, "next \(sc.canNext) prev \(sc.canPrevious) offset \(sc.offset()) max \(sc.maxOffset()) targets \((0..<4).map(target))")
+    sc.previousPrompt()
+    check("prompts: ▲ from the bottom lands on the last message, final in one step", near(sc.offset(), target(3)) && sc.flash == ids[3] && !sc.following, "offset \(sc.offset()) want \(target(3)) flash \(String(describing: sc.flash))")
+    check("prompts: ▲ stops following (the view is not at the bottom, new text does not move it)", !sc.following && !sc.isAtBottom)
+    sc.previousPrompt()
+    check("prompts: ▲ again lands on the one before", near(sc.offset(), target(2)) && sc.flash == ids[2], "offset \(sc.offset()) want \(target(2))")
+    sc.previousPrompt(); sc.previousPrompt()
+    check("prompts: ▲ reaches the first message (the top), where ▲ is disabled and ▼ is not", near(sc.offset(), target(0)) && !sc.canPrevious && sc.canNext, "offset \(sc.offset()) prev \(sc.canPrevious)")
+    sc.previousPrompt()
+    check("prompts: ▲ at the first message does nothing", near(sc.offset(), target(0)))
+    sc.nextPrompt()
+    check("prompts: ▼ from the first lands on the second", near(sc.offset(), target(1)) && sc.flash == ids[1], "offset \(sc.offset()) want \(target(1))")
+    // from a place found by hand, not from a stored index: the view is inside the second answer, ▼ goes to the third, ▲ to the second
+    user(scrollTo: target(1) + 120); settle()
+    sc.nextPrompt()
+    check("prompts: from the middle of the second answer ▼ lands on the third", near(sc.offset(), target(2)), "offset \(sc.offset()) want \(target(2))")
+    user(scrollTo: target(1) + 120); settle()
+    sc.previousPrompt()
+    check("prompts: from the middle of the second answer ▲ lands on the second", near(sc.offset(), target(1)), "offset \(sc.offset()) want \(target(1))")
+    // by hand to just below a message's top: ▲ goes to that message, not the one before it
+    user(scrollTo: target(2) + 30); settle()
+    sc.previousPrompt()
+    check("prompts: a few points below the third message ▲ lands on it", near(sc.offset(), target(2)), "offset \(sc.offset()) want \(target(2))")
+    sc.nextPrompt(); sc.nextPrompt()
+    check("prompts: ▼ to the last message, where ▼ is disabled", near(sc.offset(), target(3)) && !sc.canNext || sc.offset() >= sc.maxOffset() - 1, "offset \(sc.offset()) next \(sc.canNext)")
+    check("prompts: ▲ ▼ show only with two messages of the user's", !QCChatScroll.showsPrompts(turns: 0) && !QCChatScroll.showsPrompts(turns: 1) && QCChatScroll.showsPrompts(turns: 2))
+    // the landing highlight is a flag for about a second, then off (no fade: the view draws it or not)
+    check("prompts: the landed message is lit", sc.flash != nil)
+    spin(QCChatScroll.flashFor + 0.3)
+    check("prompts: the highlight is removed after about a second", sc.flash == nil)
+
+    // an answer's "go to the start": shown only while its first line is above the view
+    check("answer start: the footer's icons are ⤒ copy ↻ (⤒ only when asked for, ↻ on the last answer)",
+          QCTurnView.footerActions(above: true, last: true) == [.start, .copy, .again]
+          && QCTurnView.footerActions(above: false, last: true) == [.copy, .again]
+          && QCTurnView.footerActions(above: true, last: false) == [.start, .copy]
+          && QCTurnView.footerActions(above: false, last: false) == [.copy])
+    let answerTops = ids.compactMap { sc.top(ofAnswer: $0) }
+    check("answer start: each answer tells where its first line is, below its message", answerTops.count == 4 && zip(answerTops, tops).allSatisfy { $0 > $1 }, "\(answerTops) \(tops)")
+    user(scrollTo: 0); settle()
+    check("answer start: at the top, no answer's start is above the view (no ⤒ anywhere)", sc.answersAbove.isEmpty, "\(sc.answersAbove)")
+    user(scrollTo: answerTops[1] + 100); settle()
+    check("answer start: inside the second answer, the first and second answers' starts are above (⤒), the third's is not",
+          sc.answersAbove == [ids[0], ids[1]], "\(sc.answersAbove) offset \(sc.offset()) tops \(answerTops)")
+    user(scrollTo: answerTops[1] - 60); settle()
+    check("answer start: with the second answer's first line in view, its ⤒ is hidden again", sc.answersAbove == [ids[0]], "\(sc.answersAbove)")
+    user(scrollTo: answerTops[2] + 150); settle()
+    sc.goToStart(ofAnswer: ids[2])
+    check("answer start: ⤒ lands on the answer's first line, near the view's top, in one step", near(sc.offset(), answerTops[2] - QCChatScroll.inset) && sc.answersAbove == [ids[0], ids[1]],
+          "offset \(sc.offset()) want \(answerTops[2] - QCChatScroll.inset) above \(sc.answersAbove)")
+    check("answer start: ⤒ stops following", !sc.following)
+    sc.jumpToLatest()
     // a new chat: the window follows again from a clean start
     user(scrollTo: 0); settle()
     m.newChat(); settle()

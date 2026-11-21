@@ -18,6 +18,8 @@ enum QCColor {
     static let window = hex(0x262624)
     static let surface = hex(0x30302E)
     static let bubble = hex(0x141413)
+    /// A message's bubble while it is lit (scrolled to with ▲ ▼): lighter than the window behind it.
+    static let lit = hex(0x4A4945)
     static let code = hex(0x1F1E1D)
     static let line = hex(0xDEDCD1, 0.16)
     static let text = hex(0xFAF9F5)
@@ -140,7 +142,7 @@ struct QCWindow: View {
                         .qcDraggable()
                     }
                     .onChange(of: model.scrollTick) { _ in scroll.contentChanged() }
-                    .onChange(of: model.followTick) { _ in scroll.jumpToLatest(animated: false) }
+                    .onChange(of: model.followTick) { _ in scroll.jumpToLatest() }
                 }
                 .overlay(alignment: .top) { fade }
                 .overlay(alignment: .bottomTrailing) { floating }
@@ -183,15 +185,17 @@ struct QCWindow: View {
             .frame(height: 10).allowsHitTesting(false)
     }
 
-    /// What floats over the answers' bottom edge, in the gap above the field box: bottom right, jump to latest.
+    /// What floats over the answers' bottom edge, in the gap above the field box: bottom right, ▲ ▼ and jump to latest.
     private var floating: some View {
-        QCScrollControl(scroll: scroll).padding(.trailing, QCSpace.gap).padding(.bottom, 8)
+        QCScrollControl(scroll: scroll, prompts: QCChatScroll.showsPrompts(turns: model.turns.count))
+            .padding(.trailing, QCSpace.gap).padding(.bottom, 8)
     }
 
     @ViewBuilder private var turns: some View {
         if let note = model.accountNote { QCNote(words: note).padding(.top, 14) }
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
-            QCTurnView(turn: t, first: i == 0 && model.accountNote == nil, last: i == model.turns.count - 1, model: model)
+            QCTurnView(turn: t, first: i == 0 && model.accountNote == nil, last: i == model.turns.count - 1, model: model,
+                       scroll: rendering ? nil : scroll, flashing: scroll.flash == t.id, above: scroll.answersAbove.contains(t.id))
         }
         // the chat ended (idle, a crash, Stop that didn't stop): said once, under the turns that are left to read
         if let e = model.ended { QCEndNote(text: e.line).padding(.top, 12) }
@@ -455,6 +459,12 @@ struct QCTurnView: View {
     let first: Bool
     let last: Bool
     @ObservedObject var model: QuickChatModel
+    /// The chat's scroll (nil in a picture): the message tells it where it is, for ▲ ▼.
+    var scroll: QCChatScroll? = nil
+    /// The message was just scrolled to: its bubble flashes.
+    var flashing = false
+    /// This answer's first line is above the visible area: its footer has "Go to the start".
+    var above = false
     @State private var hover = false
 
     var body: some View {
@@ -471,15 +481,18 @@ struct QCTurnView: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(QCColor.bubble))
+                            // a message scrolled to: the whole bubble's background is lighter for about a second, then plain again
+                            // (no fade, no animation)
+                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(flashing ? QCColor.lit : QCColor.bubble))
                     }
                 }
             }
+            .background(anchor(.question))
             // after the previous turn's actions row: about 32 pt between an answer and the next question
             .padding(.top, first ? 0 : 4)
             if turn.thinkingTitle != nil { QCThought(turn: turn).padding(.top, 12) }
             if !turn.answer.isEmpty {
-                QCAnswer(text: turn.answer).equatable().padding(.top, turn.thinkingTitle != nil ? 4 : 10)
+                QCAnswer(text: turn.answer).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)
             }
             if turn.phase == .waiting || turn.phase == .streaming {
                 // while a web tool runs, the dot has a muted line beside it: "Reading example.com…"
@@ -507,13 +520,35 @@ struct QCTurnView: View {
         .onHover { hover = $0 }
     }
 
-    /// 24 pt: Copy and Ask again (their glyphs on the chat's edge), then "Opus 5.5 · high · 7.8 s".
+    /// The footer's icons, in order: go to the start (only while the answer's first line is above the view), copy, and ask
+    /// again (the last answer only), then the words.
+    enum FooterAction { case start, copy, again }
+    static func footerActions(above: Bool, last: Bool) -> [FooterAction] {
+        (above ? [.start] : []) + [.copy] + (last ? [.again] : [])
+    }
+
+    /// Behind a message's row, or an answer: where it is (a picture has no scroll view).
+    @ViewBuilder private func anchor(_ kind: QCChatScroll.AnchorKind) -> some View {
+        if let scroll { QCAnchor(scroll: scroll, kind: kind, id: turn.id) }
+    }
+
+    /// 24 pt: Go to the start (only while the answer's first line is above the view), Copy and Ask again (their glyphs on the
+    /// chat's edge), then "Opus 5.5 · high · 7.8 s".
     private var footer: some View {
         HStack(spacing: 0) {
             // the tick and "Copied" come from the model, so ⌘⇧C and a click say the same thing
             let copied = model.copied == turn.id
-            QCIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy (⌘⇧C copies the last answer)", small: true) { model.copyAnswer(of: turn) }
-            if last { QCIconButton(symbol: "arrow.clockwise", help: "Ask again", small: true) { model.again() } }
+            ForEach(Self.footerActions(above: above, last: last), id: \.self) { a in
+                switch a {
+                case .start:
+                    QCIconButton(symbol: "arrow.up.to.line", help: "Go to the start of this answer", small: true,
+                                 label: "Go to the start of this answer") { scroll?.goToStart(ofAnswer: turn.id) }
+                case .copy:
+                    QCIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy (⌘⇧C copies the last answer)", small: true) { model.copyAnswer(of: turn) }
+                case .again:
+                    QCIconButton(symbol: "arrow.clockwise", help: "Ask again", small: true) { model.again() }
+                }
+            }
             Text(copied ? "Copied" : words).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).padding(.leading, 4)
         }
         .frame(height: QCSpace.small)
@@ -1739,6 +1774,8 @@ struct QCIconButton: View {
     var size: CGFloat? = nil
     /// What VoiceOver says, when it should say more than the symbol's name (the tooltip is `help`).
     var label: String? = nil
+    /// False: dimmed and inert (▲ at the first message).
+    var enabled = true
     let action: () -> Void
     @State private var hover = false
     var body: some View {
@@ -1746,11 +1783,12 @@ struct QCIconButton: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: small ? 12 : 13.5, weight: .medium))
                 .frame(width: side, height: side)
-                .foregroundColor(hover ? QCColor.text : QCColor.muted)
-                .background(RoundedRectangle(cornerRadius: small ? 6 : QCSpace.keyCorner, style: .continuous).fill(hover ? QCColor.hover : .clear))
+                .foregroundColor(!enabled ? QCColor.muted.opacity(0.35) : hover ? QCColor.text : QCColor.muted)
+                .background(RoundedRectangle(cornerRadius: small ? 6 : QCSpace.keyCorner, style: .continuous).fill(hover && enabled ? QCColor.hover : .clear))
                 .qcControl()     // the whole target
         }
         .buttonStyle(.plain).help(help).onHover { hover = $0 }
+        .disabled(!enabled)
         .accessibilityLabel(Text(label ?? help))
     }
 }
