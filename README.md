@@ -226,7 +226,7 @@ minutes for a profile.
   search the web. While it does, a muted line beside the dot says what it is doing ("Reading example.com…", "Searching
   the web for “…”…") and goes when the text resumes; the answer is the whole reply (the text before and after the call),
   and Copy and ⌘⇧C take all of it. Stop works while a page is being read. Pages count toward the account's usage, like
-  any answer. Settings ▸ General ▸ **Links and search** turns it off. A change applies from the next message (after the
+  any answer. Settings ▸ General ▸ Chat ▸ **Links and search** turns it off. A change applies from the next message (after the
   answer under way, if one is running); the tools are fixed when `claude` starts, so that message starts a new chat and
   the window says "New chat; nothing from the last one was carried over."
 - The window resizes from its edges and corners, and moves from any empty area of it (the header, the gaps around
@@ -251,6 +251,11 @@ minutes for a profile.
 
 ## Settings ▸ General
 
+Two sub-pages, chosen on a recessed track of small capitals under the tiles (in the same tray; shown only on the General
+tile): **APP** (first; the last one shown is remembered) and **CHAT**, then, under both, a strip for cl_quick's own data.
+
+**APP:**
+
 - **Shortcut**: ⌥Space by default, four other Space shortcuts, Other… for any key with ⌘, ⌃ or ⌥, or Off. It warns
   only about real clashes, and with a way out (a button that picks a preset none of macOS's own shortcuts uses):
   - a macOS shortcut that uses the key, as this Mac has them set (Spotlight, Finder's search, the input sources);
@@ -259,6 +264,15 @@ minutes for a profile.
   Other apps' shortcuts can't be read, and macOS lets two apps register the same key, so nothing else is guessed at: if
   the key also opens something else, pick another. It's registered the way macOS's own app shortcuts are, so there's no
   Accessibility permission to give.
+- **Dictation**: what Return does after dictating. **Shows text first** (the default: "Return after dictation shows
+  the text; Return again sends it.") or **Sends at once** ("Return after dictation sends the text at once.").
+- **Blur addresses**, **Open at login** (in the menu bar, ready for the shortcut) and **Updates**: on by default. About
+  once a day cl_quick checks GitHub Releases and, when a newer version exists, the
+  menu bar menu shows **Update available: 26.11.3**; it opens the release's page in your browser. Nothing is
+  downloaded or installed by the app. Off: no request at all (see "What it keeps, and what it sends").
+
+**CHAT**, "What new chats start with. Changes apply to new chats; open chats keep theirs.":
+
 - **Model** and **Thinking** for a new chat. The model is one of four families, Haiku, Sonnet, Opus and Fable, each the
   newest the account has, by Claude Code's own list (asked when a chat's `claude` starts, with `initialize`, which sends
   nothing to a model; kept per profile and account in models.json). A family the account lacks isn't offered. Thinking
@@ -266,15 +280,23 @@ minutes for a profile.
   nearest. Before any list is known: the four aliases, and Low to High. The setting keeps the family, not a version.
 - **Links and search**: on by default. "Claude can open links and search the web. Pages count toward your usage." Off:
   Claude runs with no tools, as it did before, and a link in a message is only text. A change applies from the next message, in a new chat.
-- **Dictation**: what Return does after dictating. **Shows text first** (the default: "Return after dictation shows
-  the text; Return again sends it.") or **Sends at once** ("Return after dictation sends the text at once.").
-- **Open at login**: in the menu bar, ready for the shortcut.
-- **Updates**: on by default. About once a day cl_quick checks GitHub Releases and, when a newer version exists, the
-  menu bar menu shows **Update available: 26.11.3**; it opens the release's page in your browser. Nothing is
-  downloaded or installed by the app. Off: no request at all (see "What it keeps, and what it sends").
-- A strip at the bottom: the incognito note ("Quick chats are incognito: nothing is saved on this Mac."), the size of
-  cl_quick's own files, any old chats saved by earlier versions, **Show in Finder**, and **Remove…**, which moves
-  cl_quick's data to the Trash.
+- **Instructions**: a few lines of your own ("Answer in Ukrainian unless I write in another language."), at most
+  1,000 characters (typing and pasting stop there; a counter under the box, "n / 1,000", turns amber from 900 and red at
+  the limit). The box is one text view of about seven lines that scrolls inside itself: the window never changes height
+  with what is typed. Its first lines are the built-in instructions in force, dimmed and read-only (a small lock; the web
+  or the no-web text, by Links and search, swapped live), then a hairline, then your text; it opens scrolled to your text.
+  Two light links on the label line, "Built in · Custom", scroll the box to either part (about 200 ms, at once with
+  Reduce Motion on); the one in view is underlined in orange. Only your part is edited, counted, capped and stored; the
+  caret can't enter the built-in part, and selecting and copying it is fine. Saved as you type, for the app (not per profile). Your text is
+  added **after** cl_quick's fixed instructions, under "The user's own instructions:", and never replaces them (with
+  Links and search on, the fixed text is what says that a page's text is data, not instructions); an empty box adds
+  nothing. They apply to new chats: the
+  instructions are part of what a chat's `claude` is started with, so an open chat keeps the text it started with and is
+  never restarted for a change (an empty bar takes it at once). Remove… clears them with the rest.
+
+**The strip at the bottom**: with the incognito note ("Quick chats are incognito: nothing is saved on this Mac."), the size of
+cl_quick's own files, any old chats saved by earlier versions, **Show in Finder**, and **Remove…**, which moves
+cl_quick's data to the Trash.
 
 ## What it keeps, and what it sends
 
@@ -290,6 +312,8 @@ minutes for a profile.
   Chats saved by earlier versions are Claude Code sessions in the profile's folder under
   `projects/<cl_quick's work folder>/`, deleted after 30 days by default; cl_quick doesn't touch them except in
   Settings ▸ General ▸ Remove….
+- Custom instructions (Settings ▸ General ▸ Chat): your text is kept in settings.json and sent to Claude Code, with the
+  fixed instructions, as the chat's system prompt, so it goes to the model with every new chat; nothing else.
 - Remove… (it asks "Move cl_quick's data to the Trash?") moves cl_quick's folder and any old quick chats to the Trash, turns the login item off and
   quits. Your Claude Code folders, their sign-ins and their other sessions stay.
 - Apart from your messages (through Claude Code, below), the one thing it sends is an update check: about once a day it
@@ -297,7 +321,7 @@ minutes for a profile.
   User-Agent "cl_quick"), compares the version and, if a newer one exists, adds "Update available" to the menu, which
   opens the release's page; nothing is downloaded or installed. It keeps the time of the last check and the newest
   version seen in `updates.json`. Settings ▸ General ▸ Updates turns it off, and then no request is made.
-- Links and search (on by default; Settings ▸ General): Claude Code gets its two web tools, WebFetch and WebSearch
+- Links and search (on by default; Settings ▸ General ▸ Chat): Claude Code gets its two web tools, WebFetch and WebSearch
   (`--tools WebFetch,WebSearch --allowedTools WebFetch,WebSearch`), and nothing else, so it can read a page you link or
   search the web. The pages are fetched by Claude Code for that answer only, and the text goes to the model as part of
   the chat, under your account. cl_quick stores none of it: the chat stays incognito, the page text is never shown raw
@@ -327,6 +351,11 @@ On its first run it copies cl_audit's old quick chat settings (the shortcut, mod
 the arguments with Links and search on and off, and web answers (a tool call between two pieces of text, as a real
 stream has it) with Stop in the middle of a tool. `Checks/panel.sh` runs the whole chat on the stand-in for those: the
 whole answer, the activity line shown and then gone, Stop mid-tool, ⌘⇧C copying the full answer, the setting.
+`Checks/instructions.sh` checks Custom instructions on the stand-in: what is stored and read back (the user's text only),
+the box in the real text view (the built-in part above the user's is never changed by an edit or a paste, the caret stays out
+of it, Links and search swaps it live, and the 1,000-character cap counts the user's part alone), the prompt a chat starts with (an empty box changes nothing, the text comes
+after the fixed text, with and without web), that a new chat takes the current text while an open one keeps its own and
+is never restarted, and Remove… clearing it; `Checks/run.sh` has the prompt's words and the chat's key.
 `Checks/bars.sh` checks the model and thinking controls in the real panel, with four, three and two families, at 320,
 440 and 640: a bar for every family, always shown and ending before Send, picking any value moves nothing, a click on
 each bar's centre picks that bar, a click on a label's right or left half goes round forward or back, the scroll wheel

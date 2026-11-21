@@ -18,6 +18,23 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   ProfileCore also takes cl_audit's later changes (account and organisation ids, the reader's state machine), which
   cl_quick doesn't use yet. Still built without the Keychain read. CI runs cl_kit's suites on the copy and checks it is
   exactly its tag.
+- **Custom instructions.** Settings ▸ General has two sub-pages, chosen on a recessed track under the tiles, in the same
+  tray (small capitals, the chosen one a raised key, as cl_quick shares with cl_audit's Card style selector): **APP**
+  (first; Shortcut, Dictation, Blur addresses, Open at login and Updates) and **CHAT**, "What new chats start with.
+  Changes apply to new chats; open chats keep theirs.": **Model**, **Thinking** and **Links and search** (moved from
+  General) and a new **Instructions** row. The track shows only on the General tile (on a profile its room stays empty,
+  so the tray keeps its height); General no longer has a page title; the last sub-page is remembered while cl_quick runs;
+  the data strip stays under both. The Instructions box is one text view of about
+  seven lines that scrolls inside itself, so the window never changes height with what is typed. Its first lines are the
+  built-in instructions in force (the web or the no-web text, swapped live by Links and search), dimmed, with a small lock
+  and read-only (selectable, not editable); then a hairline; then your own text, which is all that is edited, counted
+  ("n / 1,000" under the box, amber from 900, red at the limit), capped at 1,000 characters (a paste too) and stored.
+  The box opens scrolled to your text; the caret can't enter the built-in part. Two light links on the row's label line,
+  "Built in · Custom", scroll the box to either part (about 200 ms, at once with Reduce Motion on), and the link of the
+  part in view is underlined in orange as it scrolls. Your text is saved as you type and added after the fixed instructions, under "The user's own instructions:", and never replaces them; an empty
+  box adds nothing. The text is part of what a chat's `claude` is started with, so it applies to new chats: an
+  open chat keeps the text it started with and is never restarted for a change, while an empty bar takes it at once.
+  Remove… clears it with the rest of cl_quick's data. New settings.json key: `instructions`.
 - **The chat's profile menu matches the menu bar's.** Under each profile's row, its standby accounts are rows
   ("<address> · standby", **Switch…** at the right, the address blurred until the pointer is on the row) and, after them,
   **Add an account…**. A standby row starts the same switch as the menu bar's row (same guards, same "Switch Main to this
