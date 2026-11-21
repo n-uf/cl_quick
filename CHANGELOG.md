@@ -20,7 +20,7 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
     hiding and reopening restores the place and whether it follows; Ask again jumps to the bottom and follows.
   - **No animation anywhere in this:** every jump is instant, and the handles and the keys list's pages switch at once.
 - **The keys list has three pages** (MODEL & WINDOW · MOVE · WRITE, on the Settings tracks' primitive), always the height of the
-  tallest, so it never resizes; ← and → turn the pages while it is open, and the last page is remembered.
+  tallest, so it never resizes; a click on a label turns the page, and the last page is remembered.
 - **Step controls** lose the dot under the step in use (the lit bars already show it); the bars are centred in their column.
 - **No forced scrolling while an answer streams.** The chat followed the end of the text even when you had scrolled up to
   read. Now it follows only while you are at the bottom (within a few points) when new text arrives. Scroll up by any

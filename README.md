@@ -197,7 +197,7 @@ minutes for a profile.
       wherever you drag it. macOS can take ⌃1–⌃6 for itself: when "Switch to Desktop N" is turned on in System
       Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Mission Control, cl_quick never sees those keys.
   - The keys button opens a list of the shortcuts on three pages, under a small track (MODEL & WINDOW · MOVE · WRITE;
-    ← and → turn the pages while the list is open, and the last page is remembered while cl_quick runs):
+    click a label to turn the page; the last page is remembered while cl_quick runs):
     - **Model & window:** ⌥⌘ arrows (thinking, model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
     - **Move:** ⌘J, ⇧⌘J, ⌘[ ⌘], Page Up, Page Down and End (see "Moving in a chat" below).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, and the shortcut

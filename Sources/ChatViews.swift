@@ -1330,15 +1330,6 @@ final class QCKeys: ObservableObject {
     @Published var page = QCKeysPage.modelWindow
     private var monitors: [Any] = []
 
-    /// ← and → turn the pages while the list is open (the panel's key handler offers them first, so the field keeps its arrows
-    /// whenever the list is closed). False when the list is not open: the key is not taken.
-    @discardableResult func turnPage(_ by: Int) -> Bool {
-        guard shown else { return false }
-        let all = QCKeysPage.allCases
-        if let i = all.firstIndex(of: page) { page = all[min(max(i + by, 0), all.count - 1)] }
-        return true
-    }
-
     func toggle() { shown ? close() : open() }
 
     /// Opens the list above the keys button; nothing (still closed) when there's no panel on screen to show it above.
