@@ -2244,8 +2244,8 @@ do {
     }
     p.onStep = oldStep
     let arrowRows = QCKeysView.rows(opener: "⌃⇧Space").map { $0.0 + " " + $0.1 }
-    let order = ["⌥⌘↑", "⌥⌘→", "⌘1 – ⌘5", "⌃1 – ⌃6", "Click a label", "Return"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
-    check("the keys list: ⌥⌘ arrows (thinking, model), sizes, places, then the rest, in that order",
+    let order = ["⌥⌘↑", "⌥⌘→", "Click a label", "⌘1 – ⌘5", "⌃1 – ⌃6", "⌘J", "⇧⌘J", "⌘[", "Page Up", "End", "Return", "⇧Return", "⌘N", "⌘D", "⇧⌘C"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
+    check("the keys list: Model & window (⌥⌘ arrows, a label, sizes, places), then Move, then Write, in that order",
           !order.contains(nil) && order.compactMap { $0 } == order.compactMap { $0 }.sorted()
           && arrowRows.contains { $0.hasPrefix("⌥⌘↑  ⌥⌘↓ Thinking up, down") } && arrowRows.contains { $0.hasPrefix("⌥⌘→  ⌥⌘← Model up, down") }, arrowRows.joined(separator: "\n"))
     check("the keys list has no plain ⌘ arrows, no ⌃⌘ or ⌃⌥ and no ⌘1 – ⌘4 presets",

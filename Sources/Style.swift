@@ -132,6 +132,8 @@ struct PillPicker<Value: Hashable>: View {
     var size: CGFloat? = nil
     /// Every segment this wide (`equalWidth`) instead of its own title's width.
     var segmentWidth: CGFloat? = nil
+    /// The chosen key eases over to its new place (the settings' tracks); false: it is there at once.
+    var animates = true
     let title: (Value) -> String
     @Environment(\.face) private var face
 
@@ -165,7 +167,7 @@ struct PillPicker<Value: Hashable>: View {
         }
         .padding(3)
         .background(WellShape(well: face.track, radius: 5))
-        .animation(.easeOut(duration: 0.12), value: selection)
+        .animation(animates ? .easeOut(duration: 0.12) : nil, value: selection)
     }
 }
 

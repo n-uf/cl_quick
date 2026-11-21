@@ -1262,18 +1262,20 @@ final class QCFloat {
 
     /// Shows a view above a frame of the panel's hosting view (its top-left space), centred on it or right-aligned with
     /// it, kept inside the panel's width. False when there is nothing to show it above (no panel on screen, no frame).
-    @discardableResult func show(_ view: AnyView, above frame: CGRect, align: Align = .center) -> Bool {
+    @discardableResult func show(_ view: AnyView, above frame: CGRect, align: Align = .center, interactive: Bool = false) -> Bool {
         guard frame != .zero, let panel = NSApp.windows.first(where: { $0 is QuickChatPanel && $0.isVisible }),
               let cv = panel.contentView else { return false }
         let w: NSPanel
         if let window, let host { host.rootView = view; w = window } else {
             w = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
             w.isOpaque = false; w.backgroundColor = .clear; w.hasShadow = true
-            w.ignoresMouseEvents = true; w.isReleasedWhenClosed = false
+            w.isReleasedWhenClosed = false
             let h = NSHostingView(rootView: view)
             w.contentView = h
             window = w; host = h
         }
+        // the usage card is only looked at (the pointer goes through it); the keys list has a track to press
+        w.ignoresMouseEvents = !interactive
         let size = host!.fittingSize
         // the frame's top edge, from the hosting view's top-left space to the screen
         let anchor = align == .center ? frame.midX : frame.maxX
@@ -1292,6 +1294,11 @@ final class QCFloat {
         w.parent?.removeChildWindow(w)
         w.orderOut(nil)
     }
+
+    /// Whether a window is this one's (a press on it).
+    func owns(_ w: NSWindow?) -> Bool { w != nil && w === window }
+    /// Its window number while it is shown (a check makes a press on it), else 0.
+    var windowNumber: Int { window?.isVisible == true ? window?.windowNumber ?? 0 : 0 }
 }
 
 /// A part of the row the checks look at: its frame under `key` in QCStepTargets.marks while it is drawn (not in a
@@ -1319,14 +1326,25 @@ extension View {
 final class QCKeys: ObservableObject {
     static let shared = QCKeys()
     @Published private(set) var shown = false
+    /// The page shown: Model & window the first time, then the last one shown (kept while cl_quick runs).
+    @Published var page = QCKeysPage.modelWindow
     private var monitors: [Any] = []
+
+    /// ← and → turn the pages while the list is open (the panel's key handler offers them first, so the field keeps its arrows
+    /// whenever the list is closed). False when the list is not open: the key is not taken.
+    @discardableResult func turnPage(_ by: Int) -> Bool {
+        guard shown else { return false }
+        let all = QCKeysPage.allCases
+        if let i = all.firstIndex(of: page) { page = all[min(max(i + by, 0), all.count - 1)] }
+        return true
+    }
 
     func toggle() { shown ? close() : open() }
 
     /// Opens the list above the keys button; nothing (still closed) when there's no panel on screen to show it above.
     func open() {
         guard let f = QCStepTargets.shared.marks["keys"],
-              QCFloat.keys.show(AnyView(QCKeysView(opener: Self.opener())), above: f) else { return }
+              QCFloat.keys.show(AnyView(QCKeysView(opener: Self.opener())), above: f, interactive: true) else { return }
         shown = true
         guard monitors.isEmpty else { return }
         if let m = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] e in
@@ -1342,6 +1360,7 @@ final class QCKeys: ObservableObject {
     /// (its tap toggles), anywhere else, in the panel or another of cl_quick's windows, it closes the list.
     func mouseDown(_ e: NSEvent) {
         guard shown else { return }
+        if QCFloat.keys.owns(e.window) { return }          // a press on the list itself (its track) is the list's
         if let w = e.window as? QuickChatPanel, let cv = w.contentView {
             var p = cv.convert(e.locationInWindow, from: nil)
             if !cv.isFlipped { p.y = cv.bounds.height - p.y }
@@ -1403,40 +1422,65 @@ struct QCKeysButton: View {
     }
 }
 
-/// The keys list's look: cl_quick's keys, each with what it does.
+/// The keys list's pages, in order (the track at its top): the first one shows the first time it opens, then the last one shown.
+enum QCKeysPage: String, CaseIterable, Hashable {
+    case modelWindow, move, write
+    var title: String {
+        switch self {
+        case .modelWindow: return "Model & window"
+        case .move: return "Move"
+        case .write: return "Write"
+        }
+    }
+}
+
+/// The keys list's look: cl_quick's keys, each with what it does, on three pages under a small track (the Settings APP | CHAT
+/// track's primitive). The pages are laid over each other, so the list is as tall and wide as the tallest and widest, and
+/// switching never resizes it. A page switches at once, with no animation.
 struct QCKeysView: View {
     let opener: String
-    /// The rows, key and what it does (a check reads them).
-    static func rows(opener: String) -> [(String, String)] {
-        let before: [(String, String)] = [
-            ("⌥⌘↑  ⌥⌘↓", "Thinking up, down"),
-            ("⌥⌘→  ⌥⌘←", "Model up, down"),
-        ]
-        let after: [(String, String)] = [
-            ("Click a label", "Right half: up; left half: down"),
-            ("Return", "Send"),
-            ("⇧Return", "New line"),
-            ("⌘N", "New chat"),
-            ("⌘⇧C", "Copy the last answer"),
-            ("⌘D", "Dictation on/off"),
-            ("Esc  ⌘W", "Hide"),
-            (opener, "Open cl_quick"),
-        ]
-        return before + QCDigitKeys.rows + after
+    @ObservedObject private var keys = QCKeys.shared
+
+    /// The rows of each page, key and what it does (a check reads them).
+    static func pages(opener: String) -> [(page: QCKeysPage, rows: [(String, String)])] {
+        [(.modelWindow, [("⌥⌘↑  ⌥⌘↓", "Thinking up, down"),
+                         ("⌥⌘→  ⌥⌘←", "Model up, down"),
+                         ("Click a label", "Right half: up; left half: down")] + QCDigitKeys.rows),
+         (.move, [("⌘J", "Jump to latest"),
+                  ("⇧⌘J", "Start of the answer in view"),
+                  ("⌘[  ⌘]", "Previous, next message of mine"),
+                  ("Page Up  Page Down", "Scroll the answers"),
+                  ("End", "Bottom, and follow")]),
+         (.write, [("Return", "Send"),
+                   ("⇧Return", "New line"),
+                   ("⌘N", "New chat"),
+                   ("⌘D", "Dictation on/off"),
+                   ("⇧⌘C", "Copy the answer in view"),
+                   ("Esc  ⌘W", "Hide"),
+                   (opener, "Open cl_quick")])]
     }
+    /// All the rows, page by page.
+    static func rows(opener: String) -> [(String, String)] { pages(opener: opener).flatMap(\.rows) }
+
     var body: some View {
-        let rows = Self.rows(opener: opener)
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Keys").font(.system(size: 12, weight: .semibold)).foregroundColor(QCColor.text)
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
-                ForEach(rows.indices, id: \.self) { i in
-                    GridRow {
-                        Text(rows[i].0).fontWeight(.semibold).foregroundColor(QCColor.text)
-                        Text(rows[i].1).foregroundColor(QCColor.muted)
+        let pages = Self.pages(opener: opener)
+        VStack(alignment: .leading, spacing: 8) {
+            PillPicker(options: QCKeysPage.allCases, selection: $keys.page, compact: true, size: 9, animates: false, title: \.title)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(pages.enumerated()), id: \.offset) { _, p in
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
+                        ForEach(p.rows.indices, id: \.self) { i in
+                            GridRow {
+                                Text(p.rows[i].0).fontWeight(.semibold).foregroundColor(QCColor.text)
+                                Text(p.rows[i].1).foregroundColor(QCColor.muted)
+                            }
+                        }
                     }
+                    .font(.system(size: 11.5))
+                    .opacity(keys.page == p.page ? 1 : 0)
+                    .accessibilityHidden(keys.page != p.page)
                 }
             }
-            .font(.system(size: 11.5))
         }
         .lineLimit(1).fixedSize()
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -2656,7 +2700,11 @@ enum QuickChatRender {
         let height = env["QC_RENDER_HEIGHT"].flatMap { Double($0) }.map { CGFloat($0) }
             ?? (state == "short" ? QuickChatRoot.minWindowHeight : QuickChatRoot.windowHeight)
         // hover-m2: the pointer on the model's third bar; hover-t0: on thinking's Off
-        let stepHover: String? = state == "keys" ? "keys" : state.hasPrefix("hover-") ? String(state.dropFirst("hover-".count)) : nil
+        // keys: the list on its first page; keys-model, keys-move, keys-write: each page
+        if state.hasPrefix("keys") {
+            QCKeys.shared.page = state == "keys-move" ? .move : state == "keys-write" ? .write : .modelWindow
+        }
+        let stepHover: String? = state.hasPrefix("keys") ? "keys" : state.hasPrefix("hover-") ? String(state.dropFirst("hover-".count)) : nil
         // QC_RENDER_BUSY=1: over a busy page of text instead of a plain grey, to show nothing of it comes through the card
         let busy = env["QC_RENDER_BUSY"] == "1"
         let view = QuickChatRoot(model: m).environment(\.qcRendering, true).environment(\.qcStepHover, stepHover)

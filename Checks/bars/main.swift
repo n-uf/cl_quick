@@ -326,6 +326,31 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     chat.escape(); spin()
     check("\(name): Esc closes the list and leaves the panel", !keysList.shown && QCFloat.keys.shownFrame == nil && p.isVisible)
     check("\(name): the list closed moves nothing", same(frames(), base), moved(base, frames()))
+    // the pages: Model & window first, then Move, then Write; ← and → turn them while the list is open (and are the field's
+    // while it is closed); the last page is remembered; the list is as tall and wide on every page
+    check("\(name): the keys list's pages are Model & window, Move, Write, in that order, and the first time it shows the first",
+          QCKeysPage.allCases.map(\.title) == ["Model & window", "Move", "Write"] && QCKeys().page == .modelWindow)
+    let sizes = QCKeysPage.allCases.map { pg -> CGSize in
+        QCKeys.shared.page = pg
+        return NSHostingView(rootView: AnyView(QCKeysView(opener: "⌃⇧Space"))).fittingSize
+    }
+    check("\(name): the keys list is the same size on every page", sizes.dropFirst().allSatisfy { $0 == sizes[0] } && sizes[0].height > 0, "\(sizes)")
+    QCKeys.shared.page = .modelWindow
+    check("\(name): ← and → are not taken while the list is closed (the field's)", !arrow(Int(NSRightArrowFunctionKey), 124, []) && !arrow(Int(NSLeftArrowFunctionKey), 123, []) && keysList.page == .modelWindow)
+    keysList.open(); spin()
+    let listSize = QCFloat.keys.shownFrame?.size
+    check("\(name): → turns to Move, taken", arrow(Int(NSRightArrowFunctionKey), 124, []) && keysList.page == .move, "\(keysList.page)")
+    check("\(name): → again turns to Write", arrow(Int(NSRightArrowFunctionKey), 124, []) && keysList.page == .write)
+    check("\(name): → at the last page is taken and stays", arrow(Int(NSRightArrowFunctionKey), 124, []) && keysList.page == .write)
+    check("\(name): ← goes back to Move, then Model & window, and stays at the first",
+          arrow(Int(NSLeftArrowFunctionKey), 123, []) && keysList.page == .move && arrow(Int(NSLeftArrowFunctionKey), 123, []) && keysList.page == .modelWindow
+          && arrow(Int(NSLeftArrowFunctionKey), 123, []) && keysList.page == .modelWindow)
+    check("\(name): ⇧← and ⌘→ are not the list's", !arrow(Int(NSLeftArrowFunctionKey), 123, [.shift]) && !arrow(Int(NSRightArrowFunctionKey), 124, [.command]))
+    keysList.page = .move; keysList.close(); spin(); keysList.open(); spin()
+    check("\(name): the list opens on the page it was left on", keysList.page == .move && QCFloat.keys.shownFrame?.size == listSize, "\(keysList.page) \(String(describing: QCFloat.keys.shownFrame?.size)) vs \(String(describing: listSize))")
+    if let e = mouseDown(at: .zero, window: QCFloat.keys.windowNumber) { keysList.mouseDown(e) }; spin()
+    check("\(name): a press on the list itself (its track) does not close it", keysList.shown && QCFloat.keys.windowNumber != 0)
+    keysList.close(); keysList.page = .modelWindow; spin()
     // the scroll wheel
     m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()
     targets.scroll(at: centre("t"), by: 1, precise: false, began: true); spin()
