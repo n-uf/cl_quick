@@ -4,6 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Shortcuts that don't clash with macOS.**
+  - **Model and thinking keys are now ⌥⌘ arrows** (⌥⌘↑ ⌥⌘↓ thinking, ⌥⌘→ ⌥⌘← model). Plain ⌘ arrows were taken by the
+    chat, but in a Mac text field they are the caret's jumps to the line's and the text's start and end; they now reach
+    the field and a selected answer's view again. ⇧⌘ arrows still select; ⌃⌘ arrows aren't cl_quick's. ⌘1–⌘5 (size) and
+    ⌃1–⌃6 (place) are unchanged.
 - **AddressPrivacy comes from cl_kit.** The module that hides an account address moved to
   [cl_kit](https://github.com/n-uf/cl_kit) (v26.11.3, `Privacy/`); cl_quick now builds it from the vendored copy, like the
   other shared modules, and no longer keeps its own in `Shared/`. Nothing changes in the app: the code is the same.

@@ -2146,38 +2146,39 @@ do {
     check("Cyrillic ⌘⇧Z (Я) names z", letter("Я", 6, [.command, .shift]) == "z")
     check("Ukrainian keys that are no edit key stay as they are", letter("і", 1) == "і" && letter("ї", 30) == "ї" && letter("ґ", 42) == "ґ")
     check("a digit, a symbol and an ASCII capital keep their letter", letter("1", 18) == "1" && letter(",", 43) == "," && letter("V", 9) == "v")
-    // ⌘ arrows are function keys, the same on every layout (the characters a Cyrillic layout gives them are the same, and a real
-    // arrow key carries the function flag, which the keypad's arrows also give the numeric-pad flag: neither is a modifier here)
+    // ⌥⌘ arrows are function keys, the same on every layout (the characters a Cyrillic layout gives them are the same, and a real
+    // arrow key carries the function flag, which the keypad's arrows also give the numeric-pad flag: neither is a modifier here).
+    // Plain ⌘ arrows are macOS's own (the caret's jumps in the field) and are not taken.
     var steps: [(Bool, Int)] = []
     let oldStep = p.onStep
     p.onStep = { steps.append(($0, $1)) }
     let L = String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!), U = String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!)
     let R = String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!), D = String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)
-    let cmd: NSEvent.ModifierFlags = .command
+    let cmd: NSEvent.ModifierFlags = [.command, .option]
     let t1 = cmdKey(L, 123, cmd), t2 = cmdKey(U, 126, cmd)
-    check("⌘← and ⌘↑ step the model down and thinking up, and are taken", t1 && t2 && steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
+    check("⌥⌘← and ⌥⌘↑ step the model down and thinking up, and are taken", t1 && t2 && steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
     steps = []
     let t3 = cmdKey(R, 124, cmd), t4 = cmdKey(D, 125, cmd)
-    check("⌘→ and ⌘↓ step the model up and thinking down, and are taken", t3 && t4 && steps.count == 2 && steps[0] == (true, 1) && steps[1] == (false, -1), "\(steps)")
+    check("⌥⌘→ and ⌥⌘↓ step the model up and thinking down, and are taken", t3 && t4 && steps.count == 2 && steps[0] == (true, 1) && steps[1] == (false, -1), "\(steps)")
     steps = []
-    _ = cmdKey(U, 126, [.command, .function]); _ = cmdKey(R, 124, [.command, .function, .numericPad])
-    check("⌘ arrows with the function and numeric-pad flags (as the arrow keys give them) still step", steps.count == 2 && steps[0] == (false, 1) && steps[1] == (true, 1), "\(steps)")
+    _ = cmdKey(U, 126, [.command, .option, .function]); _ = cmdKey(R, 124, [.command, .option, .function, .numericPad])
+    check("⌥⌘ arrows with the function and numeric-pad flags (as the arrow keys give them) still step", steps.count == 2 && steps[0] == (false, 1) && steps[1] == (true, 1), "\(steps)")
     steps = []
     var notTaken: [Bool] = []
-    for f in [NSEvent.ModifierFlags([.command, .shift]), [.command, .option], [.command, .control], [.command, .control, .shift],
+    for f in [NSEvent.ModifierFlags.command, [.command, .shift], [.command, .control], [.command, .control, .shift],
               [.command, .control, .option], [.command, .option, .shift], [.command, .control, .option, .shift], [.control], [.option], [.shift], []] {
         for (c, code) in [(L, UInt16(123)), (U, 126), (R, 124), (D, 125)] { notTaken.append(cmdKey(c, code, f)) }
     }
-    check("⇧⌘, ⌥⌘, ⌃⌘ (the old keys), their mixes, and ⌃, ⌥, ⇧ and plain arrows step nothing and are not taken", steps.isEmpty && notTaken.allSatisfy { !$0 }, "\(steps) \(notTaken)")
+    check("plain ⌘ arrows (macOS's own), ⇧⌘, ⌃⌘, their mixes, and ⌃, ⌥, ⇧ and plain arrows step nothing and are not taken", steps.isEmpty && notTaken.allSatisfy { !$0 }, "\(steps) \(notTaken)")
     // the arrow keys through the Cyrillic layout and Caps Lock: the same keys
     steps = []
-    _ = cmdKey(U, 126, [.command, .capsLock])
-    check("⌘↑ with Caps Lock steps thinking", steps.count == 1 && steps[0] == (false, 1), "\(steps)")
-    // the panel not the key window (hidden): a ⌘ arrow typed elsewhere is not the chat's
+    _ = cmdKey(U, 126, [.command, .option, .capsLock])
+    check("⌥⌘↑ with Caps Lock steps thinking", steps.count == 1 && steps[0] == (false, 1), "\(steps)")
+    // the panel not the key window (hidden): a ⌥⌘ arrow typed elsewhere is not the chat's
     steps = []
     chat.hide()
     let hiddenTaken = cmdKey(U, 126, cmd)
-    check("⌘↑ with the panel not the key window steps nothing and is not taken", steps.isEmpty && !hiddenTaken, "\(steps) \(hiddenTaken)")
+    check("⌥⌘↑ with the panel not the key window steps nothing and is not taken", steps.isEmpty && !hiddenTaken, "\(steps) \(hiddenTaken)")
     p.onStep = oldStep
     chat.open(); spin(0.3)
     // the field: ⌘ arrows are taken before it sees them, so the caret stays where it is; the same keys offered to the field itself
@@ -2194,20 +2195,33 @@ do {
             }
             var got: [(Bool, Int)] = []
             p.onStep = { got.append(($0, $1)) }
+            let ao: NSEvent.ModifierFlags = [.command, .option]
             tv.setSelectedRange(NSRange(location: 3, length: 0))
             // the premise: the field itself would move the caret (what AppKit does with a ⌘ arrow the panel did not take)
             tv.keyDown(with: ev(U, 126, .command))
             let moved = tv.selectedRange().location
             tv.setSelectedRange(NSRange(location: 3, length: 0))
-            let tookUp = p.performKeyEquivalent(with: ev(U, 126, .command))
-            check("field: ⌘↑ is taken (thinking steps) and the caret stays at 3 (the field alone would have moved it to \(moved))",
+            let tookUp = p.performKeyEquivalent(with: ev(U, 126, ao))
+            check("field: ⌥⌘↑ is taken (thinking steps) and the caret stays at 3 (the field alone would have moved it to \(moved))",
                   tookUp && got.count == 1 && tv.selectedRange() == NSRange(location: 3, length: 0) && moved != 3, "\(got) \(tv.selectedRange()) premise \(moved)")
             got = []
             tv.setSelectedRange(NSRange(location: 3, length: 0))
-            let tookDown = p.performKeyEquivalent(with: ev(D, 125, .command))
-            let tookLeft = p.performKeyEquivalent(with: ev(L, 123, .command)), tookRight = p.performKeyEquivalent(with: ev(R, 124, .command))
-            check("field: ⌘↓, ⌘← and ⌘→ are taken and the caret stays at 3", tookDown && tookLeft && tookRight && got.count == 3
+            let tookDown = p.performKeyEquivalent(with: ev(D, 125, ao))
+            let tookLeft = p.performKeyEquivalent(with: ev(L, 123, ao)), tookRight = p.performKeyEquivalent(with: ev(R, 124, ao))
+            check("field: ⌥⌘↓, ⌥⌘← and ⌥⌘→ are taken and the caret stays at 3", tookDown && tookLeft && tookRight && got.count == 3
                   && tv.selectedRange() == NSRange(location: 3, length: 0), "\(got) \(tv.selectedRange())")
+            got = []
+            // plain ⌘ arrows: not ours, so they reach the field and the caret jumps to the line's start and end, as in any Mac text field
+            tv.setSelectedRange(NSRange(location: 3, length: 0))
+            let plainLeft = ev(L, 123, .command)
+            let tookPlain = p.performKeyEquivalent(with: plainLeft)
+            if !tookPlain { tv.keyDown(with: plainLeft) }
+            let atStart = tv.selectedRange().location
+            let plainRight = ev(R, 124, .command)
+            let tookPlain2 = p.performKeyEquivalent(with: plainRight)
+            if !tookPlain2 { tv.keyDown(with: plainRight) }
+            check("field: ⌘← and ⌘→ are not taken and the caret goes to the line's start (0) and end (7)",
+                  !tookPlain && !tookPlain2 && got.isEmpty && atStart == 0 && tv.selectedRange().location == 7, "\(got) \(atStart) \(tv.selectedRange())")
             got = []
             // ⇧⌘←: not ours, so the event goes on to the field as AppKit sends it, and it selects back to the line's start
             tv.setSelectedRange(NSRange(location: 7, length: 0))
@@ -2222,19 +2236,21 @@ do {
             if !took2 { tv.keyDown(with: sel2) }
             check("field: ⇧⌘→ is not taken and selects to the line's end (3, 4)", !took2 && got.isEmpty && tv.selectedRange() == NSRange(location: 3, length: 4),
                   "\(took2) \(got) \(tv.selectedRange())")
-            // ⌥⌘ and ⌃⌘ arrows: not ours either
-            check("field: ⌥⌘← and ⌃⌘↑ are not taken", !p.performKeyEquivalent(with: ev(L, 123, [.command, .option])) && !p.performKeyEquivalent(with: ev(U, 126, [.command, .control])) && got.isEmpty, "\(got)")
+            // ⌃⌘ arrows: not ours either
+            check("field: ⌃⌘← and ⌃⌘↑ are not taken", !p.performKeyEquivalent(with: ev(L, 123, [.command, .control])) && !p.performKeyEquivalent(with: ev(U, 126, [.command, .control])) && got.isEmpty, "\(got)")
             p.onStep = { _, _ in }
         } else { check("field: the field has the keyboard", false, "\(String(describing: p.firstResponder))") }
         m.field = ""
     }
     p.onStep = oldStep
-    let arrowRows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }
-    let order = ["⌘↑", "⌘→", "⌘1 – ⌘5", "⌃1 – ⌃6", "Click a label", "Return"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
-    check("the keys list: ⌘ arrows (thinking, model), sizes, places, then the rest, in that order",
+    let arrowRows = QCKeysView.rows(opener: "⌃⇧Space").map { $0.0 + " " + $0.1 }
+    let order = ["⌥⌘↑", "⌥⌘→", "⌘1 – ⌘5", "⌃1 – ⌃6", "Click a label", "Return"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
+    check("the keys list: ⌥⌘ arrows (thinking, model), sizes, places, then the rest, in that order",
           !order.contains(nil) && order.compactMap { $0 } == order.compactMap { $0 }.sorted()
-          && arrowRows.contains { $0.hasPrefix("⌘↑  ⌘↓ Thinking up, down") } && arrowRows.contains { $0.hasPrefix("⌘→  ⌘← Model up, down") }, arrowRows.joined(separator: "\n"))
-    check("the keys list has no ⌃⌘, ⌃⌥ or ⌥⌘ and no ⌘1 – ⌘4 presets", !arrowRows.contains { $0.contains("⌃⌘") || $0.contains("⌃⌥") || $0.contains("⌥⌘") || $0.hasPrefix("⌘1  ⌘2") || $0.hasPrefix("⌘3  ⌘4") }, arrowRows.joined(separator: "\n"))
+          && arrowRows.contains { $0.hasPrefix("⌥⌘↑  ⌥⌘↓ Thinking up, down") } && arrowRows.contains { $0.hasPrefix("⌥⌘→  ⌥⌘← Model up, down") }, arrowRows.joined(separator: "\n"))
+    check("the keys list has no plain ⌘ arrows, no ⌃⌘ or ⌃⌥ and no ⌘1 – ⌘4 presets",
+          !arrowRows.contains { $0.hasPrefix("⌘↑") || $0.hasPrefix("⌘→") || $0.contains("⌃⌘") || $0.contains("⌃⌥") || $0.hasPrefix("⌘1  ⌘2") || $0.hasPrefix("⌘3  ⌘4") }, arrowRows.joined(separator: "\n"))
+    check("the keys list ends with the opener it is given", arrowRows.contains { $0.hasPrefix("⌃⇧Space Open cl_quick") }, arrowRows.joined(separator: "\n"))
     pb.clearContents()
     if let saved { for it in saved { let n = NSPasteboardItem(); for (t, d) in it { n.setData(d, forType: t) }; pb.writeObjects([n]) } }
 }
@@ -2514,7 +2530,7 @@ do {
           && QCGeometry.nearest(NSRect(x: 1100, y: 1000, width: 200, height: 200), in: big) == QCSpot(across: .centre, down: .top)
           && QCGeometry.nearest(NSRect(x: 2100, y: 900, width: 200, height: 200), in: big) == QCSpot(across: .right, down: .top))
     // the keys list shows them
-    let rows = QCKeysView.rows(opener: "⌥Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
+    let rows = QCKeysView.rows(opener: "⌃⇧Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
     check("the keys list names ⌘1 – ⌘5 with the sizes, then ⌃1 – ⌃6, and no ⌘1 – ⌘4 presets or ⌃⌥ digits",
           rows.contains("⌘1 – ⌘5") && rows.contains("⌃1 – ⌃6") && !rows.contains("⌃⌥") && !rows.contains("Sonnet, Opus") && !rows.contains("Fable: High")
           && rows.contains("Small") && rows.contains("Standard") && rows.contains("Large") && rows.contains("Tall") && rows.contains("Wide")

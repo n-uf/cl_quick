@@ -161,8 +161,9 @@ minutes for a profile.
   a new chat goes back to the defaults.
   - Model and thinking are rows of bars. Click a bar to pick it. Click the right half of a control's label for the next
     value up and the left half for the one before, wrapping round past either end. The scroll wheel steps too, and so
-    do ⌘↑ and ⌘↓ (thinking) and ⌘→ and ⌘← (model). In the field, ⌘ arrows now belong to model and thinking: ⌃A and ⌃E
-    move to the line's start and end, and ⇧⌘ arrows still select.
+    do ⌥⌘↑ and ⌥⌘↓ (thinking) and ⌥⌘→ and ⌥⌘← (model). Plain ⌘ arrows are macOS's own and reach the field (the caret
+    jumps to the line's or the text's start and end) and a selected answer's view; ⇧⌘ arrows still select, and ⌃⌘
+    arrows aren't cl_quick's.
   - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
   - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
   - **Digit keys** work while the panel has the keyboard, in the bar and in the chat window:
@@ -176,7 +177,7 @@ minutes for a profile.
       the bottom keeps the 85 pt gap the first opening has, so ⌃2 is that place). The bar keeps growing as it does
       wherever you drag it. macOS can take ⌃1–⌃6 for itself: when "Switch to Desktop N" is turned on in System
       Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Mission Control, cl_quick never sees those keys.
-  - The keys button opens a list of the shortcuts: the ⌘ arrow keys, the digit keys, the label halves, Return,
+  - The keys button opens a list of the shortcuts: the ⌥⌘ arrow keys, the digit keys, the label halves, Return,
     ⇧Return, ⌘N, ⌘D (Dictation on/off), ⌘⇧C (copy the last answer), Esc and ⌘W, and the shortcut that opens cl_quick.
     A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is

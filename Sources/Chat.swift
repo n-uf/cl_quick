@@ -739,7 +739,7 @@ final class QuickChatModel: ObservableObject {
     func choose(_ c: QuickChatModelChoice) { choice = c; focusTick += 1 }
     func choose(_ t: QuickChatThinking) { thinking = t; focusTick += 1 }
 
-    /// The scroll wheel over a control, and the ⌘ arrows: the model a family up or down among those the account has,
+    /// The scroll wheel over a control, and the ⌥⌘ arrows: the model a family up or down among those the account has,
     /// thinking a step up or down among the model's. Past either end nothing changes (false). The keyboard stays where
     /// it is (a selected answer keeps its selection); a click on a bar goes through choose(), which hands it to the field.
     @discardableResult func stepModel(_ by: Int) -> Bool {
@@ -1862,7 +1862,7 @@ final class QuickChatPanel: NSPanel {
     var onCopyAnswer: () -> Void = {}
     /// ⌘D: Dictation on or off, as the mic button does.
     var onDictate: () -> Void = {}
-    /// ⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
+    /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
     /// The digit keys (QCDigitKeys): ⌘ digits the size, ⌃ digits the place on the screen.
     var onDigit: (QCDigitAction) -> Void = { _ in }
@@ -1915,12 +1915,13 @@ final class QuickChatPanel: NSPanel {
             return true
         }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // ⌘↑ ⌘↓ step thinking, ⌘→ ⌘← the model. In the field they would move the caret to the start or end of the text, and
-        // a selected answer's view might scroll to its ends; a key with ⌘ is offered here first and taken, so neither the field
-        // nor a scroll view ever sees it (⌃A and ⌃E still go to a line's start and end). The modifiers are compared
-        // exactly (⇧⌘, ⌥⌘ and ⌃⌘ arrows are not ours: ⇧⌘ arrows select in the field); the arrow keys' function and
-        // numeric-pad flags are outside the mask. At the last step the key does nothing and is still taken.
-        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command],
+        // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model. Plain ⌘ arrows are macOS's own (in a text field the caret's jump to the
+        // line's or the text's start and end, in a selected answer's view a scroll to its ends), so they are not taken and reach
+        // the field and the view. A key with ⌥⌘ is offered here first and taken, so neither the field nor a scroll view ever
+        // sees it. The modifiers are compared exactly (⌘ alone, ⇧⌘, ⌃⌘ and ⌃⌥⌘ arrows are not ours: ⇧⌘ arrows select in the
+        // field); the arrow keys' function and numeric-pad flags are outside the mask. At the last step the key does nothing
+        // and is still taken.
+        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command, .option],
            let k = e.charactersIgnoringModifiers?.unicodeScalars.first.map({ Int($0.value) }) {
             switch k {
             case NSUpArrowFunctionKey: onStep(false, 1); return true

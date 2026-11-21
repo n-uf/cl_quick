@@ -1343,7 +1343,7 @@ struct QCKeysButton: View {
             // a picture can't show the list's own window: it draws the list where the window would be
             .overlay(alignment: .top) {
                 if rendering, pictureHover == "keys" {
-                    QCKeysView(opener: "⌥Space").fixedSize()      // a sample, not this Mac's setting.frame(width: 0, height: 0, alignment: .bottom).offset(y: -4)
+                    QCKeysView(opener: "⌃⇧Space").fixedSize()      // a sample, not this Mac's setting.frame(width: 0, height: 0, alignment: .bottom).offset(y: -4)
                 }
             }
             .accessibilityElement(children: .ignore)
@@ -1359,8 +1359,8 @@ struct QCKeysView: View {
     /// The rows, key and what it does (a check reads them).
     static func rows(opener: String) -> [(String, String)] {
         let before: [(String, String)] = [
-            ("⌘↑  ⌘↓", "Thinking up, down"),
-            ("⌘→  ⌘←", "Model up, down"),
+            ("⌥⌘↑  ⌥⌘↓", "Thinking up, down"),
+            ("⌥⌘→  ⌥⌘←", "Model up, down"),
         ]
         let after: [(String, String)] = [
             ("Click a label", "Right half: up; left half: down"),
