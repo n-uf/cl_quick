@@ -194,9 +194,28 @@ final class QCChatScroll: ObservableObject {
     /// is not read from the height: a rewrap or text that grew above the view changes it too. See `contentChanged`.)
     private func documentResized() {
         guard let g = geometry else { return }
-        if following { stick() }
+        if following { stick() } else if let h = held { held = nil; place(h) }
         lastHeight = g.doc.bounds.height
         scheduleRefresh()
+    }
+
+    /// Where the view goes when the text next changes height: a part above the view changed by as much (see below).
+    private var held: CGFloat?
+    private var heldGeneration = 0
+
+    /// A view in the chat is about to change height by `delta` (a page in an answer measured: InlinePage.swift). When its
+    /// top is above the view's top and the view isn't following, the view moves by as much once the text has changed, so
+    /// what is in view stays where it was: a page that appears or grows above the view never pulls the reader. Following,
+    /// the end stays in view as always; a page in view or below it pushes only what is below it.
+    func heightWillChange(of v: NSView, by delta: CGFloat) {
+        guard !following, abs(delta) > 0.5, let a = attached(v), top(of: a) < offset() - 0.5 else { return }
+        held = (held ?? offset()) + delta
+        heldGeneration += 1
+        let mine = heldGeneration
+        // a change that never came (the height was taken back before the layout) must not move a later one
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            if self?.heldGeneration == mine { self?.held = nil }
+        }
     }
 
     /// The chat's text changed (QuickChatModel.scrollTick: text arrived at the end of the chat): keeps the end in view when
