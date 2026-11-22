@@ -220,8 +220,8 @@ minutes for a profile.
     hand over the tabs and an arrow elsewhere on the list, and the text cursor is back once it leaves the list:
     - **Model & window:** fn↑ fn↓ (thinking), fn→ fn← (model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
     - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above).
-    - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, and the shortcut
-      that opens cl_quick.
+    - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, the shortcut
+      that opens cl_quick, and ↑ in an empty field (your earlier messages).
 
     The list is as tall on every page, so switching never resizes it. A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
@@ -239,6 +239,11 @@ minutes for a profile.
   first Return send at once). The field grows with what you dictate.
 - **⇧⌘C** copies the answer in view once you have scrolled up, else the latest complete answer, the same as that
   answer's Copy button.
+- **↑ recalls your last message.** In the field, while it is empty (and nothing is being composed), ↑ puts your last
+  message of this chat in it, the caret at the end, to edit and send again; ↑ again goes further back, ↓ goes forward, and
+  ↓ past the newest leaves the field empty. Once you edit the recalled text, ↑ and ↓ are the caret's again. Only this
+  chat's messages are recalled, from memory (a new chat starts empty), and only their text: attachments are not brought
+  back. A repeat of the message before is skipped.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
   app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
   The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under

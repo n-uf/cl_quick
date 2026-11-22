@@ -4,6 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **↑ recalls your last message.** In the field, while it is empty, ↑ puts your last message of the chat in it (the
+  caret at the end) to edit and send again; ↑ again goes further back, ↓ goes forward, and ↓ past the newest empties
+  the field. Edit the recalled text and ↑ ↓ are normal caret keys again, as they are with text typed or an input
+  method composing. Only the open chat's messages, from memory, and only their text (attachments are not recalled); a
+  new chat starts empty. The keys list's Write page has it.
 - **An html block shows its page in place.** A finished ```` ```html ```` block in an answer now shows the page it
   draws right inside the block, by default. Its header has a small **Code | Page** switch, **⤢** (opens the page in the
   separate window, as Preview did) and Copy, which copies the code on either side. A block the model fences as

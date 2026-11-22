@@ -158,6 +158,20 @@ struct QuickChatTurn: Identifiable, Equatable {
     var busy: Bool { phase == .waiting || phase == .streaming }
 }
 
+/// ↑ in the empty field: the messages of this chat that can be brought back (the ones with text, a repeat of the one
+/// before left out), and which one is in the field now. Nothing of it is kept anywhere.
+struct QCRecall: Equatable {
+    let messages: [String]
+    var index: Int
+    var shown: String { messages[index] }
+    /// The recall of a chat's questions, at the newest; nil when none has text (attachments alone are not recalled).
+    static func start(_ questions: [String]) -> QCRecall? {
+        var m: [String] = []
+        for q in questions where !q.isEmpty && q != m.last { m.append(q) }
+        return m.isEmpty ? nil : QCRecall(messages: m, index: m.count - 1)
+    }
+}
+
 /// Why a chat ended while its turns are still on screen. The conversation lived only in its `claude`, so a chat that
 /// ended is gone: the next message starts a new one.
 enum QuickChatEnd: Equatable {
@@ -495,6 +509,31 @@ final class QuickChatModel: ObservableObject {
         send()
     }
 
+    // RECALL: ↑ in an empty field puts the user's last message of this chat in it (text only: attachments are not recalled),
+    // ↑ again goes further back, ↓ forward and past the newest back to empty. Memory only: the messages are the chat's own
+    // turns (and a copy of them while a recall runs, so a chat that ended and went on screen keeps them for the next ↑).
+    /// The recall under way: the messages, which one is in the field and its text. It is over (and ↑ ↓ are the caret's)
+    /// as soon as the field's text is not what the recall put there.
+    private(set) var recall: QCRecall?
+
+    /// ↑ (`older`) or ↓ in the field: true when the key was taken. ↑ needs an empty field to start (or a recall's own text
+    /// in it); ↓ is taken only inside a recall.
+    @discardableResult
+    func recallMessage(older: Bool) -> Bool {
+        if let r = recall, r.shown == field {
+            let i = older ? max(0, r.index - 1) : r.index + 1
+            if i >= r.messages.count { recall = nil; field = ""; return true }      // past the newest: empty again
+            recall = QCRecall(messages: r.messages, index: i)
+            field = r.messages[i]
+            return true
+        }
+        recall = nil
+        guard older, field.isEmpty, let r = QCRecall.start(turns.map(\.question)) else { return false }
+        recall = r
+        field = r.shown
+        return true
+    }
+
     func send() {
         returnHeld = false
         // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
@@ -509,6 +548,7 @@ final class QuickChatModel: ObservableObject {
         guard target != nil else { barProblem = .noProfile; return }
         dictationNote = nil
         let sent = images, sentFiles = files
+        recall = nil
         field = ""
         images = []; files = []; imageNote = nil
         barProblem = nil
@@ -738,6 +778,7 @@ final class QuickChatModel: ObservableObject {
         closeProcess()
         ended = nil
         turns = []
+        recall = nil
         followTick += 1
         returnHeld = false
         sendWhenReady = false

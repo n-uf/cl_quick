@@ -1558,7 +1558,8 @@ struct QCKeysView: View {
                    ("⌘D", "Dictation on/off"),
                    ("⇧⌘C", "Copy the answer in view"),
                    ("Esc  ⌘W", "Hide"),
-                   (opener, "Open cl_quick")])]
+                   (opener, "Open cl_quick"),
+                   ("↑ (empty field)", "Your earlier messages")])]
     }
     /// All the rows, page by page.
     static func rows(opener: String) -> [(String, String)] { pages(opener: opener).flatMap(\.rows) }
@@ -2080,7 +2081,8 @@ struct QCField: View {
             QCTextField(text: $model.field, height: $height, placeholder: placeholder, size: size, focusTick: model.focusTick,
                         onSubmit: { model.submit(marked: $0) }, onEscape: { model.escape() }, onCaps: { caps = $0 },
                         onPasteImages: { model.attachFromPaste($0) }, onDropImages: { model.attachFromDrop($0) },
-                        onDragImages: { model.dropTarget = $0 }, onDeleteEmpty: { model.removeLastImage() })
+                        onDragImages: { model.dropTarget = $0 }, onDeleteEmpty: { model.removeLastImage() },
+                        onRecall: { model.recallMessage(older: $0) })
                 .frame(minHeight: height, maxHeight: grows ? .infinity : height)
                 .background(QCFieldArea().padding(EdgeInsets(top: -area.top, leading: -area.leading, bottom: -area.bottom, trailing: -area.trailing)))
                 .onChange(of: height) { _ in model.fieldChanged() }
@@ -2113,6 +2115,9 @@ struct QCTextField: NSViewRepresentable {
     var onDragImages: (Bool) -> Void = { _ in }
     /// Delete in an empty field: true when it took the last image away.
     var onDeleteEmpty: () -> Bool = { false }
+    /// ↑ (true) or ↓ (false) with no modifier and no marked text: true when the chat recalled one of the user's messages
+    /// (the field has it now), else the key is the caret's.
+    var onRecall: (Bool) -> Bool = { _ in false }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -2211,6 +2216,14 @@ struct QCTextField: NSViewRepresentable {
             case #selector(NSResponder.deleteBackward(_:)):
                 // Delete in an empty field takes the last attached image away (the field has nothing left to delete)
                 return tv.string.isEmpty && !tv.hasMarkedText() && parent.onDeleteEmpty()
+            case #selector(NSResponder.moveUp(_:)), #selector(NSResponder.moveDown(_:)):
+                // plain ↑ ↓ only (⇧ ⌥ ⌘ ⌃ arrows are other selectors); an input method's composition owns them
+                guard !tv.hasMarkedText(), parent.onRecall(sel == #selector(NSResponder.moveUp(_:))) else { return false }
+                tv.string = parent.text                                       // the recalled message, the caret after it
+                tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
+                tv.scrollRangeToVisible(tv.selectedRange())
+                edited()
+                return true
             default:
                 return false
             }

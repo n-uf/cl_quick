@@ -5313,6 +5313,9 @@ chatBehaviourChecks()
 // ── an html block's page in place (Checks/panel/inline.swift) ───────────────────────────────────────────────────────────
 inlinePageChecks()
 
+// ── the chat tools: ↑ recalls your last message (Checks/panel/toolsa.swift) ─────────────────────────────────────────────────────
+recallChecks()
+
 CheckQuiet.verify("at the end")
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so
 // a changed count is only a NOTE
