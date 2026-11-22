@@ -5,7 +5,7 @@
 >
 > **cl_quick is young and still changing. Its settings, the few files it stores and the way it talks to Claude Code are not final.**
 >
-> Version numbers are dates (YY.M.R), not semantic versions, so any release may change them, and a newer Claude Code can stop parts of cl_quick working until it is updated. cl_quick stores nothing beyond its settings and a few small files in `~/Library/Application Support/cl_quick` (levels.json, models.json, profiles.json, settings.json and updates.json) and the work folders Claude Code runs in, and it has no backups or exports. Read the [CHANGELOG](CHANGELOG.md) before you upgrade.
+> Version numbers are dates (YY.M.R), not semantic versions, so any release may change them, and a newer Claude Code can stop parts of cl_quick working until it is updated. cl_quick stores nothing beyond its settings and a few small files in `~/Library/Application Support/cl_quick` (levels.json, models.json, profiles.json, settings.json and updates.json, plus a one-time copy of profiles.json and levels.json as they were before 26.11.4's seat keys, `*.pre-26.11.4`) and the work folders Claude Code runs in, and it has no backups or exports. Read the [CHANGELOG](CHANGELOG.md) before you upgrade.
 
 A floating Claude chat for the Mac, on a shortcut. Press it over any app: a bar opens; the first message turns it into a
 chat window that stays floating, on every Space, until Esc hides it. It never brings another app forward.

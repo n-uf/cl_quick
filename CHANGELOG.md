@@ -4,6 +4,10 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **A Team seat and a personal plan on one address show as two rows,** and a chat's numbers stay on the account it
+  started on.
+- Shared account rule from cl_kit 26.11.4 (saved accounts and numbers move to seat keys in place; the files as they
+  were are kept once beside them, `profiles.json.pre-26.11.4` and `levels.json.pre-26.11.4`).
 - **Other apps can open a quick chat on a profile:** `cl-quick://chat?folder=…`.
 - **No 5-hour row where the account has none.** An account that has a week and has never had a 5-hour number (a plan
   without the 5-hour window) shows the week alone: in the bar's indicator, its hover card, the chat's header, the menu
