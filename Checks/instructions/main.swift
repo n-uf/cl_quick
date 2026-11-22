@@ -9,6 +9,7 @@
 //   - Remove cl_quick data… clears it everywhere it is held (the file goes to the Trash with the rest).
 
 import AppKit
+import ClaudeAuth
 import SwiftUI
 
 Files.readOnly = true
@@ -238,7 +239,7 @@ func fixture(_ name: String) -> Fix {
     let m = QuickChatModel()
     var tg = QuickChatTarget(Profile(id: name, name: "Main", folder: dir.appendingPathComponent("folder").path))
     tg.workFolder = dir.appendingPathComponent("work").path
-    tg.accountUUID = "u-\(name)"; tg.email = "alex@example.com"
+    tg.account = AccountKey(account: "u-\(name)"); tg.email = "alex@example.com"
     signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-\(name)", email: "alex@example.com")
     m.target = tg
     m.resolveClaude = { $0(stub) }

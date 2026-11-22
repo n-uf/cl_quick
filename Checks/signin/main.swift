@@ -1073,7 +1073,7 @@ do {
     func run(_ c: Case, uuid u: String?, email: String) -> SwitchOutcome? {
         last = c
         let before = outcomes.count
-        sw.begin(profile(c), uuid: u, email: email, origin: .settings)
+        sw.begin(profile(c), key: u.map { AccountKey(account: $0) }, email: email, origin: .settings)
         check("switch \(c.name): waiting at once (the note says switching)", sw.waiting[c.name] != nil)
         spin(until: { outcomes.count > before }, max: 20)
         return outcomes.count > before ? outcomes.last : nil
@@ -1118,7 +1118,7 @@ do {
     let retried = sw.waiting[wrong.name]
     sw.tryAgain(profile(wrong), origin: .chat)            // pressed again while it waits: nothing more
     check("retry: begins with the goal's id and address, from the folder's account now (B): a switch, not a sign-in again",
-          retried?.wantedUUID == uuid(7) && retried?.wantedEmail == "kim@example.com" && retried?.fromEmail == "bob@example.com"
+          retried?.wantedKey == AccountKey(account: uuid(7)) && retried?.wantedEmail == "kim@example.com" && retried?.fromEmail == "bob@example.com"
           && retried?.again == false && retried?.origin == .chat && sw.ended[wrong.name] == nil, "\(String(describing: retried))")
     spin(until: { outcomes.count > outcomesBeforeRetry }, max: 20)
     check("retry: …one sign-in opened, not two, and it ended on bob again (the wrong account)", outcomes.count == outcomesBeforeRetry + 1
@@ -1166,7 +1166,7 @@ do {
     let stop = Case("sw-stop", login: ["login": "hang"])
     stop.record("ann@example.com", uuid(1))
     last = stop
-    sw.begin(profile(stop), uuid: uuid(7), email: "kim@example.com", origin: .chat)
+    sw.begin(profile(stop), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .chat)
     let login = stop.waitLogin()
     sw.drop(stop.name)
     check("switch: Stop drops the note", sw.waiting[stop.name] == nil && sw.ended[stop.name] == nil)
@@ -1175,7 +1175,7 @@ do {
     let gone = Case("sw-gone", login: ["login": "ok"], make: false)
     last = gone
     let before = told.count
-    sw.begin(profile(gone), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.begin(profile(gone), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .settings)
     spin(until: { told.count > before }, max: 10)
     check("switch: a folder that isn't there: the sign-in couldn't start, said; no note left",
           told.count == before + 1 && sw.waiting[gone.name] == nil && told.last?.contains("isn't there") == true, "\(told)")
@@ -1188,7 +1188,7 @@ do {
     last = nostart
     switchGrace = 1
     let toldBefore = told.count, outcomesBefore = outcomes.count
-    sw.begin(profile(nostart), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.begin(profile(nostart), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .settings)
     spin(until: { told.count > toldBefore }, max: 10)
     spin(0.5)
     switchGrace = 10
@@ -1230,7 +1230,7 @@ do {
     let early = Case("sw-early", login: ["login": "hang"])
     last = early
     sw.findClaude = { usleep(800_000); return claude }
-    sw.begin(profile(early), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.begin(profile(early), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .settings)
     sw.drop(early.name)
     spin(2)
     check("switch: Stop before the sign-in started: none starts afterwards", early.terminal.count == 0 && sw.active == nil && sw.waiting[early.name] == nil)
@@ -1240,11 +1240,11 @@ do {
     let first = Case("sw-first", login: ["login": "hang"])
     first.record("ann@example.com", uuid(1))
     last = first
-    sw.begin(profile(first), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.begin(profile(first), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .settings)
     let firstLogin = first.waitLogin()
     let second = Case("sw-second", login: ["login": "hang"])
     last = second
-    sw.begin(profile(second), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.begin(profile(second), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .settings)
     spin(until: { sw.ended[first.name] != nil }, max: 10)
     check("switch: another profile's sign-in ends this one with its own note, not silently",
           sw.waiting[first.name] == nil && sw.ended[first.name]?.reason == .replaced && !pidAlive(firstLogin))
@@ -1282,7 +1282,7 @@ do {
     let running = Case("sw-running", login: ["login": "hang"])
     running.record("ann@example.com", uuid(1))
     last = running
-    sw.begin(profile(running), uuid: uuid(7), email: "kim@example.com", origin: .settings)
+    sw.begin(profile(running), key: AccountKey(account: uuid(7)), email: "kim@example.com", origin: .settings)
     spin(until: { running.states.contains(.waitingForBrowser) || !prefs.left(in: lateWork).isEmpty }, max: 10)
     _ = running.waitLogin()
     sweepNow()
@@ -1296,8 +1296,8 @@ do {
 // ── the words a switch ends on (the same in the chat and in Settings) ────────────────────────────────
 do {
     func goal(again: Bool = false) -> SwitchGoal {
-        SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: uuid(7), wantedEmail: "kim@example.com",
-                   fromUUID: again ? uuid(7) : uuid(1), fromEmail: "alex@example.com", origin: .settings)
+        SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedKey: AccountKey(account: uuid(7)), wantedEmail: "kim@example.com",
+                   fromKey: AccountKey(account: again ? uuid(7) : uuid(1)), fromEmail: "alex@example.com", origin: .settings)
     }
     func ended(_ r: SwitchEndReason, again: Bool = false) -> SwitchEnded { SwitchEnded(goal: goal(again: again), reason: r) }
     func line(_ e: SwitchEnded) -> String { let w = SwitchWords.ended(e); return w.lead.spoken + w.rest.spoken }
@@ -1349,16 +1349,25 @@ do {
     check("keys: a sign-in again that never came is just Sign in again; a wrong account on one is still Try again as A",
           SwitchWords.retry(ended(.timedOut, again: true)).title == "Sign in again" && SwitchWords.retry(ended(.timedOut, again: true)).address == nil
           && SwitchWords.retry(ended(.wrongAccount(signedIn: "bob@example.com", alsoOn: nil), again: true)).address == "kim@example.com")
-    // "also in use on": another profile, by id or address, never the profile itself
+    // "also in use on": another profile on maybe the same seat (the kit's one seat comparison), never the profile itself
     let main = Profile(id: "main", name: "Main", folder: "/x/main"), work = Profile(id: "work", name: "Work", folder: "/x/work")
-    let onBob: (Profile) -> (uuid: String, email: String)? = { _ in (uuid(8), "Bob@Example.com") }
-    let onWork: (Profile) -> (uuid: String, email: String)? = { $0.id == "work" ? onBob($0) : nil }
+    let onBob: (Profile) -> SignedInAccount? = { _ in
+        SignedInAccount(accountID: uuid(8), email: "Bob@Example.com", organizationID: uuid(51), organizationName: "Sample Org", origin: .record)
+    }
+    let onWork: (Profile) -> SignedInAccount? = { $0.id == "work" ? onBob($0) : nil }
+    func word(_ email: String, _ org: String? = nil) -> SignedInAccount {
+        SignedInAccount.process(org.map { ["email": email, "organization": $0] } ?? ["email": email])!
+    }
     check("also in use: the profile itself doesn't count",
-          AccountSwitcher.profileAlsoUsing(("u", "bob@example.com"), besides: "main", profiles: [main], account: onBob) == nil)
-    check("also in use: another profile on the same account (by address, in any case) is named",
-          AccountSwitcher.profileAlsoUsing((uuid(9), "bob@example.com"), besides: "main", profiles: [main, work], account: onWork) == "Work")
+          AccountSwitcher.profileAlsoUsing(word("bob@example.com"), besides: "main", profiles: [main], account: onBob) == nil)
+    check("also in use: another profile on the same account (a running claude's word: by address, in any case) is named",
+          AccountSwitcher.profileAlsoUsing(word("bob@example.com", "sample org"), besides: "main", profiles: [main, work], account: onWork) == "Work")
     check("also in use: another profile on a different account isn't",
-          AccountSwitcher.profileAlsoUsing((uuid(9), "carl@example.com"), besides: "main", profiles: [main, work], account: onWork) == nil)
+          AccountSwitcher.profileAlsoUsing(word("carl@example.com"), besides: "main", profiles: [main, work], account: onWork) == nil)
+    check("also in use: another seat on the same address (a Team seat beside a personal plan) isn't",
+          AccountSwitcher.profileAlsoUsing(word("bob@example.com", "Sample Team"), besides: "main", profiles: [main, work], account: onWork) == nil
+          && AccountSwitcher.profileAlsoUsing(SignedInAccount(accountID: uuid(8), email: "bob@example.com", organizationID: uuid(52), origin: .record),
+                                              besides: "main", profiles: [main, work], account: onWork) == nil)
 }
 
 // ── Settings' "signing in": an earlier sign-in's late end never takes the newer one's away ─────────────

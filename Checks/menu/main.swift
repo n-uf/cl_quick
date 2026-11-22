@@ -3,6 +3,7 @@
 
 import AddressPrivacy
 import AppKit
+import ClaudeAuth
 
 Files.readOnly = true
 _ = NSApplication.shared
@@ -646,10 +647,19 @@ let pa = Profile(id: "alpha", name: "Alpha", folder: folder("alpha", email: "alp
                  accounts: [KnownAccount(uuid: "ua1", email: "alpha-1@example.com"), KnownAccount(uuid: "ua2", email: "alpha-2@example.com", lastSeen: now.addingTimeInterval(-3600))])
 let pb = Profile(id: "beta", name: "Beta", folder: folder("beta", email: "beta-1@example.com", uuid: "ub1"), accounts: [KnownAccount(uuid: "ub1", email: "beta-1@example.com")])
 let store = ProfileStore.shared
+/// A level key by account id, the seat not known (the sample records name no organisation).
+func lk(_ profile: String, _ id: String, org: String? = nil) -> String { ProfileStore.levelKey(profile, AccountKey(account: id, organization: org)) }
+/// An account the numbers belong to, as the kit's numbersBelongTo names it (ids from the record).
+func owner(_ id: String, _ email: String? = nil, org: String? = nil) -> SignedInAccount {
+    SignedInAccount(accountID: id, email: email, organizationID: org, origin: .record)
+}
 store.save([pa, pb])
 store.noteAccounts()
-store.record("alpha", account: "ua2", level(five: 97, week: 97, ago: 30))         // the standby account's numbers: never kept
-check("the store: numbers for an account the folder isn't on are not recorded", store.levels[ProfileStore.levelKey("alpha", "ua2")] == nil)
+// the standby account's numbers (the kit's rule: numbers are the account's they came from): kept for it, never shown on
+// the account in use
+store.record("alpha", account: owner("ua2", "alpha-2@example.com"), level(five: 97, week: 97, ago: 30))
+check("the store: numbers for an account the folder isn't on are that account's, under its own key",
+      store.levels[lk("alpha", "ua2")]?.week == 97 && store.levels[lk("alpha", "ua1")] == nil)
 let fromStore = QCStatusMenu.infos(store)
 let alpha = fromStore.first { $0.profile.id == "alpha" }!
 check("the store: the account in use's address; the standby account is listed apart, with its own week left out", alpha.address == "alpha-1@example.com" && alpha.standby.map(\.uuid) == ["ua2"] && alpha.level == nil)
@@ -679,14 +689,14 @@ check("refresh: each profile asked once, one at a time", started == ["alpha", "b
 check("refresh: claude was looked for once", lookedFor == 1, "\(lookedFor)")
 let got = store.level(of: pa)
 check("refresh: the account in use's numbers are kept (5-hour 44%, week 12%)", got?.fiveHour == 44 && got?.week == 12 && got?.at != nil, "\(String(describing: got))")
-check("refresh: nothing was recorded for the standby account", store.levels[ProfileStore.levelKey("alpha", "ua2")] == nil)
+check("refresh: the standby account's numbers are left as they were", store.levels[lk("alpha", "ua2")]?.week == 97)
 let ctl = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
 check("refresh: Claude Code was asked for the usage, and no message went to a model", ctl.contains("CTRL get_usage") && !ctl.contains("USER "), ctl)
 check("refresh: the numbers are fresh, so the profile needs nothing more", !refresher.needs(pa, store: store))
 check("refresh: and it's tried at most every few minutes", !refresher.needs(pa, store: store, now: Date().addingTimeInterval(2 * 60)))
 // old numbers are asked for again, once the retry time has passed
 var old = got!; old.at = Date().addingTimeInterval(-10 * 60)
-store.record("alpha", account: "ua1", old)
+store.record("alpha", account: owner("ua1", "alpha-1@example.com"), old)
 check("refresh: numbers 10 minutes old need asking again, after the retry time", refresher.needs(pa, store: store, now: Date().addingTimeInterval(QCMenuUsageRefresher.retryAfter + 1)))
 check("refresh: but not before it", !refresher.needs(pa, store: store, now: Date().addingTimeInterval(60)))
 // a `claude` that can't be found starts nothing and leaves nothing waiting
@@ -742,8 +752,8 @@ do {
     let pg = Profile(id: "gamma", name: "Gamma", folder: dir,
                      accounts: [KnownAccount(uuid: "ug-a", email: "gamma-a@example.com"), KnownAccount(uuid: "ug-b", email: "gamma-b@example.com")])
     store.save([pg])
-    store.record("gamma", account: "ug-a", level(five: nil, week: 100, ago: 30))
-    check("switched: A's full week is recorded while A is in use", store.levels[ProfileStore.levelKey("gamma", "ug-a")]?.week == 100)
+    store.record("gamma", account: owner("ug-a", "gamma-a@example.com"), level(five: nil, week: 100, ago: 30))
+    check("switched: A's full week is recorded while A is in use", store.levels[lk("gamma", "ug-a")]?.week == 100)
     var writes = 0.0
     func signIn(_ email: String, _ uuid: String) {
         let json = #"{"oauthAccount":{"emailAddress":"\#(email)","accountUuid":"\#(uuid)"}}"#
@@ -789,12 +799,12 @@ do {
     spin(until: { !rEnded.isEmpty })
     let got = QCStatusMenu.info(pg, store)
     check("switched: B's own numbers come and are kept under B; A's stay A's",
-          got.level?.week == 12 && store.levels[ProfileStore.levelKey("gamma", "ug-b")]?.week == 12
-          && store.levels[ProfileStore.levelKey("gamma", "ug-a")]?.week == 100, "\(String(describing: got.level))")
+          got.level?.week == 12 && store.levels[lk("gamma", "ug-b")]?.week == 12
+          && store.levels[lk("gamma", "ug-a")]?.week == 100, "\(String(describing: got.level))")
 
     // B's numbers 10 minutes old: the menu asks again (each ask below starts a `claude`, checked)
-    var oldB = store.levels[ProfileStore.levelKey("gamma", "ug-b")]!; oldB.at = Date().addingTimeInterval(-10 * 60)
-    store.record("gamma", account: "ug-b", oldB)
+    var oldB = store.levels[lk("gamma", "ug-b")]!; oldB.at = Date().addingTimeInterval(-10 * 60)
+    store.record("gamma", account: owner("ug-b", "gamma-b@example.com"), oldB)
     func ask(_ settings: String, during: (() -> Void)? = nil) -> Bool {
         try? (settings + "args=\(argsFile)\n").write(toFile: conf, atomically: true, encoding: .utf8)
         let q = QCMenuUsageRefresher()
@@ -807,20 +817,62 @@ do {
         spin(until: { !ended.isEmpty })
         return began == 1 && ended == ["gamma"]
     }
-    // a get_usage answer that arrives after the folder moved again (back to A) is B's: dropped, not put on A
-    let aBefore = store.levels[ProfileStore.levelKey("gamma", "ug-a")]
+    // a get_usage answer that arrives after the folder moved again (back to A) is B's (the process said it is B as it
+    // started on B): kept for B, never put on A (the kit's rule: numbers belong to the account they came from)
+    let aBefore = store.levels[lk("gamma", "ug-a")]
     let asked = ask("mode=ok\nusagedelay=2\n") { signIn("gamma-a@example.com", "ug-a") }
-    check("switched: an answer that comes after the folder moved is dropped (neither A's nor B's numbers change)",
-          asked && store.levels[ProfileStore.levelKey("gamma", "ug-a")] == aBefore && store.levels[ProfileStore.levelKey("gamma", "ug-b")] == oldB)
-    // a process that says it is another account than the folder's: its numbers are dropped
+    let bAfter = store.levels[lk("gamma", "ug-b")]
+    check("switched: an answer that comes after the folder moved stays the process's account's (B's, fresh), never A's",
+          asked && store.levels[lk("gamma", "ug-a")] == aBefore && bAfter?.week == 12 && (bAfter?.at ?? .distantPast) > (oldB.at ?? .distantPast),
+          "\(String(describing: bAfter))")
+    // a process that says it is another account than the folder's: its numbers are that account's, never B's
     signIn("gamma-b@example.com", "ug-b")
     let askedOther = ask("mode=ok\naccount=someone-else@example.com\n")
-    check("switched: a process that says it is someone else has its numbers dropped", askedOther && store.levels[ProfileStore.levelKey("gamma", "ug-b")] == oldB)
+    check("switched: a process that says it is someone else never puts its numbers on B", askedOther && store.levels[lk("gamma", "ug-b")] == bAfter)
+    check("switched: …they are kept for that account, under its address until its id is known",
+          store.levels[ProfileStore.levelKey("gamma", AccountKey(account: "email:someone-else@example.com"))]?.week == 12)
     // rate_limits null (Claude Code's usage endpoint gave nothing): nothing kept, the numbers stay as old as they were
+    var staleB = bAfter!; staleB.at = Date().addingTimeInterval(-10 * 60)
+    store.record("gamma", account: owner("ug-b", "gamma-b@example.com"), staleB)
     let askedNull = ask("mode=ok\nusage=null\n")
-    check("switched: rate_limits null keeps nothing and makes nothing fresh", askedNull && store.levels[ProfileStore.levelKey("gamma", "ug-b")] == oldB)
+    check("switched: rate_limits null keeps nothing and makes nothing fresh", askedNull && store.levels[lk("gamma", "ug-b")] == staleB)
     check("switched: so the menu asks again once the retry time has passed", QCMenuUsageRefresher().needs(pg, store: store))
     try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
+}
+
+// ── a personal plan and a Team seat on one sample address: two seats, two rows, two weeks ───────────────────────────────
+do {
+    let dir = home + "/.claude-seats"
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    func on(_ org: String, _ name: String) {
+        let json = #"{"oauthAccount":{"emailAddress":"wu@example.com","accountUuid":"uw-1","organizationUuid":"\#(org)","organizationName":"\#(name)"}}"#
+        try? json.write(toFile: dir + "/.claude.json", atomically: true, encoding: .utf8)
+    }
+    on("org-personal", "wu@example.com's Organization")
+    let ps = Profile(id: "seats", name: "Seats", folder: dir,
+                     accounts: [KnownAccount(uuid: "uw-1", organization: "org-personal", email: "wu@example.com", lastSeen: now.addingTimeInterval(-60)),
+                                KnownAccount(uuid: "uw-1", organization: "org-team", email: "wu@example.com", lastSeen: now.addingTimeInterval(-7200))])
+    store.save([ps])
+    let personal = owner("uw-1", "wu@example.com", org: "org-personal"), team = owner("uw-1", "wu@example.com", org: "org-team")
+    store.record("seats", account: personal, level(five: 10, week: 20, ago: 30))
+    store.record("seats", account: team, level(five: 90, week: 95, ago: 30))
+    let info = QCStatusMenu.info(ps, store)
+    check("seats: the personal plan in use, the Team seat on standby: two rows on one address",
+          info.address == "wu@example.com" && info.standby.count == 1 && info.standby.first?.organization == "org-team", "\(info.standby)")
+    check("seats: the in-use row shows the personal plan's own week, never the Team seat's",
+          info.level?.week == 20 && store.levels[lk("seats", "uw-1", org: "org-team")]?.week == 95, "\(String(describing: info.level))")
+    let rows = QCStatusMenu.items([info], now: now, switching: { _ in false }, switchTo: { _, _ in }) { _ in }
+    let standbyRows = rows.compactMap { $0.view as? QCStandbyMenuRow }
+    check("seats: the menu draws the Team seat as its own standby row", standbyRows.count == 1 && standbyRows.first?.address == "wu@example.com",
+          "\(standbyRows.map(\.address))")
+    on("org-team", "Sample Team")                 // the Team seat signed in (no reload asked: the next look sees it)
+    let teamInfo = QCStatusMenu.info(ps, store)
+    check("seats: once the Team seat is in use its week shows, and the personal plan stands by",
+          teamInfo.level?.week == 95 && teamInfo.standby.first?.organization == "org-personal", "\(String(describing: teamInfo.level)) \(teamInfo.standby)")
+    let goal = SwitchGoal(profileID: "seats", profileName: "Seats", folder: dir, wantedKey: info.standby.first?.key, wantedEmail: "wu@example.com",
+                          fromKey: AccountKey(account: "uw-1", organization: "org-personal"), fromEmail: "wu@example.com", origin: .settings)
+    check("seats: a switch to the Team seat wants that seat (its organisation), and isn't a sign-in again",
+          goal.wanted.organizationID == "org-team" && goal.wanted.accountID == "uw-1" && !goal.again)
 }
 
 // ── cl-quick://chat?folder=… (Sources/OpenURL.swift): only picks a profile, by the folder's path as a string ────────────

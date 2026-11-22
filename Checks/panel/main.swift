@@ -37,7 +37,7 @@ ProfileStore.shared.save([Profile(id: "main", name: "Main", folder: sampleFolder
 var sampleLevel = QuickChatLevel()
 sampleLevel.week = 12; sampleLevel.weekResets = Date().addingTimeInterval(4 * 86400)
 sampleLevel.fiveHour = 44; sampleLevel.fiveHourResets = Date().addingTimeInterval(3600); sampleLevel.at = Date()
-ProfileStore.shared.record("main", account: sampleAccount, sampleLevel)
+ProfileStore.shared.record("main", account: SignedInAccount(accountID: sampleAccount, email: "ultra-1@example.com", origin: .record), sampleLevel)
 QCDictation.inputSource = { _ in nil }
 // no real `claude`: opening the panel would start one on the user's own profile (QuickChatModel.warm) and ask its usage
 chat.model.resolveClaude = { $0(nil) }
@@ -76,7 +76,8 @@ func spinQuiet(_ window: NSWindow, turns: Int = 15, ceiling: TimeInterval = 20) 
     return quiet >= turns
 }
 /// A sample Claude Code folder signed in to a sample account: a chat's `claude` reports (and goes on) only while the folder
-/// is on the account it is (AccountTrail.owner), so a chat on the stand-in needs its folder signed in like a real one.
+/// is on the account it is (AccountBook.processOn, the kit's ProcessTrail), so a chat on the stand-in needs its folder
+/// signed in like a real one.
 func signedInFolder(_ folder: URL, uuid: String, email: String) {
     try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     try? Data(#"{"oauthAccount":{"accountUuid":"\#(uuid)","emailAddress":"\#(email)"}}"#.utf8).write(to: folder.appendingPathComponent(".claude.json"))
@@ -132,7 +133,7 @@ do {
     func settled() { spinUntil(30) { sw.active == nil && sw.waiting[profile.id] == nil }; spin(0.3) }
     func endedNote(_ why: String) {
         sw.drop(profile.id); settled()
-        sw.begin(profile, uuid: "00000000-0000-4000-8000-0000000000b2", email: "kim@example.com", origin: .chat)
+        sw.begin(profile, key: AccountKey(account: "00000000-0000-4000-8000-0000000000b2"), email: "kim@example.com", origin: .chat)
         check("retry keys (\(why)): a switch is begun and ends on its timeout, leaving its note",
               spinUntil(30) { sw.ended[profile.id] != nil } && sw.waiting[profile.id] == nil, state())
         settled()
@@ -146,7 +147,7 @@ do {
         check("retry keys (\(who)): once pressed: the same switch waits, one entry, its note taken", first != nil && sw.waiting[profile.id] == first
               && sw.waiting.count == 1 && sw.ended[profile.id] == nil, "\(String(describing: first)) \(sw.waiting)")
         check("retry keys (\(who)): …begun from the ended switch's goal, for this key's own origin", first.map {
-            $0.wantedEmail == "kim@example.com" && $0.wantedUUID == "00000000-0000-4000-8000-0000000000b2" && $0.origin == origin } == true, "\(String(describing: first))")
+            $0.wantedEmail == "kim@example.com" && $0.wantedKey == AccountKey(account: "00000000-0000-4000-8000-0000000000b2") && $0.origin == origin } == true, "\(String(describing: first))")
         // the open comes from the sign-in's own queue: wait for it, then a moment more to see that no second one follows
         spinUntil(30) { lock.lock(); defer { lock.unlock() }; return opens > o0 }; spin(0.4)
         lock.lock(); let (f, m, o) = (finds - f0, makes - m0, opens - o0); lock.unlock()
@@ -162,7 +163,7 @@ do {
     press("Settings", origin: .settings) {
         // the page hands its key the goal of the note it draws; with no note, a goal of nobody
         let goal = sw.ended[profile.id]?.goal ?? SwitchGoal(profileID: profile.id, profileName: profile.name, folder: profile.path,
-                                                            wantedUUID: nil, wantedEmail: "nobody@example.com", fromUUID: nil, fromEmail: nil, origin: .settings)
+                                                            wantedKey: nil, wantedEmail: "nobody@example.com", fromKey: nil, fromEmail: nil, origin: .settings)
         ProfilePage(state: SettingsState(), store: ProfileStore.shared, profile: profile).actions.retry(goal)
     }
     sw.drop(profile.id); settled()
@@ -955,7 +956,7 @@ do {
                   AccountSwitcher.shared.waiting["main"]?.origin == .settings, "\(String(describing: AccountSwitcher.shared.waiting["main"]?.origin))")
             spinUntil(5) { AccountSwitcher.shared.waiting["main"] == nil }          // nothing to run: it drops itself
             AccountSwitcher.shared.drop("main")
-            chat.model.switchTo(QuickChatSwitchOffer(uuid: "u2", email: "alex.studio@example.com"))
+            chat.model.switchTo(QuickChatSwitchOffer(key: AccountKey(account: "u2"), email: "alex.studio@example.com"))
             check("accounts: …and the limit-full 'Switch to X…' offer stays a chat-origin switch",
                   AccountSwitcher.shared.waiting["main"]?.origin == .chat, "\(String(describing: AccountSwitcher.shared.waiting["main"]?.origin))")
             spinUntil(5) { AccountSwitcher.shared.waiting["main"] == nil }
@@ -969,12 +970,12 @@ do {
             AccountSwitcher.shared.findClaude = { nil }; AccountSwitcher.tell = { _ in }
             var began = false
             AccountSwitcher.runAlert = { _ in
-                if !began { began = true; AccountSwitcher.shared.begin(mainP, uuid: "u3", email: "alex.old@example.org", origin: .settings) }
+                if !began { began = true; AccountSwitcher.shared.begin(mainP, key: AccountKey(account: "u3"), email: "alex.old@example.org", origin: .settings) }
                 return .alertFirstButtonReturn
             }
-            AccountSwitcher.shared.confirmAndSwitch(mainP, uuid: "u2", email: "alex.studio@example.com", origin: .chat)
+            AccountSwitcher.shared.confirmAndSwitch(mainP, key: AccountKey(account: "u2"), email: "alex.studio@example.com", origin: .chat)
             check("accounts: a switch begun while the question was open is kept (the answer doesn't start a second one over it)",
-                  AccountSwitcher.shared.waiting["main"]?.wantedUUID == "u3" && AccountSwitcher.shared.waiting["main"]?.origin == .settings)
+                  AccountSwitcher.shared.waiting["main"]?.wantedKey == AccountKey(account: "u3") && AccountSwitcher.shared.waiting["main"]?.origin == .settings)
             spinUntil(5) { AccountSwitcher.shared.waiting["main"] == nil }
             AccountSwitcher.shared.drop("main")
             AccountSwitcher.runAlert = keepAlert
@@ -1038,8 +1039,8 @@ do {
 
     // ── the chat's waiting note: its × only hides it; the sign-in keeps waiting ──────────────────────────────
     do {
-        let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude-sample", wantedUUID: "u2", wantedEmail: "kim@example.org",
-                              fromUUID: "u1", fromEmail: "alex@example.com", origin: .chat)
+        let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude-sample", wantedKey: AccountKey(account: "u2"), wantedEmail: "kim@example.org",
+                              fromKey: AccountKey(account: "u1"), fromEmail: "alex@example.com", origin: .chat)
         let waitingNote = QuickChatSwitchNotice.waiting(wanted: "kim@example.org")
         let m = QuickChatModel()
         var dropped = 0
@@ -1103,7 +1104,8 @@ do {
         m.accountNote = line
         m.update(target: nil, level: nil, offer: nil, notice: .waiting(wanted: "lee@example.com"))
         check("stale line: another switch begun over a waiting one clears it too", m.accountNote == nil)
-        let g = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude-sample", wantedUUID: "u2", wantedEmail: "kim@example.org", fromUUID: "u1", fromEmail: "a@example.com", origin: .chat)
+        let g = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude-sample", wantedKey: AccountKey(account: "u2"), wantedEmail: "kim@example.org",
+                           fromKey: AccountKey(account: "u1"), fromEmail: "a@example.com", origin: .chat)
         m.accountNote = line
         m.update(target: nil, level: nil, offer: nil, notice: .ended(SwitchEnded(goal: g, reason: .declined)))
         check("stale line: a switch that ended (its note shows) does not clear a line that is there", m.accountNote != nil)
@@ -1158,8 +1160,8 @@ do {
     // the switch notes in Settings (waiting for the sign-in, and a wrong account with its keys) blur their addresses like the
     // chat's: with the blur on they are less sharp than with it off, and as wide and as high
     do {
-        let g = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2", wantedEmail: "kim@example.org",
-                           fromUUID: "u1", fromEmail: "alex@example.com", origin: .settings)
+        let g = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedKey: AccountKey(account: "u2"), wantedEmail: "kim@example.org",
+                           fromKey: AccountKey(account: "u1"), fromEmail: "alex@example.com", origin: .settings)
         func look(_ v: SwitchNotice) -> (size: CGSize, edges: Double) {
             MainActor.assumeIsolated {
                 let r = ImageRenderer(content: v.face(.std).frame(width: 520).background(Color.black))
@@ -1292,7 +1294,7 @@ do {
     let keepAlert = AccountSwitcher.runAlert
     var asked = 0
     AccountSwitcher.runAlert = { _ in asked += 1; return .alertSecondButtonReturn }
-    AccountSwitcher.shared.confirmAndSwitch(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), uuid: "u2", email: a, origin: .chat)
+    AccountSwitcher.shared.confirmAndSwitch(Profile(id: "main", name: "Main", folder: "~/.claude-sample"), key: AccountKey(account: "u2"), email: a, origin: .chat)
     AccountSwitcher.runAlert = keepAlert
     gate.sync(AddressPrivacy.shared.hoverEnded)
     check("hover: the switch question closed (Cancel) ends a hover and begins no switch",
@@ -1860,7 +1862,7 @@ do {
     t.workFolder = dir.appendingPathComponent("work").path
     m.target = t
     m.resolveClaude = { $0(stub) }
-    var recorded: (String, String, QuickChatLevel)?
+    var recorded: (String, SignedInAccount, QuickChatLevel)?
     m.levelReported = { id, account, l in recorded = (id, account, l) }
     // what the bar showed before: the account's level from its last time in use, the week alone
     var old = QuickChatLevel(); old.week = 53; old.weekResets = Date().addingTimeInterval(3 * 86400); old.at = Date().addingTimeInterval(-86400)
@@ -1874,15 +1876,16 @@ do {
     check("live usage: the answer replaced the older level", m.level?.weekNow() == 12 && m.level?.fiveHourNow() == 44, "\(String(describing: m.level))")
     check("live usage: the 5-hour number shows with its reset", m.level?.fiveHourResets != nil && m.level?.binding() != nil)
     check("live usage: the view was told", drawn > 0)
-    check("live usage: kept for that profile and account", recorded?.0 == "usage-check" && recorded?.1 == "u-check" && recorded?.2.week == 12)
+    check("live usage: kept for that profile and account (the process's word, with the record's id)",
+          recorded?.0 == "usage-check" && recorded?.1.accountID == "u-check" && recorded?.1.email == "alex@example.com" && recorded?.2.week == 12)
     watch.cancel()
     m.shutdown()
     try? FileManager.default.removeItem(at: dir)
 }
 
 // the account changed outside cl_quick while a get_usage answer was on its way (sample accounts, example.com): the answer
-// is the old account's, so it is dropped, never put on the account the folder is on now; and a process that says it is
-// another account than the folder's has its numbers dropped too
+// is the old account's, so it is kept for it (the kit's numbersBelongTo), never put on the account the folder is on now;
+// and a process that says it is another account than the folder's has its numbers kept for that account, never the folder's
 do {
     let stub = ProcessInfo.processInfo.environment["QC_STUB_PATH"] ?? ""
     let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("switch-check")
@@ -1895,7 +1898,7 @@ do {
     }
     /// `ceiling`: how long to wait for an answer that is expected (the wait ends as soon as it comes); an answer expected NOT to
     /// come waits the short one out.
-    func attempt(conf: String, switchMidway: Bool, ceiling: TimeInterval = 5) -> (recorded: [(String, QuickChatLevel)], level: QuickChatLevel?) {
+    func attempt(conf: String, switchMidway: Bool, ceiling: TimeInterval = 5) -> (recorded: [(SignedInAccount, QuickChatLevel)], level: QuickChatLevel?) {
         signIn("u-a", "alex@example.com")
         // the stand-in logs each control request it gets to <args>.ctl, the moment it gets it (before any usagedelay)
         let args = dir.appendingPathComponent("args.txt").path
@@ -1906,7 +1909,7 @@ do {
         t.workFolder = dir.appendingPathComponent("work").path
         m.target = t
         m.resolveClaude = { $0(stub) }
-        var recorded: [(String, QuickChatLevel)] = []
+        var recorded: [(SignedInAccount, QuickChatLevel)] = []
         m.levelReported = { _, account, l in recorded.append((account, l)) }
         m.warm()
         if switchMidway {
@@ -1921,14 +1924,15 @@ do {
         m.shutdown()
         return (recorded, l)
     }
-    let late = attempt(conf: "usagedelay=2\n", switchMidway: true)
-    check("switch: a get_usage answer that arrives after the folder moved to another account is dropped",
-          late.recorded.isEmpty && late.level == nil, "\(late.recorded.map(\.0))")
+    let late = attempt(conf: "usagedelay=2\n", switchMidway: true, ceiling: 20)
+    check("switch: a get_usage answer that arrives after the folder moved to another account stays the old account's, never the new one's",
+          late.recorded.map { $0.0.accountID } == ["u-a"], "\(late.recorded.map(\.0))")
     let same = attempt(conf: "usagedelay=1\n", switchMidway: false, ceiling: 40)
-    check("switch: the same wait with no switch is kept, for the account in use", same.recorded.map(\.0) == ["u-a"] && same.level?.week == 12,
+    check("switch: the same wait with no switch is kept, for the account in use", same.recorded.map { $0.0.accountID } == ["u-a"] && same.level?.week == 12,
           "\(same.recorded.map(\.0))")
-    let other = attempt(conf: "account=casey@example.com\n", switchMidway: false)
-    check("switch: a process that says it is another account than the folder's has its numbers dropped", other.recorded.isEmpty && other.level == nil,
+    let other = attempt(conf: "account=casey@example.com\n", switchMidway: false, ceiling: 20)
+    check("switch: a process that says it is another account than the folder's: its numbers are that account's, never the folder's, nor the bar's",
+          other.recorded.map { $0.0.email } == ["casey@example.com"] && other.recorded.allSatisfy { $0.0.accountID == nil } && other.level == nil,
           "\(other.recorded.map(\.0))")
     let empty = attempt(conf: "usage=null\n", switchMidway: false)
     check("switch: get_usage with rate_limits null records nothing", empty.recorded.isEmpty && empty.level == nil)
@@ -1954,19 +1958,23 @@ do {
     var full = QuickChatLevel(); full.week = 100; full.weekResets = Date().addingTimeInterval(4 * 86400); full.refusedUntil = full.weekResets
     full.at = Date()
     signIn("u-a", "alex@example.com", ago: 60)
-    store.record("truth", account: "u-a", full)                   // A's week, full, recorded while A was in use
-    check("truth: A's full week is recorded while A is in use", store.levels[ProfileStore.levelKey("truth", "u-a")]?.week == 100)
+    let accountA = SignedInAccount(accountID: "u-a", email: "alex@example.com", origin: .record)
+    let accountB = SignedInAccount(accountID: "u-b", email: "blake@example.com", origin: .record)
+    func weekKey(_ id: String) -> String { ProfileStore.levelKey("truth", AccountKey(account: id)) }
+    store.record("truth", account: accountA, full)                   // A's week, full, recorded while A was in use
+    check("truth: A's full week is recorded while A is in use", store.levels[weekKey("u-a")]?.week == 100)
     signIn("u-b", "blake@example.com", ago: 10)                     // outside cl_quick: no reload asked
     chat.open(profile: "truth"); spin(0.3)
-    check("truth: the bar is on B, the account the folder is on now", chat.model.target?.accountUUID == "u-b" && chat.model.target?.email == "blake@example.com",
+    check("truth: the bar is on B, the account the folder is on now", chat.model.target?.account == AccountKey(account: "u-b") && chat.model.target?.email == "blake@example.com",
           "\(String(describing: chat.model.target))")
     check("truth: the bar has no numbers for B (A's week is A's), nothing full, no notice, no switch offer",
           chat.model.level == nil && !chat.model.blocked && chat.model.switchOffer == nil && chat.model.offer == nil, "\(String(describing: chat.model.level))")
-    check("truth: a number for A isn't recorded while the folder is on B", {
-        var l = full; l.week = 50; store.record("truth", account: "u-a", l); return store.levels[ProfileStore.levelKey("truth", "u-a")]?.week == 100 }())
+    check("truth: a number that belongs to A is kept for A while the folder is on B, never put on B", {
+        var l = full; l.week = 50; store.record("truth", account: accountA, l)
+        return store.levels[weekKey("u-a")]?.week == 50 && store.levels[weekKey("u-b")] == nil && chat.model.level == nil }())
     // B's own full week, but a day old (B's last time in use; a plan raised since): last known, not now
     var old = full; old.at = Date().addingTimeInterval(-28 * 3600)
-    store.record("truth", account: "u-b", old)
+    store.record("truth", account: accountB, old)
     chat.refresh(); spin(0.2)
     check("truth: B's day-old full week draws nothing full and offers nothing", chat.model.level == nil && !chat.model.blocked && chat.model.switchOffer == nil)
     let menu = QCStatusMenu.info(truth, store)
@@ -1977,9 +1985,9 @@ do {
             && block.lines.contains("Last known yesterday"), "\(block.lines)")
     // B's week, fresh and full: now it is the account's state, and the notice and the standby offer (no numbers) come
     var now = full; now.at = Date()
-    store.record("truth", account: "u-b", now)
+    store.record("truth", account: accountB, now)
     chat.refresh(); spin(0.2)
-    check("truth: B's fresh full week is drawn full, with A offered on standby", chat.model.blocked && chat.model.switchOffer?.uuid == "u-a",
+    check("truth: B's fresh full week is drawn full, with A offered on standby", chat.model.blocked && chat.model.switchOffer?.key == AccountKey(account: "u-a"),
           "\(String(describing: chat.model.switchOffer))")
     chat.hide(); chat.model.newChat()
     store.remove("truth")                                           // its weeks go with it
@@ -2626,7 +2634,7 @@ do {
     // a real answer from the stand-in `claude`
     var t = QuickChatTarget(Profile(id: "copy-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
     t.workFolder = dir.appendingPathComponent("work").path
-    t.accountUUID = "u-copy"; t.email = "alex@example.com"
+    t.account = AccountKey(account: "u-copy"); t.email = "alex@example.com"
     signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-copy", email: "alex@example.com")
     // (a chat model of its own talks to the stand-in; its finished turn is then put on the panel's model, which the keys reach)
     let s = QuickChatModel()
@@ -2882,7 +2890,7 @@ do {
     let m = QuickChatModel()
     var tg = QuickChatTarget(Profile(id: "images-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
     tg.workFolder = dir.appendingPathComponent("work").path
-    tg.accountUUID = "u-images"; tg.email = "alex@example.com"
+    tg.account = AccountKey(account: "u-images"); tg.email = "alex@example.com"
     signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-images", email: "alex@example.com")
     m.target = tg
     m.resolveClaude = { $0(stub) }
@@ -2998,7 +3006,7 @@ func imageFixChat(_ name: String, conf: String = "", mode: String = "ok") -> Ima
     let m = QuickChatModel()
     var tg = QuickChatTarget(Profile(id: name, name: "Main", folder: dir.appendingPathComponent("folder").path))
     tg.workFolder = dir.appendingPathComponent("work").path
-    tg.accountUUID = "u-\(name)"; tg.email = "alex@example.com"
+    tg.account = AccountKey(account: "u-\(name)"); tg.email = "alex@example.com"
     signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-\(name)", email: "alex@example.com")
     m.target = tg
     m.resolveClaude = { $0(stub) }
@@ -4687,7 +4695,7 @@ func chatScrollChecks() {
         let s = QuickChatModel()
         var tg = QuickChatTarget(Profile(id: "scroll-check", name: "Main", folder: dir.appendingPathComponent("folder").path))
         tg.workFolder = dir.appendingPathComponent("work").path
-        tg.accountUUID = "u-scroll"; tg.email = "alex@example.com"
+        tg.account = AccountKey(account: "u-scroll"); tg.email = "alex@example.com"
         signedInFolder(dir.appendingPathComponent("folder"), uuid: "u-scroll", email: "alex@example.com")
         s.target = tg
         s.resolveClaude = { $0(stub) }

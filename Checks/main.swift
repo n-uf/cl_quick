@@ -1,5 +1,6 @@
 // Checks for the quick chat's engine and Markdown (Checks/run.sh). Sample data only.
 
+import ClaudeAuth
 import Foundation
 
 var passed = 0, failed = 0
@@ -708,15 +709,17 @@ let initLine = #"{"type":"control_response","response":{"subtype":"success","req
 let ml: [QuickChatModelEntry] = { if case .models(let l, _) = QuickChatParse.event(line(initLine)) { return l }; return [] }()
 check("models: parsed, entries without a value left out", ml.count == 8, ml)
 // who the process is: the `account` of the same answer, shaped as Claude Code 2.1.318 gives it (sample values)
-func identity(_ account: String) -> ProcessIdentity? {
+func identity(_ account: String) -> [String: String]? {
     let l = #"{"type":"control_response","response":{"subtype":"success","request_id":"qc-1","response":{"models":[]"# + account + "}}}"
     if case .models(_, let who) = QuickChatParse.event(line(l)) { return who }; return nil
 }
-check("identity: initialize's account gives the address and organization",
+check("identity: initialize's account gives the address and organization, named fields only",
       identity(#","account":{"email":"ultra-1@example.com","organization":"ultra-1@example.com's Organization","subscriptionType":"Claude Ultra","apiProvider":"firstParty"}"#)
-      == ProcessIdentity(email: "ultra-1@example.com", organization: "ultra-1@example.com's Organization"))
-check("identity: no account (a key or a token) says no one", identity("") == ProcessIdentity(email: nil, organization: nil))
-check("identity: an empty address is no one", identity(#","account":{"email":""}"#) == ProcessIdentity(email: nil, organization: nil))
+      == ["email": "ultra-1@example.com", "organization": "ultra-1@example.com's Organization"])
+check("identity: …as the kit's process word (verified, no ids)", identity(#","account":{"email":"ultra-1@example.com","organization":"Org A"}"#).flatMap { SignedInAccount.process($0) }
+      == SignedInAccount(email: "ultra-1@example.com", organizationName: "Org A", origin: .process))
+check("identity: no account (a key or a token) says no one", identity("") == [:] && SignedInAccount.process(identity("")) == nil)
+check("identity: an empty address is no one", identity(#","account":{"email":""}"#) == [:] && SignedInAccount.process(identity(#","account":{"email":""}"#)) == nil)
 // get_usage as 2.1.318 answers when its usage endpoint gave nothing (observed on a signed-in folder): no numbers
 check("usage: rate_limits null is available with no windows (nothing to take)",
       usageEvent(#"{"session":{"total_cost_usd":0},"subscription_type":"max","rate_limits_available":true,"rate_limits":null,"behaviors":null}"#)
@@ -907,25 +910,134 @@ check("a missing claude can't be interrupted or told a model", missing.interrupt
 
 do {
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    /// A record as Claude Code writes it (guessed), with sample values.
+    func rec(_ id: String?, _ email: String?, org: String? = nil, orgName: String? = nil) -> SignedInAccount {
+        SignedInAccount(accountID: id, email: email, organizationID: org, organizationName: orgName, origin: .record)
+    }
+    func key(_ a: String, _ o: String? = nil) -> AccountKey { AccountKey(account: a, organization: o) }
     var list: [KnownAccount] = []
-    AccountBook.note(&list, uuid: "u1", email: "ultra-1@example.com", now: t0)
+    AccountBook.note(&list, rec("u1", "ultra-1@example.com"), now: t0)
     check("accounts: the first is added", list.count == 1 && list[0].uuid == "u1")
     check("accounts: the same one within the hour changes nothing",
-          AccountBook.note(&list, uuid: "u1", email: "ultra-1@example.com", now: t0.addingTimeInterval(600)).changed == false)
+          AccountBook.note(&list, rec("u1", "ultra-1@example.com"), now: t0.addingTimeInterval(600)).changed == false)
     check("accounts: after the hour its time moves",
-          AccountBook.note(&list, uuid: "u1", email: "ultra-1@example.com", now: t0.addingTimeInterval(7200)).changed && list.count == 1)
-    AccountBook.note(&list, uuid: "u2", email: "ultra-2@example.com", now: t0)
+          AccountBook.note(&list, rec("u1", "ultra-1@example.com"), now: t0.addingTimeInterval(7200)).changed && list.count == 1)
+    AccountBook.note(&list, rec("u2", "ultra-2@example.com"), now: t0)
     check("accounts: another uuid is another account", list.count == 2)
     // the same address under another uuid (a second organization) is not the first account
-    AccountBook.note(&list, uuid: "u3", email: "ultra-1@example.com", now: t0)
+    AccountBook.note(&list, rec("u3", "ultra-1@example.com"), now: t0)
     check("accounts: one address under two uuids stays two accounts", list.count == 3 && list.filter { $0.email == "ultra-1@example.com" }.count == 2, list)
-    // a file that had no accountUuid and now has one: the placeholder becomes the real uuid
+    // a file that had no accountUuid and now has one: the placeholder becomes the real uuid (the kit's AccountKey upgrade)
     var old = [KnownAccount(uuid: "email:ultra-4@example.com", email: "Ultra-4@example.com", lastSeen: t0)]
-    let r = AccountBook.note(&old, uuid: "u4", email: "ultra-4@example.com", now: t0)
-    check("accounts: a placeholder uuid is replaced by the real one", old.count == 1 && old[0].uuid == "u4" && r.replaced == "email:ultra-4@example.com", old)
+    let r = AccountBook.note(&old, rec("u4", "ultra-4@example.com"), now: t0)
+    check("accounts: a placeholder uuid is replaced by the real one", old.count == 1 && old[0].uuid == "u4" && r.replaced == key("email:ultra-4@example.com"), old)
     check("accounts: a real uuid is never found by its address", { var l = [KnownAccount(uuid: "u5", email: "ultra-5@example.com")]
-        AccountBook.note(&l, uuid: "email:ultra-5@example.com", email: "ultra-5@example.com"); return l.count == 2 }())
-    check("accounts: week key", AccountBook.levelKey("main", "u1") == "main|u1")
+        AccountBook.note(&l, rec(nil, "ultra-5@example.com")); return l.count == 2 }())
+    check("accounts: a record with an id and no address is signed in (D1), noted by its id", { var l: [KnownAccount] = []
+        AccountBook.note(&l, rec("u6", nil)); return l.count == 1 && l[0].uuid == "u6" && l[0].email.isEmpty }())
+    check("accounts: week key, the seat not known as older builds wrote it", AccountBook.levelKey("main", key("u1")) == "main|u1")
+    check("accounts: week key of a seat", AccountBook.levelKey("main", key("u1", "org-1")) == "main|u1|org-1"
+          && AccountBook.parseLevelKey("main|u1|org-1").map { $0.profile == "main" && $0.key == key("u1", "org-1") } == true
+          && AccountBook.parseLevelKey("main") == nil)
+
+    // a personal plan and a Team seat on one sample address (one account id): two seats, two entries, two weeks
+    do {
+        let personal = rec("uw-1", "wu@example.com", org: "org-personal", orgName: "wu@example.com's Organization")
+        let team = rec("uw-1", "wu@example.com", org: "org-team", orgName: "Sample Team")
+        var seats: [KnownAccount] = []
+        AccountBook.note(&seats, personal, now: t0)
+        AccountBook.note(&seats, team, now: t0.addingTimeInterval(60))
+        check("seats: a personal plan and a Team seat on one address are two entries", seats.count == 2
+              && Set(seats.map(\.key)) == [key("uw-1", "org-personal"), key("uw-1", "org-team")], seats)
+        check("seats: in use, each is its own entry (never the other seat's)",
+              AccountBook.inUse(personal, in: seats)?.organization == "org-personal" && AccountBook.inUse(team, in: seats)?.organization == "org-team")
+        let standbyP = AccountBook.standby(seats, inUse: personal), standbyT = AccountBook.standby(seats, inUse: team)
+        check("seats: the other seat stands by: two rows on one address", standbyP.map(\.key) == [key("uw-1", "org-team")]
+              && standbyT.map(\.key) == [key("uw-1", "org-personal")], (standbyP, standbyT))
+        var weeks: [String: Int] = [:]
+        weeks = AccountBook.recording(20, for: personal, profile: "main", accounts: seats, levels: weeks)!.levels
+        weeks = AccountBook.recording(95, for: team, profile: "main", accounts: seats, levels: weeks)!.levels
+        check("seats: each seat's numbers under its own key, never copied onto the other",
+              weeks == ["main|uw-1|org-personal": 20, "main|uw-1|org-team": 95], weeks)
+        check("seats: one seat's numbers are never the other's base", AccountBook.numbersBase(for: team, profile: "main", accounts: seats, levels: ["main|uw-1|org-personal": 20]) == nil)
+        check("seats: maybe the same (one seat named, one not) but not the other seat",
+              AccountBook.profileUsing(team, among: [(name: "Main", inUse: Optional(personal))]) == nil
+              && AccountBook.profileUsing(team, among: [(name: "Main", inUse: Optional(rec("uw-1", "wu@example.com")))]) == "Main")
+        // the running claude names its organisation by name only: its word on the personal plan is never the Team seat's
+        var t = ProcessTrail(launchedOn: personal)
+        t.said(SignedInAccount.process(["email": "wu@example.com", "organization": "wu@example.com's Organization"]))
+        check("seats: a chat's numbers on the personal plan stay there, filled with its ids (the launch record's)",
+              AccountBook.numbersOwner(record: personal, trail: t).flatMap(AccountKey.init) == key("uw-1", "org-personal"))
+        check("seats: the Team seat signed in under the running chat: its numbers stay the personal plan's, and the chat stops there",
+              AccountBook.numbersOwner(record: team, trail: t).flatMap(AccountKey.init) == key("uw-1", "org-personal")
+              && !AccountBook.processOn(record: team, trail: t, target: key("uw-1", "org-personal")))
+    }
+
+    // the stored keys: an entry and a week an older build wrote (no organisation) are a seat not known, upgraded in place
+    // only when the numbers' own source names the seat (AccountKey.upgraded(with:seatOfTheNumbers:)); never two copies
+    do {
+        let legacy = [KnownAccount(uuid: "u1", email: "ultra-1@example.com", lastSeen: t0)]
+        let legacyWeeks: [String: Int] = ["main|u1": 40]
+        let seen = rec("u1", "ultra-1@example.com", org: "org-1", orgName: "Org One")
+        var noted = legacy
+        AccountBook.note(&noted, seen, now: t0.addingTimeInterval(7200))
+        check("keys: the record naming a seat finds the older entry and leaves its seat not known (the record is a guess)",
+              noted.count == 1 && noted[0].organization == nil, noted)
+        check("keys: the account in use is the older entry, its old week shown", AccountBook.inUse(seen, in: legacy)?.key == key("u1")
+              && legacyWeeks[AccountBook.levelKey("main", AccountBook.inUse(seen, in: legacy)!.key)] == 40)
+        check("keys: the older week is the base the new numbers are applied on",
+              AccountBook.numbersBase(for: seen, profile: "main", accounts: legacy, levels: legacyWeeks) == 40)
+        let moved = AccountBook.recording(41, for: seen, profile: "main", accounts: legacy, levels: legacyWeeks)!
+        check("keys: numbers whose source named the seat upgrade the entry in place", moved.accounts.map(\.key) == [key("u1", "org-1")], moved.accounts)
+        check("keys: …and move its week, never copy it", moved.levels == ["main|u1|org-1": 41], moved.levels)
+        // numbers with no seat named (a record and a word that name no organisation) leave the older key as it is
+        let unnamed = AccountBook.recording(42, for: rec("u1", "ultra-1@example.com"), profile: "main", accounts: legacy, levels: legacyWeeks)!
+        check("keys: numbers that name no seat stay under the older key", unnamed.accounts == legacy && unnamed.levels == ["main|u1": 42], unnamed.levels)
+        // the seat already has its own entry: the older one stays apart, nothing moves onto both
+        let both = legacy + [KnownAccount(uuid: "u1", organization: "org-1", email: "ultra-1@example.com", lastSeen: t0)]
+        let kept = AccountBook.recording(43, for: seen, profile: "main", accounts: both, levels: ["main|u1": 40, "main|u1|org-1": 30])!
+        check("keys: with the seat's own entry there, the numbers go to it and the older week is never dropped",
+              kept.accounts == both && kept.levels == ["main|u1": 40, "main|u1|org-1": 43], kept.levels)
+        // a placeholder's numbers move once the record gives the id
+        let ph = AccountBook.upgradingLevels(["main|email:ultra-7@example.com": 7, "work|email:ultra-7@example.com": 8], profile: "main",
+                                             to: key("u7"), record: rec("u7", "ultra-7@example.com"))
+        check("keys: an email: placeholder's week moves to the id, in its profile only", ph == ["main|u7": 7, "work|email:ultra-7@example.com": 8], ph)
+        check("keys: a placeholder's week never replaces the seat's own", AccountBook.upgradingLevels(["main|email:ultra-7@example.com": 7, "main|u7": 9],
+              profile: "main", to: key("u7"), record: rec("u7", "ultra-7@example.com")) == ["main|email:ultra-7@example.com": 7, "main|u7": 9])
+        check("keys: keys in the kit's lower case, an older key otherwise as it was",
+              AccountBook.normalizedKeys(["main|U1": 1, "main|u2": 2, "main": 3]) == ["main|u1": 1, "main|u2": 2, "main": 3]
+              && AccountBook.normalizedKeys(["main|U1": 1, "main|u1": 2]) == ["main|U1": 1, "main|u1": 2])
+        // an older build's entry decodes, and a new one an older build would read keeps the fields it knows
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601; enc.outputFormatting = .sortedKeys
+        let oldJSON = #"{"uuid":"u1","email":"ultra-1@example.com","lastSeen":"2026-11-01T10:00:00Z"}"#
+        let read = try? dec.decode(KnownAccount.self, from: Data(oldJSON.utf8))
+        check("keys: an older build's entry reads as a seat not known", read?.key == key("u1") && read?.organization == nil)
+        let written = (try? enc.encode(KnownAccount(uuid: "u1", organization: "org-1", email: "ultra-1@example.com", lastSeen: t0)))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        check("keys: a new entry keeps uuid, email and lastSeen (what an older build reads) and adds the organisation",
+              written?["uuid"] as? String == "u1" && written?["email"] as? String == "ultra-1@example.com" && written?["lastSeen"] != nil
+              && written?["organization"] as? String == "org-1")
+        check("keys: an entry with no seat known writes no organisation", (try? enc.encode(legacy[0]))
+              .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["organization"] == nil)
+    }
+
+    // the one-time backup before the first rewrite: kept beside the file, never overwritten, nothing without a file
+    do {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cl_quick-backup-\(getpid())")
+        try? FileManager.default.removeItem(at: dir)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("levels.json")
+        check("backup: its name", StoredKeys.backup(of: file).lastPathComponent == "levels.json.pre-26.11.4")
+        check("backup: no file, nothing kept", !StoredKeys.keepBackup(of: file) && !FileManager.default.fileExists(atPath: StoredKeys.backup(of: file).path))
+        try? #"{"main|u1":{"week":40}}"#.write(to: file, atomically: true, encoding: .utf8)
+        check("backup: the file as it was is kept beside it", StoredKeys.keepBackup(of: file)
+              && (try? String(contentsOf: StoredKeys.backup(of: file), encoding: .utf8)) == #"{"main|u1":{"week":40}}"#)
+        try? #"{"main|u1|org-1":{"week":41}}"#.write(to: file, atomically: true, encoding: .utf8)
+        check("backup: a second one never overwrites the first", StoredKeys.keepBackup(of: file)
+              && (try? String(contentsOf: StoredKeys.backup(of: file), encoding: .utf8)) == #"{"main|u1":{"week":40}}"#)
+        try? FileManager.default.removeItem(at: dir)
+    }
 
     // the folder's file: a reload asked for while another read of it is under way still sees the file as it is now
     let dir = NSTemporaryDirectory() + "cl_quick-checks-\(getpid())"
@@ -937,29 +1049,30 @@ do {
         try? FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: file)
     }
     writeAccount("u1", "ultra-1@example.com", mtime: t0)
-    check("folder: the first look reads the file", FolderFiles.fresh(file).uuid == "u1" && FolderFiles.fresh(file).plan == "Max")
+    func look(_ f: String) -> SignedInAccount? { FolderRecords.look(f).account }
+    check("folder: the first look reads the file", look(file)?.accountID == "u1" && look(file)?.plan == "max")
     // the account changed outside cl_quick (claude auth login, /login, cl_audit): no reload asked, the next look sees it
     writeAccount("u2", "ultra-2@example.com", mtime: t0.addingTimeInterval(5))
-    check("folder: an account changed outside cl_quick is seen at the next look, no reload needed", FolderFiles.fresh(file).uuid == "u2")
+    check("folder: an account changed outside cl_quick is seen at the next look, no reload needed", look(file)?.accountID == "u2")
     wait(0.2) { false }                    // that look's own signal is delivered before the reload below is asked for
     writeAccount("u3", "ultra-3@example.com", mtime: t0.addingTimeInterval(6))
     var first: Bool?, second: Bool?, seen: String?
-    FolderFiles.reload([file]) { first = $0 }                    // a read under way ...
-    FolderFiles.reload([file]) { second = $0; seen = FolderFiles.fresh(file).uuid }       // ... then what ask() does
+    FolderRecords.reload([file]) { first = $0 }                    // a read under way ...
+    FolderRecords.reload([file]) { second = $0; seen = look(file)?.accountID }       // ... then what ask() does
     wait(5) { second != nil }
     check("folder: a reload behind another read sees the new account", seen == "u3", seen as Any)
     check("folder: the first read said an account changed, the next had nothing new", first == true && second == false, (first as Any, second as Any))
     // a copy put back with an older time of its own (a restore, a switch tool that keeps times) is another file too
     writeAccount("u1", "ultra-1@example.com", mtime: t0.addingTimeInterval(-60))
-    check("folder: a file put back with an older time is read, not hidden behind the newer parse", FolderFiles.fresh(file).uuid == "u1")
+    check("folder: a file put back with an older time is read, not hidden behind the newer parse", look(file)?.accountID == "u1")
     // a look on the main thread parses the new file before the reload asked for: the change is still signalled, once
     wait(0.2) { false }                    // what the looks above signalled is delivered before the watch starts
     var notes = 0
-    let watch = NotificationCenter.default.addObserver(forName: FolderFiles.accountChanged, object: nil, queue: .main) { _ in notes += 1 }
+    let watch = NotificationCenter.default.addObserver(forName: FolderRecords.accountChanged, object: nil, queue: .main) { _ in notes += 1 }
     writeAccount("u4", "ultra-4@example.com", mtime: t0.addingTimeInterval(10))
-    check("folder: a look on the main thread sees the new account", FolderFiles.fresh(file).uuid == "u4")
+    check("folder: a look on the main thread sees the new account", look(file)?.accountID == "u4")
     var lateDone: Bool?
-    FolderFiles.reload([file]) { lateDone = $0 }          // its parse finds nothing new: the look got there first
+    FolderRecords.reload([file]) { lateDone = $0 }          // its parse finds nothing new: the look got there first
     wait(5) { lateDone != nil }
     wait(0.2) { false }
     check("folder: …and the account change is signalled exactly once, by the look or by the reload",
@@ -967,90 +1080,98 @@ do {
     // the same look, then a reload run before the look's own signal could be delivered
     writeAccount("u5", "ultra-5@example.com", mtime: t0.addingTimeInterval(11))
     notes = 0
-    _ = FolderFiles.fresh(file)
+    _ = look(file)
     var done5: Bool?
-    FolderFiles.reload([file]) { done5 = $0 }
+    FolderRecords.reload([file]) { done5 = $0 }
     wait(5) { done5 != nil }
     wait(0.2) { false }
     check("folder: a reload queued right behind a look doesn't signal it twice", notes + (done5 == true ? 1 : 0) == 1, (notes, done5 as Any))
     // no change, no signal
     notes = 0
     var quiet: Bool?
-    FolderFiles.reload([file]) { quiet = $0 }
-    _ = FolderFiles.fresh(file)
+    FolderRecords.reload([file]) { quiet = $0 }
+    _ = look(file)
     wait(5) { quiet != nil }
     wait(0.2) { false }
     check("folder: nothing changed, nothing signalled", notes == 0 && quiet == false, (notes, quiet as Any))
-    NotificationCenter.default.removeObserver(watch)
-    try? FileManager.default.removeItem(atPath: file)
+    // the same seat written again (a session rewrote the file) is no change; another seat of the account is one
     try? #"{"oauthAccount":{"accountUuid":"u6","emailAddress":"ultra-6@example.com","organizationUuid":"org-9","organizationName":"Org Nine"}}"#
         .write(toFile: file, atomically: true, encoding: .utf8)
     try? FileManager.default.setAttributes([.modificationDate: t0.addingTimeInterval(20)], ofItemAtPath: file)
-    check("folder: the organization's uuid and name are read", FolderFiles.fresh(file).organizationUuid == "org-9" && FolderFiles.fresh(file).organization == "Org Nine")
+    check("folder: the organization's uuid and name are read", look(file)?.organizationID == "org-9" && look(file)?.organizationName == "Org Nine")
+    wait(0.2) { false }
+    notes = 0
+    try? #"{"oauthAccount":{"accountUuid":"u6","emailAddress":"ultra-6@example.com","organizationUuid":"org-9","organizationName":"Org Nine","x":1}}"#
+        .write(toFile: file, atomically: true, encoding: .utf8)
+    _ = look(file); wait(0.2) { false }
+    check("folder: the same seat written again signals nothing", notes == 0, notes)
+    try? #"{"oauthAccount":{"accountUuid":"u6","emailAddress":"ultra-6@example.com","organizationUuid":"org-10","organizationName":"Sample Team"}}"#
+        .write(toFile: file, atomically: true, encoding: .utf8)
+    _ = look(file); wait(0.2) { false }
+    check("folder: another seat of the same account (a Team seat on the address) is a change", notes == 1, notes)
+    NotificationCenter.default.removeObserver(watch)
     try? FileManager.default.removeItem(atPath: file)
-    check("folder: a file that went away names no account", FolderFiles.fresh(file).uuid == nil && FolderFiles.fresh(file).email == nil)
+    check("folder: a file that went away names no account", look(file) == nil)
     try? FileManager.default.removeItem(atPath: dir)
 
-    // what a `claude` reports belongs to the account it is, and is recorded only while the folder is on that account
-    let a1 = (uuid: "u1", email: "ultra-1@example.com"), a2 = (uuid: "u2", email: "ultra-2@example.com")
-    var trail = AccountTrail()
-    check("trail: nothing running, nothing to report on", trail.owner(folder: a1) == nil)
-    trail.processStarted(on: a1.uuid, email: a1.email)
-    check("trail: before it says who it is, a report goes to the account it started on while the folder is still on it", trail.owner(folder: a1) == "u1")
+    // whose a `claude`'s numbers are (the kit's FolderSignIn.answer(record:trail:).numbersBelongTo), and whether the chat goes on
+    let a1 = rec("u1", "ultra-1@example.com"), a2 = rec("u2", "ultra-2@example.com")
+    func owner(_ record: SignedInAccount?, _ t: ProcessTrail) -> AccountKey? { AccountBook.numbersOwner(record: record, trail: t).flatMap(AccountKey.init) }
+    func word(_ email: String?, _ org: String? = nil) -> SignedInAccount? {
+        var w: [String: String] = [:]; if let email { w["email"] = email }; if let org { w["organization"] = org }
+        return SignedInAccount.process(w)
+    }
+    func trailOf(_ launch: SignedInAccount?, said w: SignedInAccount?) -> ProcessTrail { var t = ProcessTrail(launchedOn: launch); t.said(w); return t }
+    var trail = ProcessTrail(launchedOn: a1)
+    check("trail: before it says who it is, its numbers are the account it started on while the folder is still on it", owner(a1, trail) == key("u1"))
     // the folder moved to another account (claude auth login, /login, cl_audit) while the answer was on its way
-    check("trail: an answer that comes after the folder moved is dropped, never put on the new account", trail.owner(folder: a2) == nil)
-    check("trail: …nor on no account", trail.owner(folder: nil) == nil)
-    // incognito: the conversation lives only in the running process, so the chat goes on only while `owner` names the
-    // folder's account (Chat.start: goesOn)
-    check("trail: a chat goes on while the process is the folder's account", trail.running && trail.owner(folder: a1) == a1.uuid)
+    check("trail: a silent process's answer after the folder moved is nobody's, never the new account's", owner(a2, trail) == nil)
+    check("trail: …nor on no account", owner(nil, trail) == nil)
+    // incognito: the conversation lives only in the running process, so the chat goes on only while it is the folder's
+    // account (Chat.start: goesOn)
+    check("trail: a chat goes on while the process is the folder's account", AccountBook.processOn(record: a1, trail: trail, target: key("u1")))
+    check("trail: …and not once the folder moved", !AccountBook.processOn(record: a2, trail: trail, target: key("u1")))
     // the process's own word (initialize) wins over the file read before it started
-    trail.identified(ProcessIdentity(email: "ULTRA-1@example.com", organization: "Org A"))
-    check("trail: it said it is the folder's account (any case): its reports are that account's", trail.owner(folder: a1, organization: "Org A") == "u1")
-    check("trail: the same address in another organization isn't it", trail.owner(folder: a1, organization: "Org B") == nil)
-    check("trail: a file that names no organization goes by the address", trail.owner(folder: a1) == "u1")
-    // a rename of the organization (same organizationUuid) mid-process keeps its reports; another organization doesn't
-    var renamed = AccountTrail()
-    renamed.processStarted(on: a1.uuid, email: a1.email, organizationUuid: "org-1")
-    renamed.identified(ProcessIdentity(email: a1.email, organization: "Org A"))
-    check("trail: a renamed organization (same uuid) keeps the reports", renamed.owner(folder: a1, organization: "Org A renamed", organizationUuid: "org-1") == "u1")
-    check("trail: another organization's uuid with another name is cut", renamed.owner(folder: a1, organization: "Org B", organizationUuid: "org-2") == nil)
-    check("trail: a uuid that changed with the same name keeps the reports", renamed.owner(folder: a1, organization: "Org A", organizationUuid: "org-2") == "u1")
-    check("trail: no uuid in the file falls back to the names", renamed.owner(folder: a1, organization: "Org B") == nil && renamed.owner(folder: a1, organization: "Org A") == "u1")
-    var noOrgUuid = AccountTrail()
-    noOrgUuid.processStarted(on: a1.uuid, email: a1.email)
-    noOrgUuid.identified(ProcessIdentity(email: a1.email, organization: "Org A"))
-    check("trail: a process that started on no known uuid goes by the names",
-          noOrgUuid.owner(folder: a1, organization: "Org A", organizationUuid: "org-1") == "u1"
-          && noOrgUuid.owner(folder: a1, organization: "Org B", organizationUuid: "org-1") == nil)
-    var raced = AccountTrail()
-    raced.processStarted(on: a1.uuid, email: a1.email)       // cl_quick read u1 …
-    raced.identified(ProcessIdentity(email: a2.email))         // … but the sign-in landed before the process read the file
-    check("trail: a process that says it is the account the folder is on now reports on it, whatever was read before it",
-          raced.owner(folder: a2) == "u2" && raced.owner(folder: a1) == nil)
-    var keyed = AccountTrail()
-    keyed.processStarted(on: a1.uuid, email: a1.email)
-    keyed.identified(ProcessIdentity(email: nil))              // initialize named no account (a key, a token)
-    check("trail: a process that names no account goes by the account it started on", keyed.owner(folder: a1) == "u1" && keyed.owner(folder: a2) == nil)
-    var placeholder = AccountTrail()
-    placeholder.processStarted(on: "email:ultra-1@example.com", email: a1.email)     // a file that had no accountUuid yet
-    check("trail: a placeholder uuid that became a real one is the same account", placeholder.owner(folder: a1) == "u1")
-    trail.processEnded()
-    check("trail: the conversation ends with its process, a new chat can begin on any account", !trail.running)
-    check("trail: a process that ended reports nowhere", trail.owner(folder: a1) == nil)
-    trail.identified(ProcessIdentity(email: a1.email))
-    check("trail: a word that comes after the process ended is ignored", trail.identity == nil)
-    var noAccount = AccountTrail()
-    noAccount.processStarted(on: nil, email: nil)       // a folder whose file names no account
-    check("trail: a chat begun with no account doesn't go on on one that appears", noAccount.owner(folder: a1) == nil)
+    trail.said(word("ULTRA-1@example.com"))
+    check("trail: it said it is the folder's account (any case): its numbers are that account's, with its id", owner(a1, trail) == key("u1"))
+    check("trail: a word naming an organisation the record doesn't: the seat isn't known, the word's own (no id taken from the record)",
+          owner(a1, trailOf(a1, said: word(a1.email, "Org A"))) == AccountKey(account: "email:ultra-1@example.com", organization: "name:org a")
+          && AccountBook.processOn(record: a1, trail: trailOf(a1, said: word(a1.email, "Org A")), target: key("u1")))
+    let launchedA = rec("u1", "ultra-1@example.com", org: "org-1", orgName: "Org A")
+    check("trail: the same address in another organisation isn't the folder's seat (D2)",
+          !AccountBook.processOn(record: rec("u1", "ultra-1@example.com", org: "org-2", orgName: "Org B"),
+                                 trail: trailOf(launchedA, said: word("ultra-1@example.com", "Org A")), target: key("u1", "org-2")))
+    check("trail: organisation names in any case (D5)", owner(rec("u1", "ultra-1@example.com", org: "org-1", orgName: "org a"),
+          trailOf(launchedA, said: word("ultra-1@example.com", "ORG A"))) == key("u1", "org-1"))
+    // a rename of the organisation (same organizationUuid) mid-process keeps its numbers; another organisation doesn't
+    let renamed = trailOf(launchedA, said: word("ultra-1@example.com", "Org A"))
+    check("trail: a renamed organisation (same uuid) keeps the numbers", owner(rec("u1", "ultra-1@example.com", org: "org-1", orgName: "Org A renamed"), renamed) == key("u1", "org-1"))
+    check("trail: another organisation's seat never gets them (they stay the launch seat's)",
+          owner(rec("u1", "ultra-1@example.com", org: "org-2", orgName: "Org B"), renamed) == key("u1", "org-1"))
+    let raced = trailOf(a1, said: word(a2.email))       // cl_quick read u1, but the sign-in landed before the process read the file
+    check("trail: a process that says it is the account the folder is on now: its numbers are that account's, whatever was read before it",
+          owner(a2, raced) == key("u2") && AccountBook.processOn(record: a2, trail: raced, target: key("u2")))
+    check("trail: …and with the folder still on u1, they are kept for the process's own account (its address), never u1's",
+          owner(a1, raced) == key("email:ultra-2@example.com") && !AccountBook.processOn(record: a1, trail: raced, target: key("u1")))
+    let keyed = trailOf(a1, said: word(nil))            // initialize named no account (a key, a token)
+    check("trail: a process that names no account goes by the account it started on", owner(a1, keyed) == key("u1") && owner(a2, keyed) == nil)
+    let placeholder = ProcessTrail(launchedOn: rec(nil, "ultra-1@example.com"))     // a file that had no accountUuid yet
+    check("trail: a placeholder that became a real id is the same account", owner(a1, placeholder) == key("u1"))
+    let noAccount = ProcessTrail(launchedOn: nil)       // a folder whose file names no account
+    check("trail: a chat begun with no account doesn't go on on one that appears",
+          owner(a1, noAccount) == nil && !AccountBook.processOn(record: a1, trail: noAccount, target: nil))
+    check("trail: a numbers owner is the chat's own only when it is its seat", AccountBook.owns(key("u1"), email: a1.email, rec("u1", a1.email))
+          && !AccountBook.owns(key("u1", "org-1"), email: a1.email, rec("u1", a1.email, org: "org-2")) && !AccountBook.owns(nil, email: nil, a1))
 
     // an older levels.json, keyed by profile id (the values stand for weeks)
     let legacy: [String: Int] = ["main": 50, "work": 20, "gone": 7, "main|u9": 33]
-    let moved = AccountBook.migrated(legacy) { id in id == "main" ? "u1" : id == "work" ? nil : nil }
+    let moved = AccountBook.migrated(legacy) { id in id == "main" ? key("u1") : nil }
     check("migration: a week goes to the account signed in now", moved["main|u1"] == 50 && moved["main"] == nil, moved)
     check("migration: a week that can't be placed stays under its key", moved["work"] == 20 && moved["gone"] == 7, moved)
     check("migration: a per-account week stays", moved["main|u9"] == 33 && moved.count == 4, moved)
-    check("migration: a per-account week wins over the legacy one", AccountBook.migrated(["main": 1, "main|u1": 2]) { _ in "u1" } == ["main|u1": 2])
-    check("migration: a second run changes nothing", AccountBook.migrated(moved) { id in id == "main" ? "u1" : nil } == moved)
+    check("migration: a per-account week wins over the legacy one", AccountBook.migrated(["main": 1, "main|u1": 2]) { _ in key("u1") } == ["main|u1": 2])
+    check("migration: a second run changes nothing", AccountBook.migrated(moved) { id in id == "main" ? key("u1") : nil } == moved)
+    check("migration: a week goes to a seat's key", AccountBook.migrated(["main": 5]) { _ in key("u1", "org-1") } == ["main|u1|org-1": 5])
     // removing a profile takes its weeks, per account and the bare one
     let left = AccountBook.removing(profile: "main", from: moved)
     check("remove: every week of the profile goes, others stay", left == ["work": 20, "gone": 7], left)
@@ -1059,39 +1180,43 @@ do {
     // forgetting a standby account takes it from the list and its week from the levels, nothing else
     let known = [KnownAccount(uuid: "u1", email: "ultra-1@example.com"), KnownAccount(uuid: "u2", email: "ultra-2@example.com")]
     let weeks: [String: Int] = ["main|u1": 50, "main|u2": 20, "work|u2": 9]
-    let gone = AccountBook.forgetting("u2", of: "main", accounts: known, levels: weeks, inUse: "u1")
+    let gone = AccountBook.forgetting(key("u2"), of: "main", accounts: known, levels: weeks, inUse: a1)
     check("forget: the account leaves the list", gone?.accounts.map(\.uuid) == ["u1"], gone as Any)
     check("forget: its week goes, other weeks stay (another profile's too)", gone?.levels == ["main|u1": 50, "work|u2": 9], gone as Any)
-    check("forget: the account in use can't be forgotten", AccountBook.forgetting("u1", of: "main", accounts: known, levels: weeks, inUse: "u1") == nil)
-    check("forget: an account that isn't there changes nothing", AccountBook.forgetting("u9", of: "main", accounts: known, levels: weeks, inUse: "u1") == nil)
-    check("forget: with nothing signed in, any account can go", AccountBook.forgetting("u1", of: "main", accounts: known, levels: weeks, inUse: nil)?.accounts.count == 1)
-    // one account, one profile: by uuid or by address, the same rule the first run uses
-    func acct(_ u: String, _ e: String) -> (uuid: String, email: String) { (u, e) }
-    let used = [(name: "Main", inUse: Optional(acct("u1", "ultra-1@example.com"))), (name: "Work", inUse: Optional(acct("u2", "ultra-2@example.com"))),
-                (name: "Out", inUse: nil as (uuid: String, email: String)?)]
-    check("one profile: an account in use on a profile is named", AccountBook.profileUsing(acct("u1", "ultra-1@example.com"), among: used) == "Main")
-    check("one profile: found by uuid, whatever the address", AccountBook.profileUsing(acct("u2", "other@example.com"), among: used) == "Work")
-    check("one profile: found by address in any case, whatever the uuid", AccountBook.profileUsing(acct("u9", "Ultra-1@Example.com"), among: used) == "Main")
-    check("one profile: a free account is free", AccountBook.profileUsing(acct("u3", "ultra-3@example.com"), among: used) == nil)
-    check("one profile: a folder signed out uses nothing", AccountBook.profileUsing(acct("u3", "ultra-3@example.com"), among: [used[2]]) == nil)
-    check("one profile: a placeholder uuid is found by its address", AccountBook.profileUsing(acct("email:ultra-1@example.com", "ultra-1@example.com"), among: used) == "Main")
-    // a placeholder uuid given a real one by the sign-in is still the same account
-    check("same sign-in: the same uuid", AccountBook.unchanged(from: ("u1", "ultra-1@example.com"), now: ("u1", "ultra-1@example.com")))
-    check("same sign-in: a placeholder upgraded to a real uuid", AccountBook.unchanged(from: ("email:ultra-1@example.com", "Ultra-1@example.com"), now: ("u1", "ultra-1@example.com")))
-    check("same sign-in: another uuid is another account", !AccountBook.unchanged(from: ("u1", "ultra-1@example.com"), now: ("u2", "ultra-1@example.com")))
-    check("same sign-in: a placeholder and another address", !AccountBook.unchanged(from: ("email:ultra-1@example.com", "ultra-1@example.com"), now: ("u2", "ultra-2@example.com")))
+    check("forget: the account in use can't be forgotten", AccountBook.forgetting(key("u1"), of: "main", accounts: known, levels: weeks, inUse: a1) == nil)
+    check("forget: an account that isn't there changes nothing", AccountBook.forgetting(key("u9"), of: "main", accounts: known, levels: weeks, inUse: a1) == nil)
+    check("forget: with nothing signed in, any account can go", AccountBook.forgetting(key("u1"), of: "main", accounts: known, levels: weeks, inUse: nil)?.accounts.count == 1)
+    check("forget: the older entry (seat not known) of the seat in use isn't forgotten",
+          AccountBook.forgetting(key("u1"), of: "main", accounts: known, levels: weeks, inUse: rec("u1", "ultra-1@example.com", org: "org-1")) == nil)
+    // one seat, one profile: the one seat comparison (maybe the same), the same rule the first run uses
+    let used = [(name: "Main", inUse: Optional(a1)), (name: "Work", inUse: Optional(a2)), (name: "Out", inUse: nil as SignedInAccount?)]
+    check("one profile: an account in use on a profile is named", AccountBook.profileUsing(a1, among: used) == "Main")
+    check("one profile: found by id, whatever the address", AccountBook.profileUsing(rec("u2", "other@example.com"), among: used) == "Work")
+    check("one profile: another id on the address is another account (two seats are two)", AccountBook.profileUsing(rec("u9", "Ultra-1@Example.com"), among: used) == nil)
+    check("one profile: an address alone is found by its address, in any case", AccountBook.profileUsing(rec(nil, "Ultra-1@Example.com"), among: used) == "Main")
+    check("one profile: a free account is free", AccountBook.profileUsing(rec("u3", "ultra-3@example.com"), among: used) == nil)
+    check("one profile: a folder signed out uses nothing", AccountBook.profileUsing(rec("u3", "ultra-3@example.com"), among: [used[2]]) == nil)
+    // a placeholder given a real id by the sign-in is still the same account; another seat is another
+    check("same seat: the same id", !AccountBook.anotherSeat(key("u1"), "ultra-1@example.com", key("u1"), "ultra-1@example.com"))
+    check("same seat: a placeholder upgraded to a real id", !AccountBook.anotherSeat(key("email:ultra-1@example.com"), "Ultra-1@example.com", key("u1"), "ultra-1@example.com"))
+    check("same seat: a seat that was only not known", !AccountBook.anotherSeat(key("u1"), nil, key("u1", "org-1"), nil))
+    check("same seat: another id is another account", AccountBook.anotherSeat(key("u1"), "ultra-1@example.com", key("u2"), "ultra-1@example.com"))
+    check("same seat: another organisation of the account is another seat", AccountBook.anotherSeat(key("u1", "org-1"), nil, key("u1", "org-2"), nil))
+    check("same seat: a placeholder and another address", AccountBook.anotherSeat(key("email:ultra-1@example.com"), "ultra-1@example.com", key("u2"), "ultra-2@example.com"))
     let ph = [KnownAccount(uuid: "email:ultra-1@example.com", email: "ultra-1@example.com"), KnownAccount(uuid: "u2", email: "ultra-2@example.com")]
-    check("forget: a placeholder for the address in use isn't forgotten", AccountBook.forgetting("email:ultra-1@example.com", of: "main", accounts: ph, levels: weeks, inUse: "u1", inUseEmail: "Ultra-1@example.com") == nil)
-    check("forget: a placeholder for another address can go", AccountBook.forgetting("email:ultra-1@example.com", of: "main", accounts: ph, levels: weeks, inUse: "u2", inUseEmail: "ultra-2@example.com") != nil)
-    // Sign in again… only while the sign-in is broken: signed out, or the last answer failed to authenticate on this account
-    let inUse1 = Optional(acct("u1", "ultra-1@example.com"))
+    check("forget: a placeholder for the address in use isn't forgotten", AccountBook.forgetting(key("email:ultra-1@example.com"), of: "main", accounts: ph, levels: weeks, inUse: rec("u1", "Ultra-1@example.com")) == nil)
+    check("forget: a placeholder for another address can go", AccountBook.forgetting(key("email:ultra-1@example.com"), of: "main", accounts: ph, levels: weeks, inUse: a2) != nil)
+    // Sign in again… only while the sign-in is broken: signed out, or the last answer failed to authenticate on this seat
+    let inUse1 = Optional(key("u1"))
     check("broken: a working sign-in isn't", AccountBook.signInProblem(signedIn: inUse1, failedOn: nil) == nil)
     check("broken: no account signed in is signed out", AccountBook.signInProblem(signedIn: nil, failedOn: nil) == .signedOut)
-    check("broken: signed out wins over a flag", AccountBook.signInProblem(signedIn: nil, failedOn: "u1") == .signedOut)
-    check("broken: an authentication failure on the account in use", AccountBook.signInProblem(signedIn: inUse1, failedOn: "u1") == .stopped)
-    check("broken: a failure on another account says nothing about this one", AccountBook.signInProblem(signedIn: inUse1, failedOn: "u2") == nil)
+    check("broken: signed out wins over a flag", AccountBook.signInProblem(signedIn: nil, failedOn: key("u1")) == .signedOut)
+    check("broken: an authentication failure on the account in use", AccountBook.signInProblem(signedIn: inUse1, failedOn: key("u1")) == .stopped)
+    check("broken: a failure on another account says nothing about this one", AccountBook.signInProblem(signedIn: inUse1, failedOn: key("u2")) == nil)
+    check("broken: a failure on another seat of the account says nothing about this one",
+          AccountBook.signInProblem(signedIn: key("u1", "org-1"), failedOn: key("u1", "org-2")) == nil)
     check("broken: the words", SignInProblem.signedOut.words == "Signed out." && SignInProblem.stopped.words == "The sign-in stopped working.")
-    check("forget: an account without a week", AccountBook.forgetting("u2", of: "main", accounts: known, levels: ["main|u1": 50], inUse: "u1")?.levels == ["main|u1": 50])
+    check("forget: an account without a week", AccountBook.forgetting(key("u2"), of: "main", accounts: known, levels: ["main|u1": 50], inUse: a1)?.levels == ["main|u1": 50])
     // a switch's confirmation says what it affects: Claude Code on the folder, not the Claude app
     let sw0 = AccountBook.switchWords(folder: "~/.claude", isDefault: true)
     check("switch words: ~/.claude", sw0.hasPrefix("Claude Code in Terminal and editors on ~/.claude moves to this account, sessions running now included")

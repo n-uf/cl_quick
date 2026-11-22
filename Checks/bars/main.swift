@@ -445,7 +445,7 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
 let sets: [[QuickChatModelChoice]] = [[.haiku, .sonnet, .opus, .fable], [.haiku, .sonnet, .opus], [.haiku, .sonnet]]
 for fams in sets {
     let list = fullList.filter { e in e.value == "default" || QuickChatModels.family(e).map { fams.contains($0.0) } == true }
-    ModelCatalog.shared.set(list, profile: t.profileID, account: t.accountUUID)
+    ModelCatalog.shared.set(list, profile: t.profileID, account: t.account?.text)
     m.turns = []
     spin(0.6)
     for w in [CGFloat(320), 440, 640] {
@@ -463,7 +463,7 @@ for fams in sets {
 
 // the bar's usage indicator: the limit closest to full, its label and share on that window's row, one width whatever
 // it says; the profile's dot in the same colour. With all four families, the widest row.
-ModelCatalog.shared.set(fullList, profile: t.profileID, account: t.accountUUID)
+ModelCatalog.shared.set(fullList, profile: t.profileID, account: t.account?.text)
 m.turns = []
 m.choose(QuickChatModelChoice.fable); m.choose(QuickChatThinking.max)
 spin(0.6)
