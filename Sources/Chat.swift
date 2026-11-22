@@ -758,7 +758,7 @@ final class QuickChatModel: ObservableObject {
     func choose(_ c: QuickChatModelChoice) { choice = c; focusTick += 1 }
     func choose(_ t: QuickChatThinking) { thinking = t; focusTick += 1 }
 
-    /// The scroll wheel over a control, and the ⌥⌘ arrows: the model a family up or down among those the account has,
+    /// The scroll wheel over a control, and the fn arrows: the model a family up or down among those the account has,
     /// thinking a step up or down among the model's. Past either end nothing changes (false). The keyboard stays where
     /// it is (a selected answer keeps its selection); a click on a bar goes through choose(), which hands it to the field.
     @discardableResult func stepModel(_ by: Int) -> Bool {
@@ -1889,7 +1889,7 @@ final class QuickChatPanel: NSPanel {
     var onDictate: () -> Void = {}
     /// Moving in the chat (QCNav): true when the key was taken (the chat window has answers to move in).
     var onNavigate: (QCNav) -> Bool = { _ in false }
-    /// ⌥⌘ arrows: the model (true) or thinking (false) a step up (1) or down (-1).
+    /// fn arrows (QuickChatPanel.chatKey): the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
     /// The digit keys (QCDigitKeys): ⌘ digits the size, ⌃ digits the place on the screen.
     var onDigit: (QCDigitAction) -> Void = { _ in }
@@ -1950,22 +1950,6 @@ final class QuickChatPanel: NSPanel {
             switch Int(e.keyCode) {
             case kVK_ANSI_LeftBracket: if onNavigate(.previousPrompt) { return true }
             case kVK_ANSI_RightBracket: if onNavigate(.nextPrompt) { return true }
-            default: break
-            }
-        }
-        // ⌥⌘↑ ⌥⌘↓ step thinking, ⌥⌘→ ⌥⌘← the model. Plain ⌘ arrows are macOS's own (in a text field the caret's jump to the
-        // line's or the text's start and end, in a selected answer's view a scroll to its ends), so they are not taken and reach
-        // the field and the view. A key with ⌥⌘ is offered here first and taken, so neither the field nor a scroll view ever
-        // sees it. The modifiers are compared exactly (⌘ alone, ⇧⌘, ⌃⌘ and ⌃⌥⌘ arrows are not ours: ⇧⌘ arrows select in the
-        // field); the arrow keys' function and numeric-pad flags are outside the mask. At the last step the key does nothing
-        // and is still taken.
-        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command, .option],
-           let k = e.charactersIgnoringModifiers?.unicodeScalars.first.map({ Int($0.value) }) {
-            switch k {
-            case NSUpArrowFunctionKey: onStep(false, 1); return true
-            case NSDownArrowFunctionKey: onStep(false, -1); return true
-            case NSRightArrowFunctionKey: onStep(true, 1); return true
-            case NSLeftArrowFunctionKey: onStep(true, -1); return true
             default: break
             }
         }
@@ -2051,15 +2035,19 @@ final class QuickChatPanel: NSPanel {
             takeDigit(action, event)
             return
         }
-        // Page Up, Page Down and End (no modifier at all, the function and numeric-pad flags aside: a Mac laptop has no such keys,
-        // fn↑, fn↓ and fn→ arrive as these key codes with the function flag, and the keys list names them so) move the answers even while
-        // the field has the keyboard: read here, before the event goes to the field (which would scroll or move its own
-        // caret), as the digit keys are. Not while the field is composing (marked text: an input method owns these keys). The
-        // arrows are never taken: they keep their text meaning.
-        if event.type == .keyDown, isKeyWindow, event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            .intersection([.command, .option, .control, .shift]).isEmpty,
-           let nav = Self.pageNav(Int(event.keyCode)), (firstResponder as? NSTextView)?.hasMarkedText() != true, onNavigate(nav) {
-            return
+        // The chat's function-arrow keys (chatKey): fn↑ fn↓ step thinking, fn→ fn← the model, ⇧fn↑ ⇧fn↓ scroll the answers a
+        // page. A Mac laptop has no Page Up, Page Down, End or Home keys: fn↑, fn↓, fn→ and fn← arrive as those key codes
+        // with the function flag, indistinguishable from the dedicated keys (which do the same). They act while the field,
+        // an answer or a page has the keyboard: read here, before the event goes anywhere (the field would scroll or move
+        // its own caret), as the digit keys are. Not while the field is composing (marked text: an input method owns these
+        // keys). A step key is taken even at the last step (it does nothing there); a scroll key only when the chat window
+        // has answers to move in. The arrows themselves are never taken: they keep their text meaning.
+        if event.type == .keyDown, isKeyWindow, (firstResponder as? NSTextView)?.hasMarkedText() != true,
+           let key = Self.chatKey(keyCode: Int(event.keyCode), flags: event.modifierFlags) {
+            switch key {
+            case .step(let model, let by): onStep(model, by); return
+            case .scroll(let nav): if onNavigate(nav) { return }
+            }
         }
         if event.type == .flagsChanged, !event.modifierFlags.contains(.capsLock) {
             for w in childWindows ?? [] where String(describing: type(of: w)).hasPrefix("TUI") && w.alphaValue == 0 {
@@ -2070,14 +2058,32 @@ final class QuickChatPanel: NSPanel {
         super.sendEvent(event)
     }
 
-    /// The navigation a bare Page Up, Page Down or End key code is.
-    static func pageNav(_ keyCode: Int) -> QCNav? {
-        switch keyCode {
-        case kVK_PageUp: return .pageUp
-        case kVK_PageDown: return .pageDown
-        case kVK_End: return .end
-        default: return nil
+    /// What a chat key does: a step of the model (true) or of thinking (false), up (1) or down (-1), or a move of the answers.
+    enum ChatKey: Equatable { case step(model: Bool, by: Int), scroll(QCNav) }
+
+    /// The chat's key for a key code and modifiers, if it is one: fn↑ fn↓ (Page Up, Page Down, no modifier) thinking up, down;
+    /// fn→ fn← (End, Home, no modifier) the model up, down; ⇧fn↑ ⇧fn↓ (⇧ only) the answers a page up, down. The function and
+    /// numeric-pad flags are outside the comparison (a dedicated key has neither), so a ⌘, ⌥, ⌃ or other ⇧ combination is not
+    /// ours, nor is ⇧End or ⇧Home.
+    static func chatKey(keyCode: Int, flags: NSEvent.ModifierFlags) -> ChatKey? {
+        let mods = flags.intersection(.deviceIndependentFlagsMask).intersection([.command, .option, .control, .shift])
+        if mods.isEmpty {
+            switch keyCode {
+            case kVK_PageUp: return .step(model: false, by: 1)
+            case kVK_PageDown: return .step(model: false, by: -1)
+            case kVK_End: return .step(model: true, by: 1)
+            case kVK_Home: return .step(model: true, by: -1)
+            default: return nil
+            }
         }
+        if mods == [.shift] {
+            switch keyCode {
+            case kVK_PageUp: return .scroll(.pageUp)
+            case kVK_PageDown: return .scroll(.pageDown)
+            default: return nil
+            }
+        }
+        return nil
     }
 
     /// Titled (for the system's resize zones), resizable, the content under the title bar, and never activating cl_quick.

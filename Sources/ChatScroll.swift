@@ -23,8 +23,9 @@ import AppKit
 import SwiftUI
 
 /// The keys that move in the chat (the panel's performKeyEquivalent, exact modifiers): ⌘J the latest, ⇧⌘J the start of the answer
-/// in view, ⌘[ ⌘] the previous and next message of the user's, Page Up, Page Down and End.
-enum QCNav: Equatable { case latest, answerStart, previousPrompt, nextPrompt, pageUp, pageDown, end }
+/// in view, ⌘[ ⌘] the previous and next message of the user's; ⇧fn↑ and ⇧fn↓ (⇧Page Up, ⇧Page Down, in the panel's sendEvent)
+/// scroll a page.
+enum QCNav: Equatable { case latest, answerStart, previousPrompt, nextPrompt, pageUp, pageDown }
 
 final class QCChatScroll: ObservableObject {
     /// "At the bottom" is within this many points of it.
@@ -400,7 +401,7 @@ final class QCChatScroll: ObservableObject {
     func perform(_ nav: QCNav, turns: Int) -> Bool {
         guard geometry != nil else { return false }
         switch nav {
-        case .latest, .end: jumpToLatest()
+        case .latest: jumpToLatest()
         case .answerStart: if let id = answerAtBottomEdge() { goToStart(ofAnswer: id) }
         case .previousPrompt: previousPrompt()
         case .nextPrompt: nextPrompt()

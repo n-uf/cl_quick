@@ -1071,7 +1071,7 @@ struct QCControls: View {
         let choices = model.modelChoices
         let thinkingCostly = QuickChatModels.costly(effort: model.effectiveThinking.effort)
         return QCStepControl(
-            what: "Model", key: "m", keys: "⌥⌘← ⌥⌘→",
+            what: "Model", key: "m", keys: QCStepKeys.model,
             steps: choices.map { .init(title: $0.title, label: letters ? String($0.choice.title.prefix(1)) : $0.choice.title,
                                        costly: QuickChatModels.costly($0.choice)) },
             index: choices.firstIndex { $0.choice == now }, offSlot: false,
@@ -1096,7 +1096,7 @@ struct QCControls: View {
             switch t { case .off: return "–"; case .xhigh: return "X"; case .max: return "M+"; default: return String(t.title.prefix(1)) }
         }
         return QCStepControl(
-            what: "Thinking", key: "t", keys: "⌥⌘↓ ⌥⌘↑",
+            what: "Thinking", key: "t", keys: QCStepKeys.thinking,
             steps: all.map { t in
                 .init(title: t == .off ? "Thinking off" : t.title, label: label(t),
                       costly: QuickChatModels.costly(effort: t.effort), takes: takes.contains(t))
@@ -1118,7 +1118,7 @@ struct QCControls: View {
 /// own (5 pt drawn in an 8 × 28 pt column; the columns touch, a control: a press there never moves the window): a click
 /// picks that step. Thinking's Off is a dash before the bars. The pointer on a bar lights it and the label shows its
 /// short name; nothing pops up (the keys are under the row's keys button, VoiceOver has the full names); the scroll
-/// wheel and the ⌥⌘ arrows step it. A click on the label's right half picks the next value it takes, on its left half
+/// wheel and the fn arrows step it. A click on the label's right half picks the next value it takes, on its left half
 /// the one before, going round past either end; the pointer on a half lights it. The control is as wide for every
 /// step: its label is sized for the longest short name, so nothing in it or the row moves when the value changes. While the step in use costs more
 /// (Fable, Extra, Max) the control is warm (warmer when both controls are).
@@ -1518,6 +1518,12 @@ struct QCKeysButton: View {
     }
 }
 
+/// The keys each step control names in its VoiceOver hint (the panel's chatKey: fn← fn→ the model, fn↓ fn↑ thinking).
+enum QCStepKeys {
+    static let model = "fn← fn→"
+    static let thinking = "fn↓ fn↑"
+}
+
 /// The keys list's pages, in order (the track at its top): the first one shows the first time it opens, then the last one shown.
 enum QCKeysPage: String, CaseIterable, Hashable {
     case modelWindow, move, write
@@ -1539,14 +1545,13 @@ struct QCKeysView: View {
 
     /// The rows of each page, key and what it does (a check reads them).
     static func pages(opener: String) -> [(page: QCKeysPage, rows: [(String, String)])] {
-        [(.modelWindow, [("⌥⌘↑  ⌥⌘↓", "Thinking up, down"),
-                         ("⌥⌘→  ⌥⌘←", "Model up, down"),
+        [(.modelWindow, [("fn↑  fn↓", "Thinking up, down"),
+                         ("fn→  fn←", "Model up, down"),
                          ("Click a label", "Right half: up; left half: down")] + QCDigitKeys.rows),
-         (.move, [("⌘J", "Jump to latest"),
+         (.move, [("⌘J", "Jump to latest, and follow"),
                   ("⇧⌘J", "Start of the answer in view"),
                   ("⌘[  ⌘]", "Previous, next message of mine"),
-                  ("fn↑  fn↓", "Page up, page down"),       // a Mac keyboard's Page Up and Page Down
-                  ("fn→", "Bottom, and follow")]),           // and its End
+                  ("⇧fn↑  ⇧fn↓", "Scroll the answers")]),    // a Mac keyboard's ⇧Page Up and ⇧Page Down
          (.write, [("Return", "Send"),
                    ("⇧Return", "New line"),
                    ("⌘N", "New chat"),
