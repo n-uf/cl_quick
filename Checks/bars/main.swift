@@ -350,6 +350,31 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     check("\(name): the list opens on the page it was left on", keysList.page == .move && QCFloat.keys.shownFrame?.size == listSize, "\(keysList.page) \(String(describing: QCFloat.keys.shownFrame?.size)) vs \(String(describing: listSize))")
     if let e = mouseDown(at: .zero, window: QCFloat.keys.windowNumber) { keysList.mouseDown(e) }; spin()
     check("\(name): a press on the list itself (its track) does not close it", keysList.shown && QCFloat.keys.windowNumber != 0)
+    // the pointer over the list: the pointing hand over each tab, the arrow over everything else, and the panel's own I-beam
+    // held off while the pointer is on the list and back after (asked of the list's content view; the real pointer isn't moved)
+    if let host = QCFloat.keys.contentHost {
+        host.layoutSubtreeIfNeeded()
+        func hands(_ v: NSView) -> [CGRect] { v.subviews.flatMap { s in (s is QCCursorView ? [s.convert(s.bounds, to: host)] : []) + hands(s) } }
+        let tabs = hands(host).sorted { $0.minX < $1.minX }
+        check("\(name): the keys list has a pointing-hand zone on each of its three tabs, side by side", tabs.count == 3 && tabs.allSatisfy { $0.height > 10 && $0.width > 30 }
+              && zip(tabs, tabs.dropFirst()).allSatisfy { $0.maxX <= $1.minX + 0.5 }, "\(tabs)")
+        check("\(name): the pointer over each tab is the pointing hand", tabs.count == 3 && tabs.allSatisfy { host.cursor(at: CGPoint(x: $0.midX, y: $0.midY)) === NSCursor.pointingHand }, "\(tabs)")
+        let below = CGPoint(x: host.bounds.midX, y: (tabs.first?.maxY ?? 0) + 30)
+        check("\(name): over the rows, the margin and the track's edge it is the arrow",
+              host.cursor(at: below) === NSCursor.arrow && host.cursor(at: CGPoint(x: 2, y: host.bounds.midY)) === NSCursor.arrow
+              && host.cursor(at: CGPoint(x: tabs.first?.midX ?? 0, y: (tabs.first?.minY ?? 0) - 6)) === NSCursor.arrow, "\(below)")
+        let area = host.trackingAreas.first { $0.owner === host }
+        let want = QCFloatHost.trackingOptions
+        check("\(name): the list tracks the pointer whoever is key (cursor updates and moves, active always, its visible rect)", area.map { $0.options.isSuperset(of: want) } == true && host.window?.acceptsMouseMovedEvents == true,
+              "area \(String(describing: area?.options.rawValue)) want \(want.rawValue), moves \(String(describing: host.window?.acceptsMouseMovedEvents)), areas \(host.trackingAreas.count)")
+        check("\(name): the panel's cursor rectangles are on before the pointer reaches the list", p.areCursorRectsEnabled && !host.holdingPanel)
+        host.holdPanel()
+        check("\(name): with the pointer on the list the panel's cursor rectangles (its I-beam) are off", !p.areCursorRectsEnabled && host.holdingPanel)
+        host.releasePanel()
+        check("\(name): when the pointer leaves the list they are back on", p.areCursorRectsEnabled && !host.holdingPanel)
+        host.holdPanel(); keysList.close(); spin()
+        check("\(name): and when the list closes under the pointer (no mouse-exit comes) they are back on too", p.areCursorRectsEnabled && !host.holdingPanel)
+    } else { check("\(name): the keys list has a content view", false) }
     keysList.close(); keysList.page = .modelWindow; spin()
     // the scroll wheel
     m.choose(families[families.count - 2]); m.choose(QuickChatThinking.low); spin()

@@ -1247,10 +1247,71 @@ struct QCStepControl: View {
     }
 }
 
+/// The content view of an interactive QCFloat: it sets the pointer over the float itself (see QCFloat). Over a QCCursorView
+/// (what `qcPointingHand()` puts behind a control) the pointing hand, over anything else the arrow. One tracking area (cursor
+/// updates, moves, enter and exit; active always, so it works with the panel under it as the key window), and the answer is
+/// decided here from where the pointer is, never from competing areas.
+final class QCFloatHost: NSHostingView<AnyView> {
+    /// The pointer is on the float and the panel under it has its cursor rectangles off.
+    private(set) var holdingPanel = false
+
+    /// The cursor for a point of this view (its own coordinates, as the event gives them after `convert(_:from:)`).
+    func cursor(at p: NSPoint) -> NSCursor { overHand(p, in: self) ? .pointingHand : .arrow }
+
+    private func overHand(_ p: NSPoint, in v: NSView) -> Bool {
+        for s in v.subviews where !s.isHidden {
+            if s is QCCursorView, s.convert(s.bounds, to: self).contains(p) { return true }
+            if overHand(p, in: s) { return true }
+        }
+        return false
+    }
+
+    /// The one area (visible rect: it follows the view's size by itself), there from the moment the view is in a window.
+    static let trackingOptions: NSTrackingArea.Options = [.cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard !trackingAreas.contains(where: { $0.owner === self }) else { return }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: Self.trackingOptions, owner: self, userInfo: nil))
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { updateTrackingAreas() }
+    }
+
+    private func point(_ e: NSEvent) -> NSPoint { convert(e.locationInWindow, from: nil) }
+    override func cursorUpdate(with event: NSEvent) { cursor(at: point(event)).set() }
+    override func mouseMoved(with event: NSEvent) { cursor(at: point(event)).set() }
+    override func mouseEntered(with event: NSEvent) { holdPanel(); cursor(at: point(event)).set() }
+    override func mouseExited(with event: NSEvent) { releasePanel() }
+
+    /// The panel's cursor rectangles (its text views' I-beam) are off while the pointer is on the float.
+    func holdPanel() {
+        guard !holdingPanel, let panel = window?.parent else { return }
+        holdingPanel = true
+        panel.disableCursorRects()
+    }
+
+    /// Back on: rebuilt, so the panel's own pointer (the I-beam over its field) returns at the pointer's next move.
+    func releasePanel() {
+        guard holdingPanel else { return }
+        holdingPanel = false
+        if let panel = window?.parent {
+            panel.enableCursorRects()
+            panel.resetCursorRects()
+        }
+    }
+}
+
 /// A small window of its own just above a part of the row (the usage card, the keys list): it draws over the field (an
 /// AppKit view that anything drawn in the row's own view would sit under) and takes no part in the row's layout or the
 /// mouse. One window each, made the first time; a child of the panel, so it moves with it, and taken away when the
 /// pointer leaves (the card), on a click elsewhere or Esc (the keys), or when the panel hides.
+///
+/// The pointer over an interactive one (the keys list) is the float's own to set: the window is never key, and the panel
+/// under it is (its text views keep asking for the I-beam, also over the float). The float's content view tracks the pointer
+/// (cursor updates and moves, active always) and sets the pointing hand over a tab (a QCCursorView, as everywhere in the
+/// app) and the arrow over the rest, and the panel's cursor rectangles are off while the pointer is on the float, back
+/// (rebuilt) when it leaves or the float goes.
 final class QCFloat {
     static let shared = QCFloat()
     /// The keys list's own, so the usage card never replaces it.
@@ -1259,7 +1320,7 @@ final class QCFloat {
     var shownFrame: NSRect? { window?.isVisible == true ? window?.frame : nil }
     enum Align { case center, trailing }
     private var window: NSPanel?
-    private var host: NSHostingView<AnyView>?
+    private var host: QCFloatHost?
 
     /// Shows a view above a frame of the panel's hosting view (its top-left space), centred on it or right-aligned with
     /// it, kept inside the panel's width. False when there is nothing to show it above (no panel on screen, no frame).
@@ -1271,12 +1332,13 @@ final class QCFloat {
             w = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
             w.isOpaque = false; w.backgroundColor = .clear; w.hasShadow = true
             w.isReleasedWhenClosed = false
-            let h = NSHostingView(rootView: view)
+            let h = QCFloatHost(rootView: view)
             w.contentView = h
             window = w; host = h
         }
         // the usage card is only looked at (the pointer goes through it); the keys list has a track to press
         w.ignoresMouseEvents = !interactive
+        w.acceptsMouseMovedEvents = interactive          // its tracking area gets the pointer's moves (QCFloatHost)
         let size = host!.fittingSize
         // the frame's top edge, from the hosting view's top-left space to the screen
         let anchor = align == .center ? frame.midX : frame.maxX
@@ -1292,10 +1354,13 @@ final class QCFloat {
 
     func hide() {
         guard let w = window else { return }
+        host?.releasePanel()          // hidden under the pointer gets no mouse-exit: the panel's own pointer is back at once
         w.parent?.removeChildWindow(w)
         w.orderOut(nil)
     }
 
+    /// Its content view while it exists (the checks read the pointer from it).
+    var contentHost: QCFloatHost? { host }
     /// Whether a window is this one's (a press on it).
     func owns(_ w: NSWindow?) -> Bool { w != nil && w === window }
     /// Its window number while it is shown (a check makes a press on it), else 0.
