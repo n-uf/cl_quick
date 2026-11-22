@@ -62,7 +62,8 @@ let lastKnown = make(level(five: 13, week: 88, ago: 12 * 60))
 check("stale: 12 min old numbers are 'Last known', grey, with no dot colour",
       lastKnown.updated == "Last known 12 min ago" && lastKnown.rows.allSatisfy { $0.colour == Painter.grey } && lastKnown.dotP == nil,
       "\(lastKnown.lines)")
-let staleFull = make(level(five: nil, week: 100, ago: 12 * 60))
+// a 5-hour account whose window has reset since (no number now): its row stays, "–"
+let staleFull = make(level(five: 30, fiveIn: -60, week: 100, ago: 12 * 60))
 check("stale: a full week 12 min old stays visible, grey: 'Week full · last known', both rows grey, no dot, 'Last known 12 min ago' under the bars",
       staleFull.fullNote == "Week full · last known" && staleFull.fullNoteStale && staleFull.dotP == nil && staleFull.updated == "Last known 12 min ago"
       && staleFull.rows.map(\.share) == ["–", "100%"] && staleFull.rows.allSatisfy { $0.colour == Painter.grey } && staleFull.rows[1].resets.hasPrefix("back"), "\(staleFull.lines)")
@@ -80,7 +81,7 @@ let savedFive = make(level(five: 100, week: 20, ago: 3 * 3600))
 check("saved full: a 3 h old full 5-hour window the same way: '5-hour full · last known', its row 100% back …, the week '–'",
       savedFive.fullNote == "5-hour full · last known" && savedFive.fullNoteStale && savedFive.rows.map(\.share) == ["100%", "–"] && savedFive.rows[0].resets.hasPrefix("back")
       && savedFive.updated == "Last known 3 h ago" && savedFive.dotP == nil, "\(savedFive.lines)")
-let savedDay = make(level(five: nil, week: 100, ago: 28 * 3600))
+let savedDay = make(level(five: 30, fiveIn: -60, week: 100, ago: 28 * 3600))
 check("saved full: a day-old full week with its reset still ahead: 'Week full · last known', 'Last known yesterday'",
       savedDay.fullNote == "Week full · last known" && savedDay.updated == "Last known yesterday" && savedDay.rows.map(\.share) == ["–", "100%"] && savedDay.dotP == nil, "\(savedDay.lines)")
 check("saved full: the block is as tall as a fresh one (so a fresh answer can replace it live)", QCMenuUsageBlock.height(savedDay) == QCMenuUsageBlock.height(rich)
@@ -135,9 +136,13 @@ let none = make(nil)
 check("no numbers: the account line and one muted line, no bars, no age", none.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No usage yet"] && none.rows.isEmpty && none.noUsage,
       "\(none.lines)")
 check("only an old week (reset since): no numbers either", make(level(five: nil, week: 70, weekIn: -60)).noUsage)
-let weekOnly = make(level(five: nil, week: 21))
-check("a window not known yet: its bar empty, its share a dash; the other as it is", weekOnly.rows.map(\.share) == ["–", "21%"] && weekOnly.rows[0].p == nil && !weekOnly.noUsage,
+let weekOnly = make(level(five: 30, fiveIn: -60, week: 21))
+check("a window not known now (reset since): its bar empty, its share a dash; the other as it is", weekOnly.rows.map(\.share) == ["–", "21%"] && weekOnly.rows[0].p == nil && !weekOnly.noUsage,
       "\(weekOnly.rows)")
+// an account that has a week and has never had a 5-hour number (a plan without one): the week's row alone
+let no5h = make(level(five: nil, week: 21))
+check("no 5-hour window on the account: the week's row alone, no \"5-hour\" row", no5h.rows.map(\.id) == ["wk"] && no5h.rows.map(\.share) == ["21%"] && !no5h.noUsage,
+      "\(no5h.rows)")
 let full = make(level(five: 100, week: 64))
 check("a full 5-hour limit: 100% in crimson, the header says so, the bar's reset is when it is back",
       full.rows[0].share == "100%" && full.rows[0].colour == Painter.crimson && full.fullNote == "5-hour full · in 1h 5m" && !full.fullNoteStale && full.rows[0].resets.hasPrefix("back"),

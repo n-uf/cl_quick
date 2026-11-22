@@ -94,8 +94,6 @@ struct QuickChatLevel: Codable, Equatable {
     @discardableResult
     mutating func apply(usage u: QuickChatUsage, now: Date = Date()) -> Bool {
         guard u.available, u.fiveHour?.used != nil || u.week?.used != nil else { return false }
-        // a week and no 5-hour number: the account has no 5-hour window now (its plan), so an old one is dropped (hasFiveHour)
-        if u.week?.used != nil, u.fiveHour?.used == nil { fiveHour = nil; fiveHourResets = nil }
         // a window given is taken whole: its reset as given too (none, for a window that hasn't started), so an old reset
         // already past never hides the number it just gave
         if let w = u.fiveHour, let p = w.used { fiveHour = p; fiveHourResets = w.resets }
@@ -175,9 +173,11 @@ struct QuickChatLevel: Codable, Equatable {
         return fiveHour
     }
 
-    /// The 5-hour window applies to the account: it has a number, or nothing is known yet. An account whose usage gives a
-    /// week and no 5-hour window (a plan without one) shows the week alone, everywhere: no "5h" row, track or "no numbers yet".
-    var hasFiveHour: Bool { fiveHour != nil || week == nil }
+    /// The 5-hour window applies to the account: it has had a number (kept after its reset, so an idle 5-hour account, whose
+    /// window not started reads as none, keeps its row), it holds the account back, or nothing is known yet. An account
+    /// that has a week and has never had a 5-hour number (a plan without one) shows the week alone, everywhere: no "5h"
+    /// row, track or "no numbers yet".
+    var hasFiveHour: Bool { fiveHour != nil || week == nil || refusedOn == "5h" || full()?.id == "5h" }
 
     /// Room for a question: not held back, and the week known.
     func room(_ now: Date = Date()) -> Bool { full(now) == nil && weekNow(now) != nil }
