@@ -60,7 +60,7 @@ final class QCChatScroll: ObservableObject {
     /// handle follow them (QCEdgeLayout), so nothing covers the scroller and the text ends where the strip starts.
     @Published private(set) var scrollerStyle = NSScroller.preferredScrollerStyle
     @Published private(set) var scrollerInset: CGFloat = NSScroller.preferredScrollerStyle == .legacy
-        ? ceil(NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)) : 0
+        ? ceil(NSScroller.scrollerWidth(for: QCEdgeLayout.scrollerSize, scrollerStyle: .legacy)) : 0
 
     /// The two edge handles' states: left (this answer), right (navigation).
     let left = QCEdgeState()
@@ -107,6 +107,7 @@ final class QCChatScroll: ObservableObject {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         scrollView = view; self.clip = clip; self.doc = doc
+        view.verticalScroller?.controlSize = QCEdgeLayout.scrollerSize     // the thin scroller (QCEdgeLayout.scroller counts it)
         flipped = doc.isFlipped
         clip.postsBoundsChangedNotifications = true
         clip.postsFrameChangedNotifications = true
@@ -249,6 +250,8 @@ final class QCChatScroll: ObservableObject {
     /// Works out what the views show, and publishes what changed.
     func refresh() {
         guard let g = geometry, let sv = scrollView else { return }
+        // a style change ("Show scroll bars") may bring a new scroller: keep it thin
+        if let v = sv.verticalScroller, v.controlSize != QCEdgeLayout.scrollerSize { v.controlSize = QCEdgeLayout.scrollerSize }
         let style = sv.scrollerStyle
         let inset = style == .legacy ? max(0, (sv.frame.width - g.clip.frame.width).rounded()) : 0
         if scrollerStyle != style || scrollerInset != inset {
@@ -579,13 +582,15 @@ enum QCEdgeLayout {
     /// From the window's edge to the handle's strip on the left: clear of the resize band (under 4 pt deep).
     static let clear: CGFloat = 5
     /// The hit strip along the edge, and the pill drawn in it (on its outer side).
-    static let stripWidth: CGFloat = 14, stripHeight: CGFloat = 44
-    static let pillWidth: CGFloat = 3, pillHeight: CGFloat = 30
+    static let stripWidth: CGFloat = 16, stripHeight: CGFloat = 44     // the 5-pt pill stays 11 pt clear of the text
+    static let pillWidth: CGFloat = 5, pillHeight: CGFloat = 30
+    /// The answers' scroller is the small (thin) one.
+    static let scrollerSize: NSControl.ControlSize = .small
     /// The vertical scroller's track on the right, for a scroller style: its nominal width and two points clear (a check compares
     /// it with the real scroller). An overlay scroller draws over the answers (the clip view is the whole width); a LEGACY
     /// (always visible) one takes its width out of the clip view, so the text, which is laid out inside the clip view, already
     /// ends that much before the scroller: see `rightGutter`.
-    static func scroller(_ style: NSScroller.Style) -> CGFloat { ceil(NSScroller.scrollerWidth(for: .regular, scrollerStyle: style)) + 2 }
+    static func scroller(_ style: NSScroller.Style) -> CGFloat { ceil(NSScroller.scrollerWidth(for: scrollerSize, scrollerStyle: style)) + 2 }
     /// The answers' text starts this far from the left side: the strip fits in the gutter, the pill is 11 pt clear of the text.
     static var leftGutter: CGFloat { clear + stripWidth }
     /// The text's right padding inside the clip view: the scroller's track and the strip, less what the clip view has already
