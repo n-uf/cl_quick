@@ -10,7 +10,9 @@ enum QuickChatBlock: Equatable {
     case bullets([String])
     case numbered(start: Int, items: [String])
     case quote(String)
-    case code(language: String, text: String)
+    /// A fenced block: the language (the info string's first word), the words after it (`meta`: "```html code" has
+    /// "code"), and whether its closing fence has come (false while the answer is still streaming it).
+    case code(language: String, text: String, meta: String = "", closed: Bool = true)
     case rule
     /// A GitHub-style table: the header's cells, how each column is aligned, and the body rows. Every row has as many
     /// cells as the header; a cell is still Markdown source (the inline part is drawn by the view).
@@ -42,8 +44,9 @@ enum QuickChatMarkdown {
                 while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix(fence.marker) {
                     code.append(lines[i]); i += 1
                 }
+                let closed = i < lines.count
                 i += 1
-                out.append(.code(language: fence.language, text: code.joined(separator: "\n")))
+                out.append(.code(language: fence.language, text: code.joined(separator: "\n"), meta: fence.meta, closed: closed))
                 continue
             }
             if t.isEmpty { flush(); i += 1; continue }
@@ -152,10 +155,12 @@ enum QuickChatMarkdown {
         return out
     }
 
-    /// "```swift" or "~~~": the marker that closes it, and the language named ("" when none).
-    static func fence(_ t: String) -> (marker: String, language: String)? {
+    /// "```swift" or "~~~": the marker that closes it, the language named ("" when none) and the words after it, one
+    /// space apart ("```html code": "html" and "code").
+    static func fence(_ t: String) -> (marker: String, language: String, meta: String)? {
         for m in ["```", "~~~"] where t.hasPrefix(m) {
-            return (m, String(t.dropFirst(3)).trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? "")
+            let words = String(t.dropFirst(3)).split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            return (m, words.first ?? "", words.dropFirst().joined(separator: " "))
         }
         return nil
     }

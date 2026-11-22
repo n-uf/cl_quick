@@ -411,7 +411,16 @@ typealias B = QuickChatBlock
 check("paragraphs", QuickChatMarkdown.blocks("One\ntwo\n\nThree") == [B.paragraph("One\ntwo"), .paragraph("Three")])
 check("code, closed", QuickChatMarkdown.blocks("Use:\n```zsh\nls -la\necho hi\n```\nDone.")
       == [.paragraph("Use:"), .code(language: "zsh", text: "ls -la\necho hi"), .paragraph("Done.")])
-check("code, still streaming", QuickChatMarkdown.blocks("Use:\n```swift\nlet a = 1") == [.paragraph("Use:"), .code(language: "swift", text: "let a = 1")])
+check("code, still streaming (not closed yet)", QuickChatMarkdown.blocks("Use:\n```swift\nlet a = 1") == [.paragraph("Use:"), .code(language: "swift", text: "let a = 1", closed: false)])
+check("code, closed once its fence comes", QuickChatMarkdown.blocks("Use:\n```swift\nlet a = 1\n```") == [.paragraph("Use:"), .code(language: "swift", text: "let a = 1", closed: true)])
+check("code: the words after the language are its meta, the language stays the first word",
+      QuickChatMarkdown.blocks("```html code\n<p>x</p>\n```") == [.code(language: "html", text: "<p>x</p>", meta: "code")]
+      && QuickChatMarkdown.blocks("```html\n<p>x</p>\n```") == [.code(language: "html", text: "<p>x</p>", meta: "")]
+      && QuickChatMarkdown.blocks("``` html   code  page\n<p>x</p>\n```") == [.code(language: "html", text: "<p>x</p>", meta: "code page")]
+      && QuickChatMarkdown.blocks("~~~html\tcode\n<p>x</p>\n~~~") == [.code(language: "html", text: "<p>x</p>", meta: "code")])
+check("code: an html block still streaming is not closed, whatever its meta",
+      QuickChatMarkdown.blocks("```html code\n<p>x") == [.code(language: "html", text: "<p>x", meta: "code", closed: false)]
+      && QuickChatMarkdown.blocks("```html\n<p>x</p>\n``") == [.code(language: "html", text: "<p>x</p>\n``", closed: false)])
 check("code with no language", QuickChatMarkdown.blocks("```\nx\n```") == [.code(language: "", text: "x")])
 check("code keeps blank lines and indents", QuickChatMarkdown.blocks("```\na\n\n    b\n```") == [.code(language: "", text: "a\n\n    b")])
 check("tilde fence", QuickChatMarkdown.blocks("~~~py\nprint(1)\n~~~") == [.code(language: "py", text: "print(1)")])

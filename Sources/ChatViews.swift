@@ -641,7 +641,7 @@ struct QCAnswer: View, Equatable {
         case .quote(let s):
             prose(s).padding(.leading, 12)
                 .overlay(Rectangle().fill(QCColor.line).frame(width: 2), alignment: .leading)
-        case .code(let lang, let code):
+        case .code(let lang, let code, _, _):
             QCCodeBlock(language: lang, code: code)
         case .rule:
             Rectangle().fill(QCColor.line).frame(height: 1)
