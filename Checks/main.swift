@@ -449,6 +449,10 @@ check("chat as Markdown: bold labels, the answer as written (headings, fences an
 check("chat as Markdown: pictures are [image], files [file: name], after the text; a picture alone has no empty text",
       QuickChatMarkdown.chat([QuickChatExchange(question: "Look", images: 2, files: ["a.pdf"], answer: "Seen."), QuickChatExchange(question: "", images: 1)])
       == "**You:**\n\nLook\n\n[image]\n\n[image]\n\n[file: a.pdf]\n\n**Claude:**\n\nSeen.\n\n**You:**\n\n[image]")
+check("chat as Markdown: an answer left inside a code block (odd fence lines) gets its closing fence before the next turn; a closed one is as written",
+      QuickChatMarkdown.chat([QuickChatExchange(question: "a", answer: "Try:\n```swift\nlet a = 1"), QuickChatExchange(question: "b", answer: "```\nx\n```"),
+                              QuickChatExchange(question: "c", answer: "~~~py\nprint(1)")])
+      == "**You:**\n\na\n\n**Claude:**\n\nTry:\n```swift\nlet a = 1\n```\n\n**You:**\n\nb\n\n**Claude:**\n\n```\nx\n```\n\n**You:**\n\nc\n\n**Claude:**\n\n~~~py\nprint(1)\n~~~")
 check("chat as Markdown: no answer (failed, not begun) has no Claude part; nothing at all is empty",
       QuickChatMarkdown.chat([QuickChatExchange(question: "Q")]) == "**You:**\n\nQ" && QuickChatMarkdown.chat([]) == "")
 check("a year is not a list", QuickChatMarkdown.blocks("2026. A year.") == [.paragraph("2026. A year.")])

@@ -2029,10 +2029,10 @@ final class QuickChatPanel: NSPanel {
             default: break
             }
         }
-        // ⌥⇧⌘C (exactly those), by KEY CODE like the digit keys, so it works on every layout (⌥ changes the character a key
-        // gives): the whole chat as Markdown. macOS has no system shortcut on it and the field's Edit keys never use ⌥⇧⌘.
-        // Only while the panel is the key window.
-        if isKeyWindow, Int(e.keyCode) == kVK_ANSI_C, flags.intersection([.command, .option, .control, .shift]) == [.command, .option, .shift] {
+        // ⌥⇧⌘C (exactly those), matched by the letter the way the Edit keys are (shortcutLetter: on a layout without Latin
+        // letters, Cyrillic, the C key's place): the whole chat as Markdown. macOS has no system shortcut on it and the
+        // field's Edit keys never use ⌥⇧⌘. Only while the panel is the key window.
+        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command, .option, .shift], Self.shortcutLetter(e) == "c" {
             guard !e.isARepeat else { return true }
             onCopyChat()
             return true

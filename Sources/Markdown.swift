@@ -240,9 +240,22 @@ enum QuickChatMarkdown {
             mine += x.files.map { "[file: \($0)]" }
             if !mine.isEmpty { parts.append("**You:**\n\n" + mine.joined(separator: "\n\n")) }
             let a = x.answer.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !a.isEmpty { parts.append("**Claude:**\n\n" + a) }
+            if !a.isEmpty { parts.append("**Claude:**\n\n" + closingFence(a)) }
         }
         return parts.joined(separator: "\n\n")
+    }
+
+    /// The text with its last code fence closed when it was left open (an odd number of fence lines: an answer that was stopped,
+    /// or is still streaming inside a code block), so what follows it in a pasted chat isn't taken for code. Fences are read as
+    /// the chat reads them: a line starting with ``` or ~~~ opens one, and the next line starting with the same marker closes it.
+    static func closingFence(_ s: String) -> String {
+        var open: String?
+        for line in s.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if let m = open { if t.hasPrefix(m) { open = nil } } else if let f = fence(t) { open = f.marker }
+        }
+        guard let m = open else { return s }
+        return s + "\n" + m
     }
 }
 

@@ -496,9 +496,7 @@ struct QCTurnView: View {
             .padding(.top, first ? 0 : 4)
             if turn.thinkingTitle != nil { QCThought(turn: turn).padding(.top, 12) }
             if !turn.answer.isEmpty {
-                QCAnswer(text: turn.answer).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)
-                    .contextMenu { Button("Copy chat as Markdown") { model.copyChat(feedbackOn: turn.id) } }
-            }
+                QCAnswer(text: turn.answer).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)            }
             if turn.phase == .waiting || turn.phase == .streaming {
                 // while a web tool runs, the dot has a muted line beside it: "Reading example.com…"
                 HStack(spacing: 8) {
@@ -2227,9 +2225,15 @@ struct QCTextField: NSViewRepresentable {
                 // Delete in an empty field takes the last attached image away (the field has nothing left to delete)
                 return tv.string.isEmpty && !tv.hasMarkedText() && parent.onDeleteEmpty()
             case #selector(NSResponder.moveUp(_:)), #selector(NSResponder.moveDown(_:)):
-                // plain ↑ ↓ only (⇧ ⌥ ⌘ ⌃ arrows are other selectors); an input method's composition owns them
+                // plain ↑ ↓ (⇧ ⌥ ⌘ arrows are other selectors), and ⌃P and ⌃N, which the text system turns into the same two
+                // commands; an input method's composition owns them
                 guard !tv.hasMarkedText(), parent.onRecall(sel == #selector(NSResponder.moveUp(_:))) else { return false }
-                tv.string = parent.text                                       // the recalled message, the caret after it
+                // the recalled message replaces the text as an edit, so Undo stays coherent; the caret after it
+                let all = NSRange(location: 0, length: (tv.string as NSString).length)
+                if tv.shouldChangeText(in: all, replacementString: parent.text) {
+                    tv.replaceCharacters(in: all, with: parent.text)
+                    tv.didChangeText()
+                }
                 tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
                 tv.scrollRangeToVisible(tv.selectedRange())
                 edited()

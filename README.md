@@ -243,23 +243,27 @@ minutes for a profile.
   message of this chat in it, the caret at the end, to edit and send again; ↑ again goes further back, ↓ goes forward, and
   ↓ past the newest leaves the field empty. Once you edit the recalled text, ↑ and ↓ are the caret's again. Only this
   chat's messages are recalled, from memory (a new chat starts empty), and only their text: attachments are not brought
-  back. A repeat of the message before is skipped.
-- **Copy the chat as Markdown.** **⌥⇧⌘C**, or **Copy chat as Markdown** in an answer's right-click menu, copies the
+  back. A repeat of the message before is skipped. While a recalled message is unedited, ↑ (and ⌃P) goes to the older
+  message even when this one has several lines, and ↓ (⌃N) to the newer; to move the caret inside it, edit it first or
+  use ←.
+- **Copy the chat as Markdown.** **⌥⇧⌘C** copies the
   whole open chat: each message of yours under a bold **You:** and each answer under **Claude:**, as the answer was
   written (its headings, lists and code blocks with their fences and languages stay), a blank line between all of
   them, so it pastes well into a note or a GitHub issue. A picture is `[image]` and a file `[file: name]` after the
   message's text. A message with no answer (it failed) has no Claude part; an answer still streaming has its text so
   far. The answer's footer says "Copied" for a moment, as for a single answer. Nothing is kept: the copy is made from
-  the chat in memory and goes only to the pasteboard. ⌥⇧⌘C is by key, so it works on every layout.
+  the chat in memory and goes only to the pasteboard. On a layout whose letters aren't Latin (Cyrillic) ⌥⇧⌘C follows
+  the C key's place.
 - **Read aloud.** The speaker button at the end of a finished answer's footer (after ↻; tooltip "Read aloud") reads the
   answer with the Mac's own voice, on the device: the text never leaves the Mac, and nothing is kept. (Claude's own
   voice is not available to an app that runs `claude -p`, so this is macOS's speech.) The button turns into a stop
   glyph ("Stop reading") while it reads; press it again to stop. Only one answer reads at a time: pressing another
   answer's speaker moves the reading there. Esc or hiding the panel, a new chat, and an answer that starts again also
   stop it. What is read is the answer's plain text: the Markdown marks (bold, links, headings, list marks, table
-  pipes) are left out, and a code block is not read out: you hear "code block" in its place. The voice is the system's
-  default for the language of the answer when it can be told (a Ukrainian answer is read in a Ukrainian voice, if one is
-  installed), else your default voice (System Settings ▸ Accessibility ▸ Spoken Content). It has no key.
+  pipes) are left out, and a code block is not read out: you hear "code block" in its place. An answer in your Mac's own
+  language (or one whose language can't be told) is read in the voice chosen in System Settings ▸ Accessibility ▸
+  Spoken Content; an answer in another language is read in the system's default voice for that language (a Ukrainian
+  answer in a Ukrainian voice), or in yours when none is installed. It has no key.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
   app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
   The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under

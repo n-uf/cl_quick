@@ -45,7 +45,11 @@ final class QCSpeech: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     }
 
     /// The utterance ended on its own.
-    func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) { ended(u) }
+    /// The system cancelled it (not our own stop, which has let go of the utterance first).
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) { ended(u) }
+
+    private func ended(_ u: AVSpeechUtterance) {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.utterance === u else { return }
             self.utterance = nil
@@ -53,22 +57,17 @@ final class QCSpeech: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    /// The voice for a text: the system's default voice for the language the text is in, when that can be told (and the
-    /// language has an installed voice), else nil, which is the user's default voice. A text in the language of the Mac's
-    /// own settings gets that language's voice for the user's region.
+    /// The voice for a text: nil (the voice chosen in Spoken Content) when the text is in the Mac's own language or its
+    /// language can't be told; for another language, the system's default voice for it, if one is installed.
     static func voice(for text: String) -> AVSpeechSynthesisVoice? {
         let r = NLLanguageRecognizer()
         r.processString(String(text.prefix(2000)))
         guard let lang = r.dominantLanguage, lang != .undetermined, (r.languageHypotheses(withMaximum: 1)[lang] ?? 0) >= 0.6 else { return nil }
         let code = lang.rawValue.split(separator: "-").first.map(String.init) ?? lang.rawValue      // "zh-Hans" → "zh"
         let mine = AVSpeechSynthesisVoice.currentLanguageCode()
-        if mine.hasPrefix(code + "-") || mine == code, let v = AVSpeechSynthesisVoice(language: mine) { return v }
-        let same = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == code || $0.language.hasPrefix(code + "-") }
-        // the better voice first (premium, enhanced, default), the user's region among equals
-        let region = mine.split(separator: "-").dropFirst().first.map(String.init)
-        func rank(_ v: AVSpeechSynthesisVoice) -> Int {
-            (v.quality.rawValue) * 10 + (region.map { v.language.hasSuffix("-" + $0) } == true ? 1 : 0)
-        }
-        return same.max { rank($0) < rank($1) }
+        // the user's own language: nil, the voice chosen in System Settings ▸ Accessibility ▸ Spoken Content
+        if mine == code || mine.hasPrefix(code + "-") { return nil }
+        // another language: the system's default voice for it (nil when none is installed: the user's default)
+        return AVSpeechSynthesisVoice(language: code)
     }
 }

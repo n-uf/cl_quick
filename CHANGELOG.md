@@ -7,13 +7,14 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 - **Read an answer aloud.** A speaker button after ↻ in each finished answer's footer ("Read aloud") reads the answer
   with the Mac's own voice, on the device (Claude's voice isn't available to an app that runs `claude -p`). Press it
   again, or hide the panel, start a new chat or ask again, to stop; the button is a stop glyph while it reads, and only
-  one answer reads at a time. The Markdown marks are left out and a code block is said as "code block". The voice is the
-  system's default for the answer's language when it can be told, else your default. Nothing is sent or kept.
-- **Copy the chat as Markdown.** ⌥⇧⌘C, or **Copy chat as Markdown** in an answer's right-click menu, copies the whole
-  open chat: your messages under a bold **You:** and the answers under **Claude:**, exactly as written (headings,
-  lists and code blocks with their fences and languages), so it pastes well into a note or a GitHub issue. Pictures
-  are `[image]` and files `[file: name]`. The answer's footer says "Copied" for a moment, as it does for a single
-  answer. Nothing is written anywhere but the pasteboard. The keys list's Write page has it.
+  one answer reads at a time. The Markdown marks are left out and a code block is said as "code block". An answer in
+  your Mac's own language is read in the voice chosen in System Settings ▸ Accessibility ▸ Spoken Content; one in
+  another language, in the system's default voice for it (yours when none is installed). Nothing is sent or kept.
+- **Copy the chat as Markdown.** ⌥⇧⌘C copies the whole open chat: your messages under a bold **You:** and the
+  answers under **Claude:**, exactly as written (headings, lists and code blocks with their fences and languages; a
+  block left open by a stopped or unfinished answer is closed), so it pastes well into a note or a GitHub issue.
+  Pictures are `[image]` and files `[file: name]`. The answer's footer says "Copied" for a moment, as it does for a
+  single answer. Nothing is written anywhere but the pasteboard. The keys list's Write page has it.
 - **↑ recalls your last message.** In the field, while it is empty, ↑ puts your last message of the chat in it (the
   caret at the end) to edit and send again; ↑ again goes further back, ↓ goes forward, and ↓ past the newest empties
   the field. Edit the recalled text and ↑ ↓ are normal caret keys again, as they are with text typed or an input
