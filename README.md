@@ -170,8 +170,20 @@ minutes for a profile.
   - The handles keep clear of the window's resize band (under 4 pt deep), the drag surfaces and the answers' scroller: the left
     one stands 5 pt in, the right one inward of the scroller's track (17 pt), and the text column starts after them.
 - Answers stream in as Markdown; tables (header, alignment row, rows) are drawn as a grid whose cells wrap to the
-  panel's width and scroll sideways when there are too many columns; code blocks have Copy, and an `html` block also has Preview (the page in its own window: no scripts, nothing fetched from the network, links and downloads do nothing); under each answer Copy and a line like "answered by Haiku 5.5 ·
+  panel's width and scroll sideways when there are too many columns; code blocks have Copy; under each answer Copy and a line like "answered by Haiku 5.5 ·
   2.4 s"; under the last one also Ask again.
+  - **Preview: an `html` block shows its page in place.** Once its fence has closed (while it streams it is code), the
+    block shows the page inside itself. Its top row has **Code | Page** (the side shown is marked; your click wins for that
+    block), **⤢** (the page in its own window, as before) and Copy, which copies the code whichever side shows. ```` ```html ````
+    shows the page first, ```` ```html code ```` the code first: Claude is told to fence a snippet meant for pasting into a
+    file that way.
+  - The page shows at its own height, up to about half the panel's; a taller one scrolls inside the block, and at its end
+    the wheel goes on to the chat. A page that appears or grows above what you are reading doesn't move it.
+  - Only the page in view is live: the others show a still picture of themselves (kept in memory only, gone with the chat)
+    until they come back into view or the pointer rests on them, so nothing runs out of sight.
+  - In the chat and in the window alike the page is isolated: no scripts, nothing fetched from the network, links, forms
+    and downloads do nothing, and nothing about it is stored on the Mac. When that can't be set up, the block shows its code
+    and says so.
 - The header (once the bar has become a chat window) shows only the usage meters, "5h" and "wk", each with its bar,
   its share and, when there's room, when it resets, and, at the right, a darker capsule with **+** (new chat) and **✕**
   (hide). No profile name and no address. The empty part of the header moves the window.
