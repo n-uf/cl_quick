@@ -4114,7 +4114,8 @@ do {
     for d in [c.dir, s.dir, h.dir, o.dir] { try? FileManager.default.removeItem(at: d) }
 }
 
-// ── Preview on an html block, and its window (never ordered in: QCHTMLPreview.reveal is off) ───────────────────────────
+// ── Preview (⤢) on an html block, and its window (never ordered in: QCHTMLPreview.reveal is off); the page in place is
+// checked in Checks/panel/inline.swift ───────────────────────────────────────────────────────────────────────────────
 do {
     let m = chat.model
     chat.open(); spin(0.3)
@@ -4125,7 +4126,7 @@ do {
     }
     let sampleHTML = "<h1>Sample</h1>\n<p>Hello <a href=\"https://example.com\">link</a></p>"
     if let r = previewMark("Here:\n```html\n\(sampleHTML)\n```") {
-        check("preview: an html block has the control, 24 pt tall like Copy", abs(r.height - QCSpace.small) < 0.5, "\(r)")
+        check("preview: an html block has the control (⤢), 24 pt tall like Copy", abs(r.height - QCSpace.small) < 0.5 && abs(r.width - QCSpace.small) < 0.5, "\(r)")
     } else { check("preview: an html block has the control", false) }
     check("preview: an htm block has it too", previewMark("```htm\n<p>x</p>\n```") != nil)
     check("preview: the language in capitals has it too", previewMark("```HTML\n<p>x</p>\n```") != nil)
@@ -5227,6 +5228,9 @@ func chatBehaviourChecks() {
     m.newChat(); chat.hide(); spin(0.2)
 }
 chatBehaviourChecks()
+
+// ── an html block's page in place (Checks/panel/inline.swift) ───────────────────────────────────────────────────────────
+inlinePageChecks()
 
 CheckQuiet.verify("at the end")
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so
