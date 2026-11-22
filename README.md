@@ -217,13 +217,14 @@ minutes for a profile.
   sending, a new chat or hiding stops it. With Dictation off in macOS it says once where to turn it on. Return while
   dictating stops it and shows the text, and Return again sends it (Settings ▸ General ▸ App ▸ **Dictation** can make the
   first Return send at once). The field grows with what you dictate.
-- **⌘⇧C** copies the latest complete answer, in any chat, the same as its Copy button.
+- **⇧⌘C** copies the answer in view once you have scrolled up, else the latest complete answer, the same as that
+  answer's Copy button.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
   app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
   The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under
   it. Text already in the field stays above the quote; a selection over 20,000 characters is cut there, with a line
   saying so. No Accessibility permission: macOS hands the selection over. Nothing about it is kept.
-- **Keyboard layouts.** The chat's shortcuts and paste (⌘V, ⌘C, ⌘X, ⌘A, ⌘Z, ⌘N, ⌘W, ⌘D, ⌘⇧C) work on Cyrillic
+- **Keyboard layouts.** The chat's shortcuts and paste (⌘V, ⌘C, ⌘X, ⌘A, ⌘Z, ⌘N, ⌘W, ⌘D, ⇧⌘C) work on Cyrillic
   layouts such as Russian and Ukrainian too: on a layout whose letters aren't Latin they follow the key's place. The
   digit keys (⌘ with 1 to 5, ⌃ with 1 to 6) follow the key too, on the number row and the keypad, on any layout.
 - **Images.** ⌘V with a screenshot or picture on the clipboard (⌃⇧⌘4 copies one), or with image files copied in Finder,
