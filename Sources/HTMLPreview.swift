@@ -1,7 +1,9 @@
-// A fenced `html` block in an answer can be looked at: its Preview control opens the block's text as a web page in one
-// reusable window. The answer itself never draws HTML (it stays Markdown and text); the page is a separate, isolated
-// document, as Claude Code treats HTML. Every setting that isolates it, all in place before the first load (and the
-// loopback probe in Checks/panel sees whether the whole still keeps every vector off the network):
+// A fenced `html` block in an answer can be looked at: once its fence has closed it shows as its page in place, inside the
+// code block (InlinePage.swift: Code | Page, one live web view at most), and its ⤢ opens the block's text as a web page in
+// one reusable window. The answer's own text never draws HTML (it stays Markdown and text); each page is a separate,
+// isolated document, as Claude Code treats HTML, and every web view of both is made by `makeWebView` below. Every setting
+// that isolates it, all in place before the first load (and the loopback probe in Checks/panel sees whether the whole
+// still keeps every vector off the network, in the window and in the chat):
 //   - a non-persistent website data store (nothing is stored on the Mac);
 //   - JavaScript off (`allowsContentJavaScript`, also set again in every navigation's preferences);
 //   - Safe Browsing off (`isFraudulentWebsiteWarningEnabled`): it asks a service about a URL before the delegate is asked;
@@ -14,7 +16,8 @@
 //     WebKit begins anyway is cancelled at once;
 //   - a user script of ours (in its own world, not switched off with the page's JavaScript) that cancels every click,
 //     auxclick, submit and Enter, with no test of the target: WebKit connects to a link's host, and sends an <a ping>,
-//     before the delegate is asked (HTML, SVG and MathML links and links in shadow roots alike);
+//     before the delegate is asked (HTML, SVG and MathML links and links in shadow roots alike); a page in the chat adds
+//     one more in the same world, which only tells the app which ends its document is scrolled to (InlinePage.swift);
 //   - the right-click menu keeps only its Copy items, without Services (Download Linked File / Image / Media start a
 //     download without asking the delegate or the rules; the Open items navigate); Quick Look is a no-op; nothing can
 //     be dropped on the page (no dragged types).
@@ -159,7 +162,7 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     }
 
     /// A web view with the isolation set and the block-all rules added; nothing is loaded yet.
-    static func makeWebView(rules: WKContentRuleList, trace: (String) -> Void = { _ in }) -> WKWebView {
+    static func makeWebView(rules: WKContentRuleList, trace: (String) -> Void = { _ in }) -> QCPreviewWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -255,9 +258,20 @@ final class QCHTMLPreview: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindo
     /// redirect, a frame, a form, a script's navigation).
     /// (Plain values, so a check can ask without WebKit's own action objects.)
     func decide(isMainFrame: Bool, type: WKNavigationType, download: Bool) -> WKNavigationActionPolicy {
-        guard allowInitialLoad, isMainFrame, type == .other, !download else { return .cancel }
-        allowInitialLoad = false
+        Self.policy(allowInitial: &allowInitialLoad, isMainFrame: isMainFrame, type: type, download: download)
+    }
+
+    /// The one rule, for this window's page and for a page shown in the chat (InlinePage.swift): the initial load once
+    /// (main frame, `.other`, no download), which takes the flag down; everything else cancelled.
+    static func policy(allowInitial: inout Bool, isMainFrame: Bool, type: WKNavigationType, download: Bool) -> WKNavigationActionPolicy {
+        guard allowInitial, isMainFrame, type == .other, !download else { return .cancel }
+        allowInitial = false
         return .allow
+    }
+
+    /// An html block's fence says what it is first: ```html code is a snippet to paste (its code first), ```html a page.
+    static func codeFirst(_ meta: String) -> Bool {
+        meta.split(whereSeparator: { $0 == " " || $0 == "\t" }).contains { $0.lowercased() == "code" }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences,
@@ -314,6 +328,14 @@ final class QCPreviewWebView: WKWebView {
     required init?(coder: NSCoder) { fatalError("not from a nib") }
     override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {}
 
+    /// A page in the chat (InlinePage.swift) decides each wheel event: true, it went on to the chat (the page is at its
+    /// end, or has nothing to scroll); false, the page scrolls. Nil (the window's page): always the page.
+    var wheel: ((NSEvent) -> Bool)?
+    override func scrollWheel(with event: NSEvent) {
+        if wheel?(event) == true { return }
+        super.scrollWheel(with: event)
+    }
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         Self.filter(menu)
@@ -337,22 +359,12 @@ final class QCPreviewWebView: WKWebView {
     }
 }
 
-/// The compact "Preview" control in an html block's top row, beside Copy: the language label's size, Copy's 24 pt height
-/// and hover.
+/// ⤢ in an html block's top row, beside Copy (Copy's 24 pt target and hover): the block's page in the Preview window.
 struct QCPreviewButton: View {
     let html: String
-    @State private var hover = false
     var body: some View {
-        Button { QCHTMLPreview.shared.show(html) } label: {
-            Text("Preview").font(.system(size: 11.5, weight: .medium))
-                .padding(.horizontal, 8)
-                .frame(height: QCSpace.small)
-                .foregroundColor(hover ? QCColor.text : QCColor.muted)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hover ? QCColor.hover : .clear))
-                .qcControl()
-        }
-        .buttonStyle(.plain).help("Preview this HTML in a window").onHover { hover = $0 }
-        .qcMark("preview")
-        .accessibilityLabel("Preview HTML")
+        QCIconButton(symbol: "arrow.up.left.and.arrow.down.right", help: "Open the page in a window", small: true,
+                     label: "Open the page in a window") { QCHTMLPreview.shared.show(html) }
+            .qcMark("preview")
     }
 }
