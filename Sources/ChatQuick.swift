@@ -26,7 +26,7 @@ enum QCQuickText {
 
     /// The selection as a Markdown blockquote (a blank line stays a bare ">").
     static func quote(_ selection: String) -> String {
-        selection.trimmingCharacters(in: .whitespacesAndNewlines)
+        selection.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces).isEmpty ? ">" : "> " + $0 }
             .joined(separator: "\n")
@@ -92,6 +92,7 @@ final class QCQuick: ObservableObject {
         case .rightMouseDown:
             return showMenu(e)
         case .leftMouseDown:
+            if e.modifierFlags.contains(.control), showMenu(e) { return true }          // a ⌃-click is a right-click
             down = e.locationInWindow; hint = nil; dismissed = nil
             hideBar()
             if available { available = false }          // the press changes the selection: the mouse-up reads it anew
@@ -120,10 +121,9 @@ final class QCQuick: ObservableObject {
     /// SwiftUI .contextMenu never shows over it) gets our group added, then it is shown the way AppKit would. Anywhere else, or
     /// when the text has no menu, the click goes on as ever.
     private func showMenu(_ e: NSEvent) -> Bool {
-        guard let panel, let cv = panel.contentView, model?.isWindow == true else { return false }
-        let at = e.locationInWindow
-        guard let v = QCTextLines.all(under: cv).first(where: { $0.convert($0.bounds, to: nil).contains(at) }),
-              model?.scroll.answerContains(v.convert(v.bounds, to: nil)) == true, let menu = v.menu(for: e) else { return false }
+        guard let v = answerText(at: e.locationInWindow), let base = v.menu(for: e) else { return false }
+        // a copy, so a menu the text view keeps never collects our group twice
+        let menu = (base.copy() as? NSMenu) ?? base
         let sel = selection()
         if let sel { text = sel.text; if !available { available = true } }
         let on = sel != nil
@@ -136,6 +136,19 @@ final class QCQuick: ObservableObject {
         hideBar()
         NSMenu.popUpContextMenu(menu, with: e, for: v)
         return true
+    }
+
+    /// The answer's text view that really is under a point of the window (window coordinates): the point is in the answers' visible
+    /// area (not in the header, the field, or under the find bar), the content view's own hit test lands on the text view (or in it),
+    /// so a field or a bar drawn over scrolled-away text never gets the answers' menu, and the text is in an answer.
+    private func answerText(at p: NSPoint) -> NSView? {
+        guard let panel, let cv = panel.contentView, let model, model.isWindow, let vis = model.scroll.visibleRectInWindow(),
+              vis.contains(p) else { return nil }
+        if model.find.isOpen, p.y > vis.maxY - (QCFindBar.height + 12) { return nil }       // (window coordinates: the top is the larger y)
+        guard let hit = cv.hitTest(cv.superview?.convert(p, from: nil) ?? p) else { return nil }
+        guard let v = QCTextLines.all(under: cv).first(where: { hit === $0 || hit.isDescendant(of: $0) }),
+              model.scroll.answerContains(v.convert(v.bounds, to: nil)) else { return nil }
+        return v
     }
 
     /// After the event has been handled (the selection is made by then), and once more a moment later for a double or triple
@@ -222,6 +235,8 @@ final class QCQuick: ObservableObject {
         let box = topLeft(v.convert(v.bounds, to: nil)), area = topLeft(vis)
         let lh = box.height / CGFloat(lines)
         let top = box.minY + CGFloat(first) * lh, bottom = box.minY + CGFloat(last + 1) * lh
+        // the selection's lines must overlap what the answers show: scrolled away (⇧fn, ⌘J), the bar is not drawn over the field
+        guard bottom > area.minY, top < area.maxY else { return hideBar() }
         var x = box.midX
         if let h = hint { x = cv.convert(h, from: nil).x }
         x = min(max(x, box.minX + 12), max(box.minX + 12, box.maxX - 12))
@@ -297,13 +312,16 @@ private struct QCQuickPart: View {
 }
 
 /// A menu item's action, held by the item.
-final class QCMenuAction: NSObject {
+final class QCMenuAction: NSObject, NSMenuItemValidation {
     let run: () -> Void
-    init(_ run: @escaping () -> Void) { self.run = run }
+    let enabled: Bool
+    init(_ run: @escaping () -> Void, enabled: Bool = true) { self.run = run; self.enabled = enabled }
     @objc func fire() { run() }
+    /// (menus enable their items by validation: `isEnabled` alone is overruled)
+    func validateMenuItem(_ item: NSMenuItem) -> Bool { enabled }
 
     static func item(_ title: String, enabled: Bool = true, _ run: @escaping () -> Void) -> NSMenuItem {
-        let a = QCMenuAction(run)
+        let a = QCMenuAction(run, enabled: enabled)
         let i = NSMenuItem(title: title, action: #selector(fire), keyEquivalent: "")
         i.target = a
         i.representedObject = a          // the item keeps its action alive

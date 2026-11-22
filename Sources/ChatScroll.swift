@@ -345,7 +345,11 @@ final class QCChatScroll: ObservableObject {
     /// Whether a frame (window coordinates) lies in an answer: its centre is in the answer's column. A message of the user's, the
     /// thinking text and the notes are outside every answer.
     func answerContains(_ r: CGRect) -> Bool {
-        let c = CGPoint(x: r.midX, y: r.midY)
+        // (the part of the text that the answers' area shows: a text scrolled away, under the header or the field, is no answer here)
+        guard let vis = visibleRectInWindow() else { return false }
+        let shown = r.intersection(vis)
+        guard !shown.isNull else { return false }
+        let c = CGPoint(x: shown.midX, y: shown.midY)
         return answers.values.contains { w in
             guard let v = attached(w.view) else { return false }
             return v.convert(v.bounds, to: nil).contains(c)

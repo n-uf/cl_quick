@@ -602,8 +602,11 @@ final class QuickChatModel: ObservableObject {
     /// no message to follow. False then.
     @discardableResult
     func followUp(_ q: String) -> Bool {
-        guard !q.isEmpty, !turns.isEmpty, !busy, !blocked, ended == nil else { return false }
+        // (not while a message is waiting for its pictures to be read: that one goes first)
+        guard !q.isEmpty, !turns.isEmpty, !busy, !blocked, ended == nil, !sendWhenReady, preparing == 0 else { return false }
         guard target != nil else { barProblem = .noProfile; return false }
+        // as send() does: Dictation stops first, so the field holds its last words
+        if dictating || dictationNoticed { dictate(false) }
         dictationNote = nil
         barProblem = nil
         turns.append(QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))

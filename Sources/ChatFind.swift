@@ -5,7 +5,7 @@
 //
 // WHAT IS SEARCHED is what is drawn: the text of each Markdown block as the chat shows it (bold, links and `code` without their
 // marks), the cells of a table, the lines of a code block and the user's own messages. NOT searched: the thinking text a click
-// opens, the notes, the footers' words and the code of an html block while its page is the side on show. A wide code block or
+// opens, the notes, the footers' words and the code of an html block whose page shows by default. A wide code block or
 // table that scrolls sideways is brought into view up and down only, never along.
 //
 // HOW IT FITS THE VIEWS: every text the chat draws as a separate Text is a SEGMENT, named by (block, sub): block -1 is the user's
@@ -82,7 +82,10 @@ enum QCFindEngine {
             case .heading(_, let s): add(i, 0, plain(s))
             case .bullets(let items), .numbered(_, let items):
                 for (j, it) in items.enumerated() { add(i, j, plain(it)) }
-            case .code(_, let code, _, _): add(i, 0, code)
+            case .code(let lang, let code, let meta, let closed):
+                // an html block whose page shows by default is not searched: its code is not on screen, so n of m counts what is seen
+                if QCHTMLPreview.isHTML(lang), closed, !QCHTMLPreview.codeFirst(meta) { break }
+                add(i, 0, code)
             case .rule: break
             case .table(let header, _, let rows):
                 let n = header.count
@@ -167,7 +170,7 @@ final class QCFindState: ObservableObject {
         let was = isOpen
         isOpen = false
         query = ""                     // (recompute does nothing while closed)
-        matches = []; marks = [:]; current = 0
+        matches = []; marks = [:]; current = 0; cache = [:]
         if was { onClosed() }
     }
 
@@ -185,16 +188,32 @@ final class QCFindState: ObservableObject {
         recompute(reveal: false)
     }
 
+    /// A turn's segments, by (the lengths of its message and answer): a streamed token or a keystroke re-parses only the turn that changed.
+    private struct SegmentCache {
+        var question: Int
+        var answer: Int
+        var segments: [(key: QCSegKey, text: String)]
+    }
+    private var cache: [UUID: SegmentCache] = [:]
+
     private func recompute(reveal: Bool) {
         guard isOpen else { return }
         let prior = matches.indices.contains(current) ? matches[current] : nil
         var out: [QCFindMatch] = []
         if hasQuery {
+            var seen: [UUID: SegmentCache] = [:]
             for (ti, t) in turns().enumerated() {
-                for seg in QCFindEngine.segments(question: t.question, answer: t.answer) {
+                // a turn whose text has not changed (same lengths: an answer only grows, a message is fixed) keeps its segments
+                let q = t.question.utf8.count, a = t.answer.utf8.count
+                let c: SegmentCache
+                if let old = cache[t.id], old.question == q, old.answer == a { c = old }
+                else { c = SegmentCache(question: q, answer: a, segments: QCFindEngine.segments(question: t.question, answer: t.answer)) }
+                seen[t.id] = c
+                for seg in c.segments {
                     for h in QCFindEngine.hits(query, in: seg.text) { out.append(QCFindMatch(turn: t.id, turnIndex: ti, key: seg.key, hit: h)) }
                 }
             }
+            cache = seen
         }
         matches = out
         // the current match stays, or moves to the first one after where it was (typing on narrows the matches from there)
@@ -227,7 +246,7 @@ struct QCFindBar: View {
         HStack(spacing: 4) {
             Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium)).foregroundColor(QCColor.muted)
             QCFindField(text: $find.query, focusTick: find.focusTick, onNext: { find.step(1) }, onPrevious: { find.step(-1) },
-                        onClose: { find.close() })
+                        onClose: { QuickChat.shared.escape() })       // Esc: the keys list first, as everywhere else, then this bar
                 .frame(maxWidth: .infinity, minHeight: 20, maxHeight: 20)
             Text(find.count).font(.system(size: 11.5).monospacedDigit()).foregroundColor(QCColor.muted).lineLimit(1).fixedSize()
             QCIconButton(symbol: "chevron.up", help: "Previous match ⇧⌘G", small: true, label: "Previous match", enabled: !find.matches.isEmpty) { find.step(-1) }
@@ -388,8 +407,7 @@ enum QCTextLines {
 extension QCChatScroll {
     /// The match at a utf16 offset of the text that `anchor` is behind: its line is brought into view (see `reveal`).
     func revealMatch(in anchor: NSView, utf16: Int, length: Int) {
-        if let t = QCTextLines.interaction(under: anchor) {
-            let l = QCTextLines.line(of: utf16, in: t)
+        if let t = QCTextLines.interaction(under: anchor), case let l = QCTextLines.line(of: utf16, in: t), l.lines > 0 {
             reveal(anchor, line: l.line, lines: l.lines, cover: QCFindBar.height + 16)
         } else {
             // no line information: the offset's share of the text's height stands for it

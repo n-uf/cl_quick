@@ -5425,6 +5425,7 @@ func quickActionChecks() {
     typealias Q = QCQuickText
     check("quick: the selection is quoted as a Markdown blockquote, a blank line staying a bare >", Q.quote("a\nb\n\nc") == "> a\n> b\n>\n> c", Q.quote("a\nb\n\nc"))
     check("quick: the quote is trimmed", Q.quote("  \n one line \n") == "> one line")
+    check("quick: a Windows line break is one line break", Q.quote("a\r\nb") == "> a\n> b", Q.quote("a\r\nb"))
     check("quick: Explain sends the quote, a blank line, then \"Explain this.\"", Q.message(.explain, "x y") == "> x y\n\nExplain this.", "\(String(describing: Q.message(.explain, "x y")))")
     check("quick: Shorter sends the quote, a blank line, then \"Say this more briefly.\"", Q.message(.shorter, "x y") == "> x y\n\nSay this more briefly.")
     check("quick: Ask about this sends nothing (it only fills the field)", Q.message(.ask, "x y") == nil)

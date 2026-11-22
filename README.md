@@ -157,7 +157,7 @@ minutes for a profile.
   to the current one at once, when it is not in view already (like any scroll up it stops following the end). Return or
   ⌘G is the next match, ⇧Return or ⇧⌘G the previous (wrapping round); the first Esc closes the bar and clears the
   highlights, the second hides the panel. Code blocks and table cells are searched too. Not searched: the thinking text,
-  the notices and footers, and the code of an html block while its page shows; a block that scrolls sideways is
+  the notices and footers, and the code of an html block whose page shows by default; a block that scrolls sideways is
   brought into view up and down only. The bar's text is memory only: it goes with the bar (a new chat or hiding the
   panel close it), nothing about it is written to disk.
 - **Quick actions on a selection.** Select text in an answer and a small bar appears just above it (below it when there is
