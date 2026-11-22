@@ -4,6 +4,9 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Ask about part of the screen.** The keys list's Write page names ⌃⇧⌘4, then ⌘V: macOS's own capture of a part of
+  the screen to the clipboard, pasted into the field as a picture. cl_quick adds no shortcut or screen access of its own.
+
 - **Read an answer aloud.** A speaker button after ↻ in each finished answer's footer ("Read aloud") reads the answer
   with the Mac's own voice, on the device (Claude's voice isn't available to an app that runs `claude -p`). Press it
   again, or hide the panel, start a new chat or ask again, to stop; the button is a stop glyph while it reads, and only

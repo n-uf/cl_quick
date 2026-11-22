@@ -242,7 +242,8 @@ minutes for a profile.
     - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above), ⌘F
       (find in chat) and ⌘G ⇧⌘G (next, previous match).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, the shortcut
-      that opens cl_quick, ↑ in an empty field (your earlier messages) and ⌥⇧⌘C (copy the chat as Markdown).
+      that opens cl_quick, ↑ in an empty field (your earlier messages), ⌥⇧⌘C (copy the chat as Markdown) and ⌃⇧⌘4, then
+      ⌘V (ask about part of the screen: macOS's own capture to the clipboard, pasted into the field; see "Images").
 
     The list is as tall on every page, so switching never resizes it. A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
