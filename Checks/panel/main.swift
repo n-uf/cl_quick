@@ -4738,22 +4738,47 @@ func chatHandleChecks() {
     check("handles: once its first line is really in view (40 pt) the handle is its", sc.pair == ids[2], "\(String(describing: sc.pair))")
     user(scrollTo: a2 + 100); settle()
 
-    // the frames, in points
-    let W = p.frame.width
-    guard let ls = sc.frames["left.strip"], let rs = sc.frames["right.strip"] else { check("handles: both strips report their frames", false, "\(sc.frames.keys.sorted())"); return }
-    check("handles: the strips are 14 × 44, along the edges", near(ls.width, 14) && near(ls.height, 44) && near(rs.width, 14) && near(rs.height, 44), "\(ls) \(rs)")
-    check("handles: the left strip stands 5 pt in, the right one inward of the scroller", near(ls.minX, QCEdgeLayout.clear) && near(rs.maxX, W - QCEdgeLayout.scroller), "\(ls.minX) \(rs.maxX) W \(W)")
-    // the text column as DRAWN (an answer's anchor spans it), against the strips and pills as drawn, in window coordinates
-    if let col = sc.textColumn() {
-        let lw = win(ls), rw = win(rs)
-        let leftPill = lw.minX + QCEdgeLayout.pillWidth, rightPill = rw.maxX - QCEdgeLayout.pillWidth
-        check("handles: the text column (measured) is the gutters' column: it starts at the left gutter and ends at the right one",
-              near(col.lowerBound, QCEdgeLayout.leftGutter) && near(col.upperBound, W - QCEdgeLayout.rightGutter), "column \(col) gutters \(QCEdgeLayout.leftGutter) \(QCEdgeLayout.rightGutter) W \(W)")
-        check("handles: the text column (measured) starts 10 pt or more after the left pill and its strip is not over the text", col.lowerBound - leftPill >= 10 && lw.maxX <= col.lowerBound + 0.5,
-              "column \(col) left strip \(lw) pill right edge \(leftPill)")
-        check("handles: the text column (measured) ends 10 pt or more before the right pill and its strip is not over the text", rightPill - col.upperBound >= 10 && rw.minX >= col.upperBound - 0.5,
-              "column \(col) right strip \(rw) pill left edge \(rightPill)")
-    } else { check("handles: the text column is measured", false) }
+    // the frames, in points, in BOTH scroller styles: the user's "Show scroll bars" setting decides (a runner shows legacy,
+    // always visible scrollers, which take their width out of the clip view; a trackpad Mac shows overlay ones). The expectation
+    // comes from the real scroller: its style and the width it takes out of the clip view.
+    let styleAtStart = sv.scrollerStyle
+    func setStyle(_ s: NSScroller.Style) {
+        sv.scrollerStyle = s
+        // SwiftUI lays its content out at the clip view's width on the next window layout (what a runner with legacy scrollers has
+        // from the start): a one point resize and back makes it so here
+        var f = p.frame; f.size.width += 1; p.setFrame(f, display: true); spin(0.3)
+        f.size.width -= 1; p.setFrame(f, display: true)
+        spin(0.4); spinQuiet(p); user(scrollTo: (sc.top(ofAnswer: ids[1]) ?? 0) + 100); settle()
+    }
+    func edgeLayout(_ label: String) {
+        let W = sv.convert(sv.bounds, to: nil).width            // the answers area is as wide as the panel
+        let style = sv.scrollerStyle
+        let track = sv.verticalScroller.map { sv.convert($0.frame, to: nil) } ?? .zero
+        let taken = (sv.frame.width - clip.frame.width).rounded()      // what the clip view gave up to the scroller
+        guard let ls = sc.frames["left.strip"], let rs = sc.frames["right.strip"] else { check("handles: \(label): both strips report their frames", false, "\(sc.frames.keys.sorted())"); return }
+        check("handles: \(label): the strips are 14 × 44, along the edges", near(ls.width, 14) && near(ls.height, 44) && near(rs.width, 14) && near(rs.height, 44), "\(ls) \(rs)")
+        check("handles: \(label): the left strip stands 5 pt in, the right one inward of the scroller's track",
+              near(ls.minX, QCEdgeLayout.clear) && near(rs.maxX, W - QCEdgeLayout.scroller(style)), "\(ls.minX) \(rs.maxX) W \(W) style \(style.rawValue) track \(track)")
+        check("handles: \(label): the real scroller (\(track.width) pt, takes \(taken) pt out of the clip view) is outside the right strip, and the style is \(style == .legacy ? "legacy" : "overlay")",
+              (style == .legacy) == (taken > 0) && track.width <= QCEdgeLayout.scroller(style) + 0.5 && (track.width == 0 || win(rs).maxX <= track.minX + 0.5), "strip \(win(rs)) track \(track) taken \(taken)")
+        // the text column as DRAWN (an answer's anchor spans it), against the strips and pills as drawn, in window coordinates
+        if let col = sc.textColumn() {
+            let lw = win(ls), rw = win(rs)
+            let leftPill = lw.minX + QCEdgeLayout.pillWidth, rightPill = rw.maxX - QCEdgeLayout.pillWidth
+            check("handles: \(label): the text column (measured) starts at the left gutter and ends where the right strip starts (the scroller and the strip)",
+                  near(col.lowerBound, QCEdgeLayout.leftGutter) && near(col.upperBound, W - QCEdgeLayout.scroller(style) - QCEdgeLayout.stripWidth),
+                  "column \(col) W \(W) scroller \(QCEdgeLayout.scroller(style)) taken \(taken) padding \(QCEdgeLayout.rightGutter(style, inset: taken)) track \(track)")
+            check("handles: \(label): the text column (measured) starts 10 pt or more after the left pill and its strip is not over the text", col.lowerBound - leftPill >= 10 && lw.maxX <= col.lowerBound + 0.5,
+                  "column \(col) left strip \(lw) pill right edge \(leftPill)")
+            check("handles: \(label): the text column (measured) ends 10 pt or more before the right pill and its strip is not over the text", rightPill - col.upperBound >= 10 && rw.minX >= col.upperBound - 0.5,
+                  "column \(col) right strip \(rw) pill left edge \(rightPill)")
+        } else { check("handles: \(label): the text column is measured", false) }
+    }
+    for style in [NSScroller.Style.overlay, .legacy] {
+        setStyle(style)
+        edgeLayout(style == .legacy ? "legacy scrollers" : "overlay scrollers")
+    }
+    setStyle(styleAtStart)
     // opening: a pass opens nothing, a rest opens it, beside the handle and never under the pointer; leaving closes it after a while
     for (name, state) in [("left", sc.left), ("right", sc.right)] {
         state.strip(true); spin(0.05); state.strip(false)
@@ -4853,12 +4878,20 @@ func chatHandleChecks() {
         }
         sc.left.reset(); sc.right.reset()
     }
-    for w in [320, 420, 520, 720, 960] as [CGFloat] {
-        var f = p.frame; f.size.width = w + 2 * QuickChatRoot.margin; p.setFrame(f, display: true)
-        spin(0.3); spinQuiet(p)
-        user(scrollTo: (sc.top(ofAnswer: ids[1]) ?? 0) + 100); settle()
-        zones("\(Int(w)) pt wide")
+    for style in [NSScroller.Style.overlay, .legacy] {
+        sv.scrollerStyle = style
+        for w in [320, 420, 520, 720, 960] as [CGFloat] {
+            var f = p.frame; f.size.width = w + 2 * QuickChatRoot.margin; p.setFrame(f, display: true)
+            spin(0.4); spinQuiet(p)
+            user(scrollTo: (sc.top(ofAnswer: ids[1]) ?? 0) + 100); settle()
+            zones("\(Int(w)) pt wide, \(style == .legacy ? "legacy" : "overlay") scrollers")
+            // (the text never reaches the right strip, in either style, at any width)
+            if let col = sc.textColumn(), let rs = sc.frames["right.strip"] {
+                check("handles: \(Int(w)) pt, \(style == .legacy ? "legacy" : "overlay"): the text column ends before the right strip starts", col.upperBound <= win(rs).minX + 0.5, "column \(col) strip \(win(rs))")
+            }
+        }
     }
+    sv.scrollerStyle = styleAtStart
     // hidden with the pointer over a handle (a hidden window gets no mouse-exit): the stacks are closed and the pills plain, and
     // they are still closed when the panel is opened again
     var wide = p.frame; wide.size.width = QuickChatRoot.width + 2 * QuickChatRoot.margin; p.setFrame(wide, display: true); spin(0.3)
