@@ -2043,7 +2043,8 @@ final class QuickChatPanel: NSPanel {
             takeDigit(action, event)
             return
         }
-        // Page Up, Page Down and End (no modifier at all, the function and numeric-pad flags aside) move the answers even while
+        // Page Up, Page Down and End (no modifier at all, the function and numeric-pad flags aside: a Mac laptop has no such keys,
+        // fn↑, fn↓ and fn→ arrive as these key codes with the function flag, and the keys list names them so) move the answers even while
         // the field has the keyboard: read here, before the event goes to the field (which would scroll or move its own
         // caret), as the digit keys are. Not while the field is composing (marked text: an input method owns these keys). The
         // arrows are never taken: they keep their text meaning.

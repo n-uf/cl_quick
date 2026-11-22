@@ -1441,8 +1441,8 @@ struct QCKeysView: View {
          (.move, [("⌘J", "Jump to latest"),
                   ("⇧⌘J", "Start of the answer in view"),
                   ("⌘[  ⌘]", "Previous, next message of mine"),
-                  ("Page Up  Page Down", "Scroll the answers"),
-                  ("End", "Bottom, and follow")]),
+                  ("fn↑  fn↓", "Page up, page down"),       // a Mac keyboard's Page Up and Page Down
+                  ("fn→", "Bottom, and follow")]),           // and its End
          (.write, [("Return", "Send"),
                    ("⇧Return", "New line"),
                    ("⌘N", "New chat"),

@@ -2248,10 +2248,13 @@ do {
     }
     p.onStep = oldStep
     let arrowRows = QCKeysView.rows(opener: "⌃⇧Space").map { $0.0 + " " + $0.1 }
-    let order = ["⌥⌘↑", "⌥⌘→", "Click a label", "⌘1 – ⌘5", "⌃1 – ⌃6", "⌘J", "⇧⌘J", "⌘[", "Page Up", "End", "Return", "⇧Return", "⌘N", "⌘D", "⇧⌘C"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
+    let order = ["⌥⌘↑", "⌥⌘→", "Click a label", "⌘1 – ⌘5", "⌃1 – ⌃6", "⌘J", "⇧⌘J", "⌘[", "fn↑", "fn→", "Return", "⇧Return", "⌘N", "⌘D", "⇧⌘C"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
     check("the keys list: Model & window (⌥⌘ arrows, a label, sizes, places), then Move, then Write, in that order",
           !order.contains(nil) && order.compactMap { $0 } == order.compactMap { $0 }.sorted()
           && arrowRows.contains { $0.hasPrefix("⌥⌘↑  ⌥⌘↓ Thinking up, down") } && arrowRows.contains { $0.hasPrefix("⌥⌘→  ⌥⌘← Model up, down") }, arrowRows.joined(separator: "\n"))
+    check("the keys list names the Mac keys: fn↑  fn↓ (page up, page down) and fn→ (bottom, and follow), no Page Up, Page Down, End or Home",
+          arrowRows.contains("fn↑  fn↓ Page up, page down") && arrowRows.contains("fn→ Bottom, and follow")
+          && !arrowRows.contains { $0.contains("Page Up") || $0.contains("Page Down") || $0.hasPrefix("End") || $0.contains("Home") || $0.contains("fn←") }, arrowRows.joined(separator: "\n"))
     check("the keys list has no plain ⌘ arrows, no ⌃⌘ or ⌃⌥ and no ⌘1 – ⌘4 presets",
           !arrowRows.contains { $0.hasPrefix("⌘↑") || $0.hasPrefix("⌘→") || $0.contains("⌃⌘") || $0.contains("⌃⌥") || $0.hasPrefix("⌘1  ⌘2") || $0.hasPrefix("⌘3  ⌘4") }, arrowRows.joined(separator: "\n"))
     check("the keys list ends with the opener it is given", arrowRows.contains { $0.hasPrefix("⌃⇧Space Open cl_quick") }, arrowRows.joined(separator: "\n"))
@@ -5058,6 +5061,16 @@ func chatKeyChecks() {
     send(fn(NSPageDownFunctionKey), kVK_PageDown)
     check("keys: Page Down goes a page down, still not following", near(sc.offset(), up1) && !sc.following, "\(sc.offset()) vs \(up1)")
     fieldUntouched("Page Down")
+    // a Mac laptop's fn↑, fn↓ and fn→: the Page Up, Page Down and End key codes with the function flag (an arrow's numeric-pad flag may come with it)
+    let beforeFn = sc.offset()
+    send(fn(NSPageUpFunctionKey), kVK_PageUp, [.function, .numericPad])
+    check("keys: fn↑ (Page Up with the function and numeric-pad flags) scrolls the answers up a page", beforeFn - sc.offset() > h / 2 || sc.offset() == 0, "\(beforeFn) -> \(sc.offset())")
+    send(fn(NSPageDownFunctionKey), kVK_PageDown, [.function, .numericPad])
+    check("keys: fn↓ goes back down a page", near(sc.offset(), beforeFn), "\(sc.offset()) vs \(beforeFn)")
+    let beforeHome = sc.offset()
+    send(fn(NSHomeFunctionKey), kVK_Home, [.function, .numericPad])
+    check("keys: fn← (Home) is not the chat's: the answers do not scroll", sc.offset() == beforeHome, "\(beforeHome) -> \(sc.offset())")
+    tv.setSelectedRange(NSRange(location: 5, length: 0))          // Home was the field's: its caret moved
     send(fn(NSEndFunctionKey), kVK_End)
     check("keys: End goes to the bottom and resumes following", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset())")
     fieldUntouched("End")

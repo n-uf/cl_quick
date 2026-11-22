@@ -14,8 +14,8 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
     the answers' text column is narrower by the gutters (19 pt left, about 31 pt right: the scroller's track and the strip).
   - **Each answer's footer** is now ⤒ copy ↻ (⤒ only while the answer's first line is above the view).
   - **Keys:** ⌘J jump to latest; ⇧⌘J start of the answer in view; ⌘[ ⌘] previous and next message of yours; ⇧⌘C copies the
-    answer in view once you have scrolled up (else the last answer); Page Up and Page Down scroll the answers (and stop
-    following) and End goes to the bottom, even while the field has the keyboard. Buttons' tooltips end with their key.
+    answer in view once you have scrolled up (else the last answer); fn↑ and fn↓ (Page Up and Page Down on a Mac keyboard)
+    scroll the answers (and stop following) and fn→ (End) goes to the bottom, even while the field has the keyboard. Buttons' tooltips end with their key.
   - **Behaviour:** a resize at the bottom keeps the bottom and following; a resize mid-chat keeps what you are reading;
     hiding and reopening restores the place and whether it follows; Ask again jumps to the bottom and follows.
   - **No animation anywhere in this:** every jump is instant, and the handles and the keys list's pages switch at once.

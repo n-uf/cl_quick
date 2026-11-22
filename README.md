@@ -164,9 +164,9 @@ minutes for a profile.
     so far). Each answer's own footer has ⤒ copy ↻ (⤒ only while its first line is above the view).
   - **Keys** (the panel's own, exact modifiers; none is a text edit): ⌘J jump to latest, ⇧⌘J the start of the answer at the
     view's bottom edge (the last one at the bottom), ⌘[ and ⌘] the previous and next message of yours (nothing at the ends),
-    ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and Page Up, Page Down (they scroll
-    and stop following) and End (the bottom, following) work even while the field has the keyboard; arrows keep their text
-    meaning there.
+    ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and fn↑ and fn↓ (Page Up and Page Down
+    on a Mac keyboard: they scroll and stop following) and fn→ (End: the bottom, following) work even while the field has the
+    keyboard; plain arrows keep their text meaning there, and fn← (Home) is the field's.
   - The handles keep clear of the window's resize band (under 4 pt deep), the drag surfaces and the answers' scroller: the left
     one stands 5 pt in, the right one inward of the scroller's track (17 pt), and the text column starts after them.
 - Answers stream in as Markdown; tables (header, alignment row, rows) are drawn as a grid whose cells wrap to the
@@ -199,7 +199,7 @@ minutes for a profile.
   - The keys button opens a list of the shortcuts on three pages, under a small track (MODEL & WINDOW · MOVE · WRITE;
     click a label to turn the page; the last page is remembered while cl_quick runs):
     - **Model & window:** ⌥⌘ arrows (thinking, model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
-    - **Move:** ⌘J, ⇧⌘J, ⌘[ ⌘], Page Up, Page Down and End (see "Moving in a chat" below).
+    - **Move:** ⌘J, ⇧⌘J, ⌘[ ⌘], fn↑ fn↓ (page up, page down) and fn→ (bottom, and follow) (see "Moving in a chat" below).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, and the shortcut
       that opens cl_quick.
 
