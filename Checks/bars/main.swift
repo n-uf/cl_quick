@@ -357,16 +357,37 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
         func hands(_ v: NSView) -> [CGRect] { v.subviews.flatMap { s in (s is QCCursorView ? [s.convert(s.bounds, to: host)] : []) + hands(s) } }
         let tabs = hands(host).sorted { $0.minX < $1.minX }
         check("\(name): the keys list has a pointing-hand zone on each of its three tabs, side by side", tabs.count == 3 && tabs.allSatisfy { $0.height > 10 && $0.width > 30 }
-              && zip(tabs, tabs.dropFirst()).allSatisfy { $0.maxX <= $1.minX + 0.5 }, "\(tabs)")
+              && zip(tabs, tabs.dropFirst()).allSatisfy { $0.maxX <= $1.minX + 0.5 } && (tabs.map(\.width).max() ?? 0) - (tabs.map(\.width).min() ?? 0) <= 1, "\(tabs)")
         check("\(name): the pointer over each tab is the pointing hand", tabs.count == 3 && tabs.allSatisfy { host.cursor(at: CGPoint(x: $0.midX, y: $0.midY)) === NSCursor.pointingHand }, "\(tabs)")
         let below = CGPoint(x: host.bounds.midX, y: (tabs.first?.maxY ?? 0) + 30)
         check("\(name): over the rows, the margin and the track's edge it is the arrow",
               host.cursor(at: below) === NSCursor.arrow && host.cursor(at: CGPoint(x: 2, y: host.bounds.midY)) === NSCursor.arrow
               && host.cursor(at: CGPoint(x: tabs.first?.midX ?? 0, y: (tabs.first?.minY ?? 0) - 6)) === NSCursor.arrow, "\(below)")
-        let area = host.trackingAreas.first { $0.owner === host }
+        // the float's own area (found by its options: the hosting view has one of its own, with the same owner, that SwiftUI's hover uses)
         let want = QCFloatHost.trackingOptions
-        check("\(name): the list tracks the pointer whoever is key (cursor updates and moves, active always, its visible rect)", area.map { $0.options.isSuperset(of: want) } == true && host.window?.acceptsMouseMovedEvents == true,
-              "area \(String(describing: area?.options.rawValue)) want \(want.rawValue), moves \(String(describing: host.window?.acceptsMouseMovedEvents)), areas \(host.trackingAreas.count)")
+        let areas = host.trackingAreas.filter { $0.options.isSuperset(of: want) }
+        check("\(name): the list tracks the pointer whoever is key (cursor updates and moves, active always, its visible rect), beside the hosting view's own area",
+              areas.count == 1 && areas.first === host.pointerArea && host.trackingAreas.count >= 2 && host.window?.acceptsMouseMovedEvents == true,
+              "areas \(host.trackingAreas.map(\.options.rawValue)) want \(want.rawValue), moves \(String(describing: host.window?.acceptsMouseMovedEvents))")
+        // the handlers, with synthetic events: the cursor each puts on (recorded, never set on the real pointer), and the hold
+        var put: [NSCursor] = []
+        host.apply = { put.append($0) }
+        func at(_ pt: CGPoint) -> CGPoint { host.convert(pt, to: nil) }
+        let wn = host.window?.windowNumber ?? 0
+        func moveEvent(_ pt: CGPoint) -> NSEvent? { NSEvent.mouseEvent(with: .mouseMoved, location: at(pt), modifierFlags: [], timestamp: 0, windowNumber: wn, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) }
+        func crossed(_ t: NSEvent.EventType, _ pt: CGPoint) -> NSEvent? { NSEvent.enterExitEvent(with: t, location: at(pt), modifierFlags: [], timestamp: 0, windowNumber: wn, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) }
+        let tabPoint = CGPoint(x: tabs.first?.midX ?? 0, y: tabs.first?.midY ?? 0)
+        if let e = crossed(.mouseEntered, tabPoint) { host.mouseEntered(with: e) }
+        check("\(name): the pointer entering on a tab: the hand, and the panel's cursor rectangles are off", put.last === NSCursor.pointingHand && host.holdingPanel && !p.areCursorRectsEnabled)
+        if let e = moveEvent(below) { host.mouseMoved(with: e) }
+        check("\(name): moving on to the rows: the arrow", put.last === NSCursor.arrow)
+        if let e = moveEvent(tabPoint) { host.mouseMoved(with: e) }
+        check("\(name): moving back over a tab: the hand", put.last === NSCursor.pointingHand)
+        if let e = NSEvent.enterExitEvent(with: .cursorUpdate, location: at(below), modifierFlags: [], timestamp: 0, windowNumber: wn, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) { host.cursorUpdate(with: e) }
+        check("\(name): a cursor update over the rows: the arrow", put.last === NSCursor.arrow, "\(put.count)")
+        if let e = crossed(.mouseExited, below) { host.mouseExited(with: e) }
+        check("\(name): the pointer leaving the list: the panel's cursor rectangles are back on", !host.holdingPanel && p.areCursorRectsEnabled)
+        host.apply = { $0.set() }
         check("\(name): the panel's cursor rectangles are on before the pointer reaches the list", p.areCursorRectsEnabled && !host.holdingPanel)
         host.holdPanel()
         check("\(name): with the pointer on the list the panel's cursor rectangles (its I-beam) are off", !p.areCursorRectsEnabled && host.holdingPanel)

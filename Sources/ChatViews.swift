@@ -1266,23 +1266,30 @@ final class QCFloatHost: NSHostingView<AnyView> {
         return false
     }
 
-    /// The one area (visible rect: it follows the view's size by itself), there from the moment the view is in a window.
+    /// The one area of ours (visible rect: it follows the view's size by itself), there from the moment the view is in a
+    /// window. The hosting view has its own besides, which SwiftUI's hover depends on.
     static let trackingOptions: NSTrackingArea.Options = [.cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+    private(set) var pointerArea: NSTrackingArea?
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        guard !trackingAreas.contains(where: { $0.owner === self }) else { return }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: Self.trackingOptions, owner: self, userInfo: nil))
+        if let a = pointerArea, trackingAreas.contains(a) { return }
+        let a = NSTrackingArea(rect: .zero, options: Self.trackingOptions, owner: self, userInfo: nil)
+        pointerArea = a
+        addTrackingArea(a)
     }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { updateTrackingAreas() }
     }
 
+    /// How a cursor is put on (the checks take it over, so none is set on the real pointer).
+    var apply: (NSCursor) -> Void = { $0.set() }
     private func point(_ e: NSEvent) -> NSPoint { convert(e.locationInWindow, from: nil) }
-    override func cursorUpdate(with event: NSEvent) { cursor(at: point(event)).set() }
-    override func mouseMoved(with event: NSEvent) { cursor(at: point(event)).set() }
-    override func mouseEntered(with event: NSEvent) { holdPanel(); cursor(at: point(event)).set() }
-    override func mouseExited(with event: NSEvent) { releasePanel() }
+    // super first (the hosting view's own handling feeds SwiftUI's hover), then the cursor, so ours is the last set
+    override func cursorUpdate(with event: NSEvent) { super.cursorUpdate(with: event); apply(cursor(at: point(event))) }
+    override func mouseMoved(with event: NSEvent) { super.mouseMoved(with: event); apply(cursor(at: point(event))) }
+    override func mouseEntered(with event: NSEvent) { super.mouseEntered(with: event); holdPanel(); apply(cursor(at: point(event))) }
+    override func mouseExited(with event: NSEvent) { super.mouseExited(with: event); releasePanel() }
 
     /// The panel's cursor rectangles (its text views' I-beam) are off while the pointer is on the float.
     func holdPanel() {
@@ -1469,7 +1476,8 @@ struct QCKeysButton: View {
             // a picture can't show the list's own window: it draws the list where the window would be
             .overlay(alignment: .top) {
                 if rendering, pictureHover == "keys" {
-                    QCKeysView(opener: "⌃⇧Space").fixedSize()      // a sample, not this Mac's setting.frame(width: 0, height: 0, alignment: .bottom).offset(y: -4)
+                    // a sample opener, not this Mac's setting
+                    QCKeysView(opener: "⌃⇧Space").fixedSize().frame(width: 0, height: 0, alignment: .bottom).offset(y: -4)
                 }
             }
             .accessibilityElement(children: .ignore)
@@ -1492,8 +1500,8 @@ enum QCKeysPage: String, CaseIterable, Hashable {
 }
 
 /// The keys list's look: cl_quick's keys, each with what it does, on three pages under tabs in the look of the cl_audit
-/// site's (SegTabs, as wide as the list). The pages are laid over each other, so the list is as tall and wide as the tallest and widest, and
-/// switching never resizes it. A page switches at once, with no animation.
+/// site's (SegTabs, as wide as the list). The pages are laid over each other, so the list is as tall and wide as the
+/// tallest and widest, and switching never resizes it. A page switches at once, with no animation.
 struct QCKeysView: View {
     let opener: String
     @ObservedObject private var keys = QCKeys.shared
