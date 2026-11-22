@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>cl_quick chat tools</title>
+<style>
+/* the page: dark only, as the other cl_quick sketches */
+:root { color-scheme: dark; --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --p-bg: #121211; --p-text: #faf9f5; --p-soft: #c2c0b6; --p-muted: #a9a79f; --p-line: rgba(255,255,255,.1); --p-panel: rgba(255,255,255,.045);
+  --p-acc: #ff9a66; --p-ok: #7ee2a0; --p-chip: rgba(255,255,255,.09); }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--p-bg); color: var(--p-text); font: 14px/1.5 var(--font); }
+.sk { max-width: 1240px; margin: 0 auto; padding: 24px 16px 72px; }
+.sk h1 { font-size: 21px; margin: 0 0 6px; }
+.sk h2.sec { font: 700 11px var(--mono); letter-spacing: .1em; color: var(--p-muted); margin: 38px 0 14px; padding-top: 16px; border-top: 1px solid var(--p-line); }
+.sk .lede { color: var(--p-muted); font-size: 14px; max-width: 104ch; margin: 0 0 12px; }
+.sk code { font: 11.5px var(--mono); background: var(--p-chip); padding: 0 4px; border-radius: 3px; }
+.decided { max-width: 118ch; padding: 12px 14px 10px; border-radius: 8px; background: var(--p-panel); }
+.decided h2 { margin: 0 0 6px; font: 700 11px var(--mono); letter-spacing: .1em; color: var(--p-ok); }
+.decided ul { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: var(--p-soft); }
+.decided li { margin: 4px 0; } .decided b { color: var(--p-text); }
+
+.grid { display: flex; flex-wrap: wrap; gap: 34px 32px; align-items: flex-start; }
+.fig { flex: none; margin: 0; width: 520px; max-width: 100%; }
+.fig .t { font: 700 11px var(--mono); letter-spacing: .1em; color: var(--p-acc); margin: 0 0 8px; }
+.fig .t span { color: var(--p-muted); font-weight: 600; margin-left: 6px; }
+.fig .cp { font-size: 12.5px; color: var(--p-soft); margin: 10px 0 0; line-height: 1.45; }
+.fig .cp b { color: var(--p-text); }
+.fig .cp.note { color: var(--p-muted); margin-top: 6px; }
+
+/* ───────────── the chat panel (the app's own: 520 x 580 pt) ───────────── */
+.cw { --bg: #262624; --surface: #30302e; --bubble: #141413; --code: #1f1e1d; --line: rgba(222,220,209,.15); --line2: rgba(222,220,209,.10);
+  --text: #faf9f5; --soft: #c2c0b6; --muted: #9c9a92; --accent: #d97757; --amber: #f59e0b; --hover: rgba(250,249,245,.08);
+  --cap: #1c1c1b; --ic: #eba48b; --ic-bg: rgba(250,249,245,.06); --pre: #e9e7df; --track: rgba(0,0,0,.34); --thumb: #403f3c; --thumb-line: rgba(250,249,245,.12);
+  --send-bg: rgba(250,249,245,.1); --send-fg: rgba(250,249,245,.45); --meter: rgba(250,249,245,.13); --bar: rgba(250,249,245,.14); --bar-on: rgba(250,249,245,.85);
+  --hl: rgba(245,158,11,.30); --hl-cur: #f5a623; --hl-cur-fg: #1a1208; --hl-ring: rgba(245,158,11,.38);
+  --sel: rgba(64,128,255,.46); --sel-off: rgba(250,249,245,.17); --pop: #3b3b38; --pop-line: rgba(250,249,245,.14); --tgt: rgba(250,249,245,.085); --acc-bg: rgba(217,119,87,.2);
+  position: relative; width: 520px; max-width: 100%; height: 580px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.5 var(--font);
+  border-radius: 20px; box-shadow: 0 0 0 1px rgba(222,220,209,.18), 0 18px 48px rgba(0,0,0,.5); }
+.cw.light { --bg: #faf9f5; --surface: #ffffff; --bubble: #e9e6dc; --code: #f0eee6; --line: rgba(31,30,29,.16); --line2: rgba(31,30,29,.11);
+  --text: #141413; --soft: #3d3d3a; --muted: #73726c; --accent: #c6613f; --amber: #b45309; --hover: rgba(20,20,19,.07);
+  --cap: #ebe8de; --ic: #b5532f; --ic-bg: rgba(20,20,19,.06); --pre: #2b2a27; --track: rgba(20,20,19,.07); --thumb: #ffffff; --thumb-line: rgba(31,30,29,.14);
+  --send-bg: rgba(20,20,19,.08); --send-fg: rgba(20,20,19,.4); --meter: rgba(20,20,19,.12); --bar: rgba(20,20,19,.14); --bar-on: rgba(20,20,19,.8);
+  --hl: rgba(217,150,20,.30); --hl-cur: #f2b13c; --hl-cur-fg: #141413; --hl-ring: rgba(180,83,9,.4);
+  --sel: rgba(64,128,255,.3); --sel-off: rgba(20,20,19,.12); --pop: #ffffff; --pop-line: rgba(31,30,29,.16); --tgt: rgba(20,20,19,.045); --acc-bg: rgba(198,97,63,.14);
+  box-shadow: 0 0 0 1px rgba(31,30,29,.2), 0 18px 48px rgba(0,0,0,.5); }
+.cw * { box-sizing: border-box; }
+.cw svg { display: block; }
+.c-hd { position: relative; z-index: 3; flex: none; height: 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 0 10px; }
+.c-lv { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.c-lv b { font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; }
+.c-m { display: inline-block; width: 24px; height: 4px; border-radius: 2px; background: var(--meter); overflow: hidden; }
+.c-m i { display: block; height: 100%; border-radius: 2px; background: var(--amber); }
+.c-cap { display: inline-flex; height: 28px; border-radius: 11px; background: var(--cap); }
+.c-cap .c-ib { width: 28px; height: 28px; color: var(--soft); }
+.c-ib { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 6px; color: var(--muted); }
+.c-ib svg { width: 14px; height: 14px; }
+.c-ib.on { color: var(--accent); background: var(--acc-bg); }
+
+.c-bdw { position: relative; isolation: isolate; flex: 1; min-height: 0; overflow: hidden; }
+.c-mask { position: absolute; z-index: 2; left: 0; right: 0; top: 0; height: 28px; background: linear-gradient(var(--bg) 20%, transparent); pointer-events: none; }
+.c-col { position: absolute; left: 18px; right: 18px; bottom: 12px; display: flex; flex-direction: column; }
+.c-col > * { flex: none; }
+.c-u { align-self: flex-end; max-width: 82%; margin-top: 24px; padding: 8px 12px; border-radius: 16px; background: var(--bubble); font-size: 14px; line-height: 20px; }
+.c-u.first { margin-top: 0; }
+.c-a { position: relative; margin-top: 10px; font: 14px/21px var(--font); color: var(--text); }
+.c-a p { margin: 0 0 10px; } .c-a p:last-child { margin-bottom: 0; }
+.c-a b { font-weight: 600; }
+.c-a.tgt::before { content: ""; position: absolute; z-index: -1; left: -9px; right: -9px; top: -6px; bottom: -6px; border-radius: 10px; background: var(--tgt); }
+.c-ic { font: 12.5px var(--mono); color: var(--ic); background: var(--ic-bg); padding: 0 4px; border-radius: 4px; }
+.c-meta { height: 24px; margin: 4px 0 0 -5px; display: flex; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.c-meta > span:last-child { margin-left: 4px; }
+
+/* the code block (the app's) */
+.c-cb { margin: 2px 0 10px; border-radius: 8px; background: var(--code); box-shadow: inset 0 0 0 1px var(--line2); overflow: hidden; }
+.c-cb .h { height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 2px 0 12px; font: 11.5px var(--font); color: var(--muted); border-bottom: 1px solid var(--line2); }
+.c-cb pre { margin: 0; padding: 8px 12px 10px; font: 12.5px/18px var(--mono); color: var(--pre); white-space: pre; overflow: hidden; }
+
+/* the field box */
+.c-ft { position: relative; flex: none; margin: 0 10px 10px; padding: 10px 12px 8px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.c-fx { font-size: 15px; line-height: 22px; color: var(--muted); display: flex; align-items: center; }
+.c-fx.val { color: var(--text); }
+.c-fx .tx { flex: 1; min-width: 0; }
+.c-cr { margin-top: 8px; height: 28px; display: flex; align-items: center; gap: 2px; }
+.c-ch { flex: none; height: 28px; margin-left: -8px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 5px; font: 500 13px var(--font); color: var(--soft); white-space: nowrap; }
+.c-ch i { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.c-ch svg { width: 9px; height: 9px; opacity: .7; }
+.c-trk { flex: none; height: 28px; margin-left: 6px; display: inline-flex; align-items: center; padding: 0 6px 0 9px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line); font: 500 13px var(--font); color: var(--soft); white-space: nowrap; }
+.c-trk .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; margin: 0 9px 0 8px; position: relative; }
+.c-trk .bars i { width: 3px; border-radius: 1px; background: var(--bar); }
+.c-trk .bars i.on { background: var(--bar-on); }
+.c-trk .vs { width: 1px; height: 16px; background: var(--line); margin: 0 9px 0 0; }
+.c-trk .c-ib { width: 22px; height: 22px; margin-left: -2px; }
+.c-sp { flex: 1; }
+.c-send { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--send-bg); color: var(--send-fg); }
+.c-send svg { width: 14px; height: 14px; }
+.c-cr .c-ib { width: 28px; height: 28px; }
+.c-cr .c-ib svg { width: 15px; height: 15px; }
+
+/* ───────────── new in this sketch ───────────── */
+/* 1 find bar: a slim row under the header; the answers area gives up its height, the window keeps its size */
+.c-find { flex: none; padding: 0 10px 6px; }
+.fb { height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 3px 0 10px; border-radius: 9px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.fb > svg { width: 13px; height: 13px; color: var(--muted); margin-right: 7px; flex: none; }
+.fb .q { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text); display: flex; align-items: center; }
+.fb .q i { display: inline-block; width: 1.5px; height: 16px; margin-left: 1px; background: var(--accent); }
+.fb .n { flex: none; margin-right: 4px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fb .sep { flex: none; width: 1px; height: 14px; margin: 0 3px; background: var(--line); }
+.fb .c-ib { width: 24px; height: 24px; color: var(--soft); }
+mark.hl { color: inherit; background: var(--hl); border-radius: 3px; padding: 0 1px; margin: 0 -1px; }
+mark.hl.cur { color: var(--hl-cur-fg); background: var(--hl-cur); box-shadow: 0 0 0 2px var(--hl-ring); }
+
+/* 2 selection and the floating quick-action bar */
+.sel { position: relative; background: var(--sel); border-radius: 2px; }
+.sel.off { background: var(--sel-off); }
+.qa { position: absolute; z-index: 6; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); white-space: nowrap; display: inline-flex; align-items: center; height: 32px; padding: 3px; border-radius: 10px;
+  background: var(--pop); box-shadow: inset 0 0 0 1px var(--pop-line), 0 8px 22px rgba(0,0,0,.45); font: 500 12.5px var(--font); color: var(--text); }
+.qa span { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; color: var(--soft); }
+.qa i { width: 1px; height: 14px; background: var(--pop-line); }
+.ptr { position: absolute; z-index: 7; left: 100%; top: 55%; margin-left: -2px; width: 13px; height: 19px; }
+
+/* 3 the quoted selection in the field: a tinted rounded row with a quote mark (no stripe) */
+.c-q { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; padding: 6px 4px 6px 9px; border-radius: 9px; background: var(--ic-bg); font-size: 13px; line-height: 20px; color: var(--soft); }
+.c-q > svg { flex: none; width: 13px; height: 13px; margin-top: 4px; color: var(--muted); }
+.c-q .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-q .c-ib { width: 20px; height: 20px; margin-top: 0; }
+.c-q .c-ib svg { width: 11px; height: 11px; }
+.caret { display: inline-block; width: 1.5px; height: 18px; margin-right: 1px; background: var(--accent); }
+
+/* 5 the recall hint */
+.hint { flex: none; margin-left: 10px; font-size: 11px; color: var(--muted); opacity: .85; white-space: nowrap; letter-spacing: .01em; }
+
+/* 6 the context menu */
+.cm { position: absolute; z-index: 9; width: 262px; padding: 5px; border-radius: 10px; background: var(--pop); box-shadow: inset 0 0 0 1px var(--pop-line), 0 14px 34px rgba(0,0,0,.55); font: 13px/1 var(--font); color: var(--text); }
+.cm .it { height: 25px; padding: 0 10px; border-radius: 5px; display: flex; align-items: center; justify-content: space-between; }
+.cm .it em { font-style: normal; color: var(--muted); font-size: 12.5px; letter-spacing: .02em; }
+.cm .ln { height: 1px; margin: 5px 6px; background: var(--pop-line); }
+.cmp { position: absolute; z-index: 10; width: 13px; height: 19px; }
+</style></head><body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="8.5" height="9" rx="1.6"/><path d="M3.5 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v.5"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 1.8v2.9H9.1"/></symbol>
+  <symbol id="i-top" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2.8h9M8 13.5V5.6M4.4 8.6L8 5l3.6 3.6"/></symbol>
+  <symbol id="i-spk" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 6.1h2.3l3.3-2.7v9.2L4.7 9.9H2.4z"/><path d="M10.3 5.7a3.3 3.3 0 0 1 0 4.6M12.2 4a5.8 5.8 0 0 1 0 8"/></symbol>
+  <symbol id="i-spkstop" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.8 3.8l8.4 8.4M12.2 3.8l-8.4 8.4"/></symbol>
+  <symbol id="i-find" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.9" cy="6.9" r="4.4"/><path d="M10.2 10.2l3.6 3.6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10l4.5-4.5 4.5 4.5"/></symbol>
+  <symbol id="i-dn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6l4.5 4.5L12.5 6"/></symbol>
+  <symbol id="i-quote" viewBox="0 0 16 16"><path fill="currentColor" d="M2.2 12V8.4C2.2 5.6 3.6 3.9 6 3.2l.6 1.2C5.4 4.9 4.8 5.8 4.8 7.2h1.9V12zm7 0V8.4c0-2.8 1.4-4.5 3.8-5.2l.6 1.2c-1.2.5-1.8 1.4-1.8 2.8h1.9V12z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="4" height="7.5" rx="2"/><path d="M3.8 7.6a4.2 4.2 0 0 0 8.4 0M8 11.8V14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.8 7.2L8 3l4.2 4.2"/></symbol>
+  <symbol id="i-kbd" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="3.5" width="13" height="9" rx="1.8"/><path d="M4 6.4h.1M6.4 6.4h.1M8.8 6.4h.1M11.2 6.4h.1M4 9.6h8"/></symbol>
+  <symbol id="i-cv" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5l3 3 3-3"/></symbol>
+  <symbol id="i-ptr" viewBox="0 0 13 19"><path d="M1.2 1.2v14.6l3.7-3.5 2.6 5.8 2.3-1-2.6-5.7h5L1.2 1.2z" fill="#fff" stroke="#111" stroke-width="1.1" stroke-linejoin="round"/></symbol>
+</defs></svg>
+
+<div class="sk">
+<h1>cl_quick: four chat tools</h1>
+<p class="lede">Find in chat, quick actions on a selection, asking about a result, and reading an answer aloud, with the two small helpers that go with them: &uarr; to recall and a right-click menu. Six states at the panel's real size (520 &times; 580 pt) in the app's look, plus a light variant of the first. Sample content only. Nothing is built.</p>
+
+<div class="decided">
+  <h2>PROPOSED</h2>
+  <ul>
+    <li><b>Find (&#8984;F)</b> is a slim bar under the header, in the answers area. The window never grows; the answers area gets 36 pt shorter while it is open. Matches are softly marked, the current one strong; &uarr; &darr; (or &#8984;G and &#8679;&#8984;G) step, <b>Esc</b> or &times; closes.</li>
+    <li><b>Quick actions</b> float just above a selection in an answer: <b>Explain</b>, <b>Shorter</b>, <b>Ask about this</b>. The bar sits above the text, so it never covers the selection or the pointer, which is at the end of the drag.</li>
+    <li><b>Ask about this</b> puts the selection into the field as a quote row, with a quote mark and a small &times; (no coloured edge), and the caret after it. Long selections show two lines and a &hellip;.</li>
+    <li><b>Read aloud</b> is the last icon of an answer's footer. While it reads, the icon is a stop glyph in the accent colour; pressing it stops. One answer reads at a time.</li>
+    <li><b>&uarr; in an empty field</b> brings back the last message you sent; &uarr; again goes further back, &darr; forward. A tiny hint is shown (state 5 asks whether it earns its place).</li>
+    <li><b>Right-click on an answer</b> shows Copy, then the three actions, then Copy chat as Markdown. The three act on the selection if there is one, otherwise on the whole answer.</li>
+  </ul>
+</div>
+
+<h2 class="sec">THE STATES</h2>
+<div class="grid">
+
+<!-- 1 FIND -->
+<figure class="fig"><div class="t">1 &middot; FIND IN CHAT (&#8984;F)<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-find"><div class="fb"><svg><use href="#i-find"/></svg><span class="q">bash<i></i></span><span class="n">2 of 5</span><span class="sep"></span><span class="c-ib"><svg><use href="#i-up"/></svg></span><span class="c-ib"><svg><use href="#i-dn"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></div></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Biggest files in a folder, in <mark class="hl">bash</mark>?</div>
+    <div class="c-a"><p>In <mark class="hl cur">bash</mark> you can chain <span class="c-ic">du</span>, <span class="c-ic">sort</span> and <span class="c-ic">head</span>:</p>
+      <div class="c-cb"><div class="h"><span>sh</span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></div><pre>du -ah . | sort -rh | head -n 10</pre></div>
+      <p>The <span class="c-ic">-h</span> flag prints sizes like 1.2G and <span class="c-ic">sort -h</span> reads them back. It works in <mark class="hl">bash</mark> 3.2, the old <mark class="hl">bash</mark> macOS still ships.</p>
+      <p>Want it as a <mark class="hl">bash</mark> alias?</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 1.9 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp"><b>&#8984;F</b> opens a slim find bar under the header: the word, <b>2 of 5</b>, &#9650; &#9660; and &times;. Every match is softly marked, the current one stronger; the window does not grow.</figcaption></figure>
+
+<!-- 2 QUICK ACTIONS -->
+<figure class="fig"><div class="t">2 &middot; QUICK ACTIONS ON A SELECTION<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">What does du -sh do?</div>
+    <div class="c-a"><p>The <span class="c-ic">-s</span> flag <span class="sel">sums a folder into one line<span class="qa"><span>Explain</span><i></i><span>Shorter</span><i></i><span>Ask about this</span></span><svg class="ptr"><use href="#i-ptr"/></svg></span>, and <span class="c-ic">-h</span> shows sizes like 1.2G. <span class="c-ic">du -sh *</span> prints one total per item.</p>
+      <div class="c-cb"><div class="h"><span>zsh</span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></div><pre>du -sh * | sort -rh</pre></div>
+      <p>Pipe it into <span class="c-ic">sort -rh</span> to put the biggest first.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 2.1 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">Select a phrase and a small bar floats just <b>above</b> it: Explain, Shorter, Ask about this. The pointer ends the drag below and to the right, so nothing sits under it.</figcaption></figure>
+
+<!-- 3 ASK ABOUT THIS -->
+<figure class="fig"><div class="t">3 &middot; ASK ABOUT THIS RESULT<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">What does du -sh do?</div>
+    <div class="c-a"><p>The <span class="c-ic">-s</span> flag <span class="sel off">sums a folder into one line</span>, and <span class="c-ic">-h</span> shows sizes like 1.2G. <span class="c-ic">du -sh *</span> prints one total per item.</p>
+      <div class="c-cb"><div class="h"><span>zsh</span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></div><pre>du -sh * | sort -rh</pre></div>
+      <p>Pipe it into <span class="c-ic">sort -rh</span> to put the biggest first.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 2.1 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-q"><svg><use href="#i-quote"/></svg><span class="tx">sums a folder into one line</span><span class="c-ib"><svg><use href="#i-x"/></svg></span></div><div class="c-fx"><span class="caret"></span>Ask about this&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">&ldquo;Ask about this&rdquo; drops the selection into the field as a quote row, the caret waiting after it; the selection stays in the answer, greyed.</figcaption></figure>
+
+<!-- 4 FOOTER WITH READ ALOUD -->
+<figure class="fig"><div class="t">4 &middot; FOOTER WITH READ ALOUD<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">How do I find which process is using port 3000?</div>
+    <div class="c-a"><p>Three tools can answer this on macOS: <span class="c-ic">lsof</span>, <span class="c-ic">netstat</span> and <span class="c-ic">ss</span>. They differ in speed and in how much they print by default, so pick by what you need next.</p>
+      <p><span class="c-ic">netstat</span> is the oldest and prints every socket. <span class="c-ic">ss</span> is the fast one on Linux, but macOS does not ship it, so skip it here.</p>
+      <p>That leaves <span class="c-ic">lsof</span>, which is also the one that names the process, so start with it.</p>
+      <p><span class="c-ic">lsof</span> is the most direct, because it names the process:</p>
+      <div class="c-cb"><div class="h"><span>zsh</span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></div><pre>lsof -nP -iTCP:3000 -sTCP:LISTEN</pre></div>
+      <p>The PID column is the process. Stop it with <span class="c-ic">kill &lt;PID&gt;</span>, and run the same line again to check that the port is free.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-top"/></svg></span><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 2.4 s</span></div>
+    <div class="c-u">And the netstat way?</div>
+    <div class="c-a"><p><span class="c-ic">netstat -anv | grep LISTEN</span> lists every listener, but it is slower than <span class="c-ic">lsof</span> on macOS.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib on" title="Reading aloud. Click to stop."><svg><use href="#i-spkstop"/></svg></span><span>Haiku 5.5 &middot; 2.9 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">The footer reads <b>&#10514; copy &#8635; speaker</b> (&#10514; only while the answer's start is out of view, as before). The second answer is being read: its speaker is a stop glyph in the accent colour.</figcaption></figure>
+
+<!-- 5 RECALL -->
+<figure class="fig"><div class="t">5 &middot; &uarr; RECALL<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">What does du -sh do?</div>
+    <div class="c-a"><p><span class="c-ic">du -sh *</span> prints one total per item in the current folder, in units a person can read, like 1.2G.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 1.6 s</span></div>
+    <div class="c-u">Show the sizes in MB only</div>
+    <div class="c-a"><p>Use <span class="c-ic">-m</span> instead of <span class="c-ic">-h</span>: <span class="c-ic">du -sm *</span> prints every size as a whole number of megabytes.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 1.8 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx val"><span class="tx">Show the sizes in MB only<span class="caret" style="margin-left:1px;vertical-align:-3px"></span></span><span class="hint">&uarr; &darr; earlier messages</span></div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">Pressing <b>&uarr;</b> in the empty field brings back the last message you sent, caret at its end, ready to edit or send again.</figcaption>
+<figcaption class="cp note">Is the hint worth it? Proposed: yes, but only for the first few recalls. Once you have used &uarr; three times it never appears again; it also goes as soon as you edit the text, and it is not drawn when the text is long enough to reach it.</figcaption></figure>
+
+<!-- 6 CONTEXT MENU -->
+<figure class="fig"><div class="t">6 &middot; RIGHT-CLICK ON AN ANSWER<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">What does du -sh do?</div>
+    <div class="c-a tgt"><p>The <span class="c-ic">-s</span> flag sums a folder into one line, and <span class="c-ic">-h</span> shows sizes like 1.2G. <span class="c-ic">du -sh *</span> prints one total per item.</p>
+      <div class="c-cb"><div class="h"><span>zsh</span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></div><pre>du -sh * | sort -rh</pre></div>
+      <p>Pipe it into <span class="c-ic">sort -rh</span> to put the biggest first.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 2.1 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+  <svg class="cmp" style="left:196px;top:206px"><use href="#i-ptr"/></svg>
+  <div class="cm" style="left:204px;top:222px">
+    <div class="it">Copy<em>&#8984;C</em></div>
+    <div class="ln"></div>
+    <div class="it">Explain</div>
+    <div class="it">Shorter</div>
+    <div class="it">Ask about this</div>
+    <div class="ln"></div>
+    <div class="it">Copy chat as Markdown<em>&#8997;&#8679;&#8984;C</em></div>
+  </div>
+</div>
+<figcaption class="cp">Right-clicking an answer (tinted while the menu is open) shows the usual <b>Copy</b>, then <b>Explain, Shorter, Ask about this</b>, then <b>Copy chat as Markdown</b>.</figcaption></figure>
+
+<!-- 1b FIND, LIGHT -->
+<figure class="fig"><div class="t">1b &middot; FIND IN CHAT (&#8984;F)<span>light</span></div>
+<div class="cw light">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-find"><div class="fb"><svg><use href="#i-find"/></svg><span class="q">bash<i></i></span><span class="n">2 of 5</span><span class="sep"></span><span class="c-ib"><svg><use href="#i-up"/></svg></span><span class="c-ib"><svg><use href="#i-dn"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></div></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Biggest files in a folder, in <mark class="hl">bash</mark>?</div>
+    <div class="c-a"><p>In <mark class="hl cur">bash</mark> you can chain <span class="c-ic">du</span>, <span class="c-ic">sort</span> and <span class="c-ic">head</span>:</p>
+      <div class="c-cb"><div class="h"><span>sh</span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></div><pre>du -ah . | sort -rh | head -n 10</pre></div>
+      <p>The <span class="c-ic">-h</span> flag prints sizes like 1.2G and <span class="c-ic">sort -h</span> reads them back. It works in <mark class="hl">bash</mark> 3.2, the old <mark class="hl">bash</mark> macOS still ships.</p>
+      <p>Want it as a <mark class="hl">bash</mark> alias?</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span class="c-ib"><svg><use href="#i-spk"/></svg></span><span>Haiku 5.5 &middot; 1.9 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">The same find bar in the light theme.</figcaption></figure>
+
+</div>
+</div>
+</body></html>

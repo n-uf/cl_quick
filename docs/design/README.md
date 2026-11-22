@@ -7,6 +7,11 @@ A sketch shows what was proposed at the time. The app and the CHANGELOG say what
 
 ## Current
 
+- [chat-tools-sketch.html](chat-tools-sketch.html): four chat tools and two helpers, six states at real size: find in
+  chat (⌘F, a slim bar with "2 of 5" and ▲ ▼), quick actions (Explain, Shorter, Ask about this) floating above a
+  selection, the quoted selection in the field, read aloud in an answer's footer, ↑ to recall the last message, and
+  the right-click menu with Copy chat as Markdown; plus a light variant of the find bar. Proposed 2026-11-21, not
+  approved yet.
 - [chat-navigation-sketch.html](chat-navigation-sketch.html): the chat's new navigation, six states at real size: no
   forced scrolling, the floating ▲ ▼ ↓ control (New mark while text arrives), ⤒ in an answer's footer, the keys list
   with Thinking and Model on ⌥⌘ arrows, and the Shortcut row's new presets with the ⌥Space note. Proposed 2026-11-21,
