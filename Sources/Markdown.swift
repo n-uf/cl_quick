@@ -196,4 +196,33 @@ enum QuickChatMarkdown {
     }
 
     static func safeLink(_ url: URL) -> Bool { ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") }
+
+    /// A whole chat as Markdown, to paste into a note or an issue: "**You:**" and the message, then "**Claude:**" and the
+    /// answer, for each exchange in turn, a blank line between all of them. Bold labels, not headings: an answer has headings
+    /// of its own, which stay as written, with its code blocks (fences and languages) and everything else. A picture is
+    /// "[image]" and a file "[file: name]" after the message's text. An exchange with no answer (failed, or not begun) has
+    /// no Claude part; one still streaming has the text so far.
+    static func chat(_ exchanges: [QuickChatExchange]) -> String {
+        var parts: [String] = []
+        for x in exchanges {
+            var mine: [String] = []
+            let q = x.question.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !q.isEmpty { mine.append(q) }
+            mine += Array(repeating: "[image]", count: x.images)
+            mine += x.files.map { "[file: \($0)]" }
+            if !mine.isEmpty { parts.append("**You:**\n\n" + mine.joined(separator: "\n\n")) }
+            let a = x.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !a.isEmpty { parts.append("**Claude:**\n\n" + a) }
+        }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
+/// One message of the user's with what it carried and its answer, as QuickChatMarkdown.chat reads it.
+struct QuickChatExchange: Equatable {
+    var question: String
+    /// How many pictures went with it, and the names of the files.
+    var images = 0
+    var files: [String] = []
+    var answer = ""
 }

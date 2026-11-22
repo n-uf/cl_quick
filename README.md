@@ -221,7 +221,7 @@ minutes for a profile.
     - **Model & window:** fn↑ fn↓ (thinking), fn→ fn← (model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
     - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, the shortcut
-      that opens cl_quick, and ↑ in an empty field (your earlier messages).
+      that opens cl_quick, ↑ in an empty field (your earlier messages) and ⌥⇧⌘C (copy the chat as Markdown).
 
     The list is as tall on every page, so switching never resizes it. A click elsewhere or Esc closes it.
   - In the bar (before the first message) the row also has the usage indicator: a label ("5h" or "wk", whichever is
@@ -244,6 +244,13 @@ minutes for a profile.
   ↓ past the newest leaves the field empty. Once you edit the recalled text, ↑ and ↓ are the caret's again. Only this
   chat's messages are recalled, from memory (a new chat starts empty), and only their text: attachments are not brought
   back. A repeat of the message before is skipped.
+- **Copy the chat as Markdown.** **⌥⇧⌘C**, or **Copy chat as Markdown** in an answer's right-click menu, copies the
+  whole open chat: each message of yours under a bold **You:** and each answer under **Claude:**, as the answer was
+  written (its headings, lists and code blocks with their fences and languages stay), a blank line between all of
+  them, so it pastes well into a note or a GitHub issue. A picture is `[image]` and a file `[file: name]` after the
+  message's text. A message with no answer (it failed) has no Claude part; an answer still streaming has its text so
+  far. The answer's footer says "Copied" for a moment, as for a single answer. Nothing is kept: the copy is made from
+  the chat in memory and goes only to the pasteboard. ⌥⇧⌘C is by key, so it works on every layout.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
   app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
   The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under

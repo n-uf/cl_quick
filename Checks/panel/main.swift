@@ -5315,6 +5315,7 @@ inlinePageChecks()
 
 // ── the chat tools: ↑ recalls your last message (Checks/panel/toolsa.swift) ─────────────────────────────────────────────────────
 recallChecks()
+chatCopyChecks()
 
 CheckQuiet.verify("at the end")
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so

@@ -58,3 +58,62 @@ func recallChecks() {
     check("recall: the keys list's Write page names ↑ (empty field)", rows.contains("↑ (empty field) Your earlier messages"), rows.joined(separator: "\n"))
     m.newChat(); chat.hide(); spin(0.2)
 }
+
+// ── ⌥⇧⌘C and the answers' menu: the whole chat as Markdown through QCCopy.board ─────────────────────────────────────────────
+func chatCopyChecks() {
+    guard let p = panel() else { check("chat copy: the panel is there", false); return }
+    let m = chat.model
+    let board = NSPasteboard(name: NSPasteboard.Name("cl-quick-chatcopy-check-\(ProcessInfo.processInfo.processIdentifier)"))
+    let realBoard = QCCopy.board
+    QCCopy.board = board
+    defer { board.releaseGlobally(); QCCopy.board = realBoard }
+    func key(_ flags: NSEvent.ModifierFlags, _ chars: String = "c") -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                                       characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(kVK_ANSI_C)) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
+    func done(_ q: String, _ a: String) -> QuickChatTurn {
+        var t = QuickChatTurn(question: q, answer: a, model: "Haiku 5.5")
+        t.phase = .done; t.seconds = 1
+        return t
+    }
+    m.newChat(); m.field = ""
+    m.turns = [done("How do I list files?", "Use:\n\n```zsh\nls -la\n```"), done("And hidden ones?", "Those are in `ls -a`.")]
+    chat.open(); spin(0.3)
+    let want = "**You:**\n\nHow do I list files?\n\n**Claude:**\n\nUse:\n\n```zsh\nls -la\n```\n\n**You:**\n\nAnd hidden ones?\n\n**Claude:**\n\nThose are in `ls -a`."
+    check("chat copy: the model's Markdown is each message and answer, code fences and languages kept", m.chatMarkdown == want, m.chatMarkdown)
+    board.clearContents()
+    check("chat copy: ⌥⇧⌘C is taken and puts the chat on the pasteboard it was given (QCCopy.board)",
+          key([.command, .option, .shift], "Ç") && board.string(forType: .string) == want, "\(board.string(forType: .string) ?? "nil")")
+    check("chat copy: it says Copied under the latest answer (no animation: the model's flag, then not)", m.copied == m.turns[1].id)
+    spin(QuickChatModel.copiedFor + 0.3)
+    check("chat copy: and the Copied goes by itself", m.copied == nil)
+    // it is not the answer copy, nor another key
+    board.clearContents(); board.setString("kept", forType: .string)
+    check("chat copy: ⌥⌘C and ⌃⌥⇧⌘C are not the chat copy", !key([.command, .option]) && !key([.command, .option, .shift, .control]) && board.string(forType: .string) == "kept")
+    let pbName = NSPasteboard.Name("cl-quick-chatcopy-answer-\(ProcessInfo.processInfo.processIdentifier)")
+    let answers = NSPasteboard(name: pbName)
+    let realPasteboard = m.pasteboard
+    m.pasteboard = answers
+    defer { answers.releaseGlobally(); m.pasteboard = realPasteboard }
+    check("chat copy: ⇧⌘C is still the answer copy, not the chat's", key([.command, .shift], "C") && answers.string(forType: .string) == "Those are in `ls -a`."
+          && board.string(forType: .string) == "kept")
+    // the answers' menu item (the click's own answer says Copied)
+    m.copied = nil
+    check("chat copy: the menu item copies the chat and says Copied under the answer it was opened on",
+          m.copyChat(feedbackOn: m.turns[0].id) && board.string(forType: .string) == want && m.copied == m.turns[0].id)
+    // a failed message and a still streaming answer
+    var failed = QuickChatTurn(question: "Again?"); failed.phase = .failed
+    var live = QuickChatTurn(question: "More"); live.answer = "half an"; live.phase = .streaming
+    m.turns = [done("Q1", "A1"), failed, live]
+    check("chat copy: a failed message has no Claude part, a streaming answer has its text so far",
+          m.chatMarkdown == "**You:**\n\nQ1\n\n**Claude:**\n\nA1\n\n**You:**\n\nAgain?\n\n**You:**\n\nMore\n\n**Claude:**\n\nhalf an")
+    // an empty chat: the key is taken, nothing is copied
+    m.newChat(); spin(0.2)
+    board.clearContents(); board.setString("kept", forType: .string)
+    check("chat copy: with no chat the key is taken and the pasteboard untouched", key([.command, .option, .shift], "Ç") && board.string(forType: .string) == "kept" && m.copied == nil)
+    // the keys list
+    let rows = QCKeysView.pages(opener: "⌃⇧Space").first { $0.page == .write }?.rows.map { $0.0 + " " + $0.1 } ?? []
+    check("chat copy: the keys list's Write page names ⌥⇧⌘C", rows.contains("⌥⇧⌘C Copy the chat as Markdown"), rows.joined(separator: "\n"))
+    chat.hide(); spin(0.2)
+}

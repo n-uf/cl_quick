@@ -495,6 +495,7 @@ struct QCTurnView: View {
             if turn.thinkingTitle != nil { QCThought(turn: turn).padding(.top, 12) }
             if !turn.answer.isEmpty {
                 QCAnswer(text: turn.answer).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)
+                    .contextMenu { Button("Copy chat as Markdown") { model.copyChat(feedbackOn: turn.id) } }
             }
             if turn.phase == .waiting || turn.phase == .streaming {
                 // while a web tool runs, the dot has a muted line beside it: "Reading example.com…"
@@ -1559,7 +1560,8 @@ struct QCKeysView: View {
                    ("⇧⌘C", "Copy the answer in view"),
                    ("Esc  ⌘W", "Hide"),
                    (opener, "Open cl_quick"),
-                   ("↑ (empty field)", "Your earlier messages")])]
+                   ("↑ (empty field)", "Your earlier messages"),
+                   ("⌥⇧⌘C", "Copy the chat as Markdown")])]
     }
     /// All the rows, page by page.
     static func rows(opener: String) -> [(String, String)] { pages(opener: opener).flatMap(\.rows) }

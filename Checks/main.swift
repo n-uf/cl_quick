@@ -431,6 +431,16 @@ check("not a heading", QuickChatMarkdown.blocks("#hashtag") == [.paragraph("#has
 check("quote", QuickChatMarkdown.blocks("> a\n> b\nc") == [.quote("a\nb"), .paragraph("c")])
 check("rule", QuickChatMarkdown.blocks("a\n\n---\n\nb") == [.paragraph("a"), .rule, .paragraph("b")])
 check("empty", QuickChatMarkdown.blocks("") == [])
+// the chat as Markdown (⌥⇧⌘C, "Copy chat as Markdown")
+let codeAnswer = "## Fix\n\nTry:\n\n```swift\nlet a = 1\n```\n\n- one\n- two\n"      // (its trailing newline is trimmed)
+check("chat as Markdown: bold labels, the answer as written (headings, fences and languages kept), blank lines between",
+      QuickChatMarkdown.chat([QuickChatExchange(question: "How?", answer: codeAnswer), QuickChatExchange(question: "Thanks", answer: "You're welcome.")])
+      == "**You:**\n\nHow?\n\n**Claude:**\n\n## Fix\n\nTry:\n\n```swift\nlet a = 1\n```\n\n- one\n- two\n\n**You:**\n\nThanks\n\n**Claude:**\n\nYou're welcome.")
+check("chat as Markdown: pictures are [image], files [file: name], after the text; a picture alone has no empty text",
+      QuickChatMarkdown.chat([QuickChatExchange(question: "Look", images: 2, files: ["a.pdf"], answer: "Seen."), QuickChatExchange(question: "", images: 1)])
+      == "**You:**\n\nLook\n\n[image]\n\n[image]\n\n[file: a.pdf]\n\n**Claude:**\n\nSeen.\n\n**You:**\n\n[image]")
+check("chat as Markdown: no answer (failed, not begun) has no Claude part; nothing at all is empty",
+      QuickChatMarkdown.chat([QuickChatExchange(question: "Q")]) == "**You:**\n\nQ" && QuickChatMarkdown.chat([]) == "")
 check("a year is not a list", QuickChatMarkdown.blocks("2026. A year.") == [.paragraph("2026. A year.")])
 // tables
 let tableSample = """

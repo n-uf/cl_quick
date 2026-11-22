@@ -4,6 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Copy the chat as Markdown.** ⌥⇧⌘C, or **Copy chat as Markdown** in an answer's right-click menu, copies the whole
+  open chat: your messages under a bold **You:** and the answers under **Claude:**, exactly as written (headings,
+  lists and code blocks with their fences and languages), so it pastes well into a note or a GitHub issue. Pictures
+  are `[image]` and files `[file: name]`. The answer's footer says "Copied" for a moment, as it does for a single
+  answer. Nothing is written anywhere but the pasteboard. The keys list's Write page has it.
 - **↑ recalls your last message.** In the field, while it is empty, ↑ puts your last message of the chat in it (the
   caret at the end) to edit and send again; ↑ again goes further back, ↓ goes forward, and ↓ past the newest empties
   the field. Edit the recalled text and ↑ ↓ are normal caret keys again, as they are with text typed or an input

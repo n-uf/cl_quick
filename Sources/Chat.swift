@@ -356,12 +356,41 @@ final class QuickChatModel: ObservableObject {
         guard !s.isEmpty else { return false }
         pasteboard.clearContents()
         guard pasteboard.setString(s, forType: .string) else { return false }
-        copied = turn.id
+        showCopied(turn.id)
+        return true
+    }
+
+    /// The tick and "Copied" under a turn's answer for a moment (no animation: the footer shows it, then not).
+    private func showCopied(_ id: UUID) {
+        copied = id
         copiedReset?.cancel()
         let w = DispatchWorkItem { [weak self] in self?.copied = nil }
         copiedReset = w
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.copiedFor, execute: w)
+    }
+
+    /// The whole open chat as Markdown (QuickChatMarkdown.chat): each message of the user's and each answer.
+    var chatMarkdown: String {
+        QuickChatMarkdown.chat(turns.map {
+            QuickChatExchange(question: $0.question, images: $0.images.count, files: $0.files.map(\.name), answer: $0.answer)
+        })
+    }
+
+    /// Puts the whole chat on the pasteboard as Markdown (through QCCopy, the copy path a check swaps) and says "Copied"
+    /// under `turn`'s answer (the one the click was on, or the one in view). False when the chat is empty.
+    @discardableResult
+    func copyChat(feedbackOn turn: UUID? = nil) -> Bool {
+        guard !turns.isEmpty else { return false }
+        QCCopy.put(chatMarkdown)
+        if let id = turn ?? feedbackTurn { showCopied(id) }
         return true
+    }
+
+    /// The answer whose footer says "Copied" for a chat copy made by key (⌥⇧⌘C): the one in view when scrolled up, else
+    /// the last one that is done or stopped.
+    private var feedbackTurn: UUID? {
+        if !scroll.following, let id = scroll.answerAtBottomEdge(), turns.contains(where: { $0.id == id }) { return id }
+        return turns.last { $0.phase == .done || $0.phase == .stopped }?.id
     }
 
     /// ⌘⇧C: the latest complete answer.
@@ -1677,6 +1706,7 @@ final class QuickChat {
         p.onClose = { [weak self] in self?.hide() }
         p.onNewChat = { [weak self] in self?.model.newChat() }
         p.onCopyAnswer = { [weak self] in _ = self?.model.copyAnswerInView() }
+        p.onCopyChat = { [weak self] in _ = self?.model.copyChat() }
         p.onNavigate = { [weak self] nav in
             guard let m = self?.model, m.isWindow else { return false }
             return m.scroll.perform(nav, turns: m.turns.count)
@@ -1926,6 +1956,8 @@ final class QuickChatPanel: NSPanel {
     var onNewChat: () -> Void = {}
     /// ⌘⇧C: copy the latest complete answer (nothing if there is none). The key is taken either way.
     var onCopyAnswer: () -> Void = {}
+    /// ⌥⇧⌘C: copy the whole chat as Markdown (nothing if the chat is empty). The key is taken either way.
+    var onCopyChat: () -> Void = {}
     /// ⌘D: Dictation on or off, as the mic button does.
     var onDictate: () -> Void = {}
     /// Moving in the chat (QCNav): true when the key was taken (the chat window has answers to move in).
@@ -1993,6 +2025,14 @@ final class QuickChatPanel: NSPanel {
             case kVK_ANSI_RightBracket: if onNavigate(.nextPrompt) { return true }
             default: break
             }
+        }
+        // ⌥⇧⌘C (exactly those), by KEY CODE like the digit keys, so it works on every layout (⌥ changes the character a key
+        // gives): the whole chat as Markdown. macOS has no system shortcut on it and the field's Edit keys never use ⌥⇧⌘.
+        // Only while the panel is the key window.
+        if isKeyWindow, Int(e.keyCode) == kVK_ANSI_C, flags.intersection([.command, .option, .control, .shift]) == [.command, .option, .shift] {
+            guard !e.isARepeat else { return true }
+            onCopyChat()
+            return true
         }
         guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
               let key = Self.shortcutLetter(e) else { return super.performKeyEquivalent(with: e) }
