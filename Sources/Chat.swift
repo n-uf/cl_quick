@@ -231,6 +231,8 @@ final class QuickChatModel: ObservableObject {
         // pictures and scroll positions go now (InlinePage.swift)
         didSet {
             if wantedWeb != nil { syncWeb() }
+            // an answer being read aloud that is gone (a new chat, the chat left) or starts again (Ask again) stops
+            if let r = QCSpeech.shared.reading, !turns.contains(where: { $0.id == r && ($0.phase == .done || $0.phase == .stopped) }) { QCSpeech.shared.stop() }
             // (a token only changes the last turn's text: its id is still last, and nothing more is looked at)
             if let old = oldValue.last?.id, turns.last?.id != old, !turns.contains(where: { $0.id == old }) { QCInlinePages.shared.forgetAll() }
         }
@@ -806,6 +808,7 @@ final class QuickChatModel: ObservableObject {
         generation += 1
         closeProcess()
         ended = nil
+        QCSpeech.shared.stop()
         turns = []
         recall = nil
         followTick += 1
@@ -2177,6 +2180,7 @@ final class QuickChatPanel: NSPanel {
         QCKeys.shared.close()            // and the keys list
         QuickChat.shared.model.scroll.left.reset()    // and the edge handles' stacks (no mouse-exit under a hidden window either)
         QuickChat.shared.model.scroll.right.reset()
+        QCSpeech.shared.stop()           // nothing is read aloud from a hidden panel
         AddressPrivacy.shared.endHover() // and a revealed address goes blurred again (no mouse-exit either)
         super.orderOut(sender)
         quietKey = false

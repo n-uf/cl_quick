@@ -162,7 +162,7 @@ minutes for a profile.
     message; the landed bubble is lighter for about a second) and ↓ jump to latest (while not at the bottom; the pill takes the accent colour while text has arrived
     below, until you reach the bottom). **Left:** ⤒ (the start of the answer, only while its first line is above the view) and
     copy, for the answer at the view's bottom edge while its footer is out of sight (also while it streams: copy takes the text
-    so far). Each answer's own footer has ⤒ copy ↻ (⤒ only while its first line is above the view).
+    so far). Each answer's own footer has ⤒ copy ↻ and a speaker (⤒ only while its first line is above the view).
   - **Keys** (the panel's own, exact modifiers; none is a text edit): ⌘J jump to latest, ⇧⌘J the start of the answer at the
     view's bottom edge (the last one at the bottom), ⌘[ and ⌘] the previous and next message of yours (nothing at the ends),
     ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and ⇧fn↑ and ⇧fn↓ (⇧Page Up and
@@ -251,6 +251,15 @@ minutes for a profile.
   message's text. A message with no answer (it failed) has no Claude part; an answer still streaming has its text so
   far. The answer's footer says "Copied" for a moment, as for a single answer. Nothing is kept: the copy is made from
   the chat in memory and goes only to the pasteboard. ⌥⇧⌘C is by key, so it works on every layout.
+- **Read aloud.** The speaker button at the end of a finished answer's footer (after ↻; tooltip "Read aloud") reads the
+  answer with the Mac's own voice, on the device: the text never leaves the Mac, and nothing is kept. (Claude's own
+  voice is not available to an app that runs `claude -p`, so this is macOS's speech.) The button turns into a stop
+  glyph ("Stop reading") while it reads; press it again to stop. Only one answer reads at a time: pressing another
+  answer's speaker moves the reading there. Esc or hiding the panel, a new chat, and an answer that starts again also
+  stop it. What is read is the answer's plain text: the Markdown marks (bold, links, headings, list marks, table
+  pipes) are left out, and a code block is not read out: you hear "code block" in its place. The voice is the system's
+  default for the language of the answer when it can be told (a Ukrainian answer is read in a Ukrainian voice, if one is
+  installed), else your default voice (System Settings ▸ Accessibility ▸ Spoken Content). It has no key.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
   app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
   The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under

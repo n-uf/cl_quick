@@ -468,6 +468,8 @@ struct QCTurnView: View {
     var above = false
     @State private var hover = false
     @Environment(\.qcFooterBelow) private var footerBelow
+    /// Which answer is read aloud (its footer stays and its speaker button is a stop glyph).
+    @ObservedObject private var speech = QCSpeech.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -508,7 +510,8 @@ struct QCTurnView: View {
                 .padding(.top, 10)
             }
             if (turn.phase == .done || turn.phase == .stopped), !(footerBelow && last) {
-                let shown = last || hover || model.copied == turn.id       // ⌘⇧C on an earlier answer says "Copied" under it
+                // ⌘⇧C on an earlier answer says "Copied" under it; the answer being read aloud keeps its footer (its stop button)
+                let shown = last || hover || model.copied == turn.id || speech.reading == turn.id
                 // hidden, it still takes the pointer: moving down from the answer onto Copy keeps the turn hovered
                 footer.background(anchor(.footer)).padding(.top, 4).opacity(shown ? 1 : 0)
             }
@@ -523,11 +526,11 @@ struct QCTurnView: View {
         .onHover { hover = $0 }
     }
 
-    /// The footer's icons, in order: go to the start (only while the answer's first line is above the view), copy, and ask
-    /// again (the last answer only), then the words.
-    enum FooterAction { case start, copy, again }
-    static func footerActions(above: Bool, last: Bool) -> [FooterAction] {
-        (above ? [.start] : []) + [.copy] + (last ? [.again] : [])
+    /// The footer's icons, in order: go to the start (only while the answer's first line is above the view), copy, ask
+    /// again (the last answer only) and read aloud (an answer with text), then the words.
+    enum FooterAction { case start, copy, again, speak }
+    static func footerActions(above: Bool, last: Bool, speak: Bool = true) -> [FooterAction] {
+        (above ? [.start] : []) + [.copy] + (last ? [.again] : []) + (speak ? [.speak] : [])
     }
 
     /// Behind a message's row, or an answer: where it is (a picture has no scroll view).
@@ -541,7 +544,7 @@ struct QCTurnView: View {
         HStack(spacing: 0) {
             // the tick and "Copied" come from the model, so ⌘⇧C and a click say the same thing
             let copied = model.copied == turn.id
-            ForEach(Self.footerActions(above: above, last: last), id: \.self) { a in
+            ForEach(Self.footerActions(above: above, last: last, speak: !turn.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty), id: \.self) { a in
                 switch a {
                 case .start:
                     QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
@@ -550,6 +553,11 @@ struct QCTurnView: View {
                     QCIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Copy ⇧⌘C", small: true) { model.copyAnswer(of: turn) }
                 case .again:
                     QCIconButton(symbol: "arrow.clockwise", help: "Ask again", small: true) { model.again() }
+                case .speak:
+                    // the Mac's voice, on the device: the stop glyph while this answer is being read
+                    let reading = speech.reading == turn.id
+                    QCIconButton(symbol: reading ? "stop.fill" : "speaker.wave.2", help: reading ? "Stop reading" : "Read aloud", small: true,
+                                 label: reading ? "Stop reading" : "Read this answer aloud") { speech.toggle(turn.id, answer: turn.answer) }
                 }
             }
             Text(copied ? "Copied" : words).font(.system(size: 12)).foregroundColor(QCColor.muted).lineLimit(1).padding(.leading, 4)

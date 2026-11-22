@@ -117,3 +117,59 @@ func chatCopyChecks() {
     check("chat copy: the keys list's Write page names ⌥⇧⌘C", rows.contains("⌥⇧⌘C Copy the chat as Markdown"), rows.joined(separator: "\n"))
     chat.hide(); spin(0.2)
 }
+
+// ── read aloud: the speaker button's state (a check makes no sound: QCQuiet.on keeps the state and skips the voice) ──────────────
+func readAloudChecks() {
+    let m = chat.model
+    let speech = QCSpeech.shared
+    func done(_ q: String, _ a: String) -> QuickChatTurn {
+        var t = QuickChatTurn(question: q, answer: a, model: "Haiku 5.5")
+        t.phase = .done; t.seconds = 1
+        return t
+    }
+    speech.stop()
+    m.newChat(); m.field = ""
+    m.turns = [done("one", "First **answer**."), done("two", "Second answer."), done("three", "")]
+    chat.open(); spin(0.3)
+    let a = m.turns[0].id, b = m.turns[1].id
+    check("read aloud: the speaker is the last footer icon, after ↻, and only where there is text to read",
+          QCTurnView.footerActions(above: true, last: true) == [.start, .copy, .again, .speak]
+          && QCTurnView.footerActions(above: false, last: true, speak: !m.turns[2].answer.isEmpty) == [.copy, .again])
+    check("read aloud: nothing is read at first", speech.reading == nil)
+    speech.toggle(a, answer: m.turns[0].answer)
+    check("read aloud: the button starts that answer (the stop glyph shows)", speech.reading == a)
+    speech.toggle(b, answer: m.turns[1].answer)
+    check("read aloud: another answer's button reads that one instead (only one at a time)", speech.reading == b)
+    speech.toggle(b, answer: m.turns[1].answer)
+    check("read aloud: the same button again stops it", speech.reading == nil)
+    speech.toggle(a, answer: "---")
+    check("read aloud: an answer with nothing to read does not start", speech.reading == nil)
+    speech.toggle(a, answer: "```swift\nlet a = 1\n```")
+    check("read aloud: a code block alone is read as \"code block\" (it starts)", speech.reading == a)
+    // hiding the panel stops it
+    chat.hide(); spin(0.2)
+    check("read aloud: hiding the panel stops it", speech.reading == nil)
+    chat.open(); spin(0.3)
+    // a new chat stops it, and so does the answer starting again or going away
+    speech.toggle(a, answer: m.turns[0].answer)
+    m.newChat(); spin(0.2)
+    check("read aloud: a new chat stops it", speech.reading == nil)
+    m.turns = [done("one", "First answer."), done("two", "Second answer.")]
+    speech.toggle(m.turns[0].id, answer: m.turns[0].answer)
+    m.turns[0].phase = .waiting                  // Ask again begins an answer anew
+    check("read aloud: the answer starting again stops it", speech.reading == nil)
+    m.turns = [done("one", "First answer.")]
+    speech.toggle(m.turns[0].id, answer: m.turns[0].answer)
+    m.turns = []
+    check("read aloud: the answer going away stops it", speech.reading == nil)
+    // the voice follows the answer's language, else the user's default (nil); never one of another language
+    let en = QCSpeech.voice(for: "This is a plain English sentence about reading an answer aloud with the voice of the Mac.")
+    let uk = QCSpeech.voice(for: "Це звичайне українське речення про те, як прочитати відповідь уголос голосом комп'ютера.")
+    check("read aloud: an English answer gets an English voice (or the default), a Ukrainian one a Ukrainian voice (or the default)",
+          (en == nil || en!.language.hasPrefix("en")) && (uk == nil || uk!.language.hasPrefix("uk")), "\(String(describing: en?.language)) \(String(describing: uk?.language))")
+    check("read aloud: no text, no voice chosen", QCSpeech.voice(for: "") == nil)
+    // the keys list needs no row: no key
+    let rows = QCKeysView.rows(opener: "⌃⇧Space").map { $0.0 + " " + $0.1 }.joined(separator: "\n")
+    check("read aloud: it has no key, so no row in the keys list", !rows.lowercased().contains("read") && !rows.lowercased().contains("aloud"), rows)
+    speech.stop(); m.newChat(); chat.hide(); spin(0.2)
+}

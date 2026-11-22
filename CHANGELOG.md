@@ -4,6 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Read an answer aloud.** A speaker button after ↻ in each finished answer's footer ("Read aloud") reads the answer
+  with the Mac's own voice, on the device (Claude's voice isn't available to an app that runs `claude -p`). Press it
+  again, or hide the panel, start a new chat or ask again, to stop; the button is a stop glyph while it reads, and only
+  one answer reads at a time. The Markdown marks are left out and a code block is said as "code block". The voice is the
+  system's default for the answer's language when it can be told, else your default. Nothing is sent or kept.
 - **Copy the chat as Markdown.** ⌥⇧⌘C, or **Copy chat as Markdown** in an answer's right-click menu, copies the whole
   open chat: your messages under a bold **You:** and the answers under **Claude:**, exactly as written (headings,
   lists and code blocks with their fences and languages), so it pastes well into a note or a GitHub issue. Pictures

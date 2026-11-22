@@ -431,6 +431,16 @@ check("not a heading", QuickChatMarkdown.blocks("#hashtag") == [.paragraph("#has
 check("quote", QuickChatMarkdown.blocks("> a\n> b\nc") == [.quote("a\nb"), .paragraph("c")])
 check("rule", QuickChatMarkdown.blocks("a\n\n---\n\nb") == [.paragraph("a"), .rule, .paragraph("b")])
 check("empty", QuickChatMarkdown.blocks("") == [])
+// read aloud: plain text, no Markdown marks, a code block is the words "code block"
+check("spoken: bold, italics, inline code and links lose their marks, the words stay",
+      QuickChatMarkdown.spoken("Use **bold**, _italic_ and `ls -a`, see [the docs](https://example.com/x).") == "Use bold, italic and ls -a, see the docs.")
+check("spoken: a fenced code block is said as \"code block\", never read out; its fence and language are not spoken",
+      QuickChatMarkdown.spoken("Try:\n\n```swift\nlet a = 1\nprint(a)\n```\n\nDone") == "Try:\ncode block.\nDone")
+check("spoken: headings and list items end with a full stop (a pause), numbers stay, bullet marks go",
+      QuickChatMarkdown.spoken("## Steps\n\n1. Open it\n2. Close it!\n\n- red\n- green") == "Steps.\n1. Open it.\n2. Close it!\nred.\ngreen.")
+check("spoken: rules and the pipes of a table go; a row is its cells with commas",
+      QuickChatMarkdown.spoken("a\n\n---\n\n| x | y |\n|---|---|\n| 1 | 2 |") == "a\nx, y.\n1, 2.")
+check("spoken: nothing to read is empty", QuickChatMarkdown.spoken("") == "" && QuickChatMarkdown.spoken("---") == "")
 // the chat as Markdown (⌥⇧⌘C, "Copy chat as Markdown")
 let codeAnswer = "## Fix\n\nTry:\n\n```swift\nlet a = 1\n```\n\n- one\n- two\n"      // (its trailing newline is trimmed)
 check("chat as Markdown: bold labels, the answer as written (headings, fences and languages kept), blank lines between",

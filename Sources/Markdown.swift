@@ -197,6 +197,34 @@ enum QuickChatMarkdown {
 
     static func safeLink(_ url: URL) -> Bool { ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") }
 
+    /// An answer as plain text to read aloud: the Markdown marks go (bold, italics, `code` marks, link syntax, heading and list
+    /// marks, table pipes and rules), the words stay, and a code block is the words "code block" (`code`) in its place, so the
+    /// listener knows there was one without hearing it spelled out. Headings, list items and table rows end with a full stop
+    /// when they have no punctuation, which is where the voice pauses. Empty when nothing is left to read.
+    static func spoken(_ source: String, code: String = "code block") -> String {
+        func plain(_ s: String) -> String {
+            let a = (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+            return String(a.characters).replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        func stopped(_ s: String) -> String {
+            guard let last = s.last, !".!?…:;。！？".contains(last) else { return s }
+            return s + "."
+        }
+        var out: [String] = []
+        for b in blocks(source) {
+            switch b {
+            case .paragraph(let s), .quote(let s): out.append(plain(s))
+            case .heading(_, let s): out.append(stopped(plain(s)))
+            case .bullets(let items): out.append(contentsOf: items.map { stopped(plain($0)) })
+            case .numbered(let start, let items): out.append(contentsOf: items.enumerated().map { "\(start + $0.offset). " + stopped(plain($0.element)) })
+            case .code: out.append(stopped(code))
+            case .rule: break
+            case .table(let header, _, let rows): out.append(contentsOf: ([header] + rows).map { stopped($0.map(plain).filter { !$0.isEmpty }.joined(separator: ", ")) })
+            }
+        }
+        return out.filter { !$0.isEmpty && $0 != "." }.joined(separator: "\n")
+    }
+
     /// A whole chat as Markdown, to paste into a note or an issue: "**You:**" and the message, then "**Claude:**" and the
     /// answer, for each exchange in turn, a blank line between all of them. Bold labels, not headings: an answer has headings
     /// of its own, which stay as written, with its code blocks (fences and languages) and everything else. A picture is

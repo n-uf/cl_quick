@@ -4650,11 +4650,12 @@ func chatScrollChecks() {
     check("prompts: the highlight is removed after about a second", sc.flash == nil)
 
     // an answer's "go to the start": shown only while its first line is above the view
-    check("answer start: the footer's icons are ⤒ copy ↻ (⤒ only when asked for, ↻ on the last answer)",
-          QCTurnView.footerActions(above: true, last: true) == [.start, .copy, .again]
-          && QCTurnView.footerActions(above: false, last: true) == [.copy, .again]
-          && QCTurnView.footerActions(above: true, last: false) == [.start, .copy]
-          && QCTurnView.footerActions(above: false, last: false) == [.copy])
+    check("answer start: the footer's icons are ⤒ copy ↻ speaker (⤒ only when asked for, ↻ on the last answer, the speaker when there is text to read)",
+          QCTurnView.footerActions(above: true, last: true) == [.start, .copy, .again, .speak]
+          && QCTurnView.footerActions(above: false, last: true) == [.copy, .again, .speak]
+          && QCTurnView.footerActions(above: true, last: false) == [.start, .copy, .speak]
+          && QCTurnView.footerActions(above: false, last: false) == [.copy, .speak]
+          && QCTurnView.footerActions(above: false, last: true, speak: false) == [.copy, .again])
     let answerTops = ids.compactMap { sc.top(ofAnswer: $0) }
     check("answer start: each answer tells where its first line is, below its message", answerTops.count == 4 && zip(answerTops, tops).allSatisfy { $0 > $1 }, "\(answerTops) \(tops)")
     user(scrollTo: 0); settle()
@@ -5316,6 +5317,7 @@ inlinePageChecks()
 // ── the chat tools: ↑ recalls your last message (Checks/panel/toolsa.swift) ─────────────────────────────────────────────────────
 recallChecks()
 chatCopyChecks()
+readAloudChecks()
 
 CheckQuiet.verify("at the end")
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so
