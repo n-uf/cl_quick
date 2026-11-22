@@ -57,17 +57,41 @@ final class QCSpeech: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    /// The voice for a text: nil (the voice chosen in Spoken Content) when the text is in the Mac's own language or its
-    /// language can't be told; for another language, the system's default voice for it, if one is installed.
+    /// The voice for a text: the best one installed for its language (the Mac's own language when it can't be told).
+    /// Premium first, then Enhanced (the natural Siri voices among them), so a downloaded Premium voice wins by itself;
+    /// with only the compact ones installed, as before: nil (the voice chosen in Spoken Content) for the Mac's own
+    /// language, the system's default voice for another. No text: nil.
     static func voice(for text: String) -> AVSpeechSynthesisVoice? {
+        guard !text.isEmpty else { return nil }
+        let mine = AVSpeechSynthesisVoice.currentLanguageCode()                       // "en-US"
         let r = NLLanguageRecognizer()
         r.processString(String(text.prefix(2000)))
-        guard let lang = r.dominantLanguage, lang != .undetermined, (r.languageHypotheses(withMaximum: 1)[lang] ?? 0) >= 0.6 else { return nil }
-        let code = lang.rawValue.split(separator: "-").first.map(String.init) ?? lang.rawValue      // "zh-Hans" → "zh"
-        let mine = AVSpeechSynthesisVoice.currentLanguageCode()
-        // the user's own language: nil, the voice chosen in System Settings ▸ Accessibility ▸ Spoken Content
-        if mine == code || mine.hasPrefix(code + "-") { return nil }
-        // another language: the system's default voice for it (nil when none is installed: the user's default)
-        return AVSpeechSynthesisVoice(language: code)
+        var code = mine.split(separator: "-").first.map(String.init) ?? mine
+        if let lang = r.dominantLanguage, lang != .undetermined, (r.languageHypotheses(withMaximum: 1)[lang] ?? 0) >= 0.6 {
+            code = lang.rawValue.split(separator: "-").first.map(String.init) ?? lang.rawValue   // "zh-Hans" → "zh"
+        }
+        let own = mine == code || mine.hasPrefix(code + "-")
+        if let best = best(code, region: own ? mine : AVSpeechSynthesisVoice(language: code)?.language) { return best }
+        return own ? nil : AVSpeechSynthesisVoice(language: code)
+    }
+
+    /// The best Premium or Enhanced voice installed for a language ("en"), nil when there is none: higher quality first, then
+    /// the preferred region ("en-US"), then by identifier so the pick is stable. Novelty and Personal voices are never picked.
+    static func best(_ code: String, region: String?, among voices: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices()) -> AVSpeechSynthesisVoice? {
+        func rank(_ q: AVSpeechSynthesisVoiceQuality) -> Int { q == .premium ? 2 : q == .enhanced ? 1 : 0 }
+        return voices
+            .filter { ($0.language == code || $0.language.hasPrefix(code + "-")) && rank($0.quality) > 0 && plain($0) }
+            .min { a, b in
+                if rank(a.quality) != rank(b.quality) { return rank(a.quality) > rank(b.quality) }
+                let ar = a.language == region, br = b.language == region
+                if ar != br { return ar }
+                return a.identifier < b.identifier
+            }
+    }
+
+    /// Not a novelty or Personal voice (macOS 14 tells; on 13 neither kind exists).
+    private static func plain(_ v: AVSpeechSynthesisVoice) -> Bool {
+        if #available(macOS 14.0, *) { return !v.voiceTraits.contains(.isNoveltyVoice) && !v.voiceTraits.contains(.isPersonalVoice) }
+        return true
     }
 }

@@ -281,10 +281,13 @@ minutes for a profile.
   glyph ("Stop reading") while it reads; press it again to stop. Only one answer reads at a time: pressing another
   answer's speaker moves the reading there. Esc or hiding the panel, a new chat, and an answer that starts again also
   stop it. What is read is the answer's plain text: the Markdown marks (bold, links, headings, list marks, table
-  pipes) are left out, and a code block is not read out: you hear "code block" in its place. An answer in your Mac's own
-  language (or one whose language can't be told) is read in the voice chosen in System Settings ▸ Accessibility ▸
-  Spoken Content; an answer in another language is read in the system's default voice for that language (a Ukrainian
-  answer in a Ukrainian voice), or in yours when none is installed. It has no key.
+  pipes) are left out, and a code block is not read out: you hear "code block" in its place. The answer is read in the
+  best voice installed for its language (your Mac's own when it can't be told): a Premium voice first, then an
+  Enhanced one (the natural Siri voices are among them), in your region's accent when there is a choice. With only the
+  compact voices installed, an answer in your own language is read in the voice chosen in System Settings ▸
+  Accessibility ▸ Spoken Content and one in another language in the system's default voice for it (yours when none is
+  installed). Better voices are a free download there: System voice ▸ Manage Voices…, then a Premium voice such as Ava
+  or Zoe. Novelty voices and a Personal Voice are never used. It has no key.
 - **Ask about the selected text in any app.** Select text, then right-click ▸ Services ▸ **Ask cl_quick** (also the
   app menu ▸ Services; a keyboard shortcut can be set in System Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Services).
   The bar opens with the selection in the field as a quote, ready to edit and not sent, and your question goes under
