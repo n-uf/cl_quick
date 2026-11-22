@@ -78,7 +78,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let chat = QuickChat.shared
 
     /// Before launch ends, so a Services request that launched the app finds its provider (Sources/Service.swift).
-    func applicationWillFinishLaunching(_ note: Notification) { QCServiceProvider.register() }
+    func applicationWillFinishLaunching(_ note: Notification) {
+        QCServiceProvider.register()
+        // cl-quick:// URLs (Sources/OpenURL.swift): the Apple event is what a launch by URL delivers first, so it is
+        // handled from here, and one that comes before chat.start() has run waits in `pendingURLs`
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleURLEvent(_:reply:)),
+                                                     forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    /// URLs that arrived before the chat started; handled, in order, once it has.
+    private var pendingURLs: [URL] = []
+    private var chatStarted = false
+
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        guard let s = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue, let url = URL(string: s) else { return }
+        if chatStarted { chat.handle(openURL: url) } else if pendingURLs.count < 4 { pendingURLs.append(url) }
+    }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -105,6 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item = it
         UpdateChecker.shared.start()    // a newer release: a line in the menu (nothing at all while Updates is off)
         if firstRun { SettingsWindow.shared.show(profile: nil, firstRun: true) }
+        chatStarted = true              // the cl-quick:// URLs that launched the app, now the chat is ready for them
+        let waiting = pendingURLs
+        pendingURLs = []
+        waiting.forEach { chat.handle(openURL: $0) }
     }
 
     func applicationWillTerminate(_ note: Notification) {

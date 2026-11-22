@@ -744,7 +744,7 @@ final class QuickChatModel: ObservableObject {
 
     private var noteWork: DispatchWorkItem?
     /// A line over the field (nil: none); it goes by itself after a few seconds.
-    private func say(_ line: String?) {
+    func say(_ line: String?) {
         noteWork?.cancel()
         imageNote = line
         guard line != nil else { return }

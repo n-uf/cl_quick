@@ -823,6 +823,31 @@ do {
     try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
 }
 
+// ── cl-quick://chat?folder=… (Sources/OpenURL.swift): only picks a profile, by the folder's path as a string ────────────
+do {
+    let home = "/Users/sample"
+    let mainP = Profile(id: "main", name: "Main", folder: "~/.claude-sample-main")
+    let plain = Profile(id: "plain", name: "Plain", folder: "~/.claude")
+    let workP = Profile(id: "work", name: "Work", folder: "/Volumes/Sample/claude work")
+    let list = [mainP, plain, workP]
+    func pick(_ s: String) -> (id: String?, unmatched: Bool)? { QCOpenURL.profileID(for: URL(string: s)!, profiles: list, home: home) }
+    func is_(_ r: (id: String?, unmatched: Bool)?, _ id: String?, _ unmatched: Bool) -> Bool { r != nil && r!.id == id && r!.unmatched == unmatched }
+    check("url: a folder as written picks its profile", is_(pick("cl-quick://chat?folder=%2FUsers%2Fsample%2F.claude-sample-main"), "main", false))
+    check("url: ~ is the home folder", is_(pick("cl-quick://chat?folder=~%2F.claude-sample-main"), "main", false))
+    check("url: the plain default folder", is_(pick("cl-quick://chat?folder=%2FUsers%2Fsample%2F.claude"), "plain", false))
+    check("url: a trailing slash, . and .. don't matter", is_(pick("cl-quick://chat?folder=%2FUsers%2Fsample%2Fx%2F..%2F.claude-sample-main%2F.%2F"), "main", false))
+    check("url: spaces percent-encoded", is_(pick("cl-quick://chat?folder=%2FVolumes%2FSample%2Fclaude%20work"), "work", false))
+    check("url: no folder, nothing said", is_(pick("cl-quick://chat"), nil, false) && is_(pick("cl-quick://chat/"), nil, false) && is_(pick("cl-quick://chat?folder="), nil, false))
+    check("url: another folder is unmatched", is_(pick("cl-quick://chat?folder=%2FUsers%2Fsample%2Felsewhere"), nil, true))
+    check("url: a folder that isn't absolute is unmatched", is_(pick("cl-quick://chat?folder=.claude-sample-main"), nil, true))
+    check("url: a prefix of a profile's folder is not a match", is_(pick("cl-quick://chat?folder=%2FUsers%2Fsample%2F.claude-sample"), nil, true))
+    check("url: other query items are ignored", is_(pick("cl-quick://chat?q=hello&text=x&folder=%2FUsers%2Fsample%2F.claude-sample-main&profile=work"), "main", false)
+          && is_(pick("cl-quick://chat?text=hello"), nil, false))
+    check("url: another host or path does nothing", pick("cl-quick://settings") == nil && pick("cl-quick://chat/send?folder=%2FUsers%2Fsample%2F.claude") == nil
+          && pick("cl-quick://other?folder=%2FUsers%2Fsample%2F.claude") == nil)
+    check("url: another scheme does nothing", pick("https://chat?folder=%2FUsers%2Fsample%2F.claude") == nil)
+}
+
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so
 // a changed count is only a NOTE
 let clipboardCounts = "change count \(clipboardAtStart) → \(NSPasteboard.general.changeCount)"
