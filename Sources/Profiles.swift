@@ -228,10 +228,14 @@ final class ProfileStore: ObservableObject {
 
     /// The chat's answer on an account (the one its numbers belong to): it failed to authenticate (flag set on that seat),
     /// or it worked (flag cleared).
+    /// Only an answer from the account in use counts (AccountBook.answersForFolder): a stale process on another account
+    /// never sets or clears the flag.
     func authResult(_ id: String, account: SignedInAccount, failed: Bool) {
         guard let p = profile(id) else { return }
+        let record = ClaudeFolder.account(p.path)
+        guard AccountBook.answersForFolder(account, record: record) else { return }
         if failed {
-            guard let key = AccountBook.inUse(account, in: p.accounts)?.key else { return }
+            guard let key = AccountBook.inUse(record, in: p.accounts)?.key else { return }
             if authFailed[id] != key { authFailed[id] = key }
         }
         else if authFailed[id] != nil { authFailed[id] = nil }

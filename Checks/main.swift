@@ -1230,6 +1230,10 @@ do {
     check("broken: a failure on another account says nothing about this one", AccountBook.signInProblem(signedIn: inUse1, failedOn: key("u2")) == nil)
     check("broken: a failure on another seat of the account says nothing about this one",
           AccountBook.signInProblem(signedIn: key("u1", "org-1"), failedOn: key("u1", "org-2")) == nil)
+    check("broken: only an answer from the account in use sets or clears the flag (a stale process on another account doesn't)",
+          AccountBook.answersForFolder(rec("u1", nil), record: a1) && AccountBook.answersForFolder(word(a1.email)!, record: a1)
+          && !AccountBook.answersForFolder(a2, record: a1) && !AccountBook.answersForFolder(a1, record: nil)
+          && !AccountBook.answersForFolder(rec("u1", nil, org: "org-2"), record: rec("u1", nil, org: "org-1")))
     check("broken: the words", SignInProblem.signedOut.words == "Signed out." && SignInProblem.stopped.words == "The sign-in stopped working.")
     check("forget: an account without a week", AccountBook.forgetting(key("u2"), of: "main", accounts: known, levels: ["main|u1": 50], inUse: a1)?.levels == ["main|u1": 50])
     // a switch's confirmation says what it affects: Claude Code on the folder, not the Claude app

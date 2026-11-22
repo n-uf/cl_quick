@@ -241,6 +241,12 @@ enum AccountBook {
         return identity(target, email: targetEmail).match(r) != .different
     }
 
+    /// An answer from `owner` speaks for the folder's sign-in (sets or clears its "sign in again" flag): the owner is maybe
+    /// the account the record names now. A stale process on another account, or a folder signed out, says nothing.
+    static func answersForFolder(_ owner: SignedInAccount, record: SignedInAccount?) -> Bool {
+        record.map { $0.maybeSame(owner) } ?? false
+    }
+
     /// Numbers that belong to `owner` are the account `target` names (the chat's own level).
     static func owns(_ target: AccountKey?, email: String?, _ owner: SignedInAccount) -> Bool {
         guard let target else { return false }
