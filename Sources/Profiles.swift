@@ -128,8 +128,27 @@ final class ProfileStore: ObservableObject {
     private init() {
         profiles = Files.read([Profile].self, Files.profiles) ?? []
         let read = Files.read([String: QuickChatLevel].self, Files.levels) ?? [:]
-        levels = Self.migrated(read, profiles: profiles)
-        if levels != read { Files.write(levels, Files.levels) }
+        // keys as the kit writes them (AccountKey); one an older build wrote ("<profile>|<uuid>") is a seat not known yet,
+        // upgraded in place only when the numbers' own source names its seat (record)
+        levels = AccountBook.normalizedKeys(Self.migrated(read, profiles: profiles))
+        if levels != read { write(levels, Files.levels) }
+    }
+
+    /// The files this run has backed up (or found backed up) before its first rewrite of them.
+    private var backedUp: Set<URL> = []
+
+    /// Writes one of the store's files (profiles.json, levels.json); before this run's first rewrite of it, the file as
+    /// it was is kept once beside it (StoredKeys.keepBackup: profiles.json.pre-26.11.4), never over a backup already there.
+    /// Nothing while only checking or drawing (Files.readOnly).
+    @discardableResult
+    private func write<T: Encodable>(_ value: T, _ url: URL) -> Bool {
+        guard !Files.readOnly else { return false }
+        if !backedUp.contains(url) {
+            try? FileManager.default.createDirectory(at: Files.folder, withIntermediateDirectories: true)
+            StoredKeys.keepBackup(of: url)
+            backedUp.insert(url)
+        }
+        return Files.write(value, url)
     }
 
     static func levelKey(_ profile: String, _ key: AccountKey) -> String { AccountBook.levelKey(profile, key) }
@@ -169,7 +188,7 @@ final class ProfileStore: ObservableObject {
 
     func save(_ list: [Profile]) {
         profiles = list
-        Files.write(list, Files.profiles)
+        write(list, Files.profiles)
     }
 
     /// The first run: every folder found that is signed in, named after the folder. Two folders signed in to the same
@@ -237,13 +256,16 @@ final class ProfileStore: ObservableObject {
         var q = p
         let r = AccountBook.note(&q.accounts, a, now: now)
         guard r.changed else { return }
-        // a key upgraded in place (a record that first had no accountUuid and now has one): its week moves with it
-        if let was = r.replaced, let now = AccountBook.inUse(a, in: q.accounts)?.key {
-            let old = AccountBook.levelKey(id, was), new = AccountBook.levelKey(id, now)
-            if let l = levels[old], levels[new] == nil {
-                levels[new] = l; levels[old] = nil
-                Files.write(levels, Files.levels)
+        // a key upgraded in place (a record that first had no accountUuid and now has one): its week moves with it, and so
+        // do numbers kept under a placeholder of that seat before it was noted (never two, never one dropped)
+        if let now = AccountBook.inUse(a, in: q.accounts)?.key {
+            var moved = levels
+            if let was = r.replaced {
+                let old = AccountBook.levelKey(id, was), new = AccountBook.levelKey(id, now)
+                if let l = moved[old], moved[new] == nil { moved[new] = l; moved[old] = nil }
             }
+            moved = AccountBook.upgradingLevels(moved, profile: id, to: now, record: a)
+            if moved != levels { levels = moved; write(levels, Files.levels) }
         }
         update(q)
     }
@@ -267,7 +289,7 @@ final class ProfileStore: ObservableObject {
     func remove(_ id: String) {
         save(profiles.filter { $0.id != id })
         levels = AccountBook.removing(profile: id, from: levels)
-        Files.write(levels, Files.levels)
+        write(levels, Files.levels)
     }
     /// A folder already used by a profile.
     func uses(_ folder: String) -> Bool { profiles.contains { $0.path == expand(folder) } }
@@ -288,19 +310,20 @@ final class ProfileStore: ObservableObject {
         var q = p
         q.accounts = r.accounts
         update(q)
-        if r.levels != levels { levels = r.levels; Files.write(levels, Files.levels) }
+        if r.levels != levels { levels = r.levels; write(levels, Files.levels) }
         return true
     }
 
     /// What Claude Code said on this profile, kept for the account it belongs to (`owner`: the kit's numbersBelongTo,
     /// AccountBook.numbersOwner): under that seat, also when the folder has moved to another account since (the numbers are
-    /// still that seat's own), never under the account the folder is on now unless it is that seat.
+    /// still that seat's own), never under the account the folder is on now unless it is that seat. An entry whose seat
+    /// wasn't known (from before seats) is upgraded in place to the seat the numbers named (AccountBook.recording).
     func record(_ id: String, account owner: SignedInAccount, _ level: QuickChatLevel) {
         guard let p = profile(id),                                             // a profile removed meanwhile stays gone
               let r = AccountBook.recording(level, for: owner, profile: id, accounts: p.accounts, levels: levels) else { return }
         if r.accounts != p.accounts { var q = p; q.accounts = r.accounts; update(q) }
         guard r.levels != levels else { return }
         levels = r.levels
-        Files.write(levels, Files.levels)
+        write(levels, Files.levels)
     }
 }

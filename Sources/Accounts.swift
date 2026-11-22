@@ -253,28 +253,69 @@ enum AccountBook {
         return (String(key[..<bar]), k)
     }
 
-    /// Where numbers that belong to `owner` are kept in a profile: the entry of its seat, else the owner's own key (kept,
-    /// not dropped: an account cl_quick hasn't noted yet, or a word that names no id). Never two keys: the numbers go to
-    /// one seat.
-    static func numbersKey(for owner: SignedInAccount, in list: [KnownAccount]) -> AccountKey? {
-        if let k = AccountKey(owner), let i = list.firstIndex(where: { $0.key == k }) { return list[i].key }
-        if let i = list.firstIndex(where: { $0.key.match(owner) == .seat }) { return list[i].key }
-        return AccountKey(owner)
+    /// Where numbers that belong to `owner` are kept in a profile: the entry of its seat, else an entry of its account
+    /// whose seat isn't known, upgraded in place to the seat the numbers' own source named (`upgrade`: that entry and the
+    /// key it had; AccountKey.upgraded(with:seatOfTheNumbers:)), else the owner's own key (kept, not dropped: an account
+    /// cl_quick hasn't noted yet, or a word that names no id). Never two keys: the numbers go to one seat.
+    static func numbersKey(for owner: SignedInAccount, in list: [KnownAccount]) -> (key: AccountKey, upgrade: (index: Int, from: AccountKey)?)? {
+        if let k = AccountKey(owner), let i = list.firstIndex(where: { $0.key == k }) { return (list[i].key, nil) }
+        if let i = list.firstIndex(where: { $0.key.match(owner) == .seat }) { return (list[i].key, nil) }
+        if let i = list.firstIndex(where: { $0.organization == nil && $0.key.match(owner) == .seatNotKnown }),
+           let up = list[i].key.upgraded(with: owner, seatOfTheNumbers: true), up.seatKnown, !list.contains(where: { $0.key == up }) {
+            return (up, (i, list[i].key))
+        }
+        return AccountKey(owner).map { ($0, nil) }
     }
 
-    /// The numbers kept for `owner` before new ones are applied on them: its seat's (numbersKey).
+    /// The numbers kept for `owner` before new ones are applied on them: its seat's, or those of the entry whose seat
+    /// isn't known that the new ones upgrade (numbersKey).
     static func numbersBase<V>(for owner: SignedInAccount, profile: String, accounts: [KnownAccount], levels: [String: V]) -> V? {
-        numbersKey(for: owner, in: accounts).flatMap { levels[levelKey(profile, $0)] }
+        guard let r = numbersKey(for: owner, in: accounts) else { return nil }
+        return levels[levelKey(profile, r.key)] ?? r.upgrade.flatMap { levels[levelKey(profile, $0.from)] }
     }
 
-    /// New numbers that belong to `owner`, kept: under its seat (numbersKey); nothing else changes. nil when `owner` names
-    /// nobody.
+    /// New numbers that belong to `owner`, kept: under its seat (numbersKey). An entry whose seat wasn't known is upgraded
+    /// in place to the seat the numbers' source named, and its old numbers move with it (the new ones are applied on them
+    /// first: numbersBase), never copied onto both seats; nothing else changes. nil when `owner` names nobody.
     static func recording<V>(_ level: V, for owner: SignedInAccount, profile: String, accounts: [KnownAccount],
                              levels: [String: V]) -> (accounts: [KnownAccount], levels: [String: V])? {
-        guard let key = numbersKey(for: owner, in: accounts) else { return nil }
-        var kept = levels
-        kept[levelKey(profile, key)] = level
-        return (accounts, kept)
+        guard let r = numbersKey(for: owner, in: accounts) else { return nil }
+        var list = accounts, kept = levels
+        if let u = r.upgrade {
+            list[u.index].uuid = r.key.account; list[u.index].organization = r.key.organization
+            kept[levelKey(profile, u.from)] = nil
+        }
+        kept[levelKey(profile, r.key)] = level
+        return (list, kept)
+    }
+
+    /// A key upgraded in place (an address placeholder given its id, a name placeholder its organisation's id): a week of
+    /// the profile kept under a placeholder that the record upgrades to `to` (numbers kept for an account before it was
+    /// noted) moves to `to`, unless `to` has one already (never two, never one dropped).
+    static func upgradingLevels<V>(_ levels: [String: V], profile: String, to: AccountKey, record: SignedInAccount) -> [String: V] {
+        var out = levels
+        let target = levelKey(profile, to)
+        for (key, v) in levels.sorted(by: { $0.key < $1.key }) {
+            guard out[target] == nil, let p = parseLevelKey(key), p.profile == profile, p.key != to,
+                  p.key.isPlaceholder || p.key.organization?.hasPrefix(AccountKey.namePrefix) == true,
+                  p.key.upgraded(with: record) == to else { continue }
+            out[target] = v; out[key] = nil
+        }
+        return out
+    }
+
+    /// The keys in the kit's form (AccountKey: lower case): a key written in another case moves to its normal one, unless
+    /// that one is there already (then both stay). Keys from before accounts, and anything that isn't a key, stay as they
+    /// are. A key an older build wrote ("<profile>|<uuid>") is already a key whose seat isn't known: it stays.
+    static func normalizedKeys<V>(_ levels: [String: V]) -> [String: V] {
+        var out = levels
+        for (key, v) in levels.sorted(by: { $0.key < $1.key }) {
+            guard let p = parseLevelKey(key) else { continue }
+            let normal = levelKey(p.profile, p.key)
+            guard normal != key, out[normal] == nil else { continue }
+            out[normal] = v; out[key] = nil
+        }
+        return out
     }
 
     /// A levels.json from before accounts was keyed by profile id alone. Each such week goes to the seat `placed` names
@@ -313,5 +354,24 @@ enum AccountBook {
         var kept = levels
         kept[levelKey(profile, key)] = nil
         return (accounts.filter { $0.key != key }, kept)
+    }
+}
+
+/// The one-time backup of a stored file before this build first rewrites it: profiles.json and levels.json move to seat
+/// keys (account id and organisation), so the file as it was before is kept beside it, once.
+enum StoredKeys {
+    /// The backup's name: the file's, then ".pre-26.11.4" (profiles.json.pre-26.11.4).
+    static let backupExtension = "pre-26.11.4"
+
+    static func backup(of file: URL) -> URL { file.appendingPathExtension(backupExtension) }
+
+    /// Copies `file` to its backup unless a backup is there already (never overwritten: the first one is the file as an
+    /// older build left it) or there is no file yet (nothing to keep). True when a backup is there afterwards.
+    @discardableResult
+    static func keepBackup(of file: URL, files: FileManager = .default) -> Bool {
+        let b = backup(of: file)
+        if files.fileExists(atPath: b.path) { return true }
+        guard files.fileExists(atPath: file.path) else { return false }
+        return (try? files.copyItem(at: file, to: b)) != nil       // copyItem never replaces a file already there
     }
 }
