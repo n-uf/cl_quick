@@ -5,6 +5,8 @@
 // Command line, for checking:
 //   --render-quick-chat OUT.png STATE   the bar or the chat window with sample data (bar, typing, notinstalled,
 //                                       streaming, reading, searching (the line while a web tool runs), answer, failed,
+//                                       page, page-tall, page-code, page-still (an html block's page in place, drawn
+//                                       from still pictures made off screen; a tall one scrolled; ```html code),
 //                                       notsigned, thinking, full, level95; with accounts:
 //                                       switch (a full week with Switch to…), switching (waiting for the sign-in),
 //                                       wrong, wrong-also (another account signed in; also in use on Work),

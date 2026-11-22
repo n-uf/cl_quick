@@ -2731,6 +2731,9 @@ enum QuickChatRender {
         case "reading": var t = t1; t.answer = "I'll open the page."; t.phase = .streaming; t.activity = "Reading example.com…"; m.turns = [t]
         case "searching": var t = t1; t.answer = ""; t.phase = .waiting; t.activity = "Searching the web for “swift concurrency actors”…"; m.turns = [t]
         case "answer": m.turns = [t1]
+        // an html block's page in place (page), a tall one scrolled inside its block (page-tall), a ```html code block
+        // (page-code), and a page that went out of view and came back, drawn by its still picture (page-still)
+        case "page", "page-tall", "page-code", "page-still": m.turns = QCInlinePageSamples.turns(state)
         case _ where state.hasPrefix("table"): m.turns = [QCTableRender.turn(state)]       // TableView.swift
         case "copied": m.turns = [t1]; m.copied = t1.id          // after ⌘⇧C or a click on Copy: the tick and "Copied"
         case "failed": var t = t1; t.answer = String(a1.prefix(60)); t.phase = .failed
@@ -2865,6 +2868,12 @@ enum QuickChatRender {
             .environment(\.qcFooterBelow, state.hasPrefix("nav-"))
             .frame(width: width, height: m.isWindow ? height : state == "bar-tall" ? 170 : nil)
             .padding(30).background(busy ? AnyView(QCBusyBackdrop()) : AnyView(Color(white: 0.1)))
+        if state.hasPrefix("page") {
+            // a picture can't draw a web view: a first pass lays the pages out (their widths), then each is loaded off screen
+            // and photographed, as on leaving view, and the picture draws those
+            _ = ImageRenderer(content: view).nsImage
+            QCInlinePageSamples.prime(state, cap: QCInlinePageLayout.cap(panelHeight: height))
+        }
         let r = ImageRenderer(content: view)
         r.scale = 2
         if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
