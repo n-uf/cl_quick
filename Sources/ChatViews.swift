@@ -1589,8 +1589,7 @@ struct QCKeysView: View {
                    ("Esc  ⌘W", "Hide"),
                    (opener, "Open cl_quick"),
                    ("↑ (empty field)", "Your earlier messages"),
-                   ("⌥⇧⌘C", "Copy the chat as Markdown"),
-                   ("⌃⇧⌘4, then ⌘V", "Ask about part of the screen")])]    // macOS's own capture to the clipboard, then paste
+                   ("⌥⇧⌘C", "Copy the chat as Markdown")])]
     }
     /// All the rows, page by page.
     static func rows(opener: String) -> [(String, String)] { pages(opener: opener).flatMap(\.rows) }
