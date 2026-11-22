@@ -237,6 +237,7 @@ final class QuickChatModel: ObservableObject {
             if let old = oldValue.last?.id, turns.last?.id != old, !turns.contains(where: { $0.id == old }) { QCInlinePages.shared.forgetAll() }
             // find in chat follows the text (a chat with no message has none to search: its bar goes); the selection's bar goes
             if turns.isEmpty { find.close() } else { find.turnsChanged() }
+            quick.turnsChanged()
         }
     }
     @Published var field = "" {
@@ -288,6 +289,8 @@ final class QuickChatModel: ObservableObject {
     let scroll = QCChatScroll()
     /// ⌘F: find in the open chat (ChatFind.swift). Memory only.
     let find = QCFindState()
+    /// A selection in an answer: Explain, Shorter, Ask about this (ChatQuick.swift).
+    let quick = QCQuick()
     /// The profile's week, as Claude Code last reported it (Level.swift).
     @Published var level: QuickChatLevel?
     /// While a limit is full: the profile with the most room, for Ask on ….
@@ -592,6 +595,27 @@ final class QuickChatModel: ObservableObject {
         turns.append(QuickChatTurn(question: q, images: sent, files: sentFiles, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
         scrollTick += 1; followTick += 1
         ask(q, images: sent, files: sentFiles)
+    }
+
+    /// A follow-up sent at once, as a message of its own (the selection's Explain and Shorter): the field, with whatever draft and
+    /// attachments it holds, is left as it is. Nothing is sent while an answer runs, with a full limit, once the chat ended or with
+    /// no message to follow. False then.
+    @discardableResult
+    func followUp(_ q: String) -> Bool {
+        guard !q.isEmpty, !turns.isEmpty, !busy, !blocked, ended == nil else { return false }
+        guard target != nil else { barProblem = .noProfile; return false }
+        dictationNote = nil
+        barProblem = nil
+        turns.append(QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
+        scrollTick += 1; followTick += 1
+        ask(q, images: [], files: [])
+        return true
+    }
+
+    /// Ask about this: the selection, quoted, goes into the field after what is there, the caret after it.
+    func quoteIntoField(_ selection: String) {
+        field = QCQuickText.draft(selection, after: field)
+        focusTick += 1
     }
 
     // MARK: images and files
@@ -1428,6 +1452,7 @@ final class QuickChat {
         model.hide = { [weak self] in self?.hide() }
         model.find.turns = { [weak self] in self?.model.turns ?? [] }
         model.find.onClosed = { [weak self] in self?.panel?.focusField() }
+        model.quick.model = model
         model.escape = { [weak self] in self?.escape() }
         model.dictate = { [weak self] on in self?.dictate(on) }
         dictationWatch.onExit = { [weak self] in self?.dictationExited() }
@@ -1639,6 +1664,7 @@ final class QuickChat {
     func hide() {
         model.cancelSendWhenReady()
         model.find.close()                      // the find bar and its text go with the panel (memory only)
+        model.quick.hideBar()
         if model.dictating || model.dictationNoticed { dictate(false) }     // Dictation doesn't go on into a hidden field
         panel?.orderOut(nil)
         QCInlinePages.shared.update()           // no page is in view now: the live one is photographed and let go
@@ -1681,7 +1707,7 @@ final class QuickChat {
     }
 
     /// The panel gave up the keyboard (another app, a click elsewhere): Dictation, which follows the keyboard, has ended.
-    func keyLost() { model.dictating = false; model.dictationNoticed = false }
+    func keyLost() { model.dictating = false; model.dictationNoticed = false; model.quick.hideBar() }
 
     /// Dictation entered Dictation mode (the button, macOS's shortcut, the Dictation key). Counted only while the panel
     /// has the keyboard: the notice is system-wide, and Dictation elsewhere is not Dictation in the field.
@@ -1702,16 +1728,17 @@ final class QuickChat {
         guard model.dictating, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
         model.dictating = false
     }
-    /// Esc: the keys list closes if it is open; else the find bar (and its highlights); else the panel hides.
+    /// Esc: the keys list closes if it is open; else the find bar (and its highlights), else the selection's quick actions; else
+    /// the panel hides.
     func escape() {
         if QCKeys.shared.shown { QCKeys.shared.close() } else if !closeTopLayer() { hide() }
     }
 
-    /// The find bar goes (true); false when it is not open. The keys list is the panel's own to close.
+    /// The find bar or the selection's bar goes (true); false when neither is open. The keys list is the panel's own to close.
     @discardableResult
     func closeTopLayer() -> Bool {
         if model.find.isOpen { model.find.close(); return true }
-        return false
+        return model.quick.dismiss()
     }
 
     func shutdown() { hotKey.unregister(); model.shutdown() }
@@ -1743,9 +1770,17 @@ final class QuickChat {
             return true
         }
         p.onLayerEscape = { [weak self] in
-            // Esc closes the keys list first (QuickChat.escape does), then the find bar
+            // Esc closes the keys list first (QuickChat.escape does), then the find bar, then the selection's bar
             guard QCKeys.shared.shown == false else { return false }
             return self?.closeTopLayer() ?? false
+        }
+        model.quick.attach(p)
+        // the answers' right-click menu: a group after the selection's actions, with the key the panel already handles (display only)
+        model.quick.chatItems = { [weak self] in
+            let i = QCMenuAction.item("Copy chat as Markdown", enabled: self?.model.turns.isEmpty == false) { _ = self?.model.copyChat() }
+            i.keyEquivalent = "c"
+            i.keyEquivalentModifierMask = [.command, .option, .shift]
+            return [i]
         }
         p.onKeyLost = { [weak self] in self?.keyLost() }
         p.onStep = { [weak self] model, by in
@@ -2001,8 +2036,8 @@ final class QuickChatPanel: NSPanel {
     var onFind: () -> Bool = { false }
     /// ⌘G (1) and ⇧⌘G (-1): the next and previous match while the find bar is open; true when taken.
     var onFindStep: (Int) -> Bool = { _ in false }
-    /// Esc: closes the find bar when it is open (true); else the key goes on its way (the field's, a page's, the panel's own
-    /// hide). Read in sendEvent, so it works wherever the keyboard is.
+    /// Esc: closes the find bar or the selection's bar when one is open (true); else the key goes on its way (the field's, a
+    /// page's, the panel's own hide). Read in sendEvent, so it works wherever the keyboard is.
     var onLayerEscape: () -> Bool = { false }
     /// fn arrows (QuickChatPanel.chatKey): the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
@@ -2175,7 +2210,7 @@ final class QuickChatPanel: NSPanel {
             case .scroll(let nav): if onNavigate(nav) { return }
             }
         }
-        // Esc (no modifier) closes the find bar before it goes anywhere (the field's Esc, a page's):
+        // Esc (no modifier) closes the find bar, then the selection's bar, before it goes anywhere (the field's Esc, a page's):
         // so the first Esc closes the bar and the second hides the panel. Not while the field is composing.
         if event.type == .keyDown, isKeyWindow, Int(event.keyCode) == kVK_Escape,
            event.modifierFlags.intersection(.deviceIndependentFlagsMask).intersection([.command, .option, .control, .shift]).isEmpty,
@@ -2225,6 +2260,7 @@ final class QuickChatPanel: NSPanel {
     override func orderOut(_ sender: Any?) {
         QCFloat.shared.hide()            // the usage card goes with the panel (hidden under the pointer gets no mouse-exit)
         QCKeys.shared.close()            // and the keys list
+        QuickChat.shared.model.quick.hideBar()        // and the selection's bar
         QuickChat.shared.model.scroll.left.reset()    // and the edge handles' stacks (no mouse-exit under a hidden window either)
         QuickChat.shared.model.scroll.right.reset()
         QCSpeech.shared.stop()           // nothing is read aloud from a hidden panel

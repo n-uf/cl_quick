@@ -160,6 +160,16 @@ minutes for a profile.
   the notices and footers, and the code of an html block while its page shows; a block that scrolls sideways is
   brought into view up and down only. The bar's text is memory only: it goes with the bar (a new chat or hiding the
   panel close it), nothing about it is written to disk.
+- **Quick actions on a selection.** Select text in an answer and a small bar appears just above it (below it when there is
+  no room above; never under the pointer or over the selection): **Explain** and **Shorter** send a follow-up at once, the
+  selection as a Markdown blockquote and then "Explain this." or "Say this more briefly." (the field's draft and any
+  attachments stay as they are); **Ask about this** puts the quoted selection into the field, after what is there, the
+  caret after it, for you to finish. The bar is a small window of its own, so it never takes the keyboard from the selection.
+  It goes when the selection is cleared, on a scroll, a click, a resize, Esc (first Esc: the bar; then the panel) or when the
+  panel loses the keyboard. The same three follow the text's own items in an answer's right-click menu, with **Copy chat as Markdown** (⌥⇧⌘C) in a
+  group of its own below them. Only selections in an answer count (not your
+  own messages, the thinking text or the field), and none is offered while an answer streams, after the chat ended, with a
+  full limit or without a profile. Nothing is written to disk.
 - **Moving in a chat.** The chat follows the end of an answer as it streams only while you are at the bottom (within a few
   points) when new text arrives. Scroll up by any means (wheel, trackpad, scroller, ⇧fn↑, selecting text) and new text
   never moves the view; get back to the bottom (by hand, ⌘J or the ↓ button) or send a message and it follows again.

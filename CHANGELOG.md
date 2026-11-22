@@ -20,7 +20,16 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   the field. Edit the recalled text and ↑ ↓ are normal caret keys again, as they are with text typed or an input
   method composing. Only the open chat's messages, from memory, and only their text (attachments are not recalled); a
   new chat starts empty. The keys list's Write page has it.
-- **Find in chat (⌘F).** ⌘F opens a small find bar over the top of the answers, under the header (the window keeps its
+- **Quick actions on selected text.** Select text in an answer and a small bar appears just above the selection (below
+  it when there is no room above; never under the pointer or over the selection) with three actions. **Explain** and
+  **Shorter** send a follow-up at once: your selection as a Markdown blockquote, then "Explain this." or "Say this more
+  briefly." (the draft in the field and its attachments are left alone). **Ask about this** puts the quoted selection into
+  the field, after what is there and with the caret after it, for you to finish. The bar goes when the selection is
+  cleared, on a scroll, a click, a resize, Esc (the first Esc closes it, the next hides the panel) or when the panel loses
+  the keyboard. The same three follow the text's own items (Copy, Look Up…) in the right-click menu of an answer, and below them in a group of their own
+  comes **Copy chat as Markdown** (⌥⇧⌘C). The actions are never offered while an answer is
+  streaming, after the chat ended, with a full limit or without a profile, and not for selections in your own messages,
+  the thinking text or the field. Nothing is stored: the quoted text lives in memory until it is sent.- **Find in chat (⌘F).** ⌘F opens a small find bar over the top of the answers, under the header (the window keeps its
   size): a search field, "n of m", ▲ ▼ and ✕. It works wherever the keyboard is in the panel (the field, an answer, a
   page in an answer). Typing searches every message of yours and every answer of the open chat, live and ignoring case
   and accents; each match is highlighted in place with a soft background and the current one stronger, and the view

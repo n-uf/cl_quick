@@ -70,6 +70,9 @@ final class QCChatScroll: ObservableObject {
 
     func forget(_ name: String) { frames["\(name).strip"] = nil; frames["\(name).box"] = nil }
 
+    /// Told whenever the view's position changes, whoever moved it (the selection's quick actions go when the text moves).
+    var moved: () -> Void = {}
+
     /// Whether new text moves the view to the end. True at the start.
     private(set) var following = true
 
@@ -172,6 +175,7 @@ final class QCChatScroll: ObservableObject {
         let o = offset()
         let resized = g.clip.bounds.height != lastClipHeight
         let shrank = g.doc.bounds.height < clipSawHeight && isAtBottom
+        if abs(o - lastOffset) > 0.01 { moved() }
         lastClipHeight = g.clip.bounds.height
         clipSawHeight = g.doc.bounds.height
         if !moving, !resized, !shrank, abs(o - lastOffset) > 0.01 {
@@ -337,6 +341,22 @@ final class QCChatScroll: ObservableObject {
 
     /// The top of an answer's first line, the same way.
     func top(ofAnswer id: UUID) -> CGFloat? { attached(answers[id]?.view).map(top(of:)) }
+
+    /// Whether a frame (window coordinates) lies in an answer: its centre is in the answer's column. A message of the user's, the
+    /// thinking text and the notes are outside every answer.
+    func answerContains(_ r: CGRect) -> Bool {
+        let c = CGPoint(x: r.midX, y: r.midY)
+        return answers.values.contains { w in
+            guard let v = attached(w.view) else { return false }
+            return v.convert(v.bounds, to: nil).contains(c)
+        }
+    }
+
+    /// The part of the window the answers are seen through (window coordinates), while the chat's scroll view is in one.
+    func visibleRectInWindow() -> CGRect? {
+        guard let sv = scrollView, sv.window != nil else { return nil }
+        return sv.convert(sv.bounds, to: nil)
+    }
 
     /// Find: a line of a text (`line` of `lines`, the text drawn in `v`'s frame) is brought into view. When it is in view already
     /// (clear of the find bar's `cover` at the top) nothing moves; else it lands about a third of the way down, at once, and the

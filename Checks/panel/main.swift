@@ -5420,6 +5420,49 @@ func findChecks() {
 }
 findChecks()
 
+// ── quick actions on a selection (ChatQuick.swift): what is sent or put in the field, the pointer's start, when nothing may be sent ──
+func quickActionChecks() {
+    typealias Q = QCQuickText
+    check("quick: the selection is quoted as a Markdown blockquote, a blank line staying a bare >", Q.quote("a\nb\n\nc") == "> a\n> b\n>\n> c", Q.quote("a\nb\n\nc"))
+    check("quick: the quote is trimmed", Q.quote("  \n one line \n") == "> one line")
+    check("quick: Explain sends the quote, a blank line, then \"Explain this.\"", Q.message(.explain, "x y") == "> x y\n\nExplain this.", "\(String(describing: Q.message(.explain, "x y")))")
+    check("quick: Shorter sends the quote, a blank line, then \"Say this more briefly.\"", Q.message(.shorter, "x y") == "> x y\n\nSay this more briefly.")
+    check("quick: Ask about this sends nothing (it only fills the field)", Q.message(.ask, "x y") == nil)
+    check("quick: Ask about this: into an empty field, the quote and a blank line to write on", Q.draft("x", after: "") == "> x\n\n" && Q.draft("x", after: " \n") == "> x\n\n")
+    check("quick: Ask about this: after a draft, a blank line between", Q.draft("x", after: "hello") == "hello\n\n> x\n\n" && Q.draft("x", after: "hello\n") == "hello\n\n> x\n\n" && Q.draft("x", after: "hello\n\n") == "hello\n\n> x\n\n")
+    // where the bar stands: over the selection's start as the drag shows it (window coordinates: higher on screen is larger y)
+    let down = NSPoint(x: 100, y: 300), up = NSPoint(x: 200, y: 200)
+    check("quick: a drag down starts where it began; a drag up, where it ended; on one line, the left end",
+          QCQuick.start(down: down, up: up) == down && QCQuick.start(down: up, up: down) == down
+          && QCQuick.start(down: NSPoint(x: 200, y: 100), up: NSPoint(x: 100, y: 101)) == NSPoint(x: 100, y: 101) && QCQuick.start(down: nil, up: up) == up)
+
+    let m = chat.model
+    m.newChat(); m.field = ""
+    var t = ChatScrollRig.turn(1, lines: 2)
+    t.phase = .done
+    m.turns = [t]
+    chat.open(); spin(0.3)
+    spinQuiet(p)
+    m.field = "my draft"
+    check("quick: with no selection nothing is available and no bar is shown", { m.quick.refresh(); return !m.quick.available && !m.quick.shown }())
+    check("quick: a follow-up goes at once, as a message of its own; the field's draft is left alone",
+          m.followUp(Q.message(.explain, "some words")!) && m.turns.count == 2 && m.turns[1].question == "> some words\n\nExplain this." && m.field == "my draft",
+          "\(m.turns.count) \(m.turns.last?.question ?? "") \(m.field)")
+    check("quick: none while an answer is running (the new turn is waiting or failed)", { () -> Bool in
+        m.turns[m.turns.count - 1].phase = .streaming
+        let n = m.turns.count
+        return !m.followUp("> x\n\nExplain this.") && m.turns.count == n
+    }())
+    m.turns[m.turns.count - 1].phase = .done
+    m.field = ""
+    m.quoteIntoField("quoted text")
+    check("quick: Ask about this puts the quote into the field and takes the keyboard there", m.field == "> quoted text\n\n", m.field)
+    m.newChat()
+    check("quick: no follow-up without a message to follow", !m.followUp("> x\n\nExplain this."))
+    chat.hide(); spin(0.2)
+}
+quickActionChecks()
+
 CheckQuiet.verify("at the end")
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so
 // a changed count is only a NOTE
