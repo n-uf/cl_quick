@@ -4,6 +4,16 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **An html block shows its page in place.** A finished ```` ```html ```` block in an answer now shows the page it
+  draws right inside the block, by default. Its header has a small **Code | Page** switch, **⤢** (opens the page in the
+  separate window, as Preview did) and Copy, which copies the code on either side. A block the model fences as
+  ```` ```html code ```` (a snippet meant for pasting) starts as code. A block draws only once it is complete, never
+  while it is still being written. The page shows at its own height, up to about half the panel; a taller page scrolls
+  inside its block, and a swipe stays with the view it started on (the page, or the chat). Only the page in view is
+  live; the others are still pictures held in memory, which come back to life when you scroll to them or rest the
+  pointer on them. While a page has the keyboard, typing goes to the field; ⌘C copies a selection in the page. Every
+  page is isolated exactly like the window's (no scripts, nothing fetched, links do nothing, nothing stored on the
+  Mac), with no click needed, which the local-listener check now also confirms for pages shown in place.
 - **A way back to your message from the bottom of a long answer.** With a single message of yours in the chat, the right
   handle had no ▲ ▼ (they needed two messages), so at the bottom of a long answer there was no handle at all. Now the
   handle shows ▲ ▼ with a single message too, whenever it starts above or below the view (or the view is not at the
@@ -55,7 +65,8 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   [cl_kit](https://github.com/n-uf/cl_kit) (v26.11.3, `Privacy/`); cl_quick now builds it from the vendored copy, like the
   other shared modules, and no longer keeps its own in `Shared/`. Nothing changes in the app: the code is the same.
 - **The chat's prompt tells Claude about Preview.** Both prompts (with and without web links and search) now say that a
-  fenced `html` block gets a Preview button, that it should be self-contained (inline CSS and SVG only, no scripts, no
+  fenced `html` block shows as a page in the chat (its code one click away, ⤢ for a window; a snippet for pasting is
+  fenced ```` ```html code ````), that it should be self-contained (inline CSS and SVG only, no scripts, no
   external images, fonts or links, as none of that loads), and that it is for when a visual layout helps or the user
   asks; otherwise the answer stays Markdown. Answers should pick HTML more often when a visual helps, and the pages
   should render whole.
@@ -103,9 +114,10 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   sign-in…  Show". The note returns by itself when the switch ends.
 - **No stale status line while a switch waits.** "Main is on … now." from the last switch goes as soon as a new switch
   (or a sign-in again) begins.
-- **Preview for HTML blocks.** A code block marked `html` (or `htm`) in an answer has a small **Preview** button beside
-  Copy. It shows the block as a web page in one separate "Preview" window, which opens beside the chat panel (a second
-  press replaces the page and brings the window forward). The answer itself never draws HTML; the page is isolated:
+- **Preview for HTML blocks.** A code block marked `html` (or `htm`) in an answer can show as a web page in one
+  separate "Preview" window, which opens beside the chat panel (a second press replaces the page and brings the window
+  forward); its control is now **⤢** in the block's header, and the page also shows in place (the entry above). The
+  page is isolated:
   JavaScript is off, nothing is fetched (images, styles, fonts, frames, prefetch and preconnect hints, link pings and
   refreshes all stay off the network, which a check with a local listener confirms), a click on a link does nothing,
   link previews, Safe Browsing lookups, downloads and new windows are off, the right-click menu only copies, and
