@@ -1052,15 +1052,16 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// The same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
-    /// aren't part of the key, they're changed in the running one. The account's seat (AccountKey: its id and organisation),
-    /// not just its address: two seats may share one, and must not share a running claude. Web links and search is part of
-    /// it too: the tools are
+    /// aren't part of the key, they're changed in the running one. The account's id (AccountBook.processAccount), not just
+    /// its address: two accounts may share one, and must not share a running claude; two seats of one account are told
+    /// apart by processOn (an entry whose seat becomes known keeps its chat). Web links and search is part of it too: the
+    /// tools are
     /// fixed when `claude` starts, so a message in a chat whose setting differs from its process starts a new chat. So are
     /// the custom instructions, which sit in its system prompt (QuickChatCommand.processKey); they differ from the process's
     /// only for a bar with nothing on screen, since an open chat keeps its own.
     private func keyFor(_ path: String, _ target: QuickChatTarget) -> String {
         QuickChatCommand.processKey(claude: path, configDir: target.configDir, workFolder: target.workFolder,
-                                    account: target.account?.text ?? target.email ?? "", web: web, instructions: instructions)
+                                    account: AccountBook.processAccount(target.account) ?? target.email ?? "", web: web, instructions: instructions)
     }
 
     /// A new `claude` for the target, asked at once for the account's models and limits (nothing goes to a model).
@@ -1135,7 +1136,7 @@ final class QuickChatModel: ObservableObject {
             // its models (the next message asks for the newest of the family), kept for the seat they are
             if let t = target {
                 let other = numbersOwner.flatMap { AccountBook.owns(t.account, email: t.email, $0) ? nil : AccountKey($0) }
-                ModelCatalog.shared.set(list, profile: t.profileID, account: (other ?? t.account)?.text)
+                ModelCatalog.shared.set(list, profile: t.profileID, account: AccountBook.processAccount(other ?? t.account))
             }
             objectWillChange.send()
             return

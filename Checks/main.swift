@@ -990,6 +990,14 @@ do {
         let moved = AccountBook.recording(41, for: seen, profile: "main", accounts: legacy, levels: legacyWeeks)!
         check("keys: numbers whose source named the seat upgrade the entry in place", moved.accounts.map(\.key) == [key("u1", "org-1")], moved.accounts)
         check("keys: …and move its week, never copy it", moved.levels == ["main|u1|org-1": 41], moved.levels)
+        // the running chat's process and the model list are kept by the account, so that upgrade never restarts the chat
+        func processKey(_ k: AccountKey) -> String {
+            QuickChatCommand.processKey(claude: "/opt/sample/bin/claude", configDir: "/Users/sample/.claude", workFolder: "/tmp/sample-work",
+                                        account: AccountBook.processAccount(k) ?? "", web: false, instructions: "")
+        }
+        check("keys: the process key stays the same when the seat becomes known in place (the chat goes on)",
+              processKey(legacy[0].key) == processKey(moved.accounts[0].key) && AccountBook.processAccount(moved.accounts[0].key) == "u1")
+        check("keys: …and differs for another account", processKey(key("u1")) != processKey(key("u2")))
         // numbers with no seat named (a record and a word that name no organisation) leave the older key as it is
         let unnamed = AccountBook.recording(42, for: rec("u1", "ultra-1@example.com"), profile: "main", accounts: legacy, levels: legacyWeeks)!
         check("keys: numbers that name no seat stay under the older key", unnamed.accounts == legacy && unnamed.levels == ["main|u1": 42], unnamed.levels)

@@ -1356,7 +1356,7 @@ struct ChatCard: View {
         _ = modelsTick
         if let sample { return sample.models }
         guard let p = store.profile(state.settings.defaultProfile) ?? store.profiles.first else { return nil }
-        return ModelCatalog.shared.list(profile: p.id, account: store.inUse(p)?.key.text)
+        return ModelCatalog.shared.list(profile: p.id, account: AccountBook.processAccount(store.inUse(p)?.key))
     }
 
     /// The user's own lines, added after the fixed instructions of a new chat: saved as they are typed, in a box of about

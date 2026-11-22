@@ -239,6 +239,11 @@ enum AccountBook {
         return identity(target, email: email).match(owner) != .different
     }
 
+    /// What a running claude and the account's model list are kept under: the account alone (its id, or its address
+    /// placeholder), never its seat. An entry whose seat becomes known in place (AccountKey.upgraded) keeps its running
+    /// chat and its list; a move to another seat is caught by processOn and anotherSeat, not by this key.
+    static func processAccount(_ key: AccountKey?) -> String? { key?.account }
+
     // MARK: the levels' keys
 
     /// The key a week is kept under: the profile and the seat, "<profile id>|<account>" while the seat isn't known (as

@@ -2679,7 +2679,7 @@ enum QuickChatRender {
         ]
         if state.hasPrefix("models3") { list.removeLast() }
         if state.hasPrefix("models2") { list.removeLast(2) }
-        ModelCatalog.shared.set(list, profile: target.profileID, account: target.account?.text)
+        ModelCatalog.shared.set(list, profile: target.profileID, account: AccountBook.processAccount(target.account))
         var level = QuickChatLevel()
         level.week = 62; level.weekResets = Date().addingTimeInterval(3 * 86400)
         m.level = level
