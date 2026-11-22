@@ -414,8 +414,10 @@ final class QCChatScroll: ObservableObject {
     /// A page: the visible height less a few lines, as the system's page keys keep some of what was in view.
     private func page() -> CGFloat { max(40, (clip?.bounds.height ?? 0) - 40) }
 
-    /// ▲ and ▼ show once there are two messages of the user's to go between.
-    static func showsPrompts(turns: Int) -> Bool { turns >= 2 }
+    /// ▲ and ▼ (always both, one of them dimmed when it has nowhere to go) show once there are two messages of the user's, so the
+    /// stack keeps its size while scrolling, and with one message whenever it starts above the view (▲) or below it (▼): a long
+    /// answer read to the bottom still has a way back to the message that asked for it.
+    static func showsPrompts(turns: Int, canPrevious: Bool, canNext: Bool) -> Bool { turns >= 2 || canPrevious || canNext }
 
     private func clearFlash(_ id: UUID) {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor) { [weak self] in
@@ -743,7 +745,7 @@ private extension View {
 }
 
 /// What floats over the answers, in two handles: the left one's stack is this answer's ⤒ and copy (while its footer is out
-/// of sight); the right one's is ▲ ▼ (once there are two messages of the user's) and jump to latest (while not at the bottom).
+/// of sight); the right one's is ▲ ▼ (once there are two messages of the user's, or one starts above or below the view) and jump to latest (while not at the bottom).
 struct QCEdgeHandles: View {
     @ObservedObject var scroll: QCChatScroll
     @ObservedObject var model: QuickChatModel
@@ -760,10 +762,11 @@ struct QCEdgeHandles: View {
                                  label: "Copy this answer", onFocus: { scroll.left.focus($0, 2) }) { _ = model.copyAnswer(of: turn) }
                 }
             }
-            if QCChatScroll.showsPrompts(turns: model.turns.count) || !scroll.atBottom {
+            let prompts = QCChatScroll.showsPrompts(turns: model.turns.count, canPrevious: scroll.canPrevious, canNext: scroll.canNext)
+            if prompts || !scroll.atBottom {
                 QCEdgeHandle(side: .right, state: scroll.right, name: "right", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "Message navigation",
                              value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
-                    if QCChatScroll.showsPrompts(turns: model.turns.count) {
+                    if prompts {
                         QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
                                      enabled: scroll.canPrevious, onFocus: { scroll.right.focus($0, 1) }) { scroll.previousPrompt() }
                         QCIconButton(symbol: "chevron.down", help: QCNavHelp.next, small: true, label: "Next message of mine",

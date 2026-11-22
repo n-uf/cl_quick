@@ -4,6 +4,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **A way back to your message from the bottom of a long answer.** With a single message of yours in the chat, the right
+  handle had no ▲ ▼ (they needed two messages), so at the bottom of a long answer there was no handle at all. Now ▲ shows
+  whenever a message of yours starts above the view and ▼ whenever one starts below it, even with only one message; ⌘[
+  and ⌘] follow the same rule. With two or more messages both always show, one dimmed when it has nowhere to go. A short
+  exchange fully in view still has no right handle.
 - **Model and thinking keys are now the fn arrows, easier to press.** fn↑ fn↓ step thinking up and down, and fn→ fn←
   step the model up and down, wherever the keyboard is in the panel (the field, an answer, a page). On a Mac keyboard
   they are the Page Up, Page Down, End and Home keys, and the dedicated keys do the same. ⇧fn↑ and ⇧fn↓ scroll the

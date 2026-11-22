@@ -4640,7 +4640,10 @@ func chatScrollChecks() {
     sc.nextPrompt(); sc.nextPrompt()
     // (the last message's landing is cut to what can be scrolled to, as `target` is; both must hold)
     check("prompts: ▼ to the last message lands on it, where ▼ is disabled", near(sc.offset(), target(3)) && !sc.canNext, "offset \(sc.offset()) want \(target(3)) next \(sc.canNext)")
-    check("prompts: ▲ ▼ show only with two messages of the user's", !QCChatScroll.showsPrompts(turns: 0) && !QCChatScroll.showsPrompts(turns: 1) && QCChatScroll.showsPrompts(turns: 2))
+    check("prompts: ▲ ▼ show with two messages of the user's, and with one only while it starts above or below the view",
+          !QCChatScroll.showsPrompts(turns: 0, canPrevious: false, canNext: false) && !QCChatScroll.showsPrompts(turns: 1, canPrevious: false, canNext: false)
+          && QCChatScroll.showsPrompts(turns: 1, canPrevious: true, canNext: false) && QCChatScroll.showsPrompts(turns: 1, canPrevious: false, canNext: true)
+          && QCChatScroll.showsPrompts(turns: 2, canPrevious: false, canNext: false))
     // the landing highlight is a flag for about a second, then off (no fade: the view draws it or not)
     check("prompts: the landed message is lit", sc.flash != nil)
     spin(QCChatScroll.flashFor + 0.3)
@@ -4726,7 +4729,7 @@ func chatHandleChecks() {
     // which answer the left handle belongs to
     sc.jumpToLatest(); settle()
     check("handles: at the bottom the answer's footer is in view: no left handle", sc.pair == nil, "\(String(describing: sc.pair))")
-    check("handles: at the bottom the right handle shows (two messages of the user's)", QCChatScroll.showsPrompts(turns: m.turns.count))
+    check("handles: at the bottom the right handle shows (two messages of the user's)", QCChatScroll.showsPrompts(turns: m.turns.count, canPrevious: sc.canPrevious, canNext: sc.canNext))
     let a2 = sc.top(ofAnswer: ids[1]) ?? 0, a3 = sc.top(ofAnswer: ids[2]) ?? 0
     user(scrollTo: a2 + 100); settle()
     check("handles: reading the middle of the second answer, the left handle belongs to it", sc.pair == ids[1], "\(String(describing: sc.pair)) offset \(sc.offset()) a2 \(a2) a3 \(a3)")
@@ -5174,6 +5177,41 @@ func chatKeyChecks() {
     chat.hide(); spin(0.2)
 }
 chatKeyChecks()
+
+// ── one message of the user's: ▲ shows while it starts above the view, even as the only one ──────────────────────────────────────────
+func onePromptChecks() {
+    let m = chat.model
+    let sc = m.scroll
+    m.newChat(); m.field = ""
+    m.turns = [ChatScrollRig.turn(1, lines: 90)]
+    chat.open(); spin(0.3)
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    guard let sv = sc.scrollView else { check("one message: the chat's scroll view is found", false); return }
+    let clip = sv.contentView
+    sc.jumpToLatest(); spin(0.15)
+    check("one message: a long answer read to the bottom: the message starts above the view, so ▲ is enabled and ▼ is not",
+          sc.previousTarget() != nil && sc.canPrevious && !sc.canNext, "prev \(String(describing: sc.previousTarget())) \(sc.canPrevious) \(sc.canNext)")
+    check("one message: and the right handle shows (▲ ▼) though it is at the bottom and the only message",
+          QCChatScroll.showsPrompts(turns: m.turns.count, canPrevious: sc.canPrevious, canNext: sc.canNext) && sc.atBottom)
+    let before = sc.offset()
+    sc.previousPrompt()
+    check("one message: ▲ brings the message into view (the view moves up to it)", sc.offset() < before - 1 && !sc.canPrevious && !sc.following, "\(before) -> \(sc.offset())")
+    check("one message: ⌘[ at the bottom does the same", { sc.jumpToLatest(); spin(0.15)
+        let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                                 characters: "[", charactersIgnoringModifiers: "[", isARepeat: false, keyCode: UInt16(kVK_ANSI_LeftBracket))
+        return e.map { p.performKeyEquivalent(with: $0) } == true && sc.offset() < before - 1 }(), "offset \(sc.offset()) from \(before)")
+    // a short exchange fully in view: nothing to go to, no right handle
+    m.newChat(); m.field = ""
+    m.turns = [ChatScrollRig.turn(1, lines: 2)]
+    spin(0.4); spinQuiet(p)
+    sc.jumpToLatest(); spin(0.15)
+    _ = clip
+    check("one message: a short exchange fully in view has no ▲ or ▼ and no right handle",
+          !sc.canPrevious && !sc.canNext && sc.atBottom && !QCChatScroll.showsPrompts(turns: m.turns.count, canPrevious: sc.canPrevious, canNext: sc.canNext), "\(sc.canPrevious) \(sc.canNext) \(sc.atBottom)")
+    chat.hide(); spin(0.2)
+}
+onePromptChecks()
 
 // ── the scrolling defaults: resizing, hiding and reopening, the "new text below" mark, the streaming answer's handle ─────────────────
 func chatBehaviourChecks() {
