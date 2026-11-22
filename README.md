@@ -436,6 +436,11 @@ cl_quick's data to the Trash.
 
 ## With cl_audit
 
+Other apps can open a quick chat with `cl-quick://chat?folder=<percent-encoded Claude Code folder>`: the bar opens on the
+profile that uses that folder (as a click on it in the menu bar menu does), or, with no folder or one no profile uses, on
+the default profile, the second case with a quiet line saying so. A URL only picks a profile and opens the bar: it never
+sends a message, fills the field or changes anything, and the folder is matched by its path as written, never read.
+
 cl_quick runs with or without [cl_audit](https://github.com/n-uf/cl_audit) and shares nothing with it while running
 but a folder's sign-in lock (`~/Library/Caches/n-uf/signin-*.lock`), so the two never sign one folder in at once. Both
 compile the same shared modules from source: a tagged release of [cl_kit](https://github.com/n-uf/cl_kit), copied into

@@ -4,6 +4,7 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Other apps can open a quick chat on a profile:** `cl-quick://chat?folder=…`.
 - **No 5-hour row where the account has none.** An account that has a week and has never had a 5-hour number (a plan
   without the 5-hour window) shows the week alone: in the bar's indicator, its hover card, the chat's header, the menu
   and Settings, with no "5h" row, empty track or "no numbers yet". An account with a 5-hour window keeps its row, also
