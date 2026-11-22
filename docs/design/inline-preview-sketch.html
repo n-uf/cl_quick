@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>cl_quick inline page preview</title>
+<style>
+/* the page: dark only, as the other cl_quick sketches */
+:root { color-scheme: dark; --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --p-bg: #121211; --p-text: #faf9f5; --p-soft: #c2c0b6; --p-muted: #a9a79f; --p-line: rgba(255,255,255,.1); --p-panel: rgba(255,255,255,.045);
+  --p-acc: #ff9a66; --p-ok: #7ee2a0; --p-chip: rgba(255,255,255,.09); }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--p-bg); color: var(--p-text); font: 14px/1.5 var(--font); }
+.sk { max-width: 1240px; margin: 0 auto; padding: 24px 16px 72px; }
+.sk h1 { font-size: 21px; margin: 0 0 6px; }
+.sk h2.sec { font: 700 11px var(--mono); letter-spacing: .1em; color: var(--p-muted); margin: 38px 0 14px; padding-top: 16px; border-top: 1px solid var(--p-line); }
+.sk .lede { color: var(--p-muted); font-size: 14px; max-width: 104ch; margin: 0 0 12px; }
+.sk code { font: 11.5px var(--mono); background: var(--p-chip); padding: 0 4px; border-radius: 3px; }
+.decided { max-width: 118ch; padding: 12px 14px 10px; border-radius: 8px; background: var(--p-panel); }
+.decided h2 { margin: 0 0 6px; font: 700 11px var(--mono); letter-spacing: .1em; color: var(--p-ok); }
+.decided ul { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: var(--p-soft); }
+.decided li { margin: 4px 0; } .decided b { color: var(--p-text); }
+
+.grid { display: flex; flex-wrap: wrap; gap: 34px 32px; align-items: flex-start; }
+.fig { flex: none; margin: 0; width: 520px; max-width: 100%; }
+.fig .t { font: 700 11px var(--mono); letter-spacing: .1em; color: var(--p-acc); margin: 0 0 8px; }
+.fig .t span { color: var(--p-muted); font-weight: 600; margin-left: 6px; }
+.fig .cp { font-size: 12.5px; color: var(--p-soft); margin: 10px 0 0; line-height: 1.45; }
+.fig .cp b { color: var(--p-text); }
+.fig .cp.note { color: var(--p-muted); margin-top: 6px; }
+
+/* ───────────── the chat panel (the app's own: 520 x 580 pt, dark) ───────────── */
+.cw { --bg: #262624; --surface: #30302e; --bubble: #141413; --code: #1f1e1d; --line: rgba(222,220,209,.15); --line2: rgba(222,220,209,.10);
+  --text: #faf9f5; --soft: #c2c0b6; --muted: #9c9a92; --accent: #d97757; --amber: #f59e0b; --hover: rgba(250,249,245,.08);
+  --cap: #1c1c1b; --ic: #eba48b; --ic-bg: rgba(250,249,245,.06); --pre: #e9e7df; --track: rgba(0,0,0,.34); --thumb: #403f3c; --thumb-line: rgba(250,249,245,.12);
+  --send-bg: rgba(250,249,245,.1); --send-fg: rgba(250,249,245,.45); --meter: rgba(250,249,245,.13); --bar: rgba(250,249,245,.14); --bar-on: rgba(250,249,245,.85);
+  position: relative; width: 520px; max-width: 100%; height: 580px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.5 var(--font);
+  border-radius: 20px; box-shadow: 0 0 0 1px rgba(222,220,209,.18), 0 18px 48px rgba(0,0,0,.5); }
+.cw.light { --bg: #faf9f5; --surface: #ffffff; --bubble: #e9e6dc; --code: #f0eee6; --line: rgba(31,30,29,.16); --line2: rgba(31,30,29,.11);
+  --text: #141413; --soft: #3d3d3a; --muted: #73726c; --accent: #c6613f; --amber: #b45309; --hover: rgba(20,20,19,.07);
+  --cap: #ebe8de; --ic: #b5532f; --ic-bg: rgba(20,20,19,.06); --pre: #2b2a27; --track: rgba(20,20,19,.07); --thumb: #ffffff; --thumb-line: rgba(31,30,29,.14);
+  --send-bg: rgba(20,20,19,.08); --send-fg: rgba(20,20,19,.4); --meter: rgba(20,20,19,.12); --bar: rgba(20,20,19,.14); --bar-on: rgba(20,20,19,.8);
+  box-shadow: 0 0 0 1px rgba(31,30,29,.2), 0 18px 48px rgba(0,0,0,.5); }
+.cw * { box-sizing: border-box; }
+.cw svg { display: block; }
+.c-hd { position: relative; z-index: 3; flex: none; height: 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 0 10px; }
+.c-lv { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.c-lv b { font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; }
+.c-m { display: inline-block; width: 24px; height: 4px; border-radius: 2px; background: var(--meter); overflow: hidden; }
+.c-m i { display: block; height: 100%; border-radius: 2px; background: var(--amber); }
+.c-cap { display: inline-flex; height: 28px; border-radius: 11px; background: var(--cap); }
+.c-cap .c-ib { width: 28px; height: 28px; color: var(--soft); }
+.c-ib { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 6px; color: var(--muted); }
+.c-ib svg { width: 14px; height: 14px; }
+
+.c-bdw { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.c-mask { position: absolute; z-index: 2; left: 0; right: 0; top: 0; height: 28px; background: linear-gradient(var(--bg) 20%, transparent); pointer-events: none; }
+.c-col { position: absolute; left: 18px; right: 18px; bottom: 12px; display: flex; flex-direction: column; }
+.c-col > * { flex: none; }
+.c-u { align-self: flex-end; max-width: 82%; margin-top: 24px; padding: 8px 12px; border-radius: 16px; background: var(--bubble); font-size: 14px; line-height: 20px; }
+.c-u.first { margin-top: 0; }
+.c-a { margin-top: 10px; font: 14px/21px var(--font); color: var(--text); }
+.c-a p { margin: 0 0 10px; } .c-a p:last-child { margin-bottom: 0; }
+.c-a b { font-weight: 600; }
+.c-ic { font: 12.5px var(--mono); color: var(--ic); background: var(--ic-bg); padding: 0 4px; border-radius: 4px; }
+.c-pulse { margin-top: 10px; height: 20px; display: flex; align-items: center; }
+.c-pulse i { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); opacity: .85; }
+.c-meta { height: 24px; margin: 4px 0 0 -5px; display: flex; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.c-meta > span:last-child { margin-left: 4px; }
+
+/* the code block (the app's), with the new header controls */
+.c-cb { margin: 2px 0 10px; border-radius: 8px; background: var(--code); box-shadow: inset 0 0 0 1px var(--line2); overflow: hidden; }
+.c-cb .h { height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 2px 0 12px; font: 11.5px var(--font); color: var(--muted); border-bottom: 1px solid var(--line2); }
+.c-cb .h .l { display: inline-flex; align-items: center; }
+.c-cb .h .r { display: inline-flex; align-items: center; gap: 2px; }
+.c-cb pre { margin: 0; padding: 8px 12px 10px; font: 12.5px/18px var(--mono); color: var(--pre); white-space: pre; overflow: hidden; }
+.c-cb.stream pre { padding-bottom: 8px; }
+
+/* Code | Page: a small recessed two-way switch, the chosen side raised */
+.sg { display: inline-flex; gap: 1px; height: 20px; padding: 2px; margin-right: 4px; border-radius: 6px; background: var(--track); }
+.sg span { display: inline-flex; align-items: center; height: 16px; padding: 0 8px; border-radius: 4px; font: 500 11px/1 var(--font); color: var(--muted); }
+.sg span.on { background: var(--thumb); color: var(--text); box-shadow: 0 0 0 1px var(--thumb-line), 0 1px 2px rgba(0,0,0,.25); }
+/* the muted "still" tag */
+.tag { margin-left: 8px; height: 16px; padding: 0 6px; border-radius: 4px; display: inline-flex; align-items: center; background: var(--hover); color: var(--muted); font: 600 9.5px/1 var(--font); letter-spacing: .08em; text-transform: uppercase; }
+
+/* the page, inside the block's frame: inset 6 pt, clipped to rounded corners */
+.fr { padding: 6px; }
+.fr .pgbox { position: relative; overflow: hidden; border-radius: 5px; }
+.fr .pgbox.cap { height: 258px; }
+.fr .pgbox.cap::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 22px; pointer-events: none; background: linear-gradient(rgba(255,255,255,0), rgba(255,255,255,.92)); }
+.fr .sbar { position: absolute; z-index: 2; right: 3px; top: 5px; width: 5px; height: 112px; border-radius: 3px; background: rgba(0,0,0,.4); box-shadow: 0 0 0 1px rgba(255,255,255,.55); }
+
+/* the field box */
+.c-ft { position: relative; flex: none; margin: 0 10px 10px; padding: 10px 12px 8px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.c-fx { font-size: 15px; line-height: 22px; color: var(--muted); }
+.c-cr { margin-top: 8px; height: 28px; display: flex; align-items: center; gap: 2px; }
+.c-ch { flex: none; height: 28px; margin-left: -8px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 5px; font: 500 13px var(--font); color: var(--soft); white-space: nowrap; }
+.c-ch i { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.c-ch svg { width: 9px; height: 9px; opacity: .7; }
+.c-trk { flex: none; height: 28px; margin-left: 6px; display: inline-flex; align-items: center; padding: 0 6px 0 9px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line); font: 500 13px var(--font); color: var(--soft); white-space: nowrap; }
+.c-trk .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; margin: 0 9px 0 8px; position: relative; }
+.c-trk .bars i { width: 3px; border-radius: 1px; background: var(--bar); }
+.c-trk .bars i.on { background: var(--bar-on); }
+.c-trk .vs { width: 1px; height: 16px; background: var(--line); margin: 0 9px 0 0; }
+.c-trk .c-ib { width: 22px; height: 22px; margin-left: -2px; }
+.c-sp { flex: 1; }
+.c-send { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--send-bg); color: var(--send-fg); }
+.c-send svg { width: 14px; height: 14px; }
+.c-cr .c-ib { width: 28px; height: 28px; }
+.c-cr .c-ib svg { width: 15px; height: 15px; }
+
+/* ───────────── the rendered pages: they bring their own look (light, a sandboxed page) ───────────── */
+.pg { font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; color: #1f2430; background: #f6f3ec; }
+.pg * { box-sizing: border-box; }
+.pg h3 { margin: 0; font-size: 15px; letter-spacing: -.005em; }
+.pg .sub { margin: 0; font-size: 11.5px; color: #6b7080; }
+/* pricing */
+.pr { display: flex; gap: 12px; padding: 16px; justify-content: center; }
+.pr .pc { flex: 1 1 0; max-width: 210px; padding: 14px 14px 14px; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px rgba(31,36,48,.1), 0 2px 6px rgba(31,36,48,.06); }
+.pr .pn { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6b7080; }
+.pr .pp { margin: 4px 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+.pr .pp small { font-size: 12px; font-weight: 500; color: #6b7080; letter-spacing: 0; margin-left: 2px; }
+.pr ul { margin: 0 0 12px; padding: 0; list-style: none; font-size: 12px; color: #3b4150; }
+.pr li { padding: 2px 0; }
+.pr li::before { content: "\2713"; margin-right: 6px; color: #2f8f5b; font-weight: 700; }
+.pr .btn { display: block; text-align: center; height: 28px; line-height: 28px; border-radius: 7px; font-size: 12px; font-weight: 600; background: #eceae3; color: #1f2430; }
+.pr .pc.hot { background: #1f2a44; color: #fff; box-shadow: 0 6px 16px rgba(31,42,68,.35); }
+.pr .pc.hot .pn, .pr .pc.hot .pp small { color: #aeb8d4; }
+.pr .pc.hot ul { color: #dfe5f5; } .pr .pc.hot li::before { color: #7ee2a0; }
+.pr .pc.hot .btn { background: #ff9a66; color: #2a1004; }
+/* bar chart */
+.bc { padding: 14px 16px 12px; background: #fff; }
+.bc .row { display: flex; align-items: flex-end; gap: 10px; height: 104px; margin-top: 10px; padding: 0 4px; border-bottom: 1px solid #d9dbe3; }
+.bc .col { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.bc .col i { display: block; width: 100%; max-width: 38px; border-radius: 4px 4px 0 0; background: #5b7be8; }
+.bc .col.top i { background: #ff9a66; }
+.bc .col b { font-size: 10.5px; font-weight: 600; color: #3b4150; margin-bottom: 3px; }
+.bc .days { display: flex; gap: 10px; padding: 4px 4px 0; }
+.bc .days span { flex: 1 1 0; text-align: center; font-size: 10.5px; color: #6b7080; }
+/* tall report */
+.rp { background: #fff; padding: 14px 16px 16px; }
+.rp .bc2 { display: flex; align-items: flex-end; gap: 6px; height: 86px; margin: 10px 0 14px; border-bottom: 1px solid #d9dbe3; }
+.rp .bc2 i { flex: 1 1 0; display: block; border-radius: 3px 3px 0 0; background: #5b7be8; }
+.rp h4 { margin: 0 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6b7080; }
+.rp .tr { display: flex; justify-content: space-between; height: 28px; align-items: center; border-top: 1px solid #ebecf1; font-size: 12.5px; }
+.rp .tr span:last-child { font-variant-numeric: tabular-nums; color: #3b4150; font-weight: 600; }
+.rp .sp { height: 14px; }
+</style></head><body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="8.5" height="9" rx="1.6"/><path d="M3.5 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v.5"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 1.8v2.9H9.1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.8 3.8l8.4 8.4M12.2 3.8l-8.4 8.4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="4" height="7.5" rx="2"/><path d="M3.8 7.6a4.2 4.2 0 0 0 8.4 0M8 11.8V14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.8 7.2L8 3l4.2 4.2"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-kbd" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="3.5" width="13" height="9" rx="1.8"/><path d="M4 6.4h.1M6.4 6.4h.1M8.8 6.4h.1M11.2 6.4h.1M4 9.6h8"/></symbol>
+  <symbol id="i-cv" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5l3 3 3-3"/></symbol>
+  <symbol id="i-out" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 2.5h3.9v3.9M13.5 2.5L9 7M6.4 13.5H2.5V9.6M2.5 13.5L7 9"/></symbol>
+</defs></svg>
+
+<div class="sk">
+<h1>cl_quick: a page shown in place</h1>
+<p class="lede">An <code>html</code> code block in an answer shows its finished page right inside the block. Five states at the panel's real size (520 &times; 580 pt) in the app's look, plus a light variant of the first. Sample content only. Nothing is built.</p>
+
+<div class="decided">
+  <h2>PROPOSED</h2>
+  <ul>
+    <li><b>Page is the default</b> for a finished <code>html</code> block. The header keeps its place above the page: <b>html</b> on the left; on the right a small two-way switch <b>Code | Page</b> (the chosen side raised), <b>&#10530;</b> (open in a big window) and copy.</li>
+    <li><b>The model decides.</b> A block fenced as <code>```html code</code> opens as code, with the switch on Code. A plain <code>```html</code> block opens as a page.</li>
+    <li><b>Tall pages</b> are capped at about half the panel and scroll inside their block.</li>
+    <li><b>A page that scrolled out of view</b> comes back as a still picture, marked with a small muted <b>still</b> tag in the header (state 4 explains why that mark).</li>
+    <li><b>While the block streams</b> it is code with no switch; the page appears when the block is complete.</li>
+  </ul>
+</div>
+
+<h2 class="sec">THE STATES</h2>
+<div class="grid">
+
+<!-- 1 PAGE BY DEFAULT -->
+<figure class="fig"><div class="t">1 &middot; PAGE BY DEFAULT<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Make me a small pricing card, two plans.</div>
+    <div class="c-a"><p>Here is a two-plan card you can drop into a page:</p>
+      <div class="c-cb">
+        <div class="h"><span class="l">html</span><span class="r"><span class="sg" aria-label="Code or Page, Page chosen"><span>Code</span><span class="on">Page</span></span><span class="c-ib" title="Open in a big window"><svg><use href="#i-out"/></svg></span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></span></div>
+        <div class="fr"><div class="pgbox"><div class="pg pr">
+          <div class="pc"><div class="pn">Starter</div><div class="pp">$12<small>/month</small></div><ul><li>3 projects</li><li>Email support</li></ul><span class="btn">Choose Starter</span></div>
+          <div class="pc hot"><div class="pn">Team</div><div class="pp">$29<small>/month</small></div><ul><li>Unlimited projects</li><li>Priority support</li></ul><span class="btn">Choose Team</span></div>
+        </div></div></div>
+      </div>
+      <p>The Team card is the dark one, so it stands out.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span>Sonnet 5.5 &middot; medium &middot; 3.4 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Sonnet<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Medium<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:7px"></i><i class="on" style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">A finished <b>html</b> block shows its page inside the frame; the header stays above it with Code | Page (Page chosen), open big, copy.</figcaption></figure>
+
+<!-- 2 CODE CHOSEN BY THE MODEL -->
+<figure class="fig"><div class="t">2 &middot; CODE, CHOSEN BY THE MODEL<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">How do I mark the current page in a nav bar?</div>
+    <div class="c-a"><p>Add <span class="c-ic">aria-current</span> to the link of the page you are on. Screen readers announce it, and you can style it:</p>
+      <div class="c-cb">
+        <div class="h"><span class="l">html</span><span class="r"><span class="sg" aria-label="Code or Page, Code chosen"><span class="on">Code</span><span>Page</span></span><span class="c-ib" title="Open in a big window"><svg><use href="#i-out"/></svg></span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></span></div>
+<pre>&lt;nav&gt;
+  &lt;a href="/"&gt;Home&lt;/a&gt;
+  &lt;a href="/docs" aria-current="page"&gt;Docs&lt;/a&gt;
+  &lt;a href="/blog"&gt;Blog&lt;/a&gt;
+&lt;/nav&gt;</pre>
+      </div>
+      <p>Then style it with <span class="c-ic">a[aria-current]</span>.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span>Haiku 5.5 &middot; 1.9 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Haiku<span class="bars"><i class="on" style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Low<span class="bars"><i class="on" style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">The model fenced it as <code>```html code</code>, a snippet to copy rather than a page to see, so it opens as code with the switch on <b>Code</b>.</figcaption></figure>
+
+<!-- 3 TALL PAGE -->
+<figure class="fig"><div class="t">3 &middot; A PAGE TALLER THAN THE CAP<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Draft a one-page weekly traffic report.</div>
+    <div class="c-a"><p>Here is the full report:</p>
+      <div class="c-cb">
+        <div class="h"><span class="l">html</span><span class="r"><span class="sg" aria-label="Code or Page, Page chosen"><span>Code</span><span class="on">Page</span></span><span class="c-ib" title="Open in a big window"><svg><use href="#i-out"/></svg></span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></span></div>
+        <div class="fr"><div class="pgbox cap"><span class="sbar"></span><div class="pg rp">
+          <h3>Weekly traffic</h3><p class="sub">Visits per week, last eight weeks</p>
+          <div class="bc2"><i style="height:38%"></i><i style="height:44%"></i><i style="height:41%"></i><i style="height:57%"></i><i style="height:63%"></i><i style="height:60%"></i><i style="height:78%"></i><i style="height:92%"></i></div>
+          <h4>Top pages</h4>
+          <div class="tr"><span>/pricing</span><span>4,210</span></div>
+          <div class="tr"><span>/docs/start</span><span>3,880</span></div>
+          <div class="tr"><span>/blog/launch-notes</span><span>2,975</span></div>
+          <div class="tr"><span>/changelog</span><span>1,640</span></div>
+          <div class="tr"><span>/about</span><span>980</span></div>
+          <div class="sp"></div>
+          <h4>By source</h4>
+          <div class="tr"><span>Search</span><span>6,300</span></div>
+          <div class="tr"><span>Direct</span><span>3,120</span></div>
+          <div class="tr"><span>Newsletter</span><span>1,860</span></div>
+          <div class="tr"><span>Social</span><span>940</span></div>
+        </div></div></div>
+      </div></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span>Sonnet 5.5 &middot; medium &middot; 5.2 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Sonnet<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Medium<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:7px"></i><i class="on" style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">A page taller than the cap (about half the panel) scrolls <b>inside</b> its block: the thin bar at the right edge and the row cut off at the bottom say there is more.</figcaption></figure>
+
+<!-- 4 STILL PICTURE -->
+<figure class="fig"><div class="t">4 &middot; STILL PICTURE<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Chart the tickets we closed last week.</div>
+    <div class="c-a"><p>Closed tickets per day:</p>
+      <div class="c-cb">
+        <div class="h"><span class="l">html<span class="tag" title="A snapshot: the page scrolled out of view and was replaced by a picture of itself">still</span></span><span class="r"><span class="sg" aria-label="Code or Page, Page chosen"><span>Code</span><span class="on">Page</span></span><span class="c-ib" title="Open in a big window"><svg><use href="#i-out"/></svg></span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></span></div>
+        <div class="fr"><div class="pgbox"><div class="pg bc">
+          <h3>Tickets closed</h3><p class="sub">Last week, per day</p>
+          <div class="row">
+            <div class="col"><b>14</b><i style="height:36%"></i></div>
+            <div class="col"><b>22</b><i style="height:56%"></i></div>
+            <div class="col top"><b>39</b><i style="height:100%"></i></div>
+            <div class="col"><b>31</b><i style="height:80%"></i></div>
+            <div class="col"><b>27</b><i style="height:69%"></i></div>
+            <div class="col"><b>9</b><i style="height:23%"></i></div>
+            <div class="col"><b>6</b><i style="height:15%"></i></div>
+          </div>
+          <div class="days"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+        </div></div></div>
+      </div>
+      <p>Wednesday was the busiest day, with 39 closed.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span>Sonnet 5.5 &middot; medium &middot; 2.8 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Sonnet<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Medium<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:7px"></i><i class="on" style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">A page that scrolled out of view and back is drawn as a <b>still picture</b>: the same look, with a small muted <b>still</b> tag next to <b>html</b>.</figcaption>
+<figcaption class="cp note">Why the tag: it sits where the eye already reads the block's state, costs no height, and a caption under the page would push the answer down each time a page turns still.</figcaption></figure>
+
+<!-- 5 STREAMING -->
+<figure class="fig"><div class="t">5 &middot; WHILE STREAMING<span>dark</span></div>
+<div class="cw">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Make me a small pricing card, two plans.</div>
+    <div class="c-a"><p>Here is a two-plan card you can drop into a page:</p>
+      <div class="c-cb stream">
+        <div class="h"><span class="l">html</span><span class="r"><span class="c-ib"><svg><use href="#i-copy"/></svg></span></span></div>
+<pre>&lt;div class="plans"&gt;
+  &lt;div class="plan"&gt;
+    &lt;h3&gt;Starter&lt;/h3&gt;
+    &lt;p class="price"&gt;$12 &lt;small&gt;/month&lt;/small&gt;&lt;/p&gt;
+    &lt;ul&gt;
+      &lt;li&gt;3 projects&lt;/li&gt;
+      &lt;li&gt;Email supp</pre>
+      </div></div>
+    <div class="c-pulse"><i></i></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Sonnet<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Medium<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:7px"></i><i class="on" style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-stop"/></svg></span></div></div>
+</div>
+<figcaption class="cp">An unfinished <b>html</b> block is plain code with <b>no switch</b> yet, and no &#10530;; it turns into the page of state 1 once the block is complete.</figcaption></figure>
+
+<!-- 1b LIGHT -->
+<figure class="fig"><div class="t">1b &middot; PAGE BY DEFAULT<span>light</span></div>
+<div class="cw light">
+  <div class="c-hd"><span class="c-lv">wk <span class="c-m"><i style="width:62%"></i></span> <b>62%</b> <span>&middot; resets Tue 13:33</span></span><span class="c-cap"><span class="c-ib"><svg><use href="#i-plus"/></svg></span><span class="c-ib"><svg><use href="#i-x"/></svg></span></span></div>
+  <div class="c-bdw"><div class="c-mask"></div><div class="c-col">
+    <div class="c-u first">Make me a small pricing card, two plans.</div>
+    <div class="c-a"><p>Here is a two-plan card you can drop into a page:</p>
+      <div class="c-cb">
+        <div class="h"><span class="l">html</span><span class="r"><span class="sg" aria-label="Code or Page, Page chosen"><span>Code</span><span class="on">Page</span></span><span class="c-ib" title="Open in a big window"><svg><use href="#i-out"/></svg></span><span class="c-ib"><svg><use href="#i-copy"/></svg></span></span></div>
+        <div class="fr"><div class="pgbox"><div class="pg pr">
+          <div class="pc"><div class="pn">Starter</div><div class="pp">$12<small>/month</small></div><ul><li>3 projects</li><li>Email support</li></ul><span class="btn">Choose Starter</span></div>
+          <div class="pc hot"><div class="pn">Team</div><div class="pp">$29<small>/month</small></div><ul><li>Unlimited projects</li><li>Priority support</li></ul><span class="btn">Choose Team</span></div>
+        </div></div></div>
+      </div>
+      <p>The Team card is the dark one, so it stands out.</p></div>
+    <div class="c-meta"><span class="c-ib"><svg><use href="#i-copy"/></svg></span><span class="c-ib"><svg><use href="#i-retry"/></svg></span><span>Sonnet 5.5 &middot; medium &middot; 3.4 s</span></div>
+  </div></div>
+  <div class="c-ft"><div class="c-fx">Reply&hellip;</div><div class="c-cr"><span class="c-ch"><i></i>Main <svg><use href="#i-cv"/></svg></span><span class="c-trk">Sonnet<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i></span><span class="vs"></span>Medium<span class="bars"><i class="on" style="height:5px"></i><i class="on" style="height:7px"></i><i class="on" style="height:10px"></i><i style="height:12px"></i><i style="height:14px"></i></span><span class="c-ib"><svg><use href="#i-kbd"/></svg></span></span><span class="c-sp"></span><span class="c-ib"><svg><use href="#i-mic"/></svg></span><span class="c-send"><svg><use href="#i-send"/></svg></span></div></div>
+</div>
+<figcaption class="cp">The same state in the light theme: the page keeps its own colours inside the block's frame.</figcaption></figure>
+
+</div>
+</div>
+</body></html>

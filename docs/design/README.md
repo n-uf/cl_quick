@@ -15,6 +15,11 @@ A sketch shows what was proposed at the time. The app and the CHANGELOG say what
   App and Chat, and the Instructions row (the built-in text and your own, one document with jump links). Option E,
   the track with a raised key under the tiles, approved 2026-11-21.
 
+- [inline-preview-sketch.html](inline-preview-sketch.html): an html code block in an answer shows its rendered
+  page in place: Code | Page switch, open-big and copy in the block's header; five states (page by default, code
+  chosen by the model, a tall page that scrolls inside its block, a still picture with a muted "still" tag, and
+  streaming with no switch yet) plus a light variant. Proposed 2026-11-21, not approved yet.
+
 ## App sketches
 
 - [menubar-usage-sketch.html](menubar-usage-sketch.html): the account in use's usage in the menu every time it
