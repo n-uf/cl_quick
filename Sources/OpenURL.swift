@@ -43,13 +43,40 @@ enum QCOpenURL {
     }
 }
 
+extension QCOpenURL {
+    /// What a URL does once its folder is matched. A URL never ends or replaces a chat: it moves to another profile only
+    /// while nothing is under way (no answers, no running one, no draft, no attachment being read).
+    enum Action: Equatable {
+        case open(profile: String?)         // open(profile:); nil: open(), which keeps a chat under way as it is
+        case openSaying(String)             // open(), with a quiet line over the field; `%@` is the profile's name
+    }
+
+    static let unmatchedLine = "No profile uses that folder; on %@."
+    static let underwayLine = "A chat is under way on %@."
+
+    static func action(_ r: (id: String?, unmatched: Bool), current: String?, underway: Bool) -> Action {
+        if r.unmatched { return .openSaying(unmatchedLine) }
+        guard let id = r.id else { return .open(profile: nil) }
+        return !underway || id == current ? .open(profile: id) : .openSaying(underwayLine)
+    }
+}
+
 extension QuickChat {
-    /// Opens the bar for a cl-quick:// URL, as the menu bar's profile click does (open(profile:)): a chat under way on
-    /// that profile stays, another profile gets a new chat. A folder no profile uses opens it on the default one, with a
-    /// quiet line over the field. Nothing else comes of a URL.
+    /// Opens the bar for a cl-quick:// URL: on the matched profile when no chat is under way (as a click on it in the menu
+    /// bar menu does), else as it is, with a quiet line if the URL named another profile. A folder no profile uses opens
+    /// the default profile (or the chat under way), with a quiet line over the field. Nothing else comes of a URL.
     func handle(openURL url: URL) {
         guard let r = QCOpenURL.profileID(for: url, profiles: store.profiles, home: NSHomeDirectory()) else { return }
-        open(profile: r.id)
-        if r.unmatched, let name = model.target?.name { model.say("No profile uses that folder; on \(name).") }
+        model.leaveEnded()          // a chat that ended is gone (open() does the same), so it is not "under way"
+        let underway = model.isWindow || model.busy || !model.field.isEmpty || !model.images.isEmpty || !model.files.isEmpty || model.preparing != 0
+        // with something under way the bar opens on the chat's own profile (a bare open() would go to the default one and
+        // start a new chat there, dropping a draft); with nothing under way a bare open() is the default profile
+        let keep = underway ? model.target?.profileID : nil
+        switch QCOpenURL.action(r, current: model.target?.profileID, underway: underway) {
+        case .open(let id): open(profile: id ?? keep)
+        case .openSaying(let line):
+            open(profile: keep)
+            if let name = model.target?.name { model.say(String(format: line, name)) }
+        }
     }
 }

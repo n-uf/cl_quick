@@ -846,6 +846,14 @@ do {
     check("url: another host or path does nothing", pick("cl-quick://settings") == nil && pick("cl-quick://chat/send?folder=%2FUsers%2Fsample%2F.claude") == nil
           && pick("cl-quick://other?folder=%2FUsers%2Fsample%2F.claude") == nil)
     check("url: another scheme does nothing", pick("https://chat?folder=%2FUsers%2Fsample%2F.claude") == nil)
+    // what is done with the match: a chat under way is never ended or replaced
+    typealias A = QCOpenURL.Action
+    check("url action: idle, another profile: switches to it", QCOpenURL.action(("work", false), current: "main", underway: false) == A.open(profile: "work"))
+    check("url action: under way, the same profile: opens it as it is", QCOpenURL.action(("main", false), current: "main", underway: true) == A.open(profile: "main"))
+    check("url action: under way, another profile: stays, with a line", QCOpenURL.action(("work", false), current: "main", underway: true) == A.openSaying(QCOpenURL.underwayLine))
+    check("url action: no folder: a plain open", QCOpenURL.action((nil, false), current: "main", underway: true) == A.open(profile: nil))
+    check("url action: a folder no profile uses: a line, idle or not", QCOpenURL.action((nil, true), current: "main", underway: false) == A.openSaying(QCOpenURL.unmatchedLine)
+          && QCOpenURL.action((nil, true), current: "main", underway: true) == A.openSaying(QCOpenURL.unmatchedLine))
 }
 
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so

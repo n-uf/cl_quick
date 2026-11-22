@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let s = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue, let url = URL(string: s) else { return }
-        if chatStarted { chat.handle(openURL: url) } else if pendingURLs.count < 4 { pendingURLs.append(url) }
+        if chatStarted { chat.handle(openURL: url) } else { pendingURLs = [url] }      // before launch ends only the latest counts
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
