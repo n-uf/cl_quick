@@ -157,9 +157,9 @@ minutes for a profile.
   panel restores the place and whether it follows. Every jump is instant (nothing animates).
   - Two **edge handles** stand in the answers' side gutters, above the field: thin pills at rest. The pointer resting on one
     for about 0.15 s opens its stack beside it, inward over the text, in a solid box; it closes about 0.5 s after the pointer
-    leaves both. **Right:** ▲ ▼ (the previous and next message of yours, once there are two, or with one while it starts above or below the view, so a
-    long answer read to the bottom still has a way back to its message; the landed bubble is lighter for
-    about a second) and ↓ jump to latest (while not at the bottom; the pill takes the accent colour while text has arrived
+    leaves both. **Right:** ▲ ▼ (the previous and next message of yours, once there are two, or with one whenever the
+    handle shows: it starts above or below the view, so a long answer read to the bottom still has a way back to its
+    message; the landed bubble is lighter for about a second) and ↓ jump to latest (while not at the bottom; the pill takes the accent colour while text has arrived
     below, until you reach the bottom). **Left:** ⤒ (the start of the answer, only while its first line is above the view) and
     copy, for the answer at the view's bottom edge while its footer is out of sight (also while it streams: copy takes the text
     so far). Each answer's own footer has ⤒ copy ↻ (⤒ only while its first line is above the view).

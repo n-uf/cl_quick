@@ -5,16 +5,16 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 ## Unreleased
 
 - **A way back to your message from the bottom of a long answer.** With a single message of yours in the chat, the right
-  handle had no ▲ ▼ (they needed two messages), so at the bottom of a long answer there was no handle at all. Now ▲ shows
-  whenever a message of yours starts above the view and ▼ whenever one starts below it, even with only one message; ⌘[
-  and ⌘] follow the same rule. With two or more messages both always show, one dimmed when it has nowhere to go. A short
-  exchange fully in view still has no right handle.
+  handle had no ▲ ▼ (they needed two messages), so at the bottom of a long answer there was no handle at all. Now the
+  handle shows ▲ ▼ with a single message too, whenever it starts above or below the view (or the view is not at the
+  bottom), one of them dimmed when it has nowhere to go, so the stack keeps its size. With two or more messages both
+  always show. A short exchange fully in view still has no right handle. (⌘[ and ⌘] already went to a single message.)
 - **Model and thinking keys are now the fn arrows, easier to press.** fn↑ fn↓ step thinking up and down, and fn→ fn←
   step the model up and down, wherever the keyboard is in the panel (the field, an answer, a page). On a Mac keyboard
   they are the Page Up, Page Down, End and Home keys, and the dedicated keys do the same. ⇧fn↑ and ⇧fn↓ scroll the
   answers a page up and down (and stop following unless that reaches the bottom), as plain fn↑ and fn↓ did. The ⌥⌘
   arrows are gone (macOS's and the field's again), and so are plain Page Up and Page Down scrolling and End's jump to
-  the bottom: ⌘J jumps to the latest and follows. The controls' tooltips and the keys list say the new keys.
+  the bottom: ⌘J jumps to the latest and follows. The controls' VoiceOver hints and the keys list say the new keys.
 - **Moving in a chat.**
   - **Edge handles.** Two thin pills stand in the answers' side gutters, above the field. The pointer resting on one for
     about 0.15 s opens a stack beside it (inward, in a solid box); it closes about 0.5 s after the pointer leaves. Nothing

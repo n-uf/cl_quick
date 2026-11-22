@@ -414,10 +414,13 @@ final class QCChatScroll: ObservableObject {
     /// A page: the visible height less a few lines, as the system's page keys keep some of what was in view.
     private func page() -> CGFloat { max(40, (clip?.bounds.height ?? 0) - 40) }
 
-    /// ▲ and ▼ (always both, one of them dimmed when it has nowhere to go) show once there are two messages of the user's, so the
-    /// stack keeps its size while scrolling, and with one message whenever it starts above the view (▲) or below it (▼): a long
-    /// answer read to the bottom still has a way back to the message that asked for it.
-    static func showsPrompts(turns: Int, canPrevious: Bool, canNext: Bool) -> Bool { turns >= 2 || canPrevious || canNext }
+    /// ▲ and ▼ (always both, one of them dimmed when it has nowhere to go) show once there are two messages of the user's. With
+    /// one message they show whenever the right handle does (it starts above the view, below it, or the view is not at the
+    /// bottom), so the stack keeps its size while scrolling and a click on ▲ does not shrink it under the pointer; a short
+    /// exchange fully in view has no handle. A long answer read to the bottom has a way back to the message that asked for it.
+    static func showsPrompts(turns: Int, canPrevious: Bool, canNext: Bool, atBottom: Bool) -> Bool {
+        turns >= 2 || (turns == 1 && (canPrevious || canNext || !atBottom))
+    }
 
     private func clearFlash(_ id: UUID) {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor) { [weak self] in
@@ -745,7 +748,8 @@ private extension View {
 }
 
 /// What floats over the answers, in two handles: the left one's stack is this answer's ⤒ and copy (while its footer is out
-/// of sight); the right one's is ▲ ▼ (once there are two messages of the user's, or one starts above or below the view) and jump to latest (while not at the bottom).
+/// of sight); the right one's is ▲ ▼ (once there are two messages of the user's, or with one whenever the handle shows) and
+/// jump to latest (while not at the bottom).
 struct QCEdgeHandles: View {
     @ObservedObject var scroll: QCChatScroll
     @ObservedObject var model: QuickChatModel
@@ -762,7 +766,8 @@ struct QCEdgeHandles: View {
                                  label: "Copy this answer", onFocus: { scroll.left.focus($0, 2) }) { _ = model.copyAnswer(of: turn) }
                 }
             }
-            let prompts = QCChatScroll.showsPrompts(turns: model.turns.count, canPrevious: scroll.canPrevious, canNext: scroll.canNext)
+            let prompts = QCChatScroll.showsPrompts(turns: model.turns.count, canPrevious: scroll.canPrevious, canNext: scroll.canNext,
+                                                  atBottom: scroll.atBottom)
             if prompts || !scroll.atBottom {
                 QCEdgeHandle(side: .right, state: scroll.right, name: "right", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "Message navigation",
                              value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
