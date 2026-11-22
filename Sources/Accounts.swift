@@ -215,8 +215,14 @@ enum AccountBook {
     /// own word's account (with the launch record's ids when it named the seat it started on), kept for that account even
     /// when the record names another one now (never put on the record's); while it said nothing, the record's account
     /// while the record still names the seat it started on. nil: nobody's.
+    ///
+    /// A word whose seat isn't known against the record (only one of them names an organisation) is the record's account
+    /// while the record still names the very seat the process started on: the process is on that seat, so its numbers
+    /// are kept under it, not under an address key nothing shows.
     static func numbersOwner(record: SignedInAccount?, trail: ProcessTrail) -> SignedInAccount? {
-        FolderSignIn.answer(record: record, trail: trail).numbersBelongTo
+        let a = FolderSignIn.answer(record: record, trail: trail)
+        if a.verdict == .seatNotKnown, let r = a.record, let l = trail.launchedOn, l.match(r) == .seat { return r }
+        return a.numbersBelongTo
     }
 
     /// The running claude is the account the folder is on now and the one `target` (the chat's account) names. A chat is
@@ -226,7 +232,9 @@ enum AccountBook {
         guard let r = record, let target else { return false }
         let a = FolderSignIn.answer(record: r, trail: trail)
         switch a.verdict {
-        case .verified, .seatNotKnown: break
+        case .verified: break
+        // the word can't tell the seat: it goes on only while the folder isn't on another seat than the one it started on
+        case .seatNotKnown: guard trail.launchedOn?.match(r) != .different else { return false }
         case .guessed: guard a.numbersBelongTo != nil else { return false }
         case .differs, .none: return false
         }

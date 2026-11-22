@@ -1142,9 +1142,16 @@ do {
     // the process's own word (initialize) wins over the file read before it started
     trail.said(word("ULTRA-1@example.com"))
     check("trail: it said it is the folder's account (any case): its numbers are that account's, with its id", owner(a1, trail) == key("u1"))
-    check("trail: a word naming an organisation the record doesn't: the seat isn't known, the word's own (no id taken from the record)",
-          owner(a1, trailOf(a1, said: word(a1.email, "Org A"))) == AccountKey(account: "email:ultra-1@example.com", organization: "name:org a")
+    check("trail: a word naming an organisation the record doesn't, the record still on the seat it started on: the record's account",
+          owner(a1, trailOf(a1, said: word(a1.email, "Org A"))) == key("u1")
           && AccountBook.processOn(record: a1, trail: trailOf(a1, said: word(a1.email, "Org A")), target: key("u1")))
+    // the seat isn't known and the folder moved to another seat of the account: the word's own, and the chat stops
+    let onOrg1 = rec("u1", "ultra-1@example.com", org: "org-1"), onOrg2 = rec("u1", "ultra-1@example.com", org: "org-2")
+    let notKnown = trailOf(onOrg1, said: word(a1.email, "Org A"))
+    check("trail: seat not known after the folder moved to another seat: never the new seat's numbers, and the chat stops",
+          owner(onOrg2, notKnown) == AccountKey(account: "email:ultra-1@example.com", organization: "name:org a")
+          && !AccountBook.processOn(record: onOrg2, trail: notKnown, target: key("u1", "org-2"))
+          && AccountBook.processOn(record: onOrg1, trail: notKnown, target: key("u1", "org-1")) && owner(onOrg1, notKnown) == key("u1", "org-1"))
     let launchedA = rec("u1", "ultra-1@example.com", org: "org-1", orgName: "Org A")
     check("trail: the same address in another organisation isn't the folder's seat (D2)",
           !AccountBook.processOn(record: rec("u1", "ultra-1@example.com", org: "org-2", orgName: "Org B"),
