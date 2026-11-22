@@ -2150,39 +2150,35 @@ do {
     check("Cyrillic ⌘⇧Z (Я) names z", letter("Я", 6, [.command, .shift]) == "z")
     check("Ukrainian keys that are no edit key stay as they are", letter("і", 1) == "і" && letter("ї", 30) == "ї" && letter("ґ", 42) == "ґ")
     check("a digit, a symbol and an ASCII capital keep their letter", letter("1", 18) == "1" && letter(",", 43) == "," && letter("V", 9) == "v")
-    // ⌥⌘ arrows are function keys, the same on every layout (the characters a Cyrillic layout gives them are the same, and a real
-    // arrow key carries the function flag, which the keypad's arrows also give the numeric-pad flag: neither is a modifier here).
-    // Plain ⌘ arrows are macOS's own (the caret's jumps in the field) and are not taken.
+    // the fn arrows (Page Up, Page Down, End, Home key codes) are the same on every layout and read by key code, through the
+    // window's sendEvent (the panel's check of the keys: chatKeyChecks, below). Here: the ⌥⌘ arrows are gone, every ⌘ arrow is
+    // macOS's own (the caret's jumps in the field) and is not taken; the fn arrows with Caps Lock still step.
     var steps: [(Bool, Int)] = []
     let oldStep = p.onStep
     p.onStep = { steps.append(($0, $1)) }
     let L = String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!), U = String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!)
     let R = String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!), D = String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)
     let cmd: NSEvent.ModifierFlags = [.command, .option]
-    let t1 = cmdKey(L, 123, cmd), t2 = cmdKey(U, 126, cmd)
-    check("⌥⌘← and ⌥⌘↑ step the model down and thinking up, and are taken", t1 && t2 && steps.count == 2 && steps[0] == (true, -1) && steps[1] == (false, 1), "\(steps)")
-    steps = []
-    let t3 = cmdKey(R, 124, cmd), t4 = cmdKey(D, 125, cmd)
-    check("⌥⌘→ and ⌥⌘↓ step the model up and thinking down, and are taken", t3 && t4 && steps.count == 2 && steps[0] == (true, 1) && steps[1] == (false, -1), "\(steps)")
-    steps = []
-    _ = cmdKey(U, 126, [.command, .option, .function]); _ = cmdKey(R, 124, [.command, .option, .function, .numericPad])
-    check("⌥⌘ arrows with the function and numeric-pad flags (as the arrow keys give them) still step", steps.count == 2 && steps[0] == (false, 1) && steps[1] == (true, 1), "\(steps)")
+    func fnSend(_ f: Int, _ code: Int, _ flags: NSEvent.ModifierFlags) {
+        let ch = String(UnicodeScalar(UInt16(f))!)
+        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                                    characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: UInt16(code)) { p.sendEvent(e) }
+    }
     steps = []
     var notTaken: [Bool] = []
-    for f in [NSEvent.ModifierFlags.command, [.command, .shift], [.command, .control], [.command, .control, .shift],
+    for f in [NSEvent.ModifierFlags.command, [.command, .option], [.command, .option, .function, .numericPad], [.command, .shift], [.command, .control], [.command, .control, .shift],
               [.command, .control, .option], [.command, .option, .shift], [.command, .control, .option, .shift], [.control], [.option], [.shift], []] {
         for (c, code) in [(L, UInt16(123)), (U, 126), (R, 124), (D, 125)] { notTaken.append(cmdKey(c, code, f)) }
     }
-    check("plain ⌘ arrows (macOS's own), ⇧⌘, ⌃⌘, their mixes, and ⌃, ⌥, ⇧ and plain arrows step nothing and are not taken", steps.isEmpty && notTaken.allSatisfy { !$0 }, "\(steps) \(notTaken)")
-    // the arrow keys through the Cyrillic layout and Caps Lock: the same keys
+    check("⌥⌘ arrows, plain ⌘ arrows (macOS's own), ⇧⌘, ⌃⌘, their mixes, and ⌃, ⌥, ⇧ and plain arrows step nothing and are not taken", steps.isEmpty && notTaken.allSatisfy { !$0 }, "\(steps) \(notTaken)")
     steps = []
-    _ = cmdKey(U, 126, [.command, .option, .capsLock])
-    check("⌥⌘↑ with Caps Lock steps thinking", steps.count == 1 && steps[0] == (false, 1), "\(steps)")
-    // the panel not the key window (hidden): a ⌥⌘ arrow typed elsewhere is not the chat's
+    fnSend(NSPageUpFunctionKey, kVK_PageUp, [.function, .numericPad, .capsLock])
+    check("fn↑ with Caps Lock steps thinking", steps.count == 1 && steps[0] == (false, 1), "\(steps)")
+    // the panel not the key window (hidden): an fn arrow typed elsewhere is not the chat's
     steps = []
     chat.hide()
-    let hiddenTaken = cmdKey(U, 126, cmd)
-    check("⌥⌘↑ with the panel not the key window steps nothing and is not taken", steps.isEmpty && !hiddenTaken, "\(steps) \(hiddenTaken)")
+    fnSend(NSPageUpFunctionKey, kVK_PageUp, [.function, .numericPad]); fnSend(NSEndFunctionKey, kVK_End, [])
+    check("fn↑ and End with the panel not the key window step nothing", steps.isEmpty, "\(steps)")
     p.onStep = oldStep
     chat.open(); spin(0.3)
     // the field: ⌘ arrows are taken before it sees them, so the caret stays where it is; the same keys offered to the field itself
@@ -2205,15 +2201,18 @@ do {
             tv.keyDown(with: ev(U, 126, .command))
             let moved = tv.selectedRange().location
             tv.setSelectedRange(NSRange(location: 3, length: 0))
+            // the ⌥⌘ arrows are not the panel's any more: offered to it and sent through the window they step nothing
             let tookUp = p.performKeyEquivalent(with: ev(U, 126, ao))
-            check("field: ⌥⌘↑ is taken (thinking steps) and the caret stays at 3 (the field alone would have moved it to \(moved))",
-                  tookUp && got.count == 1 && tv.selectedRange() == NSRange(location: 3, length: 0) && moved != 3, "\(got) \(tv.selectedRange()) premise \(moved)")
-            got = []
-            tv.setSelectedRange(NSRange(location: 3, length: 0))
             let tookDown = p.performKeyEquivalent(with: ev(D, 125, ao))
             let tookLeft = p.performKeyEquivalent(with: ev(L, 123, ao)), tookRight = p.performKeyEquivalent(with: ev(R, 124, ao))
-            check("field: ⌥⌘↓, ⌥⌘← and ⌥⌘→ are taken and the caret stays at 3", tookDown && tookLeft && tookRight && got.count == 3
-                  && tv.selectedRange() == NSRange(location: 3, length: 0), "\(got) \(tv.selectedRange())")
+            for e in [ev(U, 126, ao), ev(D, 125, ao), ev(L, 123, ao), ev(R, 124, ao)] { p.sendEvent(e) }
+            check("field: ⌥⌘ arrows are not taken and step nothing (premise: a ⌘↑ moves the caret from 3 to \(moved))", !tookUp && !tookDown && !tookLeft && !tookRight && got.isEmpty && moved != 3, "\(got)")
+            // fn↑ fn→ through the window with the field focused: they step and the field does not see them (the caret stays at 3)
+            tv.setSelectedRange(NSRange(location: 3, length: 0))
+            fnSend(NSPageUpFunctionKey, kVK_PageUp, [.function, .numericPad]); fnSend(NSEndFunctionKey, kVK_End, [.function, .numericPad])
+            fnSend(NSHomeFunctionKey, kVK_Home, [])
+            check("field: fn↑, fn→ and Home step (thinking up, model up, model down) and the caret stays at 3 (End and Home alone would have moved it)",
+                  got.count == 3 && got[0] == (false, 1) && got[1] == (true, 1) && got[2] == (true, -1) && tv.selectedRange() == NSRange(location: 3, length: 0), "\(got) \(tv.selectedRange())")
             got = []
             // plain ⌘ arrows: not ours, so they reach the field and the caret jumps to the line's start and end, as in any Mac text field
             tv.setSelectedRange(NSRange(location: 3, length: 0))
@@ -2248,13 +2247,14 @@ do {
     }
     p.onStep = oldStep
     let arrowRows = QCKeysView.rows(opener: "⌃⇧Space").map { $0.0 + " " + $0.1 }
-    let order = ["⌥⌘↑", "⌥⌘→", "Click a label", "⌘1 – ⌘5", "⌃1 – ⌃6", "⌘J", "⇧⌘J", "⌘[", "fn↑", "fn→", "Return", "⇧Return", "⌘N", "⌘D", "⇧⌘C"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
-    check("the keys list: Model & window (⌥⌘ arrows, a label, sizes, places), then Move, then Write, in that order",
+    let order = ["fn↑", "fn→", "Click a label", "⌘1 – ⌘5", "⌃1 – ⌃6", "⌘J", "⇧⌘J", "⌘[", "⇧fn↑", "Return", "⇧Return", "⌘N", "⌘D", "⇧⌘C"].map { k in arrowRows.firstIndex { $0.hasPrefix(k) } }
+    check("the keys list: Model & window (fn arrows, a label, sizes, places), then Move, then Write, in that order",
           !order.contains(nil) && order.compactMap { $0 } == order.compactMap { $0 }.sorted()
-          && arrowRows.contains { $0.hasPrefix("⌥⌘↑  ⌥⌘↓ Thinking up, down") } && arrowRows.contains { $0.hasPrefix("⌥⌘→  ⌥⌘← Model up, down") }, arrowRows.joined(separator: "\n"))
-    check("the keys list names the Mac keys: fn↑  fn↓ (page up, page down) and fn→ (bottom, and follow), no Page Up, Page Down, End or Home",
-          arrowRows.contains("fn↑  fn↓ Page up, page down") && arrowRows.contains("fn→ Bottom, and follow")
-          && !arrowRows.contains { $0.contains("Page Up") || $0.contains("Page Down") || $0.hasPrefix("End") || $0.contains("Home") || $0.contains("fn←") }, arrowRows.joined(separator: "\n"))
+          && arrowRows.contains("fn↑  fn↓ Thinking up, down") && arrowRows.contains("fn→  fn← Model up, down"), arrowRows.joined(separator: "\n"))
+    check("the keys list's Move page: ⌘J jumps to the latest and follows, ⌘[ ⌘] and ⇧fn↑  ⇧fn↓ scroll the answers; no ⌥⌘, Page Up, Page Down, End or Home, no Bottom row",
+          arrowRows.contains("⌘J Jump to latest, and follow") && arrowRows.contains("⇧fn↑  ⇧fn↓ Scroll the answers") && arrowRows.contains("⌘[  ⌘] Previous, next message of mine")
+          && !arrowRows.contains { $0.contains("⌥⌘") || $0.contains("Page Up") || $0.contains("Page Down") || $0.hasPrefix("End") || $0.contains("Home") || $0.contains("Bottom") || $0.hasPrefix("fn↑  fn↓ Page") }, arrowRows.joined(separator: "\n"))
+    check("the controls' key hints are fn← fn→ (model) and fn↓ fn↑ (thinking)", QCStepKeys.model == "fn← fn→" && QCStepKeys.thinking == "fn↓ fn↑", "\(QCStepKeys.model) \(QCStepKeys.thinking)")
     check("the keys list has no plain ⌘ arrows, no ⌃⌘ or ⌃⌥ and no ⌘1 – ⌘4 presets",
           !arrowRows.contains { $0.hasPrefix("⌘↑") || $0.hasPrefix("⌘→") || $0.contains("⌃⌘") || $0.contains("⌃⌥") || $0.hasPrefix("⌘1  ⌘2") || $0.hasPrefix("⌘3  ⌘4") }, arrowRows.joined(separator: "\n"))
     check("the keys list ends with the opener it is given", arrowRows.contains { $0.hasPrefix("⌃⇧Space Open cl_quick") }, arrowRows.joined(separator: "\n"))
@@ -5043,7 +5043,7 @@ func chatKeyChecks() {
     _ = key("J", kVK_ANSI_J, [.command, .shift])
     check("keys: ⇧⌘J with the next answer peeking goes to the start of the one being read", near(sc.offset(), min(sc.maxOffset(), answerTops[1] - QCChatScroll.inset)), "offset \(sc.offset()) want \(answerTops[1] - QCChatScroll.inset)")
     sc.jumpToLatest(); settle()
-    // Page Up, Page Down and End, with the field focused
+    // ⇧fn↑ and ⇧fn↓ (⇧Page Up, ⇧Page Down) scroll the answers a page; fn↑ fn↓ fn→ fn← step thinking and the model; with the field focused
     sc.jumpToLatest(); settle()
     let h = clip.bounds.height
     // (through the REAL event path: NSWindow.sendEvent, where the panel reads these keys before the field sees them; the bare keys
@@ -5053,37 +5053,55 @@ func chatKeyChecks() {
                                        characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: UInt16(code)) else { return }
         p.sendEvent(e)
     }
-    check("keys: Page Up (sent through the window, the field focused) scrolls the answers by about a page and stops following",
-          { send(fn(NSPageUpFunctionKey), kVK_PageUp); return near(sc.maxOffset() - sc.offset(), h - 40) && !sc.following }(), "\(sc.maxOffset() - sc.offset()) vs \(h - 40)")
-    fieldUntouched("Page Up")
+    var steps: [(Bool, Int)] = []
+    let oldStep = p.onStep
+    p.onStep = { steps.append(($0, $1)) }
+    func stepped(_ want: [(Bool, Int)]) -> Bool { steps.count == want.count && zip(steps, want).allSatisfy { $0 == $1 } }
+    let fnFlags: NSEvent.ModifierFlags = [.function, .numericPad]
+    // a Mac laptop's fn arrows are the Page Up, Page Down, End and Home key codes with the function flag (an arrow's numeric-pad flag
+    // comes with it); the dedicated keys have neither flag. Both are the same key.
+    for (label, flags) in [("fn", fnFlags), ("dedicated", [])] as [(String, NSEvent.ModifierFlags)] {
+        sc.jumpToLatest(); settle(); steps = []
+        let off = sc.offset()
+        send(fn(NSPageUpFunctionKey), kVK_PageUp, flags); send(fn(NSPageDownFunctionKey), kVK_PageDown, flags)
+        send(fn(NSEndFunctionKey), kVK_End, flags); send(fn(NSHomeFunctionKey), kVK_Home, flags)
+        check("keys: \(label)↑, \(label)↓, \(label)→ and \(label)← step thinking up, down and the model up, down, and nothing else",
+              stepped([(false, 1), (false, -1), (true, 1), (true, -1)]), "\(steps)")
+        check("keys: \(label) arrows do not scroll the answers or touch the field, and following goes on", sc.offset() == off && sc.following, "\(off) -> \(sc.offset())")
+        fieldUntouched("\(label) arrows")
+        // with the answers scrolled up: still no scroll, and following is not touched (they were not following)
+        user(scrollTo: 50); settle(); steps = []
+        let upOff = sc.offset(), wasFollowing = sc.following
+        send(fn(NSPageUpFunctionKey), kVK_PageUp, flags); send(fn(NSEndFunctionKey), kVK_End, flags)
+        check("keys: \(label)↑ and \(label)→ with the answers scrolled up do not scroll them (End is no jump to the bottom any more)", sc.offset() == upOff && sc.following == wasFollowing && stepped([(false, 1), (true, 1)]), "\(upOff) -> \(sc.offset()) \(steps)")
+    }
+    // ⇧fn↑ ⇧fn↓: the answers a page up, down (stop following; the bottom resumes it), the same without the function flags
+    sc.jumpToLatest(); settle(); steps = []
+    let shiftFn: NSEvent.ModifierFlags = [.shift, .function, .numericPad]
+    check("keys: ⇧fn↑ (sent through the window, the field focused) scrolls the answers by about a page and stops following, stepping nothing",
+          { send(fn(NSPageUpFunctionKey), kVK_PageUp, shiftFn); return near(sc.maxOffset() - sc.offset(), h - 40) && !sc.following && steps.isEmpty }(), "\(sc.maxOffset() - sc.offset()) vs \(h - 40) \(steps)")
+    fieldUntouched("⇧fn↑")
     let up1 = sc.offset()
-    send(fn(NSPageUpFunctionKey), kVK_PageUp)
-    check("keys: Page Up again goes another page up", near(up1 - sc.offset(), h - 40) || sc.offset() == 0, "\(up1) -> \(sc.offset())")
-    send(fn(NSPageDownFunctionKey), kVK_PageDown)
-    check("keys: Page Down goes a page down, still not following", near(sc.offset(), up1) && !sc.following, "\(sc.offset()) vs \(up1)")
-    fieldUntouched("Page Down")
-    // a Mac laptop's fn↑, fn↓ and fn→: the Page Up, Page Down and End key codes with the function flag (an arrow's numeric-pad flag may come with it)
-    let beforeFn = sc.offset()
-    send(fn(NSPageUpFunctionKey), kVK_PageUp, [.function, .numericPad])
-    check("keys: fn↑ (Page Up with the function and numeric-pad flags) scrolls the answers up a page", beforeFn - sc.offset() > h / 2 || sc.offset() == 0, "\(beforeFn) -> \(sc.offset())")
-    send(fn(NSPageDownFunctionKey), kVK_PageDown, [.function, .numericPad])
-    check("keys: fn↓ goes back down a page", near(sc.offset(), beforeFn), "\(sc.offset()) vs \(beforeFn)")
-    let beforeHome = sc.offset()
-    send(fn(NSHomeFunctionKey), kVK_Home, [.function, .numericPad])
-    check("keys: fn← (Home) is not the chat's: the answers do not scroll", sc.offset() == beforeHome, "\(beforeHome) -> \(sc.offset())")
-    tv.setSelectedRange(NSRange(location: 5, length: 0))          // Home was the field's: its caret moved
-    send(fn(NSEndFunctionKey), kVK_End)
-    check("keys: End goes to the bottom and resumes following", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset())")
-    fieldUntouched("End")
+    send(fn(NSPageUpFunctionKey), kVK_PageUp, [.shift])
+    check("keys: ⇧Page Up (the dedicated key, no function flags) goes another page up", near(up1 - sc.offset(), h - 40) || sc.offset() == 0, "\(up1) -> \(sc.offset())")
+    send(fn(NSPageDownFunctionKey), kVK_PageDown, shiftFn)
+    check("keys: ⇧fn↓ goes a page down, still not following", near(sc.offset(), up1) && !sc.following && steps.isEmpty, "\(sc.offset()) vs \(up1) \(steps)")
+    fieldUntouched("⇧fn↓")
     user(scrollTo: sc.maxOffset() - (h - 40) + 15); settle()
-    send(fn(NSPageDownFunctionKey), kVK_PageDown)
-    check("keys: Page Down that reaches the bottom resumes following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
-    // an input method composing in the field (marked text) keeps these keys: nothing scrolls
-    sc.jumpToLatest(); settle()
+    send(fn(NSPageDownFunctionKey), kVK_PageDown, [.shift])
+    check("keys: ⇧Page Down that reaches the bottom resumes following", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    // ⇧End and ⇧Home are not ours: they step nothing and scroll nothing (they reach the field)
+    steps = []
+    let offShift = sc.offset()
+    send(fn(NSEndFunctionKey), kVK_End, shiftFn); send(fn(NSHomeFunctionKey), kVK_Home, shiftFn)
+    check("keys: ⇧fn→ and ⇧fn← (⇧End, ⇧Home) are not the chat's", steps.isEmpty && sc.offset() == offShift, "\(steps) \(offShift) -> \(sc.offset())")
+    tv.setSelectedRange(NSRange(location: 5, length: 0))          // ⇧Home and ⇧End were the field's: its selection moved
+    // an input method composing in the field (marked text) keeps these keys: nothing scrolls or steps
+    sc.jumpToLatest(); settle(); steps = []
     tv.setMarkedText("ab", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
     let composing = sc.offset()
-    send(fn(NSPageUpFunctionKey), kVK_PageUp)
-    check("keys: Page Up while the field has marked text is the input method's: the answers do not scroll", tv.hasMarkedText() && sc.offset() == composing && sc.following, "offset \(composing) -> \(sc.offset())")
+    send(fn(NSPageUpFunctionKey), kVK_PageUp, shiftFn); send(fn(NSPageUpFunctionKey), kVK_PageUp, fnFlags); send(fn(NSEndFunctionKey), kVK_End, fnFlags)
+    check("keys: ⇧fn↑, fn↑ and fn→ while the field has marked text are the input method's: nothing scrolls or steps", tv.hasMarkedText() && sc.offset() == composing && sc.following && steps.isEmpty, "offset \(composing) -> \(sc.offset()) \(steps)")
     tv.unmarkText(); tv.setSelectedRange(NSRange(location: 5, length: 0)); m.field = "hello world"; spin(0.1)
     tv.setSelectedRange(NSRange(location: 5, length: 0))
     // plain arrows stay the field's: they reach it (the caret moves) and the answers do not scroll
@@ -5091,8 +5109,8 @@ func chatKeyChecks() {
     check("keys: ← reaches the field (the caret moves) and the answers do not scroll", tv.selectedRange().location == 4 && sc.offset() == composing, "\(tv.selectedRange()) \(sc.offset())")
     send(fn(NSRightArrowFunctionKey), kVK_RightArrow)
     check("keys: → reaches the field too", tv.selectedRange().location == 5)
-    check("keys: plain arrows, fn-arrows, Home and Delete are not taken by the key equivalents", !key(fn(NSLeftArrowFunctionKey), kVK_LeftArrow, [.function]) && !key(fn(NSUpArrowFunctionKey), kVK_UpArrow, [.function])
-          && !key(fn(NSHomeFunctionKey), kVK_Home, [.function]) && !key(fn(NSDownArrowFunctionKey), kVK_DownArrow, [.function]))
+    check("keys: plain arrows, fn-arrows, Home and Delete are not taken by the key equivalents and step nothing", !key(fn(NSLeftArrowFunctionKey), kVK_LeftArrow, [.function]) && !key(fn(NSUpArrowFunctionKey), kVK_UpArrow, [.function])
+          && !key(fn(NSHomeFunctionKey), kVK_Home, [.function]) && !key(fn(NSDownArrowFunctionKey), kVK_DownArrow, [.function]) && steps.isEmpty, "\(steps)")
     // exact modifiers
     let off0 = sc.offset()
     let loose = [key("j", kVK_ANSI_J, [.command, .option]), key("j", kVK_ANSI_J, [.command, .control]), key("j", kVK_ANSI_J, []),
@@ -5100,17 +5118,34 @@ func chatKeyChecks() {
     check("keys: other modifier mixes are not taken and move nothing", loose.allSatisfy { !$0 } && sc.offset() == off0, "\(loose)")
     sc.jumpToLatest(); settle()
     let atEndNow = sc.offset()
-    send(fn(NSPageUpFunctionKey), kVK_PageUp, [.function, .shift]); send(fn(NSPageUpFunctionKey), kVK_PageUp, [.function, .option])
-    send(fn(NSEndFunctionKey), kVK_End, [.function, .command])
-    check("keys: Page Up and End with ⇧, ⌥ or ⌘ are not the chat's (they go to the field)", sc.offset() == atEndNow && sc.following, "offset \(atEndNow) -> \(sc.offset())")
+    steps = []
+    // every other modifier combination of the four keys is not the chat's: nothing steps, nothing scrolls (they go to the field)
+    for f in [NSEvent.ModifierFlags.command, .option, .control, [.shift, .option], [.shift, .control], [.shift, .command], [.command, .option], [.command, .option, .shift]] {
+        for (k, c) in [(NSPageUpFunctionKey, kVK_PageUp), (NSPageDownFunctionKey, kVK_PageDown), (NSEndFunctionKey, kVK_End), (NSHomeFunctionKey, kVK_Home)] {
+            send(fn(k), c, f.union(fnFlags)); send(fn(k), c, f)
+        }
+    }
+    check("keys: Page Up, Page Down, End and Home with ⌘, ⌥, ⌃, ⇧⌥, ⇧⌃, ⇧⌘, ⌥⌘ or ⌥⌘⇧ are not the chat's", sc.offset() == atEndNow && sc.following && steps.isEmpty, "offset \(atEndNow) -> \(sc.offset()) \(steps)")
     tv.setSelectedRange(NSRange(location: 5, length: 0)); m.field = "hello world"; spin(0.1)
     tv.setSelectedRange(NSRange(location: 5, length: 0))
-    // no clash with the ⌥⌘ arrows, the Edit keys and ⇧⌘ arrows
-    var steps: [(Bool, Int)] = []
-    let oldStep = p.onStep
-    p.onStep = { steps.append(($0, $1)) }
-    check("keys: ⌥⌘ arrows still step the model and thinking", key(fn(NSUpArrowFunctionKey), kVK_UpArrow, [.command, .option, .function]) && key(fn(NSRightArrowFunctionKey), kVK_RightArrow, [.command, .option, .function]) && steps.count == 2, "\(steps)")
+    // the ⌥⌘ arrows are gone: not taken as key equivalents, nothing steps, whether sent as key equivalents or through the window
+    check("keys: ⌥⌘ arrows are not taken by the panel and step nothing", !key(fn(NSUpArrowFunctionKey), kVK_UpArrow, [.command, .option, .function]) && !key(fn(NSRightArrowFunctionKey), kVK_RightArrow, [.command, .option, .function])
+          && !key(fn(NSDownArrowFunctionKey), kVK_DownArrow, [.command, .option]) && !key(fn(NSLeftArrowFunctionKey), kVK_LeftArrow, [.command, .option]) && steps.isEmpty, "\(steps)")
+    for (k, c) in [(NSUpArrowFunctionKey, kVK_UpArrow), (NSDownArrowFunctionKey, kVK_DownArrow), (NSLeftArrowFunctionKey, kVK_LeftArrow), (NSRightArrowFunctionKey, kVK_RightArrow)] {
+        send(fn(k), c, [.command, .option, .function, .numericPad])
+    }
+    check("keys: ⌥⌘ arrows sent through the window step nothing and scroll nothing", steps.isEmpty && sc.offset() == atEndNow, "\(steps)")
+    tv.setSelectedRange(NSRange(location: 5, length: 0)); m.field = "hello world"; spin(0.1)
+    tv.setSelectedRange(NSRange(location: 5, length: 0))
+    // the panel not the key window: an fn arrow typed elsewhere is not the chat's (below, with the panel hidden)
     p.onStep = oldStep
+    // a pure check of the key table
+    check("keys: chatKey names exactly the six keys",
+          QuickChatPanel.chatKey(keyCode: kVK_PageUp, flags: []) == .step(model: false, by: 1) && QuickChatPanel.chatKey(keyCode: kVK_PageDown, flags: fnFlags) == .step(model: false, by: -1)
+          && QuickChatPanel.chatKey(keyCode: kVK_End, flags: fnFlags) == .step(model: true, by: 1) && QuickChatPanel.chatKey(keyCode: kVK_Home, flags: []) == .step(model: true, by: -1)
+          && QuickChatPanel.chatKey(keyCode: kVK_PageUp, flags: .shift) == .scroll(.pageUp) && QuickChatPanel.chatKey(keyCode: kVK_PageDown, flags: [.shift, .function]) == .scroll(.pageDown)
+          && QuickChatPanel.chatKey(keyCode: kVK_End, flags: .shift) == nil && QuickChatPanel.chatKey(keyCode: kVK_Home, flags: .shift) == nil
+          && QuickChatPanel.chatKey(keyCode: kVK_PageUp, flags: .command) == nil && QuickChatPanel.chatKey(keyCode: kVK_UpArrow, flags: .function) == nil)
     tv.setSelectedRange(NSRange(location: 0, length: 5))
     check("keys: ⌘A, ⌘C and ⌘Z still go to the field (taken as Edit keys, the answers not scrolled)", key("a", kVK_ANSI_A, cmd) && sc.offset() == off0)
     tv.setSelectedRange(NSRange(location: 5, length: 0))
@@ -5125,12 +5160,17 @@ func chatKeyChecks() {
     let notKey = [key("j", kVK_ANSI_J, cmd), key("J", kVK_ANSI_J, [.command, .shift]), key("[", kVK_ANSI_LeftBracket, cmd), key("]", kVK_ANSI_RightBracket, cmd),
                   key("х", kVK_ANSI_LeftBracket, cmd)]
     check("keys: with the panel not the key window ⌘J, ⇧⌘J, ⌘[ and ⌘] are not taken and move nothing", !p.isKeyWindow && notKey.allSatisfy { !$0 } && sc.offset() == keyOff, "\(notKey) \(sc.offset()) vs \(keyOff)")
+    var hiddenSteps: [(Bool, Int)] = []
+    p.onStep = { hiddenSteps.append(($0, $1)) }
+    send(fn(NSPageUpFunctionKey), kVK_PageUp, fnFlags); send(fn(NSEndFunctionKey), kVK_End, fnFlags); send(fn(NSPageUpFunctionKey), kVK_PageUp, shiftFn)
+    p.onStep = oldStep
+    check("keys: with the panel not the key window fn↑, fn→ and ⇧fn↑ step and scroll nothing", hiddenSteps.isEmpty && sc.offset() == keyOff, "\(hiddenSteps) \(sc.offset()) vs \(keyOff)")
     chat.open(); spin(0.4)
     check("keys: and with the panel key again they work", key("[", kVK_ANSI_LeftBracket, cmd) && sc.offset() != keyOff)
     // with no chat (the bar) the navigation keys are not taken
     m.newChat(); spin(0.3)
-    check("keys: in the bar (no chat) ⌘J, ⌘[, ⌘], Page Up and End are not taken", !key("j", kVK_ANSI_J, cmd) && !key("[", kVK_ANSI_LeftBracket, cmd) && !key("]", kVK_ANSI_RightBracket, cmd)
-          && !p.onNavigate(.pageUp) && !p.onNavigate(.pageDown) && !p.onNavigate(.end))
+    check("keys: in the bar (no chat) ⌘J, ⌘[, ⌘], ⇧Page Up and ⇧Page Down are not taken", !key("j", kVK_ANSI_J, cmd) && !key("[", kVK_ANSI_LeftBracket, cmd) && !key("]", kVK_ANSI_RightBracket, cmd)
+          && !p.onNavigate(.pageUp) && !p.onNavigate(.pageDown))
     chat.hide(); spin(0.2)
 }
 chatKeyChecks()
