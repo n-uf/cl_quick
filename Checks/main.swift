@@ -186,7 +186,7 @@ check("incognito with thinking too", a2.contains("--no-session-persistence") && 
 // web links and search. Off (the default of the struct, and what the usage-only `claude` of the menu runs): exactly the
 // arguments there were before the setting existed. On: the two web tools, allowed up front, and nothing else changes.
 // (the prompt as it was before the setting existed plus the Preview sentences, pinned as written: not derived from the code under test)
-let oldPrompt = "You are Claude, answering in a small floating chat window on the user's Mac. Answer directly and briefly unless asked for more. Use Markdown; put code in fenced blocks with the language named. A fenced `html` block gets a Preview button that shows it as a page. Make it self-contained: inline CSS and SVG only, no scripts, and no external images, fonts or links (nothing loads from outside, and links do nothing). Use it when a visual layout helps or the user asks; otherwise answer in Markdown. You have no tools here."
+let oldPrompt = "You are Claude, answering in a small floating chat window on the user's Mac. Answer directly and briefly unless asked for more. Use Markdown; put code in fenced blocks with the language named. A fenced `html` block shows as a rendered page in the chat by default, with a switch to its code and a Preview button that opens it in a window; write the fence as ```html code when the HTML is a snippet to paste into a file rather than something to look at. Make it self-contained: inline CSS and SVG only, no scripts, and no external images, fonts or links (nothing loads from outside, and links do nothing). Use it when a visual layout helps or the user asks; otherwise answer in Markdown. You have no tools here."
 check("web off: the prompt is the old one plus the Preview sentences, word for word", QuickChatCommand.systemPrompt == oldPrompt, QuickChatCommand.systemPrompt)
 let offArguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                     "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
@@ -215,7 +215,9 @@ check("both prompts share the same start", QuickChatCommand.webSystemPrompt.hasP
       && QuickChatCommand.systemPrompt.hasPrefix("You are Claude, answering in a small floating chat window"))
 // the HTML Preview: both prompts tell Claude what a fenced `html` block gets and how to write it
 for (name, p) in [("plain", QuickChatCommand.systemPrompt), ("web", QuickChatCommand.webSystemPrompt)] {
-    check("\(name) prompt: a fenced `html` block gets a Preview button", p.contains("fenced `html` block") && p.contains("Preview button"), p)
+    check("\(name) prompt: a fenced `html` block shows as a page in the chat by default, and has a Preview button",
+          p.contains("fenced `html` block shows as a rendered page in the chat by default") && p.contains("Preview button"), p)
+    check("\(name) prompt: ```html code is for a snippet to paste into a file", p.contains("write the fence as ```html code when the HTML is a snippet to paste into a file"), p)
     check("\(name) prompt: self-contained, inline CSS and SVG, no scripts, nothing external",
           p.contains("self-contained") && p.contains("inline CSS and SVG only") && p.contains("no scripts") && p.contains("external images, fonts or links"), p)
     check("\(name) prompt: HTML when a visual helps or is asked for, otherwise Markdown",
