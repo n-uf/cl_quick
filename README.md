@@ -150,6 +150,16 @@ minutes for a profile.
 ## The chat
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
+- **Find in chat (⌘F).** ⌘F opens a find bar over the top of the answers, under the header (it never changes the window's
+  size): a search field, "n of m", ▲ ▼ and ✕. It works wherever the keyboard is in the panel (the field, an answer, a page
+  in an answer), once the chat has a message. Typing searches all of the open chat's messages and answers, live, ignoring
+  case and accents; every match is highlighted in place (a soft background, the current one stronger) and the view scrolls
+  to the current one at once, when it is not in view already (like any scroll up it stops following the end). Return or
+  ⌘G is the next match, ⇧Return or ⇧⌘G the previous (wrapping round); the first Esc closes the bar and clears the
+  highlights, the second hides the panel. Code blocks and table cells are searched too. Not searched: the thinking text,
+  the notices and footers, and the code of an html block while its page shows; a block that scrolls sideways is
+  brought into view up and down only. The bar's text is memory only: it goes with the bar (a new chat or hiding the
+  panel close it), nothing about it is written to disk.
 - **Moving in a chat.** The chat follows the end of an answer as it streams only while you are at the bottom (within a few
   points) when new text arrives. Scroll up by any means (wheel, trackpad, scroller, ⇧fn↑, selecting text) and new text
   never moves the view; get back to the bottom (by hand, ⌘J or the ↓ button) or send a message and it follows again.
@@ -219,7 +229,8 @@ minutes for a profile.
     window · Move · Write; click a tab to turn the page; the last page is remembered while cl_quick runs). The pointer is a
     hand over the tabs and an arrow elsewhere on the list, and the text cursor is back once it leaves the list:
     - **Model & window:** fn↑ fn↓ (thinking), fn→ fn← (model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
-    - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above).
+    - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above), ⌘F
+      (find in chat) and ⌘G ⇧⌘G (next, previous match).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, the shortcut
       that opens cl_quick, ↑ in an empty field (your earlier messages) and ⌥⇧⌘C (copy the chat as Markdown).
 

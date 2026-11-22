@@ -235,6 +235,8 @@ final class QuickChatModel: ObservableObject {
             if let r = QCSpeech.shared.reading, !turns.contains(where: { $0.id == r && ($0.phase == .done || $0.phase == .stopped) }) { QCSpeech.shared.stop() }
             // (a token only changes the last turn's text: its id is still last, and nothing more is looked at)
             if let old = oldValue.last?.id, turns.last?.id != old, !turns.contains(where: { $0.id == old }) { QCInlinePages.shared.forgetAll() }
+            // find in chat follows the text (a chat with no message has none to search: its bar goes); the selection's bar goes
+            if turns.isEmpty { find.close() } else { find.turnsChanged() }
         }
     }
     @Published var field = "" {
@@ -284,6 +286,8 @@ final class QuickChatModel: ObservableObject {
     @Published var followTick = 0
     /// How the chat window scrolls: whether it follows, and the buttons that scroll it.
     let scroll = QCChatScroll()
+    /// ⌘F: find in the open chat (ChatFind.swift). Memory only.
+    let find = QCFindState()
     /// The profile's week, as Claude Code last reported it (Level.swift).
     @Published var level: QuickChatLevel?
     /// While a limit is full: the profile with the most room, for Ask on ….
@@ -1422,6 +1426,8 @@ final class QuickChat {
         AddressPrivacy.shared.apply(settings)
         model.resolveClaude = { [weak self] done in self?.resolveClaude(done) ?? done(nil) }
         model.hide = { [weak self] in self?.hide() }
+        model.find.turns = { [weak self] in self?.model.turns ?? [] }
+        model.find.onClosed = { [weak self] in self?.panel?.focusField() }
         model.escape = { [weak self] in self?.escape() }
         model.dictate = { [weak self] on in self?.dictate(on) }
         dictationWatch.onExit = { [weak self] in self?.dictationExited() }
@@ -1632,6 +1638,7 @@ final class QuickChat {
 
     func hide() {
         model.cancelSendWhenReady()
+        model.find.close()                      // the find bar and its text go with the panel (memory only)
         if model.dictating || model.dictationNoticed { dictate(false) }     // Dictation doesn't go on into a hidden field
         panel?.orderOut(nil)
         QCInlinePages.shared.update()           // no page is in view now: the live one is photographed and let go
@@ -1695,8 +1702,17 @@ final class QuickChat {
         guard model.dictating, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
         model.dictating = false
     }
-    /// Esc: the keys list closes if it is open, else the panel hides.
-    func escape() { if QCKeys.shared.shown { QCKeys.shared.close() } else { hide() } }
+    /// Esc: the keys list closes if it is open; else the find bar (and its highlights); else the panel hides.
+    func escape() {
+        if QCKeys.shared.shown { QCKeys.shared.close() } else if !closeTopLayer() { hide() }
+    }
+
+    /// The find bar goes (true); false when it is not open. The keys list is the panel's own to close.
+    @discardableResult
+    func closeTopLayer() -> Bool {
+        if model.find.isOpen { model.find.close(); return true }
+        return false
+    }
 
     func shutdown() { hotKey.unregister(); model.shutdown() }
 
@@ -1715,6 +1731,22 @@ final class QuickChat {
             return m.scroll.perform(nav, turns: m.turns.count)
         }
         p.onDictate = { [weak self] in self?.model.toggleDictation() }
+        // ⌘F opens find in chat (only with a chat to search); ⌘G ⇧⌘G step through the matches while the bar is open
+        p.onFind = { [weak self] in
+            guard let m = self?.model, m.isWindow else { return false }
+            m.find.open()
+            return true
+        }
+        p.onFindStep = { [weak self] by in
+            guard let f = self?.model.find, f.isOpen else { return false }
+            f.step(by)
+            return true
+        }
+        p.onLayerEscape = { [weak self] in
+            // Esc closes the keys list first (QuickChat.escape does), then the find bar
+            guard QCKeys.shared.shown == false else { return false }
+            return self?.closeTopLayer() ?? false
+        }
         p.onKeyLost = { [weak self] in self?.keyLost() }
         p.onStep = { [weak self] model, by in
             guard let m = self?.model else { return }
@@ -1965,6 +1997,13 @@ final class QuickChatPanel: NSPanel {
     var onDictate: () -> Void = {}
     /// Moving in the chat (QCNav): true when the key was taken (the chat window has answers to move in).
     var onNavigate: (QCNav) -> Bool = { _ in false }
+    /// ⌘F: opens find in chat; true when taken (the window has a chat to search). Else the key is left alone.
+    var onFind: () -> Bool = { false }
+    /// ⌘G (1) and ⇧⌘G (-1): the next and previous match while the find bar is open; true when taken.
+    var onFindStep: (Int) -> Bool = { _ in false }
+    /// Esc: closes the find bar when it is open (true); else the key goes on its way (the field's, a page's, the panel's own
+    /// hide). Read in sendEvent, so it works wherever the keyboard is.
+    var onLayerEscape: () -> Bool = { false }
     /// fn arrows (QuickChatPanel.chatKey): the model (true) or thinking (false) a step up (1) or down (-1).
     var onStep: (Bool, Int) -> Void = { _, _ in }
     /// The digit keys (QCDigitKeys): ⌘ digits the size, ⌃ digits the place on the screen.
@@ -2002,7 +2041,7 @@ final class QuickChatPanel: NSPanel {
         guard let c = e.charactersIgnoringModifiers?.lowercased(), !c.isEmpty else { return nil }
         if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.isASCII { return c }
         let place: [Int: String] = [kVK_ANSI_A: "a", kVK_ANSI_C: "c", kVK_ANSI_V: "v", kVK_ANSI_X: "x", kVK_ANSI_Z: "z",
-                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w", kVK_ANSI_D: "d", kVK_ANSI_J: "j"]
+                                    kVK_ANSI_N: "n", kVK_ANSI_W: "w", kVK_ANSI_D: "d", kVK_ANSI_J: "j", kVK_ANSI_F: "f", kVK_ANSI_G: "g"]
         // (not the bracket keys: Ukrainian has ї and ґ on them, which stay their letters; ⌘[ and ⌘] are the US keys')
         // only a letter of another script falls back to the key's place: a digit, a symbol or a dead key stays as it is
         if c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.properties.isAlphabetic, let l = place[Int(e.keyCode)] { return l }
@@ -2052,6 +2091,9 @@ final class QuickChatPanel: NSPanel {
         // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view; ⌘[ ⌘] are above, by key code): taken only
         // when the chat window has something to scroll, and never a text edit, so the field keeps its keys
         case "j" where isKeyWindow: if onNavigate(shift ? .answerStart : .latest) { return true }
+        // find in chat: ⌘F opens it (the field, an answer and a page all send it here first), ⌘G and ⇧⌘G step through the matches
+        case "f" where isKeyWindow && !shift: if onFind() { return true }
+        case "g" where isKeyWindow: if onFindStep(shift ? -1 : 1) { return true }
         case "n" where !shift: onNewChat(); return true
         case "w" where !shift: onClose(); return true
         default: break
@@ -2133,6 +2175,11 @@ final class QuickChatPanel: NSPanel {
             case .scroll(let nav): if onNavigate(nav) { return }
             }
         }
+        // Esc (no modifier) closes the find bar before it goes anywhere (the field's Esc, a page's):
+        // so the first Esc closes the bar and the second hides the panel. Not while the field is composing.
+        if event.type == .keyDown, isKeyWindow, Int(event.keyCode) == kVK_Escape,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask).intersection([.command, .option, .control, .shift]).isEmpty,
+           (firstResponder as? NSTextView)?.hasMarkedText() != true, onLayerEscape() { return }
         if event.type == .flagsChanged, !event.modifierFlags.contains(.capsLock) {
             for w in childWindows ?? [] where String(describing: type(of: w)).hasPrefix("TUI") && w.alphaValue == 0 {
                 w.alphaValue = 1

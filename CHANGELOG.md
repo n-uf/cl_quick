@@ -20,7 +20,16 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   the field. Edit the recalled text and ↑ ↓ are normal caret keys again, as they are with text typed or an input
   method composing. Only the open chat's messages, from memory, and only their text (attachments are not recalled); a
   new chat starts empty. The keys list's Write page has it.
-- **An html block shows its page in place.** A finished ```` ```html ```` block in an answer now shows the page it
+- **Find in chat (⌘F).** ⌘F opens a small find bar over the top of the answers, under the header (the window keeps its
+  size): a search field, "n of m", ▲ ▼ and ✕. It works wherever the keyboard is in the panel (the field, an answer, a
+  page in an answer). Typing searches every message of yours and every answer of the open chat, live and ignoring case
+  and accents; each match is highlighted in place with a soft background and the current one stronger, and the view
+  scrolls to the current one at once (only when it is not in view already; the view stops following the end, like any
+  scroll up). Return or ⌘G is the next match, ⇧Return or ⇧⌘G the previous, wrapping round; Esc closes the bar first
+  (and clears the highlights), a second Esc hides the panel. Matches inside code blocks and table cells count. Not
+  searched: the thinking text a click opens, the notices and footers, and the code of an html block while its page shows;
+  a code block or table that scrolls sideways is brought into view up and down only. The bar's text lives in memory only
+  and goes with the bar (also on a new chat and when the panel hides). The keys list's Move page names ⌘F and ⌘G ⇧⌘G.- **An html block shows its page in place.** A finished ```` ```html ```` block in an answer now shows the page it
   draws right inside the block, by default. Its header has a small **Code | Page** switch, **⤢** (opens the page in the
   separate window, as Preview did) and Copy, which copies the code on either side. A block the model fences as
   ```` ```html code ```` (a snippet meant for pasting) starts as code. A block draws only once it is complete, never

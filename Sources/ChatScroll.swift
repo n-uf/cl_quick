@@ -338,6 +338,18 @@ final class QCChatScroll: ObservableObject {
     /// The top of an answer's first line, the same way.
     func top(ofAnswer id: UUID) -> CGFloat? { attached(answers[id]?.view).map(top(of:)) }
 
+    /// Find: a line of a text (`line` of `lines`, the text drawn in `v`'s frame) is brought into view. When it is in view already
+    /// (clear of the find bar's `cover` at the top) nothing moves; else it lands about a third of the way down, at once, and the
+    /// view stops following the end, like any scroll up.
+    func reveal(_ v: NSView, line: Int, lines: Int, cover: CGFloat) {
+        guard let g = geometry, let a = attached(v), lines > 0 else { return }
+        let lh = a.bounds.height / CGFloat(lines)
+        let y0 = top(of: a) + CGFloat(line) * lh, y1 = y0 + lh
+        let o = offset(), view = g.clip.bounds.height
+        if y0 >= o + cover, y1 <= o + view - Self.inset { return }
+        go(to: y0 - view * 0.3, follow: false)
+    }
+
     // MARK: Messages of the user's
 
     /// Where each message would put the view (near its top, cut to what can be scrolled to), in the order they stand.

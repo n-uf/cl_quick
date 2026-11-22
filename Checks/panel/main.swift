@@ -5319,6 +5319,107 @@ recallChecks()
 chatCopyChecks()
 readAloudChecks()
 
+// ── find in chat (⌘F, ChatFind.swift): the matches, the bar's state, the keys, Esc, the highlights, scrolling to a match ───────
+func findChecks() {
+    typealias E = QCFindEngine
+    // the engine: case and accents don't matter, matches run left to right and never overlap, a blank query finds nothing
+    let hits = E.hits("the", in: "The theme, THE end")
+    check("find: matches are case-insensitive, left to right, 3 letters each", hits.map(\.start) == [0, 4, 11] && hits.allSatisfy { $0.length == 3 }, "\(hits)")
+    check("find: accents don't matter (cafe finds Café)", E.hits("cafe", in: "Café cafe").map(\.start) == [0, 5], "\(E.hits("cafe", in: "Café cafe"))")
+    check("find: a blank query and an empty text find nothing", E.hits("  ", in: "a b").isEmpty && E.hits("x", in: "").isEmpty)
+    check("find: matches do not overlap (aa in aaaa is two)", E.hits("aa", in: "aaaa").map(\.start) == [0, 2])
+    // the segments: the message, then the answer's blocks (a paragraph without its marks, the list's items, the code, a table's cells)
+    let md = "Use **bold** like this.\n\n- one\n- two bold\n\n```swift\nlet bold = 1\n```\n\n| A | B |\n|---|---|\n| bold | x |"
+    let segs = E.segments(question: "Tell me about bold", answer: md)
+    check("find: the segments are named by block and sub, in reading order (message -1; list items; code; header cells, then rows)",
+          segs.map { "\($0.key.block).\($0.key.sub)" } == ["-1.0", "0.0", "1.0", "1.1", "2.0", "3.0", "3.1", "3.2", "3.3"], "\(segs.map { "\($0.key.block).\($0.key.sub)" })")
+    check("find: a paragraph is searched as it is drawn, without its Markdown marks", segs.count > 1 && segs[1].text == "Use bold like this.", "\(segs.map(\.text))")
+    // the state
+    var turns = [QuickChatTurn(question: "Tell me about bold", answer: md, model: "Haiku 5.5")]
+    let f = QCFindState()
+    f.turns = { turns }
+    check("find: closed, it has no matches and says nothing", !f.isOpen && f.matches.isEmpty && f.count.isEmpty)
+    f.open()
+    f.query = "bold"
+    check("find: five matches (message, paragraph, list item, code, table cell), the first current", f.matches.count == 5 && f.current == 0 && f.count == "1 of 5", "\(f.matches.count) \(f.count)")
+    let id = turns[0].id
+    let current = f.marks[id]?.ranges.values.flatMap { $0 }.filter(\.current).count
+    check("find: exactly one match is the current one, and its segment is told to reveal it", current == 1 && f.marks[id]?.reveal(-1, 0) != nil && f.marks[id]?.reveal(0, 0) == nil, "\(String(describing: f.marks[id]))")
+    let t0 = f.marks[id]?.reveal?.token ?? 0
+    f.step(1)
+    check("find: ⌘G steps on, and reveals again", f.count == "2 of 5" && f.marks[id]?.reveal(0, 0) != nil && (f.marks[id]?.reveal?.token ?? 0) > t0, f.count)
+    f.step(-1); f.step(-1)
+    check("find: ⇧⌘G wraps round to the last match", f.count == "5 of 5", f.count)
+    turns[0].answer += "\n\nbold again"; f.turnsChanged()
+    check("find: a streaming answer's new matches count, the current one stays", f.matches.count == 6 && f.current == 4, "\(f.matches.count) \(f.current)")
+    f.query = "zzz"
+    check("find: no match says so, and highlights nothing", f.count == "No matches" && f.marks.isEmpty)
+    f.close()
+    check("find: closing clears the text, the matches and the highlights", !f.isOpen && f.query.isEmpty && f.matches.isEmpty && f.marks.isEmpty && f.count.isEmpty)
+    // the highlights: a soft background on each match, the current one stronger
+    var mk = QCFindMarks()
+    mk.ranges[QCSegKey(block: 0, sub: 0)] = [QCFindRange(start: 2, length: 4, current: true), QCFindRange(start: 9, length: 4, current: false)]
+    let lit = mk.highlighted(AttributedString("a bold b bold c"), 0, 0)
+    check("find: the matches are painted into the text, and the text is unchanged", String(lit.characters) == "a bold b bold c" && lit.runs.filter { $0.backgroundColor != nil }.count == 2, "\(lit.runs.count)")
+    check("find: another segment is left as it is", mk.highlighted(AttributedString("a bold b bold c"), 0, 1) == AttributedString("a bold b bold c"))
+    // the keys list names them on the Move page
+    let move = QCKeysView.pages(opener: "⌃⇧Space").first { $0.page == .move }?.rows.map { $0.0 + " " + $0.1 } ?? []
+    check("find: the keys list's Move page has ⌘F and ⌘G ⇧⌘G", move.contains("⌘F Find in chat") && move.contains("⌘G  ⇧⌘G Next, previous match"), "\(move)")
+
+    // the panel: ⌘F opens the bar wherever the keyboard is, ⌘G steps, the first Esc closes the bar only
+    let m = chat.model
+    m.newChat(); m.field = ""
+    m.turns = [ChatScrollRig.turn(1, lines: 3), ChatScrollRig.turn(2, lines: 3)]
+    chat.open(); spin(0.3)
+    spinQuiet(p)
+    func key(_ ch: String, _ code: Int, _ flags: NSEvent.ModifierFlags = [.command]) -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                                       characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: UInt16(code)) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
+    check("find: ⌘G with the bar closed is not taken", !key("g", kVK_ANSI_G) && !m.find.isOpen)
+    check("find: ⌘F opens the bar (taken)", key("f", kVK_ANSI_F) && m.find.isOpen)
+    check("find: ⇧⌘F is not ⌘F", !key("f", kVK_ANSI_F, [.command, .shift]))
+    m.find.query = "sample"
+    check("find: the message and the three lines of each answer match (8)", m.find.matches.count == 8 && m.find.count == "1 of 8", "\(m.find.matches.count) \(m.find.count)")
+    check("find: ⌘G is the next match and ⇧⌘G the previous, wrapping", key("g", kVK_ANSI_G) && m.find.count == "2 of 8"
+          && key("g", kVK_ANSI_G, [.command, .shift]) && key("g", kVK_ANSI_G, [.command, .shift]) && m.find.count == "8 of 8", m.find.count)
+    spin(0.2)
+    check("find: the bar leaves the window's size alone", p.isIdle)
+    chat.escape()
+    check("find: the first Esc closes the bar and not the panel", !m.find.isOpen && m.find.marks.isEmpty && chat.isOpen)
+    check("find: a second Esc hides the panel", { chat.escape(); return !chat.isOpen }())
+    // Esc read where the keyboard is (an answer, a page), before it goes anywhere
+    chat.open(); spin(0.3)
+    _ = key("f", kVK_ANSI_F)
+    m.find.query = "sample"
+    if let esc = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: p.windowNumber, context: nil,
+                                  characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: UInt16(kVK_Escape)) {
+        p.sendEvent(esc)
+    }
+    check("find: Esc through the panel's sendEvent closes the bar too, the panel stays", !m.find.isOpen && chat.isOpen)
+    // a new chat and hiding take the bar with them
+    _ = key("f", kVK_ANSI_F); m.find.query = "sample"
+    m.newChat()
+    check("find: a new chat closes the bar", !m.find.isOpen && m.find.query.isEmpty)
+
+    // reaching a match: scrolled to the bottom of a long chat, a match far above comes into view at once, and the view stops following
+    m.field = ""
+    m.turns = (1...4).map { ChatScrollRig.turn($0, lines: 30) }
+    chat.open(); spin(0.3)
+    let sc = m.scroll
+    spinUntil(10) { sc.scrollView != nil && sc.maxOffset() > 200 }
+    spinQuiet(p)
+    sc.jumpToLatest(); spin(0.15)
+    m.find.open()
+    m.find.query = "Line 3 of the #1 sample"
+    spinUntil(5) { !sc.atBottom }
+    check("find: the current match is scrolled into view, instantly, and the view stops following the end",
+          m.find.matches.count == 1 && !sc.atBottom && !sc.following, "\(m.find.matches.count) offset \(sc.offset()) of \(sc.maxOffset())")
+    m.find.close(); m.newChat(); chat.hide(); spin(0.2)
+}
+findChecks()
+
 CheckQuiet.verify("at the end")
 // strict on CI (GitHub Actions sets CI; nobody copies there); on a Mac the user or another session may copy meanwhile, so
 // a changed count is only a NOTE

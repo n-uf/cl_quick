@@ -109,11 +109,14 @@ struct QCWindow: View {
     @ObservedObject var model: QuickChatModel
     /// How the chat scrolls (ChatScroll.swift): the model's, watched here for the floating control.
     @ObservedObject private var scroll: QCChatScroll
+    /// Find in chat (ChatFind.swift): its bar over the top of the answers, and the matches the turns draw.
+    @ObservedObject private var find: QCFindState
     @Environment(\.qcRendering) private var rendering
 
     init(model: QuickChatModel) {
         self.model = model
         scroll = model.scroll
+        find = model.find
     }
 
     var body: some View {
@@ -147,6 +150,8 @@ struct QCWindow: View {
                 }
                 .overlay(alignment: .top) { fade }
                 .overlay { floating }
+                // ⌘F: the find bar lies over the top of the answers (the window keeps its size)
+                .overlay(alignment: .top) { if find.isOpen { QCFindBar(find: find) } }
                 .frame(minHeight: 44)         // a line of chat stays, whatever the window
             }
             // Dictation off in macOS: its one line, over the field box
@@ -196,7 +201,8 @@ struct QCWindow: View {
         if let note = model.accountNote { QCNote(words: note).padding(.top, 14) }
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
             QCTurnView(turn: t, first: i == 0 && model.accountNote == nil, last: i == model.turns.count - 1, model: model,
-                       scroll: rendering ? nil : scroll, flashing: scroll.flash == t.id, above: scroll.answersAbove.contains(t.id))
+                       scroll: rendering ? nil : scroll, flashing: scroll.flash == t.id, above: scroll.answersAbove.contains(t.id),
+                       marks: find.marks[t.id] ?? QCFindMarks())
         }
         // the chat ended (idle, a crash, Stop that didn't stop): said once, under the turns that are left to read
         if let e = model.ended { QCEndNote(text: e.line).padding(.top, 12) }
@@ -466,6 +472,8 @@ struct QCTurnView: View {
     var flashing = false
     /// This answer's first line is above the visible area: its footer has "Go to the start".
     var above = false
+    /// Find in chat: where this turn's message and answer have matches (none when the bar is closed).
+    var marks = QCFindMarks()
     @State private var hover = false
     @Environment(\.qcFooterBelow) private var footerBelow
     /// Which answer is read aloud (its footer stays and its speaker button is a stop glyph).
@@ -478,12 +486,13 @@ struct QCTurnView: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !turn.images.isEmpty || !turn.files.isEmpty { QCSentAttachments(images: turn.images, files: turn.files) }
                     if !turn.question.isEmpty {       // pictures or files alone have no bubble
-                        Text(turn.question)
+                        (marks.ranges(-1, 0).isEmpty ? Text(turn.question) : Text(marks.highlighted(AttributedString(turn.question), -1, 0)))
                             .font(.system(size: 14))
                             .lineSpacing(3)
                             .foregroundColor(QCColor.text)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                            .qcFindAnchor(marks.reveal(-1, 0), length: (turn.question as NSString).length)
                             .padding(.horizontal, 12).padding(.vertical, 8)
                             // a message scrolled to: the whole bubble's background is lighter for about a second, then plain again
                             // (no fade, no animation)
@@ -496,7 +505,7 @@ struct QCTurnView: View {
             .padding(.top, first ? 0 : 4)
             if turn.thinkingTitle != nil { QCThought(turn: turn).padding(.top, 12) }
             if !turn.answer.isEmpty {
-                QCAnswer(text: turn.answer).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)            }
+                QCAnswer(text: turn.answer, marks: marks).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)            }
             if turn.phase == .waiting || turn.phase == .streaming {
                 // while a web tool runs, the dot has a muted line beside it: "Reading example.com…"
                 HStack(spacing: 8) {
@@ -616,56 +625,62 @@ enum QCFormat {
 /// parsed and drawn again while a later one streams.
 struct QCAnswer: View, Equatable {
     let text: String
+    /// Find in chat: the matches in this answer, painted into its texts (equal marks: nothing is drawn again).
+    var marks = QCFindMarks()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(QuickChatMarkdown.blocks(text).enumerated()), id: \.offset) { _, b in block(b) }
+            ForEach(Array(QuickChatMarkdown.blocks(text).enumerated()), id: \.offset) { i, b in block(b, i) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private func block(_ b: QuickChatBlock) -> some View {
+    @ViewBuilder private func block(_ b: QuickChatBlock, _ i: Int) -> some View {
         switch b {
         case .paragraph(let s):
-            prose(s)
+            prose(s, i)
         case .heading(let level, let s):
-            Text(Self.inline(s)).font(.system(size: level <= 2 ? 17 : 15, weight: .semibold))
+            let a = marks.highlighted(Self.inline(s), i, 0)
+            Text(a).font(.system(size: level <= 2 ? 17 : 15, weight: .semibold))
                 .foregroundColor(QCColor.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                .qcFindAnchor(marks.reveal(i, 0), length: marks.length(a, i, 0))
         case .bullets(let items):
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•").foregroundColor(QCColor.muted); prose(it) }
+                ForEach(Array(items.enumerated()), id: \.offset) { j, it in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•").foregroundColor(QCColor.muted); prose(it, i, j) }
                 }
             }
         case .numbered(let start, let items):
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { i, it in
+                ForEach(Array(items.enumerated()), id: \.offset) { j, it in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("\(start + i).").font(.system(size: 14).monospacedDigit()).foregroundColor(QCColor.muted)
-                        prose(it)
+                        Text("\(start + j).").font(.system(size: 14).monospacedDigit()).foregroundColor(QCColor.muted)
+                        prose(it, i, j)
                     }
                 }
             }
         case .quote(let s):
-            prose(s).padding(.leading, 12)
+            prose(s, i).padding(.leading, 12)
                 .overlay(Rectangle().fill(QCColor.line).frame(width: 2), alignment: .leading)
         case .code(let lang, let code, let meta, let closed):
-            QCCodeBlock(language: lang, code: code, meta: meta, closed: closed)
+            QCCodeBlock(language: lang, code: code, meta: meta, closed: closed, block: i, marks: marks)
         case .rule:
             Rectangle().fill(QCColor.line).frame(height: 1)
         case .table(let header, let align, let rows):
-            QCTableView(header: header, align: align, rows: rows)
+            QCTableView(header: header, align: align, rows: rows, block: i, marks: marks)
         }
     }
 
-    /// The system font at 14 on 21 pt lines: one family across the window.
-    private func prose(_ s: String) -> some View {
-        Text(Self.inline(s))
+    /// The system font at 14 on 21 pt lines: one family across the window. `block` and `sub` name the text for Find.
+    private func prose(_ s: String, _ block: Int, _ sub: Int = 0) -> some View {
+        let a = marks.highlighted(Self.inline(s), block, sub)
+        return Text(a)
             .font(.system(size: 14))
             .foregroundColor(QCColor.text)
             .lineSpacing(4)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
+            .qcFindAnchor(marks.reveal(block, sub), length: marks.length(a, block, sub))
     }
 
     /// Inline Markdown, with `code` in the mono font and a warm colour.
@@ -686,6 +701,9 @@ struct QCCodeBlock: View {
     var meta = ""
     /// Its closing fence has come: only then does an html block show its page (InlinePage.swift).
     var closed = true
+    /// Find in chat: which block of the answer this is, and the matches in it.
+    var block = 0
+    var marks = QCFindMarks()
     /// The side the user clicked (Code | Page): it wins for this block.
     @State private var picked: Bool?
     /// The page couldn't be made safe (the rule list didn't compile): the code, and a line saying so.
@@ -737,12 +755,14 @@ struct QCCodeBlock: View {
     }
 
     private var codeText: some View {
-        Text(code)
+        let a = marks.highlighted(AttributedString(code), block, 0)
+        return Text(a)
             .font(.system(size: 12.5, design: .monospaced))
             .lineSpacing(3)
             .foregroundColor(QCColor.codeText)
             .textSelection(.enabled)
             .fixedSize()
+            .qcFindAnchor(marks.reveal(block, 0), length: marks.length(a, block, 0))
             .padding(EdgeInsets(top: 8, leading: 12, bottom: 10, trailing: 12))
     }
 }
@@ -1558,7 +1578,9 @@ struct QCKeysView: View {
          (.move, [("⌘J", "Jump to latest, and follow"),
                   ("⇧⌘J", "Start of the answer in view"),
                   ("⌘[  ⌘]", "Previous, next message of mine"),
-                  ("⇧fn↑  ⇧fn↓", "Scroll the answers")]),    // a Mac keyboard's ⇧Page Up and ⇧Page Down
+                  ("⇧fn↑  ⇧fn↓", "Scroll the answers"),    // a Mac keyboard's ⇧Page Up and ⇧Page Down
+                  ("⌘F", "Find in chat"),
+                  ("⌘G  ⇧⌘G", "Next, previous match")]),
          (.write, [("Return", "Send"),
                    ("⇧Return", "New line"),
                    ("⌘N", "New chat"),

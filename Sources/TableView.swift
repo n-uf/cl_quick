@@ -108,6 +108,10 @@ struct QCTableView: View {
     let header: [String]
     let align: [QuickChatAlign]
     let rows: [[String]]
+    /// Find in chat: which block of the answer this is, and the matches in it (a cell is the text `column` of the header, then
+    /// `columns + row * columns + column`).
+    var block = 0
+    var marks = QCFindMarks()
     @Environment(\.qcRendering) private var rendering
 
     private var columns: Int { header.count }
@@ -129,23 +133,25 @@ struct QCTableView: View {
 
     private func grid(scrolling: Bool, contain: Bool = false) -> some View {
         QCTableLayout(columns: columns, scrolling: scrolling, contain: contain) {
-            ForEach(0..<columns, id: \.self) { c in cell(header[c], column: c, head: true) }
+            ForEach(0..<columns, id: \.self) { c in cell(header[c], column: c, head: true, sub: c) }
             ForEach(0..<rows.count, id: \.self) { r in
-                ForEach(0..<columns, id: \.self) { c in cell(rows[r][c], column: c, head: false) }
+                ForEach(0..<columns, id: \.self) { c in cell(rows[r][c], column: c, head: false, sub: columns + r * columns + c) }
             }
         }
     }
 
     /// One cell: inline Markdown at 13 pt, aligned as its column says, with the row's separator on its top edge (the
     /// header sits on the code block's fill instead).
-    private func cell(_ s: String, column c: Int, head: Bool) -> some View {
+    private func cell(_ s: String, column c: Int, head: Bool, sub: Int) -> some View {
         let a = align[c]
-        return Text(s.isEmpty ? AttributedString(" ") : QCAnswer.inline(s))
+        let shown = s.isEmpty ? AttributedString(" ") : marks.highlighted(QCAnswer.inline(s), block, sub)
+        return Text(shown)
             .font(.system(size: 13, weight: head ? .semibold : .regular))
             .foregroundColor(QCColor.text)
             .lineSpacing(3)
             .multilineTextAlignment(a == .right ? .trailing : a == .center ? .center : .leading)
             .textSelection(.enabled)
+            .qcFindAnchor(marks.reveal(block, sub), length: marks.length(shown, block, sub))
             .padding(EdgeInsets(top: 7, leading: 10, bottom: 7, trailing: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: a == .right ? .topTrailing : a == .center ? .top : .topLeading)
             .background(head ? QCColor.code : Color.clear)
