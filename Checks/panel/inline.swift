@@ -18,6 +18,11 @@ func inlinePageChecks() {
     var steps: [String] = []
     pages.trace = { steps.append($0) }
     defer { pages.trace = { _ in } }
+    // the panel is ordered in invisible, off every screen: the window server never counts it as visible, so the checks say
+    // whether it is covered (uncovered here; covered in the check that says so)
+    let realUncovered = QCInlinePageView.uncovered
+    QCInlinePageView.uncovered = { $0 === p }
+    defer { QCInlinePageView.uncovered = realUncovered }
     m.newChat(); m.field = ""
     chat.open(); spin(0.3)
 
@@ -97,6 +102,77 @@ func inlinePageChecks() {
     show(["Paste:\n```html code\n\(short)\n```"])
     _ = press("Page"); spin(0.3); settle()
     check("inline: on a ```html code block a click on Page shows the page", hosts().count == 1 && liveViews() == 1)
+    // another answer written in the same place (Ask again): the last block's click doesn't carry over
+    show(["Here:\n```html\n\(short)\n```"])
+    _ = press("Code"); spin(0.3); settle()
+    m.turns[0].answer = "Again:\n```html\n<p style=\"margin:0;padding:8px\">Another sample</p>\n```"; m.scrollTick += 1; spin(0.3); settle()
+    check("inline: a new block in the same place (Ask again) starts from its fence again, not from the last one's click",
+          hosts().count == 1 && liveViews() == 1 && QCBlockActions.pageMarked == true, "\(hosts().count) \(String(describing: QCBlockActions.pageMarked))")
+    // a live page whose text changes in place is made again for its new text (never left blank, never stuck as "live")
+    if let h = hosts().first, h.state == .live {
+        let loads = pages.loads
+        m.turns[0].answer = "Again:\n```html\n<p style=\"margin:0;padding:8px\">A third sample</p>\n```"; m.scrollTick += 1; spin(0.3); settle()
+        check("inline: a page whose text changes in place goes live again with the new text (the same host, one more load)",
+              hosts().first === h && h.html.contains("third") && h.state == .live && pages.loads == loads + 1 && liveViews() == 1,
+              "\(h.html.prefix(40)) \(h.state) loads \(pages.loads - loads)")
+        // its web content process ends: made again while in view, once; a second end leaves the still picture (no crash loop)
+        if let v = h.page { h.webViewWebContentProcessDidTerminate(v) }
+        settle()
+        check("inline: a page whose web content process ended is made again while in view", h.state == .live && h.hasWebView && h.crashes == 1, "\(h.state) \(h.crashes)")
+        if let v = h.page { h.webViewWebContentProcessDidTerminate(v) }
+        settle(); spin(0.5); settle()
+        check("inline: …ending a second time it stays a still picture: not made again, no web view", h.state == .idle && !h.hasWebView && pages.alive == 0 && h.crashes == 2,
+              "\(h.state) alive \(pages.alive)")
+        m.turns.append(turn("And:\n```html\n<p style=\"margin:0;padding:8px\">One more sample</p>\n```")); m.scrollTick += 1; m.followTick += 1; spin(0.3); settle()
+        check("inline: …and another page still goes live after it (nothing is left stuck)", hosts().contains { $0.html.contains("One more") && $0.state == .live } && liveViews() == 1,
+              "\(hosts().map { "\($0.state)" })")
+    } else { check("inline: the page is live before its text changes", false) }
+
+    // ── the keyboard: typing while the page has it goes to the field; a click selecting nothing gives the field it back ──
+    show(["Here:\n```html\n<p style=\"margin:0;padding:8px\">Sample text to select</p>\n```"])
+    if let h = hosts().first, let v = h.page {
+        func fieldHasKeys() -> Bool { p.firstResponder is QCTextView }
+        m.field = ""
+        p.makeFirstResponder(v)
+        let a = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: p.windowNumber,
+                                 context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+        v.keyDown(with: a); spin(0.2)
+        check("inline: a letter typed while the page has the keyboard lands in the field, which takes the keyboard", m.field == "a" && fieldHasKeys(), "'\(m.field)' \(String(describing: p.firstResponder))")
+        p.makeFirstResponder(v)
+        let cmdA = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: p.windowNumber,
+                                    context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+        v.keyDown(with: cmdA); spin(0.2)
+        check("inline: a ⌘ key stays the page's (⌘A, ⌘C: select and copy in the page)", p.firstResponder === v && m.field == "a", "\(String(describing: p.firstResponder))")
+        func click() {
+            let up = NSEvent.mouseEvent(with: .leftMouseUp, location: v.convert(NSPoint(x: 5, y: 5), to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: p.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)!
+            v.mouseUp(with: up)
+        }
+        _ = v.evaluateJavaScript("window.getSelection().removeAllRanges(); 1", in: nil, in: .defaultClient) { _ in }
+        spin(0.2)
+        p.makeFirstResponder(v); click()
+        check("inline: a click that selects nothing gives the keyboard back to the field", spinUntil(5) { fieldHasKeys() }, "\(String(describing: p.firstResponder))")
+        var selected = false
+        v.evaluateJavaScript("window.getSelection().selectAllChildren(document.body); String(window.getSelection()).length", in: nil, in: .defaultClient) { r in
+            selected = ((try? r.get()) as? Double ?? 0) > 0
+        }
+        spinUntil(5) { selected }
+        p.makeFirstResponder(v); click(); spin(0.5)
+        check("inline: a click that leaves text selected keeps the keyboard in the page (to copy it)", selected && p.firstResponder === v, "\(selected) \(String(describing: p.firstResponder))")
+        p.focusField(); m.field = ""
+    } else { check("inline: a live page for the keyboard checks", false) }
+
+    // ── a covered panel keeps no live page ──
+    check("inline: the real test is the window's occlusion state (visible)", {
+        let w = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: true)
+        return realUncovered(w) == w.occlusionState.contains(.visible)
+    }())
+    QCInlinePageView.uncovered = { _ in false }
+    NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: p); spin(0.05); settle()
+    check("inline: the panel covered (not visible), no page's web view is alive", pages.alive == 0 && liveViews() == 0, "\(pages.alive)")
+    QCInlinePageView.uncovered = { $0 === p }
+    NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: p); spin(0.05); settle()
+    check("inline: uncovered again, the page in view is live again", liveViews() == 1, "\(liveViews())")
 
     // ── only when complete: an unfinished block is code; it renders once its fence closes, and never reloads per token ──
     pages.forgetAll()
@@ -221,16 +297,31 @@ func inlinePageChecks() {
     pages.forgetAll()
     m.turns = [turn("Tall:\n```html\n\(tall)\n```\n\n" + lines, question: "Sample tall?"), turn("Page:\n```html\n\(short)\n```\n\n" + lines)]
     m.scrollTick += 1; spin(0.3)
+    /// The page's document scroll position, asked in our world (-1: no answer).
+    func scrollTop(_ v: WKWebView?) -> Double {
+        var out: Double?
+        v?.evaluateJavaScript("(document.scrollingElement || document.documentElement).scrollTop", in: nil, in: .defaultClient) { r in out = (try? r.get()) as? Double ?? -1 }
+        spinUntil(5) { out != nil }
+        return out ?? -1
+    }
+    /// Polls (a slow runner gets the time it needs) until the page's scroll position satisfies `ok`, for 5 s at most.
+    @discardableResult func scrolled(_ v: WKWebView?, _ ok: (Double) -> Bool) -> Double {
+        var y = scrollTop(v)
+        let end = Date().addingTimeInterval(5)
+        while !ok(y), Date() < end { spin(0.05); y = scrollTop(v) }
+        return y
+    }
     if let h = toPage(0) {
-        h.scrollPage(to: 400); spin(0.4)
+        h.scrollPage(to: 400)
+        scrolled(h.page) { abs($0 - 400) < 2 }
         _ = toPage(1); settle()
+        spinUntil(20) { h.state == .idle }
         let y = pages.memo(h.html)?.scrollY ?? -1
         check("inline: a page leaving view keeps where it was scrolled to (with its still picture)", near(y, 400, 2) && pages.memo(h.html)?.still != nil, "\(y)")
-        _ = toPage(0); spin(0.3); settle()
-        var back: Double?
-        h.page?.evaluateJavaScript("(document.scrollingElement || document.documentElement).scrollTop", in: nil, in: .defaultClient) { r in back = (try? r.get()) as? Double ?? -1 }
-        spinUntil(5) { back != nil }
-        check("inline: back in view it is live again, scrolled where it was", h.state == .live && near(CGFloat(back ?? -1), 400, 2), "\(String(describing: back))")
+        _ = toPage(0); settle()
+        spinUntil(20) { h.state == .live }
+        let back = scrolled(h.page) { abs($0 - 400) < 2 }
+        check("inline: back in view it is live again, scrolled where it was", h.state == .live && near(CGFloat(back), 400, 2), "\(back)")
     } else { check("inline: the tall page is found", false) }
 
     // ── the wheel: a page with nothing to scroll hands it to the chat; a tall one keeps it until its end, then hands it on ──
@@ -248,23 +339,57 @@ func inlinePageChecks() {
         v.scrollWheel(with: down); spin(0.2)
         check("inline: the wheel over a page with nothing to scroll goes on to the chat's scroll view", !h.scrollable && handed.count == 1 && handed.first === sv, "\(handed)")
     } else { check("inline: the short page and a wheel event", false) }
+    /// A trackpad's wheel event: its scroll phase (1 began, 2 changed, 4 ended, 128 may begin) or momentum phase (1 began,
+    /// 2 continued, 3 ended).
+    func swipe(_ dy: Int32, phase: Int64 = 0, momentum: Int64 = 0) -> NSEvent? {
+        guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return nil }
+        cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+        cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+        return NSEvent(cgEvent: cg)
+    }
     if let h = toPage(0), let v = h.page, let down = wheel(-30), let up = wheel(30) {
-        h.scrollPage(to: 0); spin(0.4)
+        h.scrollPage(to: 0)
+        let before = scrolled(v) { $0 == 0 }
+        spinUntil(5) { h.atTop && !h.atBottom }
         handed = []
-        var y0: Any??, y1: Any??
-        v.evaluateJavaScript("(document.scrollingElement || document.documentElement).scrollTop", in: nil, in: .defaultClient) { y0 = .some(try? $0.get()) }
-        spinUntil(5) { y0 != nil }
-        v.scrollWheel(with: down); spin(0.4)
-        v.evaluateJavaScript("(document.scrollingElement || document.documentElement).scrollTop", in: nil, in: .defaultClient) { y1 = .some(try? $0.get()) }
-        spinUntil(5) { y1 != nil }
-        let before = ((y0 ?? nil) as? Double) ?? -1, after = ((y1 ?? nil) as? Double) ?? -1
+        v.scrollWheel(with: down)
+        let after = scrolled(v) { $0 > 0 }
         check("inline: over a tall page at its top, the wheel down stays with the page: not handed to the chat, the page scrolls",
               handed.isEmpty && h.scrollable && before == 0 && after > 0 && !h.atBottom, "handed \(handed.count) bottom \(h.atBottom) scrollTop \(before) → \(after)")
-        h.scrollPage(to: 100000); spin(0.5)
-        v.scrollWheel(with: down); spin(0.2)
+        h.scrollPage(to: 100000)
+        spinUntil(5) { h.atBottom }
+        v.scrollWheel(with: down); spin(0.1)
         check("inline: at the page's end the wheel goes on to the chat", h.atBottom && handed.count == 1 && handed.first === sv, "bottom \(h.atBottom) handed \(handed.count)")
-        v.scrollWheel(with: up); spin(0.2)
+        v.scrollWheel(with: up); spin(0.1)
         check("inline: …and back up, the page takes it again (it is not at its top)", handed.count == 1 && !h.atTop, "handed \(handed.count) top \(h.atTop)")
+        // trackpad gestures latch where they start
+        h.scrollPage(to: 0)
+        spinUntil(5) { h.atTop && !h.atBottom }
+        handed = []
+        if let b = swipe(-20, phase: 1), let c = swipe(-20, phase: 2), let e = swipe(0, phase: 4), let mb = swipe(-15, momentum: 1), let mc = swipe(-10, momentum: 2), let me = swipe(0, momentum: 3) {
+            for x in [b, c] { v.scrollWheel(with: x) }
+            h.scrollPage(to: 100000)
+            spinUntil(5) { h.atBottom }
+            for x in [c, e, mb, mc, me] { v.scrollWheel(with: x) }
+            check("inline: a swipe that started on the page stays the page's to its end, momentum included, though the page reached its end meanwhile",
+                  handed.isEmpty && h.atBottom, "handed \(handed.count)")
+            v.scrollWheel(with: b); v.scrollWheel(with: c)
+            check("inline: the next swipe, with the page at its end, goes to the chat from its start", handed.count == 2, "handed \(handed.count)")
+            v.scrollWheel(with: e); v.scrollWheel(with: me)
+            h.scrollPage(to: 0)
+            spinUntil(5) { h.atTop && !h.atBottom }
+            handed = []
+            v.scrollWheel(with: c); v.scrollWheel(with: c); v.scrollWheel(with: e)
+            check("inline: a swipe whose start this page never saw (begun over the chat) goes to the chat, though the page could scroll",
+                  handed.count == 3, "handed \(handed.count)")
+            handed = []
+            v.scrollWheel(with: mb); v.scrollWheel(with: mc); v.scrollWheel(with: me)
+            check("inline: …so does momentum passing over the page after a swipe that ended elsewhere", handed.count == 3, "handed \(handed.count)")
+            handed = []
+            v.scrollWheel(with: b); v.scrollWheel(with: e)          // a swipe on the page, ended with no momentum
+            v.scrollWheel(with: c); v.scrollWheel(with: c)          // then another one's middle (begun over the chat) passes over
+            check("inline: after a swipe on the page ends, the middle of another one isn't taken as the page's", handed.count == 2, "handed \(handed.count)")
+        } else { check("inline: trackpad wheel events can be made", false) }
         // a still picture never takes the wheel: nothing between it and the chat's scroll view handles one
         _ = toPage(1); settle()
         if h.state == .idle, let still = h.subviews.first(where: { $0 is NSImageView }) {
@@ -331,14 +456,22 @@ func inlinePageChecks() {
     func probe(_ port: UInt16) -> String {
         let u = { (t: String) in "http://127.0.0.1:\(port)/\(t)" }
         return """
-        <!doctype html><html><head><title>probe</title>
+        <!doctype html><html><head><title>probe</title><base href="\(u("base/"))">
         <link rel="stylesheet" href="\(u("css-link"))"><link rel="preload" as="image" href="\(u("preload"))">
-        <link rel="preconnect" href="\(u("preconnect"))"><meta http-equiv="refresh" content="1;url=\(u("refresh"))">
+        <link rel="preconnect" href="\(u("preconnect"))"><link rel="dns-prefetch" href="\(u("dns-prefetch"))">
+        <link rel="prefetch" href="\(u("prefetch"))"><link rel="modulepreload" href="\(u("modulepreload"))">
+        <link rel="icon" href="\(u("favicon"))"><link rel="apple-touch-icon" href="\(u("touch-icon"))"><link rel="manifest" href="\(u("manifest"))">
+        <meta http-equiv="refresh" content="1;url=\(u("refresh"))">
         <style>@import url("\(u("css-import"))"); @font-face { font-family: F; src: url("\(u("font"))"); }
-        body { font-family: F; background: url("\(u("css-url"))"); }</style><script>document.title = 'js'</script></head>
-        <body><p>probe page</p><img src="\(u("img"))"><img srcset="\(u("srcset")) 1x">
+        body { font-family: F; background: url("\(u("css-url"))"); }
+        .cur { cursor: url("\(u("cursor"))"), auto; width: 40px; height: 20px; }
+        .mask { -webkit-mask-image: url("\(u("mask"))"); mask-image: url("\(u("mask"))"); width: 40px; height: 20px; background: #000; }
+        ul.l { list-style-image: url("\(u("list-image"))"); }</style><script>document.title = 'js'</script></head>
+        <body><p>probe page</p><img src="\(u("img"))"><img srcset="\(u("srcset")) 1x"><img src="relative-img" alt="r">
+        <picture><source srcset="\(u("picture"))"><img alt="p"></picture><input type="image" src="\(u("input-image"))">
         <svg width="20" height="20"><image href="\(u("svg-image"))" width="20" height="20"></image></svg>
-        <iframe src="\(u("iframe"))"></iframe><object data="\(u("object"))"></object>
+        <div class="cur">cursor</div><div class="mask"></div><ul class="l"><li>list item</li></ul>
+        <iframe src="\(u("iframe"))"></iframe><object data="\(u("object"))"></object><video poster="\(u("poster"))"></video>
         <video src="\(u("video"))" preload="auto"></video><audio src="\(u("audio"))" preload="auto"></audio>
         <video><source src="\(u("source"))"></video><a href="\(u("href"))" ping="\(u("ping"))">link</a></body></html>
         """
@@ -352,6 +485,7 @@ func inlinePageChecks() {
         pages.forgetAll()
         let html = probe(lb.port)
         m.turns = [turn("Probe:\n```html\n\(html)\n```")]; m.scrollTick += 1; spin(0.3); settle()
+        spinUntil(20) { hosts().first?.state == .live }   // a slow runner: the load takes what it takes
         spin(2.5)                                          // the meta refresh (1 s) and anything late
         var title: String?
         if let v = hosts().first?.page {
@@ -368,7 +502,7 @@ func inlinePageChecks() {
     check("inline probe: with the rules left out the listener does see requests (so the probe would see a lost rule list)",
           open.connections > 0 && ["css-import", "css-link"].allSatisfy(open.paths.contains), "\(open.connections) \(open.paths)")
     let sealed = run(rules: true)
-    check("inline probe: an inline page sends not one connection to 127.0.0.1 (css url, @import, @font-face, link, preload, preconnect, img, srcset, svg image, iframe, object, video, audio, source, meta refresh, a ping), with no click",
+    check("inline probe: an inline page sends not one connection to 127.0.0.1 (css url, @import, @font-face, cursor, mask-image, list-style-image, link stylesheet, preload, preconnect, dns-prefetch, prefetch, modulepreload, icon, touch icon, manifest, base href and a relative img, img, srcset, picture source, input image, svg image, iframe, object, poster, video, audio, source, meta refresh, a ping), with no click",
           sealed.connections == 0, "\(sealed.connections) \(sealed.paths)")
     check("inline probe: the page's own script did not run", sealed.title == "probe", "\(String(describing: sealed.title))")
 
@@ -377,13 +511,24 @@ func inlinePageChecks() {
     QCHTMLPreview.encodedRules = "not rules"
     show(["Here:\n```html\n<p>unsafe sample</p>\n```"])
     check("inline: when the rules don't compile, the block shows its code and no web view is made", hosts().isEmpty && pages.alive == 0, "\(hosts().count) \(pages.alive)")
+    check("inline: …and its switch marks Code, not Page", QCBlockActions.pageMarked == false, "\(String(describing: QCBlockActions.pageMarked))")
     QCHTMLPreview.encodedRules = goodRules
 
-    // ── a new chat lets go of every page: no web view, no memo of its pages ──
+    // ── the pages' memos go with the chat, at once: a new chat, no turns left, another chat's turns in their place ──
     show(["Here:\n```html\n\(short)\n```"])
-    m.newChat(); spin(0.3); settle()
-    check("inline: a new chat leaves no web view and no memo of the old pages (memory only, nothing kept)", pages.alive == 0 && pages.memos.isEmpty && hosts().isEmpty,
-          "\(pages.alive) \(pages.memos.count)")
+    check("inline: a page on show has its memo (height, still picture, scroll position)", !pages.memos.isEmpty)
+    m.turns = []
+    check("inline: no turns left (an ended chat left, a send after it ended): the memos are gone at once", pages.memos.isEmpty, "\(pages.memos.count)")
+    show(["Here:\n```html\n\(short)\n```"])
+    m.turns = [turn("Another chat's first answer.")]
+    check("inline: another chat's turns in place of the old ones (Ask again after an end): gone at once", pages.memos.isEmpty, "\(pages.memos.count)")
+    show(["Here:\n```html\n\(short)\n```"])
+    m.turns[0].answer += "\nMore."; m.turns.append(turn("A second answer."))
+    check("inline: the same chat going on keeps them", !pages.memos.isEmpty)
+    m.newChat()
+    check("inline: a new chat: gone at once", pages.memos.isEmpty, "\(pages.memos.count)")
+    spin(0.3); settle()
+    check("inline: …and no web view of a page is left", pages.alive == 0 && hosts().isEmpty, "\(pages.alive)")
     check("inline: never more than one page web view at once, in this whole section", pages.mostAlive <= 1, "\(pages.mostAlive)")
     chat.hide(); spin(0.2)
 }

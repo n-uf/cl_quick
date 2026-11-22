@@ -177,8 +177,12 @@ minutes for a profile.
     block), **⤢** (the page in its own window, as before) and Copy, which copies the code whichever side shows. ```` ```html ````
     shows the page first, ```` ```html code ```` the code first: Claude is told to fence a snippet meant for pasting into a
     file that way.
-  - The page shows at its own height, up to about half the panel's; a taller one scrolls inside the block, and at its end
-    the wheel goes on to the chat. A page that appears or grows above what you are reading doesn't move it.
+  - The page shows at its own height, up to about half the panel's; a taller one scrolls inside the block. A swipe stays
+    with whatever it started over: once the page is at its end, the next swipe (or wheel turn) scrolls the chat, and a
+    swipe that started over the chat goes on scrolling the chat as it passes over a page. A page that appears or grows
+    above what you are reading doesn't move it.
+  - A click in the page lets you select its text and copy it with ⌘C; typing goes on to the reply field, and a click that
+    selects nothing gives the keyboard back to the field.
   - Only the page in view is live: the others show a still picture of themselves (kept in memory only, gone with the chat)
     until they come back into view or the pointer rests on them, so nothing runs out of sight.
   - In the chat and in the window alike the page is isolated: no scripts, nothing fetched from the network, links, forms
