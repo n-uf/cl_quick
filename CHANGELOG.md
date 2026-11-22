@@ -4,6 +4,13 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **No 5-hour row where the account has none.** An account that has a week and has never had a 5-hour number (a plan
+  without the 5-hour window) shows the week alone: in the bar's indicator, its hover card, the chat's header, the menu
+  and Settings, with no "5h" row, empty track or "no numbers yet". An account with a 5-hour window keeps its row, also
+  while that window is idle, and a full 5-hour limit always shows.
+- **Thinner scroller, thicker edge pills.** The answers' scroller is macOS's small one; the pills of the left and right
+  edge handles are 5 pt thick (were 3), in 16-pt strips, still 11 pt clear of the text.
+
 - **Read an answer aloud.** A speaker button after ↻ in each finished answer's footer ("Read aloud") reads the answer
   with the Mac's own voice, on the device (Claude's voice isn't available to an app that runs `claude -p`). Press it
   again, or hide the panel, start a new chat or ask again, to stop; the button is a stop glyph while it reads, and only
