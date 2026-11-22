@@ -18,6 +18,7 @@
 
 import AddressPrivacy
 import AppKit
+import ClaudeAuth
 import Combine
 
 // MARK: - What a profile's block says
@@ -419,7 +420,8 @@ enum QCStatusMenu {
         /// The address of the account in use; nil: nothing is signed in.
         let address: String?
         let problem: SignInProblem?
-        /// The accounts signed in before and not in use now, the most recently seen first.
+        /// The seats signed in before and not in use now, the most recently seen first (one row each: a personal plan
+        /// and a Team seat on one address are two).
         let standby: [KnownAccount]
     }
 
@@ -446,7 +448,7 @@ enum QCStatusMenu {
     /// sign-in that finished while the menu was open may have made it the one in use) and no switch is waited for.
     static func mayStartSwitch(_ p: Profile, _ a: KnownAccount, store: ProfileStore = .shared,
                                waiting: (Profile) -> Bool = { AccountSwitcher.shared.waiting[$0.id] != nil }) -> Bool {
-        !waiting(p) && store.standby(p).contains { $0.uuid == a.uuid }
+        !waiting(p) && store.standby(p).contains { $0.key == a.key }
     }
     /// The rule a click is held to (a seam: the checks replace it).
     static var allowSwitch: (Profile, KnownAccount) -> Bool = { mayStartSwitch($0, $1) }
@@ -617,20 +619,17 @@ final class QCMenuUsageRefresher {
         let process = QuickChatProcess(command(p, claude))
         // the account the folder names as it starts (read now, not when the menu opened); the process's own word
         // (initialize) then says who it is
-        let start = ClaudeFolder.account(p.path)
-        var trail = AccountTrail()
-        trail.processStarted(on: start?.uuid, email: start?.email, organizationUuid: ClaudeFolder.organizationUuid(p.path))
+        var trail = ProcessTrail(launchedOn: ClaudeFolder.account(p.path))
         process.onEvent = { [weak self, weak process] e in
             guard let self, let process, process === self.current else { return }
             switch e {
             case .models(_, let who):
-                trail.identified(who)
+                trail.said(SignedInAccount.process(who))
             case .usage(let u):
-                // recorded for the account the process is, only while the folder is still on it (AccountTrail.owner): an
-                // answer that comes after the folder moved to another account is dropped
-                if let owner = trail.owner(folder: ClaudeFolder.account(p.path), organization: ClaudeFolder.organization(p.path),
-                                           organizationUuid: ClaudeFolder.organizationUuid(p.path)) {
-                    var l = store.levels[ProfileStore.levelKey(p.id, owner)] ?? QuickChatLevel()
+                // kept for the account the numbers belong to (the kit's numbersBelongTo with the process's trail): an
+                // answer that comes after the folder moved to another account stays that account's, never the new one's
+                if let owner = AccountBook.numbersOwner(record: ClaudeFolder.account(p.path), trail: trail) {
+                    var l = store.base(p.id, for: owner) ?? QuickChatLevel()
                     if l.apply(usage: u) { store.record(p.id, account: owner, l) }
                 }
                 self.finish(p.id, store)

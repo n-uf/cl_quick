@@ -9,6 +9,7 @@
 import AddressPrivacy
 import AppKit
 import Carbon.HIToolbox
+import ClaudeAuth
 import Combine
 import SwiftUI
 
@@ -106,15 +107,16 @@ struct QuickChatTarget: Equatable {
     var name: String
     var configDir: String
     var isDefaultDir: Bool
-    /// The account signed in to the folder now, as its file says (never a token).
+    /// The account signed in to the folder now, as its file says (never a token): its address, and its seat as the
+    /// profile's list keeps it (AccountKey: account id and organisation).
     var email: String?
-    var accountUUID: String?
+    var account: AccountKey?
     var workFolder: String
 
     init(_ p: Profile) {
         profileID = p.id; name = p.name; configDir = p.path; isDefaultDir = p.isDefaultFolder
-        let a = ClaudeFolder.account(p.path)
-        email = a?.email; accountUUID = a?.uuid; workFolder = p.workFolder
+        let a = AccountBook.inUse(ClaudeFolder.account(p.path), in: p.accounts)
+        email = a?.email; account = a?.key; workFolder = p.workFolder
     }
 }
 
@@ -210,7 +212,7 @@ struct QuickChatOffer: Equatable {
 /// Another account of the chat's own profile, on standby, offered while a limit is full: signing in again as it moves the
 /// profile (and every Claude Code session using its folder) to it. No numbers: a standby account shows no usage.
 struct QuickChatSwitchOffer: Equatable {
-    var uuid: String
+    var key: AccountKey
     var email: String
 }
 
@@ -432,12 +434,13 @@ final class QuickChatModel: ObservableObject {
     var pickable: () -> [(Profile, QuickChatLevel?)] = { [] }
     /// Another profile was picked: the controller moves the chat there.
     var pickProfile: (String) -> Void = { _ in }
-    /// Claude Code reported the account's limits after an answer: the profile, its account's uuid, the level.
-    var levelReported: (String, String, QuickChatLevel) -> Void = { _, _, _ in }
+    /// Claude Code reported the account's limits after an answer: the profile, the account they belong to (the kit's
+    /// numbersBelongTo: AccountBook.numbersOwner), the level.
+    var levelReported: (String, SignedInAccount, QuickChatLevel) -> Void = { _, _, _ in }
     /// The field has more or fewer lines now: the panel may need to grow to hold it (QuickChat.fit).
     var fieldChanged: () -> Void = {}
-    /// An answer failed to authenticate (true) or worked (false), on the account the `claude` started on: profile, account.
-    var authResult: (String, String, Bool) -> Void = { _, _, _ in }
+    /// An answer failed to authenticate (true) or worked (false), on the account the `claude` is: profile, account.
+    var authResult: (String, SignedInAccount, Bool) -> Void = { _, _, _ in }
     /// Switch to …: the controller asks first, then opens Claude Code's sign-in and watches the folder.
     var switchTo: (QuickChatSwitchOffer) -> Void = { _ in }
     /// Sign in again, as the account that was wanted (after another one signed in).
@@ -451,8 +454,9 @@ final class QuickChatModel: ObservableObject {
 
     private var process: QuickChatProcess?
     private var processKey = ""
-    /// The account the running `claude` started on: what it reports belongs to it, and the chat goes on only on it.
-    private var trail = AccountTrail()
+    /// The running `claude`'s trail (ClaudeAuth's ProcessTrail: the record as it started, then its own word): what it
+    /// reports belongs to that account, and the chat goes on only on it. nil while no `claude` runs.
+    private var trail: ProcessTrail?
     /// The model and thinking the running `claude` has now; the controls change them with control requests.
     private var appliedModel = "", appliedEffort: String?
     /// The question being answered reached `claude` (not still waiting for the folder to be read or `claude` to be found).
@@ -996,10 +1000,10 @@ final class QuickChatModel: ObservableObject {
                 // the profile is gone (removed while the folder was being read): nothing to ask on
                 guard fresh != nil else { self.fail(.noProfile); return }
                 if let fresh, fresh != self.target {
-                    let was = self.target?.accountUUID
+                    let was = self.target
                     self.target = fresh
-                    // the folder moved to another account: the account line starts over and says where it is
-                    if let was, let now = fresh.accountUUID, was != now {
+                    // the folder moved to another account or seat: the account line starts over and says where it is
+                    if AccountBook.anotherSeat(was?.account, was?.email, fresh.account, fresh.email) {
                         self.forgetAccount()
                         self.accountNote = .isOn(fresh.name, address: fresh.email)
                     }
@@ -1016,7 +1020,7 @@ final class QuickChatModel: ObservableObject {
                                    instructions: instructions)
         var key = keyFor(path, target)
         // (target is the folder as read just now, freshTarget: the process must still be its account)
-        let goesOn = process?.isRunning == true && key == processKey && (!trail.running || reportOwner == target.accountUUID)
+        let goesOn = process?.isRunning == true && key == processKey && (trail == nil || processOnTarget)
         if goesOn {
             if cmd.model != appliedModel {
                 if let id = process?.setModel(cmd.model) { modelRequests[id] = cmd.model }
@@ -1048,14 +1052,15 @@ final class QuickChatModel: ObservableObject {
     }
 
     /// The same `claude` while what it runs on is the same: the conversation lives only in it. The model and thinking
-    /// aren't part of the key, they're changed in the running one. The account's uuid, not just its address: two
-    /// accounts may share one, and must not share a running claude. Web links and search is part of it too: the tools are
+    /// aren't part of the key, they're changed in the running one. The account's seat (AccountKey: its id and organisation),
+    /// not just its address: two seats may share one, and must not share a running claude. Web links and search is part of
+    /// it too: the tools are
     /// fixed when `claude` starts, so a message in a chat whose setting differs from its process starts a new chat. So are
     /// the custom instructions, which sit in its system prompt (QuickChatCommand.processKey); they differ from the process's
     /// only for a bar with nothing on screen, since an open chat keeps its own.
     private func keyFor(_ path: String, _ target: QuickChatTarget) -> String {
         QuickChatCommand.processKey(claude: path, configDir: target.configDir, workFolder: target.workFolder,
-                                    account: target.accountUUID ?? target.email ?? "", web: web, instructions: instructions)
+                                    account: target.account?.text ?? target.email ?? "", web: web, instructions: instructions)
     }
 
     /// A new `claude` for the target, asked at once for the account's models and limits (nothing goes to a model).
@@ -1090,8 +1095,8 @@ final class QuickChatModel: ObservableObject {
         appliedModel = cmd.model
         confirmedModel = cmd.model
         appliedEffort = cmd.effort
-        trail.processStarted(on: target.accountUUID, email: target.email,
-                             organizationUuid: ClaudeFolder.organizationUuid(target.configDir))      // until it says who it is (initialize)
+        // the record as the process starts (read again now), until it says who it is (initialize)
+        trail = ProcessTrail(launchedOn: ClaudeFolder.account(target.configDir))
         return nil
     }
 
@@ -1103,7 +1108,7 @@ final class QuickChatModel: ObservableObject {
         if let p = process, p.isRunning {
             // one still on the account the folder had before (it was answering when the switch landed): its numbers
             // aren't this account's, so it goes and a new one starts below (the chat couldn't go on there anyway)
-            if !busy, let t = target, reportOwner != t.accountUUID { closeProcess() }
+            if !busy, !processOnTarget { closeProcess() }
             else {
                 if Date().timeIntervalSince(usageAsked) >= Self.usageAgainSeconds, p.getUsage() != nil { usageAsked = Date() }
                 return
@@ -1126,15 +1131,19 @@ final class QuickChatModel: ObservableObject {
         switch e {
         case .models(let list, let who):
             // who this `claude` is, in its own word: what it reports from now on is that account's
-            trail.identified(who)
-            // its models (the next message asks for the newest of the family)
-            if let t = target { ModelCatalog.shared.set(list, profile: t.profileID, account: reportOwner ?? trail.launchedOn?.uuid ?? t.accountUUID) }
+            trail?.said(SignedInAccount.process(who))
+            // its models (the next message asks for the newest of the family), kept for the seat they are
+            if let t = target {
+                let other = numbersOwner.flatMap { AccountBook.owns(t.account, email: t.email, $0) ? nil : AccountKey($0) }
+                ModelCatalog.shared.set(list, profile: t.profileID, account: (other ?? t.account)?.text)
+            }
             objectWillChange.send()
             return
         case .usage(let u):
-            // its limits now, for the account it is, only while the folder is on that account (else dropped)
-            guard let owner = reportOwner else { return }
-            var l = (owner == target?.accountUUID ? level : nil) ?? QuickChatLevel()
+            // its limits now, for the account it is (the kit's numbersBelongTo): kept for that account also when the folder
+            // has moved since, never put on the one it is on now
+            guard let owner = numbersOwner else { return }
+            var l = (AccountBook.owns(target?.account, email: target?.email, owner) ? level : nil) ?? QuickChatLevel()
             // numbers given: kept even when they are the same, so they count as fresh again (an answer with no numbers,
             // `rate_limits` null, changes nothing and leaves the old ones as old as they were)
             if l.apply(usage: u) { reportLevel(l) }
@@ -1198,7 +1207,7 @@ final class QuickChatModel: ObservableObject {
                 if turns[i].answer.isEmpty, pending.isEmpty { turns[i].problem = .refused(text: text) }
             } else if error == "authentication_failed", let target {
                 turns[i].problem = .notSignedIn(profile: target.name, id: target.profileID)
-                if let u = reportOwner { authResult(target.profileID, u, true) }
+                if let u = numbersOwner { authResult(target.profileID, u, true) }
             } else if error != nil || model.hasPrefix("<"), QuickChatParse.isLimit(error: error, text: text) {
                 // only an error message (or Claude Code's own, "<synthetic>") is read for limit words: an answer that
                 // merely talks about a rate limit, a page summary say, is not one
@@ -1235,7 +1244,7 @@ final class QuickChatModel: ObservableObject {
             } else {
                 if turns[i].answer.isEmpty { turns[i].answer = text }
                 turns[i].phase = .done
-                if let t = target, let u = reportOwner { authResult(t.profileID, u, false) }      // it signed in fine
+                if let t = target, let u = numbersOwner { authResult(t.profileID, u, false) }      // it signed in fine
             }
             if process?.getUsage() != nil { usageAsked = Date() }    // the limits after this answer (rate_limit_event stays as the fallback)
             // the chat may have ended meanwhile (reporting the level can refresh the profile): nothing more to draw
@@ -1258,21 +1267,28 @@ final class QuickChatModel: ObservableObject {
         }
     }
 
-    /// The account the running `claude`'s reports belong to now: the folder's account as its file says now
-    /// (ClaudeFolder.account), when the process is that account (AccountTrail.owner: by its own `initialize` word, else
-    /// by the account it started on); nil, and the report is dropped, when the folder has moved to another account.
-    private var reportOwner: String? {
-        guard let t = target else { return nil }
-        return trail.owner(folder: ClaudeFolder.account(t.configDir), organization: ClaudeFolder.organization(t.configDir),
-                           organizationUuid: ClaudeFolder.organizationUuid(t.configDir))
+    /// The account the running `claude`'s reports belong to now (AccountBook.numbersOwner, the kit's numbersBelongTo with
+    /// its trail): its own `initialize` word's account, with the launch record's ids when it named the seat it started on;
+    /// while it said nothing, the folder's account while the folder still names the seat it started on. nil: nothing
+    /// running, or nobody's (the report is dropped).
+    private var numbersOwner: SignedInAccount? {
+        guard let t = target, let trail else { return nil }
+        return AccountBook.numbersOwner(record: ClaudeFolder.account(t.configDir), trail: trail)
     }
 
-    /// What Claude Code said about its limits is the account the `claude` is (reportOwner), recorded only while the
-    /// folder is still on it: an answer that arrives after the folder moved to another account is dropped. The account
-    /// line shows it while the target is that account.
+    /// The running `claude` is the account the folder is on now, and the chat's (AccountBook.processOn): the conversation
+    /// lives only in that process, so the chat goes on only then.
+    private var processOnTarget: Bool {
+        guard let t = target, let trail else { return false }
+        return AccountBook.processOn(record: ClaudeFolder.account(t.configDir), trail: trail, target: t.account, targetEmail: t.email)
+    }
+
+    /// What Claude Code said about its limits is the account the `claude` is (numbersOwner), kept for that account: an
+    /// answer that arrives after the folder moved to another account stays that account's, never the new one's. The
+    /// account line shows it while the target is that account.
     private func reportLevel(_ l: QuickChatLevel) {
-        guard let t = target, let u = reportOwner else { return }
-        if u == t.accountUUID { level = l }
+        guard let t = target, let u = numbersOwner else { return }
+        if AccountBook.owns(t.account, email: t.email, u) { level = l }
         levelReported(t.profileID, u, l)
     }
 
@@ -1374,7 +1390,7 @@ final class QuickChatModel: ObservableObject {
         process?.stop()
         process = nil
         processKey = ""
-        trail.processEnded()
+        trail = nil
         pending = ""; pendingThinking = ""; toolBreak = false; thinkBreak = false
     }
 
@@ -1468,7 +1484,7 @@ final class QuickChat {
             guard let self else { return }
             // the menu's switch is the menu bar's (origin .settings): when it lands a new chat is on the profile with the draft kept
             // and nothing sent; only the limit-full "Switch to X…" offer (model.switchTo) continues the chat's own question
-            self.switcher.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .settings)
+            self.switcher.confirmAndSwitch(p, key: a.key, email: a.email, origin: .settings)
             self.panel?.makeKey()
         }
         model.defaults = { [weak self] in self?.settings ?? .init() }
@@ -1487,7 +1503,7 @@ final class QuickChat {
         model.authResult = { [weak self] id, account, failed in self?.store.authResult(id, account: account, failed: failed) }
         model.switchTo = { [weak self] o in
             guard let self, let id = self.model.target?.profileID, let p = self.store.profile(id) else { return }
-            self.switcher.confirmAndSwitch(p, uuid: o.uuid, email: o.email, origin: .chat)
+            self.switcher.confirmAndSwitch(p, key: o.key, email: o.email, origin: .chat)
             self.panel?.makeKey()
         }
         model.signInAgain = { [weak self] in
@@ -1569,7 +1585,7 @@ final class QuickChat {
         }
         // the folder is on another account than the chat's (a switch from Settings, a sign-in as someone else, Sign in
         // again…, or one outside cl_quick): a chat belongs to its account, so a new chat starts and says so
-        if let old = model.target, old.profileID == id, let was = old.accountUUID, let to = now.accountUUID, was != to, !model.busy {
+        if let old = model.target, old.profileID == id, AccountBook.anotherSeat(old.account, old.email, now.account, now.email), !model.busy {
             model.accountChanged(to: now)
             restarted = true
         }
@@ -1585,7 +1601,7 @@ final class QuickChat {
         // the profile's own standby account seen most recently. A standby account shows no usage (one folder holds one
         // sign-in, so its limits aren't known here), so none is picked or described by numbers kept from its last time
         // in use
-        let standby = store.standby(p).first.map { QuickChatSwitchOffer(uuid: $0.uuid, email: $0.email) }
+        let standby = store.standby(p).first.map { QuickChatSwitchOffer(key: $0.key, email: $0.email) }
         let notice: QuickChatSwitchNotice? = switcher.waiting[id].map { .waiting(wanted: $0.wantedEmail) }
             ?? switcher.ended[id].map { .ended($0) }
         // only fresh numbers: older ones never draw the account full or offer elsewhere (warm() asks for new ones)

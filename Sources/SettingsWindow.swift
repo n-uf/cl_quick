@@ -9,6 +9,7 @@
 import AddressPrivacy
 import AppKit
 import Carbon.HIToolbox
+import ClaudeAuth
 import ServiceManagement
 import SwiftUI
 
@@ -817,7 +818,7 @@ struct ProfilePage: View {
         ProfileActions(
             reveal: { Files.reveal(URL(fileURLWithPath: profile.path)) },
             showTerminal: { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) },
-            switchTo: { e in switcher.confirmAndSwitch(profile, uuid: e.id, email: e.email, origin: .settings) },
+            switchTo: { e in switcher.confirmAndSwitch(profile, key: AccountKey(text: e.id), email: e.email, origin: .settings) },
             forget: { e in confirmForget(e) },
             signInAgain: { switcher.signInAgain(profile, origin: .settings) },
             signInSignedOut: { signInSignedOut() },
@@ -838,14 +839,15 @@ struct ProfilePage: View {
     private func entries(_ waiting: SwitchGoal?) -> [AccountEntry] {
         var out: [AccountEntry] = []
         if let u = store.inUse(profile) {
-            out.append(AccountEntry(id: u.uuid, email: u.email, plan: ClaudeFolder.plan(profile.path),
-                                    inUse: true, level: store.level(of: profile, account: u.uuid), signing: waiting?.again == true,
+            out.append(AccountEntry(id: u.id, email: u.email, plan: ClaudeFolder.plan(profile.path),
+                                    inUse: true, level: store.level(of: profile, account: u.key), signing: waiting?.again == true,
                                     problem: store.signInProblem(profile)))
         }
+        // one row per seat: a personal plan and a Team seat on one address are two
         for a in store.standby(profile) {
-            let signing = waiting.map { $0.wantedUUID == a.id || $0.wantedEmail.lowercased() == a.email.lowercased() } ?? false
+            let signing = waiting.map { w in w.wantedKey.map { $0 == a.key } ?? (w.wantedEmail.lowercased() == a.email.lowercased()) } ?? false
             // no level: a standby account shows no usage (an old week stays in levels.json, unshown)
-            out.append(AccountEntry(id: a.uuid, email: a.email, inUse: false, level: nil, lastSeen: a.lastSeen, signing: signing))
+            out.append(AccountEntry(id: a.id, email: a.email, inUse: false, level: nil, lastSeen: a.lastSeen, signing: signing))
         }
         return out
     }
@@ -862,8 +864,10 @@ struct ProfilePage: View {
         let a = address.trimmingCharacters(in: .whitespaces)
         if store.inUse(profile)?.email.lowercased() == a.lowercased() { problem = "\(a) is the account in use already."; return }
         problem = nil
-        let known = profile.accounts.first { $0.email.lowercased() == a.lowercased() }
-        switcher.confirmAndSwitch(profile, uuid: known?.uuid, email: known?.email ?? a, origin: .settings)
+        // an address typed: the seat it was last seen as, when there is only one on that address (else the browser decides)
+        let known = profile.accounts.filter { $0.email.lowercased() == a.lowercased() }
+        let one = known.count == 1 ? known.first : nil
+        switcher.confirmAndSwitch(profile, key: one?.key, email: one?.email ?? a, origin: .settings)
         address = ""
         adding.wrappedValue = false
     }
@@ -882,7 +886,7 @@ struct ProfilePage: View {
         a.informativeText = ForgetWords.detail(profile: profile.name)
         a.addButton(withTitle: "Forget"); a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
-        if store.forget(account: e.id, of: profile.id) {
+        if let key = AccountKey(text: e.id), store.forget(account: key, of: profile.id) {
             NotificationCenter.default.post(name: AccountSwitcher.changed, object: nil)      // the chat's switch offer too
         }
     }
@@ -1035,7 +1039,7 @@ struct AddPage: View {
         guard !store.uses(folder) else { problem = "\(tilde(expand(folder))) is a profile already."; return }
         // one account, one profile: the folder's file is read as it is now, not as it was when the list was drawn
         if let a = ClaudeFolder.account(folder), let other = store.nameUsing(a) {
-            problem = AddPage.refusedWords(folder: folder, email: a.email, profile: other)
+            problem = AddPage.refusedWords(folder: folder, email: a.email ?? "this account", profile: other)
             return
         }
         let p = Profile(id: ProfileStore.newID(folder, taken: store.profiles.map(\.id)), name: name ?? ClaudeFolder.suggestedName(folder), folder: tilde(expand(folder)))
@@ -1352,7 +1356,7 @@ struct ChatCard: View {
         _ = modelsTick
         if let sample { return sample.models }
         guard let p = store.profile(state.settings.defaultProfile) ?? store.profiles.first else { return nil }
-        return ModelCatalog.shared.list(profile: p.id, account: store.inUse(p)?.uuid)
+        return ModelCatalog.shared.list(profile: p.id, account: store.inUse(p)?.key.text)
     }
 
     /// The user's own lines, added after the fixed instructions of a new chat: saved as they are typed, in a box of about
@@ -1415,8 +1419,8 @@ enum SettingsRender {
         let alex = AccountEntry(id: "u1", email: "alex@example.com", plan: "Max", inUse: true, level: level(34, 62, ago: 600))
         let kim = AccountEntry(id: "u2", email: "kim@example.org", inUse: false, level: nil, lastSeen: now.addingTimeInterval(-2 * 86400 - 600))
         let lee = AccountEntry(id: "u3", email: "lee@example.com", inUse: false, level: nil, lastSeen: now.addingTimeInterval(-9 * 86400))
-        let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2",
-                              wantedEmail: "kim@example.org", fromUUID: "u1", fromEmail: "alex@example.com", origin: .settings)
+        let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedKey: AccountKey(account: "u2"),
+                              wantedEmail: "kim@example.org", fromKey: AccountKey(account: "u1"), fromEmail: "alex@example.com", origin: .settings)
         var tiles: [SettingsTiles.Item] = [.init(id: "main", name: "Main", sub: "default · alex@example.com", lamp: .ok),
                                            .init(id: "work", name: "Work", sub: "sam@work.example", lamp: .ok)]
         var at: SettingsPage = .profile("main")

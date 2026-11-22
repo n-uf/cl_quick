@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // after them Add an account…, which opens Settings on the profile with that form open)
         QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) },
                            switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
-                           switchTo: { p, a in AccountSwitcher.shared.confirmAndSwitch(p, uuid: a.uuid, email: a.email, origin: .settings) },
+                           switchTo: { p, a in AccountSwitcher.shared.confirmAndSwitch(p, key: a.key, email: a.email, origin: .settings) },
                            addAccount: { p in SettingsWindow.shared.show(profile: p.id, addAccount: true) },
                            pick: { [chat = self.chat] id in chat.open(profile: id) })
             .forEach(menu.addItem)

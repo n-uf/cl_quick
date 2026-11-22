@@ -11,7 +11,7 @@ final class ModelCatalog {
     /// Posted (main thread) when a list changed.
     static let changed = Notification.Name("cl_quick.models.changed")
 
-    /// "<profile id>|<account uuid>" → the list.
+    /// "<profile id>|<account's seat>" (AccountKey.text) → the list.
     private(set) var lists: [String: [QuickChatModelEntry]]
 
     init() { lists = Files.read([String: [QuickChatModelEntry]].self, Files.models) ?? [:] }
@@ -53,7 +53,7 @@ final class ModelCatalog {
 extension QuickChatModel {
     /// The list for the profile and account the chat is on, if Claude Code gave one.
     var modelList: [QuickChatModelEntry]? {
-        target.flatMap { ModelCatalog.shared.list(profile: $0.profileID, account: $0.accountUUID) }
+        target.flatMap { ModelCatalog.shared.list(profile: $0.profileID, account: $0.account?.text) }
     }
     /// The model the chat answers with: the chosen family's newest on the account (or the nearest family it has).
     var resolvedModel: (family: QuickChatModelChoice, value: String, entry: QuickChatModelEntry?) {

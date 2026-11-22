@@ -17,22 +17,26 @@ struct SwitchGoal: Equatable {
     var profileID: String
     var profileName: String
     var folder: String
-    /// The standby account's uuid; nil for an address typed in (Add an account…).
-    var wantedUUID: String?
+    /// The standby seat's key (AccountKey: account id and organisation); nil for an address typed in (Add an account…).
+    var wantedKey: AccountKey?
     var wantedEmail: String
-    var fromUUID: String?
+    /// The seat the folder was on as it began.
+    var fromKey: AccountKey?
     var fromEmail: String?
     var origin: Origin
     var started = Date()
 
     /// Signing in again on the account already in use (Sign in again…): the folder's account is the same before and after,
     /// so only Claude Code's login ending well says it's done (ClaudeSignIn follows it).
-    var again: Bool { fromUUID != nil && wantedUUID == fromUUID }
+    var again: Bool { fromKey != nil && wantedKey == fromKey }
 
-    /// The account wanted, for ClaudeSignIn: by its id when cl_quick knows one (not one made from the address), and its
-    /// address.
+    /// The seat wanted, for ClaudeSignIn: by its account id when cl_quick knows one (not an address placeholder), its
+    /// organisation when it knows the seat (then a sign-in that lands on another seat of the account is the wrong one),
+    /// and its address.
     var wanted: SignedInAccount {
-        SignedInAccount(accountID: wantedUUID.flatMap { $0.hasPrefix("email:") ? nil : $0 }, email: wantedEmail, origin: .record)
+        var a = (wantedKey ?? AccountKey(account: AccountKey.addressPrefix + wantedEmail)).identity
+        a.email = wantedEmail
+        return a
     }
 }
 
@@ -72,8 +76,8 @@ struct SwitchEnded: Equatable {
 final class AccountSwitcher {
     static let shared = AccountSwitcher()
     /// Posted (main thread) whenever a switch begins, ends or is dropped, or the account signed in to a folder changed:
-    /// the chat and Settings draw again. (The folder's change is posted by FolderFiles itself, whoever parsed the file.)
-    static let changed = FolderFiles.accountChanged
+    /// the chat and Settings draw again. (The folder's change is posted by FolderRecords itself, whoever parsed the file.)
+    static let changed = FolderRecords.accountChanged
 
     /// By profile id: the sign-ins being waited for.
     private(set) var waiting: [String: SwitchGoal] = [:]
@@ -129,7 +133,7 @@ final class AccountSwitcher {
     }
 
     /// "Switch to …": asks first, in plain words, then opens Claude Code's sign-in and watches the folder.
-    func confirmAndSwitch(_ p: Profile, uuid: String?, email: String, origin: SwitchGoal.Origin) {
+    func confirmAndSwitch(_ p: Profile, key: AccountKey?, email: String, origin: SwitchGoal.Origin) {
         let answer = Self.runAlert(Self.confirmAlert(p, email: email))
         // the alert took the pointer: whatever was under it (the Switch to … button) got no exit, so its address goes blurred
         AddressPrivacy.shared.endHover()
@@ -137,7 +141,7 @@ final class AccountSwitcher {
         // the question was modal: a switch may have begun on the profile meanwhile (its sign-in is waited for), and a second
         // one would replace it
         guard waiting[p.id] == nil else { return }
-        begin(p, uuid: uuid, email: email, origin: origin)
+        begin(p, key: key, email: email, origin: origin)
     }
 
     /// Shows a question modally (the checks replace it: nothing is shown, cl_quick is never activated).
@@ -158,10 +162,11 @@ final class AccountSwitcher {
     }
 
     /// Opens the sign-in for `email` on the profile's folder and waits for ClaudeSignIn's outcome.
-    func begin(_ p: Profile, uuid: String?, email: String, origin: SwitchGoal.Origin) {
-        let now = ClaudeFolder.account(p.path)
-        let goal = SwitchGoal(profileID: p.id, profileName: p.name, folder: p.path, wantedUUID: uuid, wantedEmail: email,
-                              fromUUID: now?.uuid, fromEmail: now?.email, origin: origin)
+    func begin(_ p: Profile, key: AccountKey?, email: String, origin: SwitchGoal.Origin) {
+        // the seat the folder is on, as the profile's list knows it (its key is the one a sign-in again wants)
+        let now = AccountBook.inUse(ClaudeFolder.account(p.path), in: (ProfileStore.shared.profile(p.id) ?? p).accounts)
+        let goal = SwitchGoal(profileID: p.id, profileName: p.name, folder: p.path, wantedKey: key, wantedEmail: email,
+                              fromKey: now?.key, fromEmail: now?.email, origin: origin)
         waiting[p.id] = goal
         ended[p.id] = nil; signedAgain[p.id] = nil
         changed()
@@ -176,12 +181,13 @@ final class AccountSwitcher {
     /// and follows it like a switch: the same account is "Signed in again", another one is the wrong account, and no
     /// sign-in is the timeout's note.
     func signInAgain(_ p: Profile, origin: SwitchGoal.Origin) {
-        guard waiting[p.id] == nil, let now = ClaudeFolder.account(p.path) else {
+        guard waiting[p.id] == nil,
+              let now = AccountBook.inUse(ClaudeFolder.account(p.path), in: (ProfileStore.shared.profile(p.id) ?? p).accounts) else {
             // not signed in at all: no account to wait for; Claude Code's own sign-in on the folder
             signIn(folder: p.path)
             return
         }
-        begin(p, uuid: now.uuid, email: now.email, origin: origin)
+        begin(p, key: now.key, email: now.email, origin: origin)
     }
 
     /// "Try again as A" / "Sign in again" on a switch that ended: the same account wanted, begun from the folder as it is
@@ -189,7 +195,7 @@ final class AccountSwitcher {
     /// sign-in is waited for on that profile, or when none ended (the note it was asked from is gone).
     func tryAgain(_ p: Profile, origin: SwitchGoal.Origin) {
         guard waiting[p.id] == nil, let m = ended[p.id] else { return }
-        begin(p, uuid: m.goal.wantedUUID, email: m.goal.wantedEmail, origin: origin)
+        begin(p, key: m.goal.wantedKey, email: m.goal.wantedEmail, origin: origin)
     }
 
     /// Claude Code's sign-in on a folder, for an account (a switch) or for whoever signs in (a signed-out folder, a folder
@@ -253,10 +259,11 @@ final class AccountSwitcher {
         switch outcome {
         case .signedIn(let a): end(goal.profileID, goal, .reached, signedIn: a.email)
         case .wrongAccount(let a, _):
-            let email = a.email ?? ClaudeFolder.email(goal.folder) ?? ""
-            // the folder was read again before this: it is on the account that signed in
-            let uuid = ClaudeFolder.account(goal.folder).flatMap { $0.email.lowercased() == email.lowercased() ? $0.uuid : nil } ?? a.accountID ?? "email:" + email
-            let also = Self.profileAlsoUsing((uuid, email), besides: goal.profileID, profiles: ProfileStore.shared.profiles,
+            // the folder was read again before this: it is on the account that signed in (its record, with its ids, when it
+            // is maybe that one; else the word as it is)
+            let who = ClaudeFolder.account(goal.folder).flatMap { $0.maybeSame(a) ? $0 : nil } ?? a
+            let email = a.email ?? who.email ?? ""
+            let also = Self.profileAlsoUsing(who, besides: goal.profileID, profiles: ProfileStore.shared.profiles,
                                              account: { ClaudeFolder.account($0.path) })
             end(goal.profileID, goal, .ended(.wrongAccount(signedIn: email, alsoOn: also)))
         case .timedOut: end(goal.profileID, goal, .ended(.timedOut))
@@ -267,10 +274,10 @@ final class AccountSwitcher {
         }
     }
 
-    /// The name of another profile (not `besides`) whose folder is signed in to this account now, if one is: the account
-    /// the browser signed in is then in use there too (one account never makes two profiles).
-    static func profileAlsoUsing(_ account: (uuid: String, email: String), besides id: String, profiles: [Profile],
-                                 account of: (Profile) -> (uuid: String, email: String)?) -> String? {
+    /// The name of another profile (not `besides`) whose folder is signed in to this account (maybe the same seat) now, if
+    /// one is: the account the browser signed in is then in use there too (one seat never makes two profiles).
+    static func profileAlsoUsing(_ account: SignedInAccount, besides id: String, profiles: [Profile],
+                                 account of: (Profile) -> SignedInAccount?) -> String? {
         AccountBook.profileUsing(account, among: profiles.filter { $0.id != id }.map { ($0.name, of($0)) })
     }
 
@@ -413,7 +420,7 @@ enum SignInWord {
                                                       workFolder: workFolder, model: ""))
             let answered = DispatchSemaphore(value: 0)
             let lock = NSLock()
-            var said: ProcessIdentity?
+            var said: [String: String]?
             p.onEvent = { e in
                 guard case .models(_, let who) = e else { return }
                 lock.lock(); said = who; lock.unlock()
@@ -424,10 +431,7 @@ enum SignInWord {
             _ = answered.wait(timeout: .now() + wait)
             p.stop()
             lock.lock(); let who = said; lock.unlock()
-            var account: [String: Any] = [:]
-            if let e = who?.email { account["email"] = e }
-            if let o = who?.organization { account["organization"] = o }
-            return SignedInAccount.process(account)
+            return SignedInAccount.process(who.map { $0 as [String: Any] })
         }
     }
 }

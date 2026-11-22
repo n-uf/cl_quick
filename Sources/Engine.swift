@@ -32,8 +32,9 @@ enum QuickChatEvent: Equatable {
     /// response to a `set_model` names the model now in effect ("claude-sonnet-5-5").
     case control(id: String, error: String?, model: String?)
     /// The models this account can use, from Claude Code's answer to `initialize` (sent when `claude` starts; nothing
-    /// goes to a model for it), and who the process says it is (the same answer's `account`).
-    case models([QuickChatModelEntry], account: ProcessIdentity)
+    /// goes to a model for it), and who the process says it is: the same answer's `account`, its named fields only
+    /// (`email`, `organization`; empty when it names no one), as ClaudeAuth's SignedInAccount.process takes them.
+    case models([QuickChatModelEntry], account: [String: String])
     /// The account's limits now, from Claude Code's answer to `get_usage` (sent when `claude` starts, after each answer
     /// and when the panel opens again; nothing goes to a model).
     case usage(QuickChatUsage)
@@ -294,8 +295,9 @@ enum QuickChatParse {
             // the answer to `initialize`: the account's models, and who the process is (`account`: email, organization)
             if error == nil, let answer = r["response"] as? [String: Any], let list = answer["models"] as? [[String: Any]] {
                 let a = answer["account"] as? [String: Any]
-                func word(_ k: String) -> String? { (a?[k] as? String).flatMap { $0.isEmpty ? nil : $0 } }
-                return .models(list.compactMap(modelEntry), account: ProcessIdentity(email: word("email"), organization: word("organization")))
+                var who: [String: String] = [:]
+                for k in ["email", "organization"] { if let v = a?[k] as? String, !v.isEmpty { who[k] = v } }
+                return .models(list.compactMap(modelEntry), account: who)
             }
             // the answer to `get_usage`: the account's limits (an error is just a control answer: nothing changes)
             if error == nil, let u = r["response"] as? [String: Any], u["rate_limits"] != nil || u["rate_limits_available"] != nil {

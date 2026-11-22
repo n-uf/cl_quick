@@ -1,10 +1,11 @@
 // Profiles: the Claude Code folders cl_quick chats on, picked by you (Settings), with the account signed in to each and
-// its week as Claude Code last reported it. cl_quick reads only each folder's own .claude.json for the account; it never
-// touches the Keychain and reads no usage of its own.
+// its week as Claude Code last reported it. cl_quick reads only each folder's own .claude.json for the account (through
+// the kit's FolderRecordReader, Accounts.swift); it never touches the Keychain and reads no usage of its own.
 //
 // Its files, all in ~/Library/Application Support/cl_quick/: profiles.json, settings.json, levels.json, and work/<id>/
 // (the folders Claude Code runs the chats in).
 
+import ClaudeAuth
 import Foundation
 
 func expand(_ path: String) -> String { (path as NSString).expandingTildeInPath }
@@ -55,47 +56,38 @@ enum ClaudeFolder {
         isDefault(path) ? expand("~/.claude.json") : (expand(path) as NSString).appendingPathComponent(".claude.json")
     }
 
-    /// The folder's file as it is now: stat'ed at every look, parsed again only when it changed (FolderFiles.fresh).
-    private static func read(_ path: String) -> FolderRead { FolderFiles.fresh(json(path)) }
-
     /// Parses the folders' files off the main thread where they changed, so the next look finds the parse done; `done`
     /// comes on the main thread, after those reads, with whether an account changed.
     static func reload(_ paths: [String], done: @escaping (Bool) -> Void) {
-        FolderFiles.reload(Array(Set(paths.map(json))), done: done)
+        FolderRecords.reload(Array(Set(paths.map(json))), done: done)
     }
 
-    /// The address Claude Code signed the folder in with; nil when it hasn't.
-    static func email(_ path: String) -> String? { read(path).email }
+    /// The address Claude Code signed the folder in with; nil when it names none.
+    static func email(_ path: String) -> String? { account(path)?.email }
 
-    /// THE ACCOUNT IN USE on a profile, the one answer every part of cl_quick asks for it: the chat's target, the bar,
-    /// the menu, Settings, the switch watch, the offers, the menu's refresh. Claude Code's accountUuid (or, in a file
-    /// without one, "email:" and the address in lower case) and the address; nil when the folder isn't signed in.
+    /// THE ACCOUNT CLAUDE CODE'S RECORD NAMES on a profile's folder, the one read every part of cl_quick asks for it: the
+    /// chat's target, the bar, the menu, Settings, the switch watch, the offers, the menu's refresh. Its account id,
+    /// address, organisation (id and name) and plan, as the record says them (guessed: SignedInAccount.record); nil when
+    /// the folder isn't signed in (the record names no id and no address).
     ///
-    /// The rule: it is the folder's .claude.json `oauthAccount` as the file is NOW (stat'ed at every look, parsed again
-    /// when its modification time moved), never a copy kept from before, so a sign-in made outside cl_quick (`claude auth
-    /// login`, /login in Terminal, cl_audit) is seen at the next look. The file is only what was written last, though:
-    /// what a running `claude` reports belongs to the account THAT process says it is (its `initialize` answer,
-    /// AccountTrail), and it is recorded only while that is still the account this function returns.
-    static func account(_ path: String) -> (uuid: String, email: String)? {
-        let r = read(path)
-        guard let email = r.email else { return nil }
-        return (r.uuid ?? "email:" + email.lowercased(), email)
-    }
-
-    /// The organization of the account in use (Claude Code's organizationName), when the file names one.
-    static func organization(_ path: String) -> String? { read(path).organization }
-
-    /// The organizationUuid of that account: the same after the organization is renamed.
-    static func organizationUuid(_ path: String) -> String? { read(path).organizationUuid }
+    /// The rule (the kit's, decided 2026-11-22): it is the folder's .claude.json `oauthAccount` as the file is NOW (one stat
+    /// at every look, parsed again when its stamp moved: FolderRecordReader), never a copy kept from before, so a sign-in
+    /// made outside cl_quick (`claude auth login`, /login in Terminal, cl_audit) is seen at the next look. The record is
+    /// only what was written last, though: what a running `claude` reports belongs to the account THAT process says it is
+    /// (its `initialize` answer, ProcessTrail and FolderSignIn.answer: AccountBook.numbersOwner), never moved onto the
+    /// record's when the two disagree.
+    static func account(_ path: String) -> SignedInAccount? { FolderRecords.look(json(path)).account }
 
     /// Claude's name for the plan ("Max"), when Claude Code recorded it.
-    static func plan(_ path: String) -> String? { read(path).plan }
+    static func plan(_ path: String) -> String? {
+        account(path)?.plan.map { $0 == $0.lowercased() ? $0.capitalized : $0 }
+    }
 
     /// A folder cl_quick can chat on: signed in to Claude Code, and not the home folder itself.
     static func usable(_ path: String) -> Bool {
         let p = (expand(path) as NSString).standardizingPath
         // the file as it is now (as every look is): a folder signed in since it was last looked at is accepted
-        return p != (NSHomeDirectory() as NSString).standardizingPath && email(p) != nil
+        return p != (NSHomeDirectory() as NSString).standardizingPath && account(p) != nil
     }
 
     /// ~/.claude and every ~/.claude-* folder, the plain one first. `home` is for the checks.
@@ -125,12 +117,13 @@ final class ProfileStore: ObservableObject {
     static let shared = ProfileStore()
 
     @Published private(set) var profiles: [Profile] = []
-    /// Each account's week as last reported, kept per profile and account: "<profile id>|<account uuid>". A switch shows
-    /// the account's own last week, not the one it replaced.
+    /// Each seat's week as last reported, kept per profile and seat (AccountBook.levelKey: "<profile id>|<account>" while
+    /// the seat isn't known, "<profile id>|<account>|<organisation>" once it is). A switch shows the seat's own last week,
+    /// not the one it replaced.
     @Published private(set) var levels: [String: QuickChatLevel] = [:]
-    /// By profile id: the account (uuid) Claude Code's last answer failed to authenticate on. In memory only: the chat
-    /// sets it, a good answer or a sign-in that landed clears it, and cl_quick starting afresh forgets it.
-    @Published private(set) var authFailed: [String: String] = [:]
+    /// By profile id: the seat Claude Code's last answer failed to authenticate on. In memory only: the chat sets it, a
+    /// good answer or a sign-in that landed clears it, and cl_quick starting afresh forgets it.
+    @Published private(set) var authFailed: [String: AccountKey] = [:]
 
     private init() {
         profiles = Files.read([Profile].self, Files.profiles) ?? []
@@ -139,22 +132,29 @@ final class ProfileStore: ObservableObject {
         if levels != read { Files.write(levels, Files.levels) }
     }
 
-    static func levelKey(_ profile: String, _ account: String) -> String { AccountBook.levelKey(profile, account) }
+    static func levelKey(_ profile: String, _ key: AccountKey) -> String { AccountBook.levelKey(profile, key) }
 
-    /// A levels.json from before accounts (AccountBook.migrated): each week goes to the account signed in to that
-    /// profile's folder now; one that can't be placed stays under its old key.
+    /// A levels.json from before accounts (AccountBook.migrated): each week goes to the seat signed in to that profile's
+    /// folder now; one that can't be placed stays under its old key.
     static func migrated(_ old: [String: QuickChatLevel], profiles: [Profile],
-                         account: (Profile) -> String? = { ClaudeFolder.account($0.path)?.uuid }) -> [String: QuickChatLevel] {
+                         account: (Profile) -> AccountKey? = { AccountBook.inUse(ClaudeFolder.account($0.path), in: $0.accounts)?.key })
+        -> [String: QuickChatLevel] {
         AccountBook.migrated(old) { id in profiles.first { $0.id == id }.flatMap(account) }
     }
 
-    /// What was last recorded for one account of the profile (the one in use by default), however old; nil: nothing
-    /// reported on it yet. Numbers are recorded only for the account in use at the time, from a `claude` that was that
-    /// account (`record`, AccountTrail.owner), so these are its own, but they may be from long ago (its last time in use,
-    /// or a plan since changed): what is shown and acted on goes through `shownLevel`.
-    func level(of p: Profile, account uuid: String? = nil) -> QuickChatLevel? {
-        guard let uuid = uuid ?? ClaudeFolder.account(p.path)?.uuid else { return nil }
-        return levels[Self.levelKey(p.id, uuid)]
+    /// What was last recorded for one seat of the profile (the one in use by default), however old; nil: nothing
+    /// reported on it yet. Numbers are recorded for the seat they belong to (`record`, AccountBook.numbersOwner), so these
+    /// are its own, but they may be from long ago (its last time in use, or a plan since changed): what is shown and acted
+    /// on goes through `shownLevel`.
+    func level(of p: Profile, account key: AccountKey? = nil) -> QuickChatLevel? {
+        guard let key = key ?? inUse(p)?.key else { return nil }
+        return levels[Self.levelKey(p.id, key)]
+    }
+
+    /// The numbers kept for the seat `owner` is, in profile `id`, for new ones to be applied on (AccountBook.numbersBase).
+    func base(_ id: String, for owner: SignedInAccount) -> QuickChatLevel? {
+        guard let p = profile(id) else { return nil }
+        return AccountBook.numbersBase(for: owner, profile: id, accounts: p.accounts, levels: levels)
     }
 
     /// The numbers the chat shows and acts on for the profile's account in use now: only fresh ones
@@ -178,11 +178,11 @@ final class ProfileStore: ObservableObject {
         guard profiles.isEmpty else { return }
         var list: [Profile] = []
         for f in ClaudeFolder.found() where ClaudeFolder.usable(f) {
-            guard let a = ClaudeFolder.account(f),
-                  AccountBook.profileUsing(a, among: list.map { ($0.name, $0.accounts.first.map { (uuid: $0.uuid, email: $0.email) }) }) == nil
+            guard let a = ClaudeFolder.account(f), let key = AccountKey(a),
+                  AccountBook.profileUsing(a, among: list.map { ($0.name, $0.accounts.first?.identity) }) == nil
             else { continue }
             list.append(Profile(id: Self.newID(f, taken: list.map(\.id)), name: ClaudeFolder.suggestedName(f), folder: f,
-                                accounts: [KnownAccount(uuid: a.uuid, email: a.email)]))
+                                accounts: [KnownAccount(key: key, email: a.email ?? "")]))
         }
         save(list)
     }
@@ -198,47 +198,48 @@ final class ProfileStore: ObservableObject {
 
     // MARK: accounts
 
-    /// The profile's account in use now (the folder's .claude.json), as a KnownAccount.
-    func inUse(_ p: Profile) -> KnownAccount? {
-        ClaudeFolder.account(p.path).map { a in p.accounts.first { $0.uuid == a.uuid } ?? KnownAccount(uuid: a.uuid, email: a.email) }
-    }
+    /// The profile's account in use now (the folder's .claude.json), as its list knows it (AccountBook.inUse: the entry
+    /// of its seat, or of its account while the seat isn't known).
+    func inUse(_ p: Profile) -> KnownAccount? { AccountBook.inUse(ClaudeFolder.account(p.path), in: p.accounts) }
 
     /// What is wrong with the profile's sign-in, if anything (SignInProblem): as the folder's file says now.
     func signInProblem(_ p: Profile) -> SignInProblem? {
-        AccountBook.signInProblem(signedIn: ClaudeFolder.account(p.path), failedOn: authFailed[p.id])
+        AccountBook.signInProblem(signedIn: inUse(p)?.key, failedOn: authFailed[p.id])
     }
 
-    /// The chat's answer on an account: it failed to authenticate (flag set), or it worked (flag cleared).
-    func authResult(_ id: String, account uuid: String, failed: Bool) {
-        guard profile(id) != nil else { return }
-        if failed { if authFailed[id] != uuid { authFailed[id] = uuid } }
+    /// The chat's answer on an account (the one its numbers belong to): it failed to authenticate (flag set on that seat),
+    /// or it worked (flag cleared).
+    func authResult(_ id: String, account: SignedInAccount, failed: Bool) {
+        guard let p = profile(id) else { return }
+        if failed {
+            guard let key = AccountBook.inUse(account, in: p.accounts)?.key else { return }
+            if authFailed[id] != key { authFailed[id] = key }
+        }
         else if authFailed[id] != nil { authFailed[id] = nil }
     }
 
     /// A sign-in landed on the profile's folder: whatever failed before is behind it.
     func signedIn(_ id: String) { if authFailed[id] != nil { authFailed[id] = nil } }
 
-    /// The accounts signed in before and not in use now, the most recently seen first.
-    func standby(_ p: Profile) -> [KnownAccount] {
-        let current = ClaudeFolder.account(p.path)
-        return p.accounts.filter { $0.uuid != current?.uuid }.sorted { $0.lastSeen > $1.lastSeen }
-    }
+    /// The seats signed in before and not in use now, tidied per seat (AccountBook.standby, the kit's StandbyTidy), the
+    /// most recently seen first.
+    func standby(_ p: Profile) -> [KnownAccount] { AccountBook.standby(p.accounts, inUse: ClaudeFolder.account(p.path)) }
 
-    /// Whenever cl_quick looks at a profile's folder, the account signed in to it is added to the profile, or its address
-    /// and last-seen time updated (found by its uuid). Addresses only; the time is kept to the hour so a busy chat
-    /// doesn't write the file at every look. Main thread; not from a view's body.
+    /// Whenever cl_quick looks at a profile's folder, the seat signed in to it is added to the profile, or its address and
+    /// last-seen time updated (AccountBook.note). Addresses only; the time is kept to the hour so a busy chat doesn't
+    /// write the file at every look. Main thread; not from a view's body.
     func noteAccount(of id: String, now: Date = Date()) {
         guard let p = profile(id) else { return }
         // signed out: that is the problem now, and signing back in (even as the same account) starts clean
         guard let a = ClaudeFolder.account(p.path) else { if authFailed[id] != nil { authFailed[id] = nil }; return }
-        // a failure was on another account than the one signed in now: it doesn't come back if that one does
-        if let failed = authFailed[id], failed != a.uuid { authFailed[id] = nil }
+        // a failure was on another seat than the one signed in now: it doesn't come back if that one does
+        if let failed = authFailed[id], failed != AccountBook.inUse(a, in: p.accounts)?.key { authFailed[id] = nil }
         var q = p
-        let r = AccountBook.note(&q.accounts, uuid: a.uuid, email: a.email, now: now)
+        let r = AccountBook.note(&q.accounts, a, now: now)
         guard r.changed else { return }
-        // a file that first had no accountUuid and now has one: its week moves to the new key
-        if let was = r.replaced {
-            let old = AccountBook.levelKey(id, was), new = AccountBook.levelKey(id, a.uuid)
+        // a key upgraded in place (a record that first had no accountUuid and now has one): its week moves with it
+        if let was = r.replaced, let now = AccountBook.inUse(a, in: q.accounts)?.key {
+            let old = AccountBook.levelKey(id, was), new = AccountBook.levelKey(id, now)
             if let l = levels[old], levels[new] == nil {
                 levels[new] = l; levels[old] = nil
                 Files.write(levels, Files.levels)
@@ -271,20 +272,19 @@ final class ProfileStore: ObservableObject {
     /// A folder already used by a profile.
     func uses(_ folder: String) -> Bool { profiles.contains { $0.path == expand(folder) } }
 
-    /// The name of the profile whose folder has this account signed in now, if any: one account never
+    /// The name of the profile whose folder has this account (maybe the same seat) signed in now, if any: one seat never
     /// makes two profiles.
-    func nameUsing(_ account: (uuid: String, email: String)) -> String? {
+    func nameUsing(_ account: SignedInAccount) -> String? {
         AccountBook.profileUsing(account, among: profiles.map { ($0.name, ClaudeFolder.account($0.path)) })
     }
 
-    /// cl_quick forgets a standby account of a profile, and its week. The account in use (as the folder's file says right
+    /// cl_quick forgets a standby seat of a profile, and its week. The account in use (as the folder's file says right
     /// now) is never forgotten. Returns whether it was.
     @discardableResult
-    func forget(account uuid: String, of id: String) -> Bool {
+    func forget(account key: AccountKey, of id: String) -> Bool {
         guard let p = profile(id) else { return false }
-        let now = ClaudeFolder.account(p.path)
-        guard let r = AccountBook.forgetting(uuid, of: id, accounts: p.accounts, levels: levels,
-                                             inUse: now?.uuid, inUseEmail: now?.email) else { return false }
+        guard let r = AccountBook.forgetting(key, of: id, accounts: p.accounts, levels: levels,
+                                             inUse: ClaudeFolder.account(p.path)) else { return false }
         var q = p
         q.accounts = r.accounts
         update(q)
@@ -292,14 +292,15 @@ final class ProfileStore: ObservableObject {
         return true
     }
 
-    /// What Claude Code said on this profile, on the account that answered. Recorded only while that is the account in
-    /// use (ClaudeFolder.account, the file as it is now): numbers are never kept under an account the folder has left,
-    /// nor put on the one it moved to (the callers check the process too: AccountTrail.owner).
-    func record(_ id: String, account uuid: String, _ level: QuickChatLevel) {
-        let key = Self.levelKey(id, uuid)
-        guard let p = profile(id), levels[key] != level else { return }      // a profile removed meanwhile stays gone
-        guard ClaudeFolder.account(p.path)?.uuid == uuid else { return }
-        levels[key] = level
+    /// What Claude Code said on this profile, kept for the account it belongs to (`owner`: the kit's numbersBelongTo,
+    /// AccountBook.numbersOwner): under that seat, also when the folder has moved to another account since (the numbers are
+    /// still that seat's own), never under the account the folder is on now unless it is that seat.
+    func record(_ id: String, account owner: SignedInAccount, _ level: QuickChatLevel) {
+        guard let p = profile(id),                                             // a profile removed meanwhile stays gone
+              let r = AccountBook.recording(level, for: owner, profile: id, accounts: p.accounts, levels: levels) else { return }
+        if r.accounts != p.accounts { var q = p; q.accounts = r.accounts; update(q) }
+        guard r.levels != levels else { return }
+        levels = r.levels
         Files.write(levels, Files.levels)
     }
 }

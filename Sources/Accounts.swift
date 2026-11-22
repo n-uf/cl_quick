@@ -1,169 +1,80 @@
-// Accounts: the bookkeeping of a profile's accounts that needs nothing but Foundation, so Checks/run.sh can check it:
-// the accounts remembered per profile, and the keys the weeks are kept under.
+// Accounts: the bookkeeping of a profile's accounts, on cl_kit's one account rule (ClaudeAuth and ProfileCore, vendored in
+// Vendor/): the accounts remembered per profile and the keys their weeks are kept under (AccountKey: the account id and
+// its organisation, so a personal plan and a Team seat on one address are two), the folders' records (the kit's one
+// FolderRecordReader), and whose numbers a running claude's are (ProcessTrail, FolderSignIn.answer). Pure functions where
+// it can, so Checks/run.sh checks them.
 
+import ClaudeAuth
 import Foundation
+import ProfileCore
 
-/// An account that was signed in to a profile's folder: its address and when cl_quick last saw it there. Never a token.
+/// A seat that was signed in to a profile's folder: its key, its address and when cl_quick last saw it there. Never a token.
 struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
-    /// Claude Code's accountUuid (the address in lower case, behind "email:", when its file has none).
+    /// The key's account: Claude Code's accountUuid, or "email:" and the address in lower case while the record named no
+    /// id (AccountKey's placeholder, upgraded in place once the id appears). Called `uuid` as older builds write it.
     var uuid: String
+    /// The key's organisation: its organizationUuid (or "name:" and its name until the id is known); nil while the seat
+    /// isn't known (an entry an older build wrote, or a record that names no organisation). Older builds don't read it.
+    var organization: String?
     var email: String
     var lastSeen: Date
-    var id: String { uuid }
 
-    init(uuid: String, email: String, lastSeen: Date = Date()) { self.uuid = uuid; self.email = email; self.lastSeen = lastSeen }
+    init(key: AccountKey, email: String, lastSeen: Date = Date()) {
+        uuid = key.account; organization = key.organization; self.email = email; self.lastSeen = lastSeen
+    }
+    init(uuid: String, organization: String? = nil, email: String, lastSeen: Date = Date()) {
+        self.init(key: AccountKey(account: uuid, organization: organization), email: email, lastSeen: lastSeen)
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        uuid = try c.decode(String.self, forKey: .uuid)
-        email = try c.decode(String.self, forKey: .email)
-        lastSeen = (try? c.decodeIfPresent(Date.self, forKey: .lastSeen)) ?? Date()
+        let account = try c.decode(String.self, forKey: .uuid)
+        let org = (try? c.decodeIfPresent(String.self, forKey: .organization)).flatMap { $0?.isEmpty == false ? $0 : nil }
+        self.init(key: AccountKey(account: account, organization: org), email: try c.decode(String.self, forKey: .email),
+                  lastSeen: (try? c.decodeIfPresent(Date.self, forKey: .lastSeen)) ?? Date())
     }
 
-    /// A uuid made from the address, for a file without an accountUuid.
-    var isPlaceholder: Bool { uuid.hasPrefix("email:") }
+    /// The seat it is kept under (AccountKey: case doesn't count).
+    var key: AccountKey { AccountKey(account: uuid, organization: organization) }
+    var id: String { key.text }
+    /// Known by its address only (no account id yet).
+    var isPlaceholder: Bool { key.isPlaceholder }
+    /// The entry as an account: its key, with its address.
+    var identity: SignedInAccount { AccountBook.identity(key, email: email) }
 }
 
-/// What was read from a folder's .claude.json.
-struct FolderRead {
-    var mtime: Date?
-    var email: String?
-    var uuid: String?
-    var plan: String?
-    /// Claude Code's organizationName for the account (two accounts may share an address, one per organization).
-    var organization: String? = nil
-    /// Claude Code's organizationUuid for the account: it doesn't change when the organization is renamed.
-    var organizationUuid: String? = nil
-}
-
-/// The .claude.json files, read for the account in them. There is no copy that can go out of date: every look stats the
-/// file and parses it again only when its modification time moved (`fresh`), so a sign-in made outside cl_quick is seen
-/// at the next look. A file can be several MB and changes often (every Claude Code session writes it), so `reload`
-/// parses the files on one serial utility queue first where it can, and the look on the main thread then finds the
-/// parse done. Every reload is queued behind the reads before it, so its `done` always sees the file as it was when the
-/// reload was asked for, even if another read of it was under way.
-enum FolderFiles {
-    private static var cache: [String: FolderRead] = [:]
-    private static let lock = NSLock()
+/// The folders' records (.claude.json), through the kit's one reader (FolderRecordReader: named fields only, bounded, one
+/// stat per look, parsed again only after a write), so a sign-in made outside cl_quick is seen at the next look. A file can
+/// be several MB and changes often (every Claude Code session writes it), so `reload` parses the files on one serial
+/// utility queue first where it can, and the look on the main thread then finds the parse done. Every reload is queued
+/// behind the reads before it, so its `done` sees the file as it was when the reload was asked for.
+enum FolderRecords {
+    static let reader = FolderRecordReader()
     private static let queue = DispatchQueue(label: "cl_quick.folder-reads", qos: .utility)
-    /// Posted (main thread) when a parse finds another account than the one it replaces in the cache, whoever parsed
-    /// it: a look on the main thread (the menu opening, a SwiftUI body) as much as a `reload`. Nothing is lost when a
-    /// look gets to the new file before the reload that was asked for.
+    /// Posted (main thread) when a look finds the record naming someone else (another account or seat, a sign-in, a
+    /// sign-out), whoever looked: a look on the main thread (the menu opening, a SwiftUI body) as much as a `reload`.
     static let accountChanged = Notification.Name("cl_quick.accountSwitch.changed")
-    /// An account change that no one has been told about yet (guarded by `lock`): a main-thread flush or the `done` of
-    /// a reload takes it, whichever comes first, so a change is signalled once.
-    private static var unsignalled = false
 
-    private static func takeUnsignalled() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        let was = unsignalled
-        unsignalled = false
-        return was
+    /// The record at `file` now. Only the look whose own parse found a change sees `changed` (the reader's rule), so each
+    /// change is signalled once: by this look (`accountChanged`, on the main thread), or, with `signal` false, by the
+    /// caller (`reload` tells its own caller, so that caller can note the accounts first).
+    @discardableResult
+    static func look(_ file: String, signal: Bool = true) -> FolderRecordReader.Look {
+        let l = reader.look(path: file)
+        if l.changed && signal {
+            DispatchQueue.main.async { NotificationCenter.default.post(name: accountChanged, object: nil) }
+        }
+        return l
     }
 
-    /// Reads the files again, off the main thread (parsing only those whose modification time moved); `done` comes on
-    /// the main thread with whether an account changed that hasn't been signalled yet (by a look on the main thread that
-    /// already parsed the new file, `accountChanged` has been posted for it: false here). The caller posts
-    /// `accountChanged` itself on true, after its own bookkeeping.
+    /// Reads the files again, off the main thread (parsing only those whose stamp moved); `done` comes on the main thread
+    /// with whether one of them now names someone else (and nobody was told yet). The caller posts `accountChanged`
+    /// itself on true, after its own bookkeeping.
     static func reload(_ files: [String], done: @escaping (Bool) -> Void) {
         queue.async {
-            for f in files { _ = fresh(f, signal: false) }
-            DispatchQueue.main.async { done(takeUnsignalled()) }
+            var changed = false
+            for f in files where look(f, signal: false).changed { changed = true }
+            DispatchQueue.main.async { done(changed) }
         }
-    }
-
-    private static func modified(_ file: String) -> Date? {
-        (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date
-    }
-
-    /// The file as it is now: parsed again only if its modification time moved (to any other time: a copy put back
-    /// with an older time of its own is another file too). A parse that finds another account than the one it replaces
-    /// is signalled (`accountChanged`, on the main thread, once per change); `reload` passes `signal: false` and tells
-    /// its own caller instead, so that caller can note the accounts first.
-    static func fresh(_ file: String, signal: Bool = true) -> FolderRead {
-        let mtime = modified(file)
-        lock.lock(); let hit = cache[file]; lock.unlock()
-        if let hit, hit.mtime == mtime { return hit }
-        var r = FolderRead(mtime: mtime)
-        if let d = FileManager.default.contents(atPath: file),
-           let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
-           let a = j["oauthAccount"] as? [String: Any] {
-            r.email = a["emailAddress"] as? String
-            r.uuid = (a["accountUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            r.organization = (a["organizationName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            r.organizationUuid = (a["organizationUuid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            if let p = a["planDisplayName"] as? String, !p.trimmingCharacters(in: .whitespaces).isEmpty {
-                r.plan = p == p.lowercased() ? p.capitalized : p
-            }
-        }
-        // kept only while the file still has the time it was read at: a parse that a write overtook (or a read on one
-        // thread that finishes after a newer one on another) never stands for the file; the next look parses again
-        guard modified(file) == mtime else { return r }
-        lock.lock()
-        let replaced = cache[file]
-        cache[file] = r
-        let changed = replaced.map { $0.email != r.email || $0.uuid != r.uuid } ?? false     // the first parse is no change
-        if changed { unsignalled = true }
-        lock.unlock()
-        if changed && signal {
-            DispatchQueue.main.async { if takeUnsignalled() { NotificationCenter.default.post(name: accountChanged, object: nil) } }
-        }
-        return r
-    }
-}
-
-/// Who a running `claude` says it is: the `account` of its `initialize` answer. Claude Code 2.1.318 gives `email`,
-/// `organization` (the organization's name), `subscriptionType` and `apiProvider` there, and no uuid; it is that
-/// process's own reading of the folder's oauthAccount, made as it started, so it can differ from the file cl_quick read
-/// just before (a sign-in landing in between). No email: a process on a key or a token, or a Claude Code that doesn't
-/// say. (`subscriptionType` isn't used: it has been seen out of date after a plan change.)
-struct ProcessIdentity: Equatable {
-    var email: String?
-    var organization: String?
-}
-
-/// The account a `claude` (the chat's, or the menu's short-lived one) runs on, and so whose numbers it reports. A chat
-/// is incognito, so its conversation lives only in that process: it goes on only while the process is the account the
-/// folder is on.
-struct AccountTrail {
-    private(set) var running = false
-    /// The account the folder's file named just before the process started.
-    private(set) var launchedOn: (uuid: String, email: String)?
-    /// The organizationUuid the file named at that moment (nil when it named none).
-    private(set) var launchedOrganizationUuid: String?
-    /// What the process said it is, once its `initialize` answer came (nil until then).
-    private(set) var identity: ProcessIdentity?
-
-    mutating func processStarted(on uuid: String?, email: String?, organizationUuid: String? = nil) {
-        running = true; identity = nil
-        launchedOn = uuid.map { ($0, email ?? "") }
-        launchedOrganizationUuid = organizationUuid
-    }
-    /// The process's `initialize` answer said who it is.
-    mutating func identified(_ who: ProcessIdentity) { if running { identity = who } }
-    /// The process ended, and the conversation with it.
-    mutating func processEnded() { running = false; launchedOn = nil; launchedOrganizationUuid = nil; identity = nil }
-
-    /// The account a report from the running process belongs to, given the folder's account NOW (ClaudeFolder.account,
-    /// and its organization): that account's uuid when the process is that account, else nil, and the report is
-    /// dropped. The process is that account when
-    /// - it said who it is: the same address, and the same organization when both name one. Its word wins over what
-    ///   cl_quick read before it started. Organizations are compared by name only when the file's organizationUuid is
-    ///   not the one the process started on (or one of the two isn't known): a rename of the same organization
-    ///   (same uuid) never cuts the reports;
-    /// - it said nothing (no answer yet, or no account in it): the folder still names the account it named as the
-    ///   process started.
-    /// So a number is never recorded under an account the folder isn't on now: an answer that arrives after the folder
-    /// moved to another account (a sign-in elsewhere) is dropped, never put on the account now in use.
-    func owner(folder: (uuid: String, email: String)?, organization: String? = nil, organizationUuid: String? = nil) -> String? {
-        guard running, let folder else { return nil }
-        if let said = identity?.email {
-            guard said.lowercased() == folder.email.lowercased() else { return nil }
-            let sameOrganization = launchedOrganizationUuid != nil && launchedOrganizationUuid == organizationUuid
-            if !sameOrganization, let a = identity?.organization, let b = organization, a != b { return nil }
-            return folder.uuid
-        }
-        guard let from = launchedOn, AccountBook.unchanged(from: from, now: folder) else { return nil }
-        return folder.uuid
     }
 }
 
@@ -179,11 +90,11 @@ enum SignInProblem: Equatable {
 
 enum AccountBook {
     /// "Sign in again…" is for a sign-in that is broken: no account signed in to the folder, or the account in use failed
-    /// to authenticate on the last answer (`failedOn`: the uuid it failed on, kept in memory only). A flag for another
-    /// account says nothing about this one.
-    static func signInProblem(signedIn: (uuid: String, email: String)?, failedOn: String?) -> SignInProblem? {
+    /// to authenticate on the last answer (`failedOn`: the seat it failed on, kept in memory only). A flag for another
+    /// account or seat says nothing about this one.
+    static func signInProblem(signedIn: AccountKey?, failedOn: AccountKey?) -> SignInProblem? {
         guard let signedIn else { return .signedOut }
-        return failedOn == signedIn.uuid ? .stopped : nil
+        return failedOn == signedIn ? .stopped : nil
     }
 
     /// What a switch affects, for its confirmation: Claude Code on the folder (in Terminal and editors for ~/.claude,
@@ -213,19 +124,169 @@ enum AccountBook {
         }
     }
 
-    /// The key a week is kept under: the profile and the account, "<profile id>|<account uuid>".
-    static func levelKey(_ profile: String, _ account: String) -> String { profile + "|" + account }
+    // MARK: the seat rule (the kit's: ClaudeAuth's AccountKey and FolderSignIn, ProfileCore's one seat comparison)
 
-    /// A levels.json from before accounts was keyed by profile id alone. Each such week goes to the account `placed`
-    /// names for that profile (the one signed in now, the one it was most likely reported on); one that can't be placed
-    /// (no such profile, or none signed in yet) is kept as it is, to be placed by a later start. Keys already per
-    /// account stay, and win over a week moved onto the same key.
-    static func migrated<V>(_ old: [String: V], placed: (String) -> String?) -> [String: V] {
+    /// A key as an account, with an address beside it (the key keeps one only while it is a placeholder).
+    static func identity(_ key: AccountKey, email: String?) -> SignedInAccount {
+        var a = key.identity
+        if a.email == nil, let e = email, !e.isEmpty { a.email = e }
+        return a
+    }
+
+    /// Another account or seat: two keys (each with its address) that the one seat comparison tells apart. A placeholder
+    /// upgraded to its id, or a seat that was only not known, is the same one.
+    static func anotherSeat(_ a: AccountKey?, _ aEmail: String?, _ b: AccountKey?, _ bEmail: String?) -> Bool {
+        guard let a, let b else { return false }
+        return identity(a, email: aEmail).match(identity(b, email: bEmail)) == .different
+    }
+
+    /// The entry of a profile's list an account is (the record's account in use, or the account numbers belong to): the
+    /// same key, else the same seat (AccountKey.match), else an entry of that account whose seat isn't known (an entry an
+    /// older build wrote, before seats). nil: none of them.
+    static func entryIndex(for a: SignedInAccount, in list: [KnownAccount]) -> Int? {
+        if let k = AccountKey(a), let i = list.firstIndex(where: { $0.key == k }) { return i }
+        if let i = list.firstIndex(where: { $0.key.match(a) == .seat }) { return i }
+        return list.firstIndex { $0.organization == nil && $0.key.match(a) == .seatNotKnown }
+    }
+
+    /// The profile's account in use, as its list knows it: the entry the record is (entryIndex), else one made from the
+    /// record. nil when the folder isn't signed in.
+    static func inUse(_ record: SignedInAccount?, in list: [KnownAccount]) -> KnownAccount? {
+        guard let r = record, let key = AccountKey(r) else { return nil }
+        if let i = entryIndex(for: r, in: list) { return list[i] }
+        return KnownAccount(key: key, email: r.email ?? "")
+    }
+
+    /// Notes the account the record names in a profile's list: found by entryIndex, its address and last-seen time
+    /// updated (kept to the hour), its key upgraded as the kit does (an "email:" placeholder to the account id, a "name:"
+    /// one to the organisation's id of the same seat; never onto another seat, and never a seat given to an entry whose
+    /// seat isn't known: the record is only a guess, the numbers' own source names that). A new seat is added. Returns
+    /// whether the list changed, and the key it replaced when the key itself was upgraded.
+    @discardableResult
+    static func note(_ list: inout [KnownAccount], _ r: SignedInAccount, now: Date = Date()) -> (changed: Bool, replaced: AccountKey?) {
+        guard let key = AccountKey(r) else { return (false, nil) }
+        guard let i = entryIndex(for: r, in: list) else {
+            list.append(KnownAccount(key: key, email: r.email ?? "", lastSeen: now))
+            return (true, nil)
+        }
+        let old = list[i]
+        var up = old.key.upgraded(with: r) ?? old.key
+        if up != old.key, list.contains(where: { $0.key == up }) { up = old.key }      // never two entries for one seat
+        let email = r.email ?? old.email
+        guard up != old.key || email != old.email || now.timeIntervalSince(old.lastSeen) > 3600 else { return (false, nil) }
+        list[i] = KnownAccount(key: up, email: email, lastSeen: now)
+        return (true, up != old.key ? old.key : nil)
+    }
+
+    /// The name of the profile the account is maybe in use on (SignedInAccount.maybeSame: the same seat, or the same
+    /// account whose seat isn't known), among profiles given as (name, the account signed in to its folder now); nil when
+    /// no profile uses it. A personal plan and a Team seat on one address are two: each may be one profile's.
+    static func profileUsing(_ account: SignedInAccount, among profiles: [(name: String, inUse: SignedInAccount?)]) -> String? {
+        profiles.first { p in p.inUse.map { $0.maybeSame(account) } ?? false }?.name
+    }
+
+    /// A profile's standby accounts: its list but the account in use (the record's), tidied by the kit's rule
+    /// (StandbyTidy, per seat: one entry per seat, never the account in use, an entry whose seat isn't known joining its
+    /// account's one seat), the most recently seen first. A personal plan and a Team seat on one address are two.
+    static func standby(_ list: [KnownAccount], inUse record: SignedInAccount?) -> [KnownAccount] {
+        let own = record.flatMap { entryIndex(for: $0, in: list) }
+        let rest = list.indices.filter { $0 != own }.map { list[$0] }
+        let ownSeat = record.flatMap(AccountKey.init).flatMap(seat)
+        let tidied = StandbyTidy.merge([], into: rest.map(standbyEntry), inUse: ownSeat)
+        return tidied.map(knownAccount).sorted { $0.lastSeen > $1.lastSeen }
+    }
+
+    /// A key as ProfileCore's seat; nil for an address placeholder (no account id yet).
+    static func seat(_ k: AccountKey) -> Seat? { k.isPlaceholder ? nil : Seat(account: k.account, organization: k.organization) }
+
+    private static func standbyEntry(_ a: KnownAccount) -> StandbyAccount {
+        StandbyAccount(email: a.email, seat: seat(a.key), addedAt: nil, id: a.id, lastInUse: a.lastSeen)
+    }
+
+    private static func knownAccount(_ s: StandbyAccount) -> KnownAccount {
+        let key = s.seat.map { AccountKey(account: $0.account, organization: $0.organization) }
+            ?? AccountKey(text: s.id) ?? AccountKey(account: AccountKey.addressPrefix + s.email.lowercased())
+        return KnownAccount(key: key, email: s.email, lastSeen: s.lastInUse ?? .distantPast)
+    }
+
+    // MARK: whose numbers a running claude's are
+
+    /// Whose the numbers a running claude reports are (the kit's FolderSignIn.answer(record:trail:).numbersBelongTo): its
+    /// own word's account (with the launch record's ids when it named the seat it started on), kept for that account even
+    /// when the record names another one now (never put on the record's); while it said nothing, the record's account
+    /// while the record still names the seat it started on. nil: nobody's.
+    static func numbersOwner(record: SignedInAccount?, trail: ProcessTrail) -> SignedInAccount? {
+        FolderSignIn.answer(record: record, trail: trail).numbersBelongTo
+    }
+
+    /// The running claude is the account the folder is on now and the one `target` (the chat's account) names. A chat is
+    /// incognito, so its conversation lives only in that process: it goes on only then. A chat begun on no account never
+    /// goes on on one that appears.
+    static func processOn(record: SignedInAccount?, trail: ProcessTrail, target: AccountKey?, targetEmail: String? = nil) -> Bool {
+        guard let r = record, let target else { return false }
+        let a = FolderSignIn.answer(record: r, trail: trail)
+        switch a.verdict {
+        case .verified, .seatNotKnown: break
+        case .guessed: guard a.numbersBelongTo != nil else { return false }
+        case .differs, .none: return false
+        }
+        return identity(target, email: targetEmail).match(r) != .different
+    }
+
+    /// Numbers that belong to `owner` are the account `target` names (the chat's own level).
+    static func owns(_ target: AccountKey?, email: String?, _ owner: SignedInAccount) -> Bool {
+        guard let target else { return false }
+        return identity(target, email: email).match(owner) != .different
+    }
+
+    // MARK: the levels' keys
+
+    /// The key a week is kept under: the profile and the seat, "<profile id>|<account>" while the seat isn't known (as
+    /// older builds wrote it), "<profile id>|<account>|<organisation>" once it is (AccountKey.text). An older build reads
+    /// a seat's key as a miss: it shows no numbers until its next usage ask.
+    static func levelKey(_ profile: String, _ key: AccountKey) -> String { profile + "|" + key.text }
+
+    /// A level key read back: its profile and its seat; nil for a key from before accounts (the profile id alone) or one
+    /// that isn't a key.
+    static func parseLevelKey(_ key: String) -> (profile: String, key: AccountKey)? {
+        guard let bar = key.firstIndex(of: "|"), let k = AccountKey(text: String(key[key.index(after: bar)...])) else { return nil }
+        return (String(key[..<bar]), k)
+    }
+
+    /// Where numbers that belong to `owner` are kept in a profile: the entry of its seat, else the owner's own key (kept,
+    /// not dropped: an account cl_quick hasn't noted yet, or a word that names no id). Never two keys: the numbers go to
+    /// one seat.
+    static func numbersKey(for owner: SignedInAccount, in list: [KnownAccount]) -> AccountKey? {
+        if let k = AccountKey(owner), let i = list.firstIndex(where: { $0.key == k }) { return list[i].key }
+        if let i = list.firstIndex(where: { $0.key.match(owner) == .seat }) { return list[i].key }
+        return AccountKey(owner)
+    }
+
+    /// The numbers kept for `owner` before new ones are applied on them: its seat's (numbersKey).
+    static func numbersBase<V>(for owner: SignedInAccount, profile: String, accounts: [KnownAccount], levels: [String: V]) -> V? {
+        numbersKey(for: owner, in: accounts).flatMap { levels[levelKey(profile, $0)] }
+    }
+
+    /// New numbers that belong to `owner`, kept: under its seat (numbersKey); nothing else changes. nil when `owner` names
+    /// nobody.
+    static func recording<V>(_ level: V, for owner: SignedInAccount, profile: String, accounts: [KnownAccount],
+                             levels: [String: V]) -> (accounts: [KnownAccount], levels: [String: V])? {
+        guard let key = numbersKey(for: owner, in: accounts) else { return nil }
+        var kept = levels
+        kept[levelKey(profile, key)] = level
+        return (accounts, kept)
+    }
+
+    /// A levels.json from before accounts was keyed by profile id alone. Each such week goes to the seat `placed` names
+    /// for that profile (the one signed in now, the one it was most likely reported on); one that can't be placed (no such
+    /// profile, or none signed in yet) is kept as it is, to be placed by a later start. Keys already per account stay, and
+    /// win over a week moved onto the same key.
+    static func migrated<V>(_ old: [String: V], placed: (String) -> AccountKey?) -> [String: V] {
         var out: [String: V] = [:]
         for (key, v) in old {
             guard !key.contains("|") else { out[key] = v; continue }
-            if let uuid = placed(key) {
-                let to = levelKey(key, uuid)
+            if let seat = placed(key) {
+                let to = levelKey(key, seat)
                 if old[to] == nil { out[to] = v }
             } else {
                 out[key] = v
@@ -234,56 +295,23 @@ enum AccountBook {
         return out
     }
 
-    /// Every week of a profile: each account's, and a legacy one under the bare profile id.
+    /// Every week of a profile: each seat's, and a legacy one under the bare profile id.
     static func removing<V>(profile id: String, from levels: [String: V]) -> [String: V] {
         levels.filter { $0.key != id && !$0.key.hasPrefix(id + "|") }
     }
 
-    /// The same account: by uuid, or by address (in any case). The one rule for "one account, one profile".
-    static func same(_ a: (uuid: String, email: String), _ b: (uuid: String, email: String)) -> Bool {
-        a.uuid == b.uuid || a.email.lowercased() == b.email.lowercased()
-    }
-
-    /// A folder still on the account it was on: by uuid, or by address when that uuid was a placeholder made from the
-    /// address (a file with no accountUuid, which the sign-in has since given one).
-    static func unchanged(from: (uuid: String, email: String), now: (uuid: String, email: String)) -> Bool {
-        from.uuid == now.uuid || (from.uuid.hasPrefix("email:") && from.email.lowercased() == now.email.lowercased())
-    }
-
-    /// The name of the profile the account is in use on, among profiles given as (name, the account signed in to its
-    /// folder now); nil when no profile uses it.
-    static func profileUsing(_ account: (uuid: String, email: String),
-                             among profiles: [(name: String, inUse: (uuid: String, email: String)?)]) -> String? {
-        profiles.first { p in p.inUse.map { same($0, account) } ?? false }?.name
-    }
-
-    /// Forgets a standby account of a profile: it leaves the list and its week goes (key "<profile>|<uuid>"). The account
-    /// in use can't be forgotten, nor one that isn't in the list: nil. Nothing else moves.
-    static func forgetting<V>(_ uuid: String, of profile: String, accounts: [KnownAccount], levels: [String: V],
-                              inUse: String?, inUseEmail: String? = nil) -> (accounts: [KnownAccount], levels: [String: V])? {
-        guard uuid != inUse, let a = accounts.first(where: { $0.uuid == uuid }) else { return nil }
-        // a placeholder entry for the address in use (its real uuid not noted yet) is the account in use too
-        if a.isPlaceholder, a.email.lowercased() == inUseEmail?.lowercased() { return nil }
-        var kept = levels
-        kept[levelKey(profile, uuid)] = nil
-        return (accounts.filter { $0.uuid != uuid }, kept)
-    }
-
-    /// Notes the account signed in now in a profile's list. It is found by its uuid; the address finds it only when the
-    /// stored uuid is a placeholder made from that address (a file that had no accountUuid, and now has one), so two
-    /// accounts that share an address (two organizations) stay two. The time is kept to the hour. Returns whether the
-    /// list changed, and the uuid it replaced when a placeholder became a real one.
-    @discardableResult
-    static func note(_ list: inout [KnownAccount], uuid: String, email: String, now: Date = Date()) -> (changed: Bool, replaced: String?) {
-        let k = list.firstIndex { $0.uuid == uuid }
-            ?? list.firstIndex { $0.isPlaceholder && $0.email.lowercased() == email.lowercased() }
-        guard let k else {
-            list.append(KnownAccount(uuid: uuid, email: email, lastSeen: now))
-            return (true, nil)
+    /// Forgets a standby account of a profile: it leaves the list and its week goes (levelKey). The account in use (the
+    /// entry the record is, entryIndex, a placeholder or an entry whose seat isn't known included) can't be forgotten, nor
+    /// one that isn't in the list: nil. Nothing else moves.
+    static func forgetting<V>(_ key: AccountKey, of profile: String, accounts: [KnownAccount], levels: [String: V],
+                              inUse record: SignedInAccount?) -> (accounts: [KnownAccount], levels: [String: V])? {
+        guard accounts.contains(where: { $0.key == key }) else { return nil }
+        if let r = record {
+            if AccountKey(r) == key { return nil }
+            if let i = entryIndex(for: r, in: accounts), accounts[i].key == key { return nil }
         }
-        let old = list[k]
-        guard old.uuid != uuid || old.email != email || now.timeIntervalSince(old.lastSeen) > 3600 else { return (false, nil) }
-        list[k] = KnownAccount(uuid: uuid, email: email, lastSeen: now)
-        return (true, old.uuid != uuid ? old.uuid : nil)
+        var kept = levels
+        kept[levelKey(profile, key)] = nil
+        return (accounts.filter { $0.key != key }, kept)
     }
 }

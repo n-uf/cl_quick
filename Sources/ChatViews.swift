@@ -7,6 +7,7 @@
 
 import AddressPrivacy
 import AppKit
+import ClaudeAuth
 import PDFKit
 import SwiftUI
 
@@ -2678,7 +2679,7 @@ enum QuickChatRender {
         ]
         if state.hasPrefix("models3") { list.removeLast() }
         if state.hasPrefix("models2") { list.removeLast(2) }
-        ModelCatalog.shared.set(list, profile: target.profileID, account: target.accountUUID)
+        ModelCatalog.shared.set(list, profile: target.profileID, account: target.account?.text)
         var level = QuickChatLevel()
         level.week = 62; level.weekResets = Date().addingTimeInterval(3 * 86400)
         m.level = level
@@ -2857,9 +2858,9 @@ enum QuickChatRender {
             m.field = q1
             level.week = 100; level.weekResets = Date().addingTimeInterval(26 * 3600); m.level = level
             m.offer = QuickChatOffer(profileID: "work", name: "Work", used: 18)
-            m.switchOffer = QuickChatSwitchOffer(uuid: "u2", email: "ultra-2@example.com")
-            let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedUUID: "u2", wantedEmail: "ultra-2@example.com",
-                                  fromUUID: "u1", fromEmail: "ultra-1@example.com", origin: .chat)
+            m.switchOffer = QuickChatSwitchOffer(key: AccountKey(account: "u2"), email: "ultra-2@example.com")
+            let goal = SwitchGoal(profileID: "main", profileName: "Main", folder: "~/.claude", wantedKey: AccountKey(account: "u2"),
+                                  wantedEmail: "ultra-2@example.com", fromKey: AccountKey(account: "u1"), fromEmail: "ultra-1@example.com", origin: .chat)
             func ended(_ r: SwitchEndReason) -> QuickChatSwitchNotice { .ended(SwitchEnded(goal: goal, reason: r)) }
             if state == "switching" { m.switchNotice = .waiting(wanted: "ultra-2@example.com") }
             // the note hidden by its ×: the picker's lamp is the waiting one, the sign-in goes on
