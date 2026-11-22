@@ -122,7 +122,7 @@ struct QCWindow: View {
             if rendering {
                 // a picture can't draw a scroll view: the chat's end, clipped to the window, as if scrolled down
                 Color.clear
-                    .overlay(VStack(alignment: .leading, spacing: 0) { turns }.padding(Self.chatPadding), alignment: .bottom)
+                    .overlay(VStack(alignment: .leading, spacing: 0) { turns }.padding(chatPadding(scroll)), alignment: .bottom)
                     .clipped()
                     .overlay(alignment: .top) { fade }
                     .overlay { floating }
@@ -136,7 +136,7 @@ struct QCWindow: View {
                             turns
                             Color.clear.frame(height: 1)
                         }
-                        .padding(Self.chatPadding)
+                        .padding(chatPadding(scroll))
                         .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
                         .background(QCScrollProbe(scroll: scroll))
                         .qcDraggable()
@@ -178,8 +178,8 @@ struct QCWindow: View {
 
     /// The answers' text column: it starts and ends inside the gutters the edge handles stand in (QCEdgeLayout), clear of
     /// them, of macOS's resize band and of the scroller.
-    static var chatPadding: EdgeInsets {
-        EdgeInsets(top: 4, leading: QCEdgeLayout.leftGutter, bottom: 12, trailing: QCEdgeLayout.rightGutter)
+    func chatPadding(_ s: QCChatScroll) -> EdgeInsets {
+        EdgeInsets(top: 4, leading: QCEdgeLayout.leftGutter, bottom: 12, trailing: QCEdgeLayout.rightGutter(s.scrollerStyle, inset: s.scrollerInset))
     }
 
     /// The answers scroll under the header through a short fade, not a hard edge.

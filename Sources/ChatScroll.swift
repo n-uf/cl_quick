@@ -54,6 +54,13 @@ final class QCChatScroll: ObservableObject {
     /// view's bottom, its end below it): the left handle's answer, whose ⤒ and copy float. Nil: no left handle.
     @Published private(set) var pair: UUID?
 
+    /// The answers' scroller: its style (the user's "Show scroll bars" setting, or the view's own) and what it takes out of the
+    /// clip view (0 for an overlay scroller; a legacy, always visible one's width). The text's right padding and the right
+    /// handle follow them (QCEdgeLayout), so nothing covers the scroller and the text ends where the strip starts.
+    @Published private(set) var scrollerStyle = NSScroller.preferredScrollerStyle
+    @Published private(set) var scrollerInset: CGFloat = NSScroller.preferredScrollerStyle == .legacy
+        ? ceil(NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)) : 0
+
     /// The two edge handles' states: left (this answer), right (navigation).
     let left = QCEdgeState()
     let right = QCEdgeState()
@@ -217,7 +224,12 @@ final class QCChatScroll: ObservableObject {
 
     /// Works out what the views show, and publishes what changed.
     func refresh() {
-        guard geometry != nil else { return }
+        guard let g = geometry, let sv = scrollView else { return }
+        let style = sv.scrollerStyle
+        let inset = style == .legacy ? max(0, (sv.frame.width - g.clip.frame.width).rounded()) : 0
+        if scrollerStyle != style || scrollerInset != inset {
+            scrollerStyle = style; scrollerInset = inset
+        }
         let at = isAtBottom
         if atBottom != at {
             atBottom = at
@@ -497,22 +509,27 @@ enum QCNavHelp {
 ///     content's), 20 pt around a corner. The handles start 5 pt in, and the corners are far below the answers' bottom.
 ///   - the drag surfaces: every empty part of the card moves the window; a control (`qcControl`) never does. Handles' strips
 ///     and boxes are controls.
-///   - the vertical scroller of the answers: an NSScroller `scrollerWidth` (15 pt) wide on the right edge, in both styles
-///     (an overlay scroller only draws when it is wanted, but its track is there). The right handle stands inward of it.
+///   - the vertical scroller of the answers: an NSScroller `scrollerWidth` wide on the right edge, in both styles (an overlay
+///     scroller only draws when it is wanted, but its track is there; a legacy, always visible one also takes its width out
+///     of the clip view). The right handle stands inward of it, in either style.
 ///   - the text: the answers' gutters are as wide as the handle strips, so a handle never touches the text column, and the
-///     pill is 10 pt or more clear of it.
+///     pill is 10 pt or more clear of it, in either scroller style.
 enum QCEdgeLayout {
     /// From the window's edge to the handle's strip on the left: clear of the resize band (under 4 pt deep).
     static let clear: CGFloat = 5
     /// The hit strip along the edge, and the pill drawn in it (on its outer side).
     static let stripWidth: CGFloat = 14, stripHeight: CGFloat = 44
     static let pillWidth: CGFloat = 3, pillHeight: CGFloat = 30
-    /// The vertical scroller's track on the right (a check compares it with what the scroll view has).
-    /// (measured: 17 pt wide in the panel with either style; two points over the scroller's nominal width are kept clear)
-    static var scroller: CGFloat { ceil(NSScroller.scrollerWidth(for: .regular, scrollerStyle: NSScroller.preferredScrollerStyle)) + 2 }
-    /// The answers' text starts and ends this far from the sides: the strip fits in the gutter, the pill is 11 pt clear of the text.
+    /// The vertical scroller's track on the right, for a scroller style: its nominal width and two points clear (a check compares
+    /// it with the real scroller). An overlay scroller draws over the answers (the clip view is the whole width); a LEGACY
+    /// (always visible) one takes its width out of the clip view, so the text, which is laid out inside the clip view, already
+    /// ends that much before the scroller: see `rightGutter`.
+    static func scroller(_ style: NSScroller.Style) -> CGFloat { ceil(NSScroller.scrollerWidth(for: .regular, scrollerStyle: style)) + 2 }
+    /// The answers' text starts this far from the left side: the strip fits in the gutter, the pill is 11 pt clear of the text.
     static var leftGutter: CGFloat { clear + stripWidth }
-    static var rightGutter: CGFloat { scroller + stripWidth }
+    /// The text's right padding inside the clip view: the scroller's track and the strip, less what the clip view has already
+    /// given up to a legacy scroller (`inset`; 0 for an overlay one), so the text always ends where the right strip starts.
+    static func rightGutter(_ style: NSScroller.Style, inset: CGFloat) -> CGFloat { max(stripWidth, scroller(style) + stripWidth - inset) }
     /// From the answers area's bottom (the field box is under it) to the tallest box's bottom.
     static let bottomGap: CGFloat = 8
     /// A box is at most this tall (three buttons in a stack and its padding), so a handle stays in line at any content.
@@ -531,7 +548,7 @@ enum QCEdgeLayout {
 
     /// The box's distance from the window's edge (the pill is `clear` or `scroller` in, and `pillWidth` wide).
     static var leftBoxInset: CGFloat { clear + pillWidth + boxGap }
-    static var rightBoxInset: CGFloat { scroller + pillWidth + boxGap }
+    static func rightBoxInset(_ style: NSScroller.Style) -> CGFloat { scroller(style) + pillWidth + boxGap }
 }
 
 /// One handle's state: whether its stack is open. The pointer's rest, its leaving, and the keyboard drive it; nothing animates.
@@ -641,6 +658,8 @@ struct QCEdgeHandle<Box: View>: View {
     /// The frames the handle reports (a check reads them), under this name.
     let name: String
     let scroll: QCChatScroll
+    /// The answers' scroller style (the right handle stands inward of its track).
+    let scrollerStyle: NSScroller.Style
     /// What VoiceOver calls the handle, and its value ("New text below").
     let label: String
     var value = ""
@@ -671,7 +690,7 @@ struct QCEdgeHandle<Box: View>: View {
             .accessibilityLabel(Text(label))
             .accessibilityValue(Text(value))
             .report(scroll, "\(name).strip")
-            .padding(left ? .leading : .trailing, left ? QCEdgeLayout.clear : QCEdgeLayout.scroller)
+            .padding(left ? .leading : .trailing, left ? QCEdgeLayout.clear : QCEdgeLayout.scroller(scrollerStyle))
             if state.expanded {
                 VStack(spacing: 0) { box() }
                     .padding(QCEdgeLayout.boxPadding)
@@ -681,7 +700,7 @@ struct QCEdgeHandle<Box: View>: View {
                     .qcControl()          // the rim as well: a press there never moves the window
                     .onHover { state.box($0) }
                     .report(scroll, "\(name).box")
-                    .padding(left ? .leading : .trailing, left ? QCEdgeLayout.leftBoxInset : QCEdgeLayout.rightBoxInset)
+                    .padding(left ? .leading : .trailing, left ? QCEdgeLayout.leftBoxInset : QCEdgeLayout.rightBoxInset(scrollerStyle))
             }
         }
         .frame(height: QCEdgeLayout.boxMaxHeight, alignment: .center)
@@ -712,7 +731,7 @@ struct QCEdgeHandles: View {
     var body: some View {
         ZStack {
             if let id = scroll.pair, let turn = model.turns.first(where: { $0.id == id }) {
-                QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, label: "This answer") {
+                QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "This answer") {
                     if scroll.answersAbove.contains(id) {
                         QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
                                      label: "Go to the start of this answer", onFocus: { scroll.left.focus($0, 1) }) { scroll.goToStart(ofAnswer: id) }
@@ -722,7 +741,7 @@ struct QCEdgeHandles: View {
                 }
             }
             if QCChatScroll.showsPrompts(turns: model.turns.count) || !scroll.atBottom {
-                QCEdgeHandle(side: .right, state: scroll.right, name: "right", scroll: scroll, label: "Message navigation",
+                QCEdgeHandle(side: .right, state: scroll.right, name: "right", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "Message navigation",
                              value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
                     if QCChatScroll.showsPrompts(turns: model.turns.count) {
                         QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
