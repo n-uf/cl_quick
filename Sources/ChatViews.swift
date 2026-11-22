@@ -1426,8 +1426,8 @@ enum QCKeysPage: String, CaseIterable, Hashable {
     }
 }
 
-/// The keys list's look: cl_quick's keys, each with what it does, on three pages under a small track (the Settings APP | CHAT
-/// track's primitive). The pages are laid over each other, so the list is as tall and wide as the tallest and widest, and
+/// The keys list's look: cl_quick's keys, each with what it does, on three pages under tabs in the look of the cl_audit
+/// site's (SegTabs, as wide as the list). The pages are laid over each other, so the list is as tall and wide as the tallest and widest, and
 /// switching never resizes it. A page switches at once, with no animation.
 struct QCKeysView: View {
     let opener: String
@@ -1457,7 +1457,7 @@ struct QCKeysView: View {
     var body: some View {
         let pages = Self.pages(opener: opener)
         VStack(alignment: .leading, spacing: 8) {
-            PillPicker(options: QCKeysPage.allCases, selection: $keys.page, compact: true, size: 9, animates: false, title: \.title)
+            SegTabs(options: QCKeysPage.allCases, selection: $keys.page, title: \.title)
             ZStack(alignment: .topLeading) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { _, p in
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
@@ -2473,6 +2473,7 @@ enum QuickChatRender {
         if state.hasPrefix("keys-") {
             QCKeys.shared.page = state == "keys-move" ? .move : state == "keys-write" ? .write : .modelWindow
             let v = QCKeysView(opener: "⌃⇧Space").fixedSize().padding(20).background(Color(white: 0.1)).environment(\.colorScheme, .dark)
+                .environment(\.qcRendering, true)          // a picture has no pointer (and draws no AppKit marker)
             let r = ImageRenderer(content: v)
             r.scale = 3
             if let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {

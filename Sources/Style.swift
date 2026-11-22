@@ -171,6 +171,91 @@ struct PillPicker<Value: Hashable>: View {
     }
 }
 
+/// The look of SegTabs: the cl_audit site's tabs (cl_audit_home src/styles/app.css, .seg / .seg-ind / .stab, dark face),
+/// scaled to the keys list's 11.5 pt text.
+enum SegTabsLook {
+    /// .seg: padding 4, radius 12, background rgba(0,0,0,.22), inset 0 0 0 1px rgba(255,255,255,.06), inset 0 1px 2px rgba(0,0,0,.35)
+    static let trackPadding: CGFloat = 3
+    static let trackRadius: CGFloat = 9
+    static let track = Color.black.opacity(0.22)
+    static let trackRing = Color.white.opacity(0.06)
+    static let trackInset = Color.black.opacity(0.35)
+    /// .seg-ind: radius 9, linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.08)),
+    /// inset 0 1px 0 rgba(255,255,255,.1), 0 1px 3px rgba(0,0,0,.45)
+    static let plateRadius: CGFloat = 7
+    static let plateTop = Color.white.opacity(0.13)
+    static let plateBottom = Color.white.opacity(0.08)
+    static let plateEdge = Color.white.opacity(0.10)
+    static let plateShadow = Color.black.opacity(0.45)
+    /// .stab: height 34, padding 0 10, 13 px / 500, color #9a9aa0; hover #d4d4d8; selected #fff
+    static let segmentHeight: CGFloat = 24
+    static let segmentPadding: CGFloat = 8
+    static let fontSize: CGFloat = 11.5
+    static let idle = Color(red: 0x9A / 255, green: 0x9A / 255, blue: 0xA0 / 255)
+    static let hover = Color(red: 0xD4 / 255, green: 0xD4 / 255, blue: 0xD8 / 255)
+    static let selected = Color.white
+}
+
+/// Tabs in the look of the cl_audit site's (SegTabsLook): equal segments across the full width on a recessed track, the
+/// chosen one a lit plate with its label white, the others grey (lighter under the pointer). Labels as written, in
+/// sentence case, no tracking. The plate is on the chosen tab at once: no slide, no animation. The width is the
+/// parent's (the track fills it; every segment is at least as wide as the widest label needs, so they stay equal). A
+/// pointing hand over each tab.
+struct SegTabs<Value: Hashable>: View {
+    let options: [Value]
+    @Binding var selection: Value
+    let title: (Value) -> String
+    @State private var hovered: Value?
+
+    /// A segment's least width: the widest title (medium, at the tab size) and the padding at each side.
+    private var segmentMinWidth: CGFloat {
+        let font = NSFont.systemFont(ofSize: SegTabsLook.fontSize, weight: .medium)
+        let widest = options.map { (title($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return ceil(widest) + 2 * SegTabsLook.segmentPadding
+    }
+
+    var body: some View {
+        let minWidth = segmentMinWidth
+        HStack(spacing: 0) {
+            ForEach(options, id: \.self) { o in
+                let on = o == selection
+                Button { selection = o } label: {
+                    Text(title(o))
+                        .font(.system(size: SegTabsLook.fontSize, weight: .medium))
+                        .lineLimit(1).fixedSize()
+                        .foregroundColor(on ? SegTabsLook.selected : hovered == o ? SegTabsLook.hover : SegTabsLook.idle)
+                        .frame(minWidth: minWidth, maxWidth: .infinity)
+                        .frame(height: SegTabsLook.segmentHeight)
+                        .background { if on { SegPlate() } }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .qcPointingHand()
+                .onHover { inside in hovered = inside ? o : (hovered == o ? nil : hovered) }
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(SegTabsLook.trackPadding)
+        .frame(maxWidth: .infinity)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: SegTabsLook.trackRadius, style: .continuous)
+            shape.fill(SegTabsLook.track)
+                .overlay(shape.strokeBorder(SegTabsLook.trackRing, lineWidth: 1))
+                .overlay(shape.strokeBorder(LinearGradient(colors: [SegTabsLook.trackInset, .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.3)), lineWidth: 1.5))
+        }
+    }
+}
+
+/// SegTabs' lit plate.
+private struct SegPlate: View {
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: SegTabsLook.plateRadius, style: .continuous)
+        shape.fill(LinearGradient(colors: [SegTabsLook.plateTop, SegTabsLook.plateBottom], startPoint: .top, endPoint: .bottom))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [SegTabsLook.plateEdge, .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.25)), lineWidth: 1))
+            .shadow(color: SegTabsLook.plateShadow, radius: 1.5, y: 1)
+    }
+}
+
 /// The quick chat's spacing (diagrams/cl-quick-chat-design.html in the design notes): one outer gap that the header's
 /// name, the answers and the field box all keep from the window's edges, and rows on a 4 pt grid.
 enum QCSpace {
