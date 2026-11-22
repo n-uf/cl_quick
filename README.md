@@ -151,8 +151,8 @@ minutes for a profile.
 
 - Return sends, Shift-Return adds a line, Esc or ⌘W hides it, ⌘N starts a new chat.
 - **Moving in a chat.** The chat follows the end of an answer as it streams only while you are at the bottom (within a few
-  points) when new text arrives. Scroll up by any means (wheel, trackpad, scroller, Page Up, selecting text) and new text
-  never moves the view; get back to the bottom (by hand, End, ⌘J or the ↓ button) or send a message and it follows again.
+  points) when new text arrives. Scroll up by any means (wheel, trackpad, scroller, ⇧fn↑, selecting text) and new text
+  never moves the view; get back to the bottom (by hand, ⌘J or the ↓ button) or send a message and it follows again.
   Resizing at the bottom keeps the bottom; resizing mid-chat keeps what you are reading in place; hiding and reopening the
   panel restores the place and whether it follows. Every jump is instant (nothing animates).
   - Two **edge handles** stand in the answers' side gutters, above the field: thin pills at rest. The pointer resting on one
@@ -164,9 +164,9 @@ minutes for a profile.
     so far). Each answer's own footer has ⤒ copy ↻ (⤒ only while its first line is above the view).
   - **Keys** (the panel's own, exact modifiers; none is a text edit): ⌘J jump to latest, ⇧⌘J the start of the answer at the
     view's bottom edge (the last one at the bottom), ⌘[ and ⌘] the previous and next message of yours (nothing at the ends),
-    ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and fn↑ and fn↓ (Page Up and Page Down
-    on a Mac keyboard: they scroll and stop following) and fn→ (End: the bottom, following) work even while the field has the
-    keyboard; plain arrows keep their text meaning there, and fn← (Home) is the field's.
+    ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and ⇧fn↑ and ⇧fn↓ (⇧Page Up and
+    ⇧Page Down on a Mac keyboard: they scroll the answers a page, and stop following unless that reaches the bottom) work
+    even while the field has the keyboard; plain arrows keep their text meaning there. ⌘J jumps to the latest and follows.
   - The handles keep clear of the window's resize band (under 4 pt deep), the drag surfaces and the answers' scroller: the left
     one stands 5 pt in, the right one inward of the scroller's track (17 pt), and the text column starts after them.
 - Answers stream in as Markdown; tables (header, alignment row, rows) are drawn as a grid whose cells wrap to the
@@ -196,9 +196,11 @@ minutes for a profile.
   a new chat goes back to the defaults.
   - Model and thinking are rows of bars. Click a bar to pick it. Click the right half of a control's label for the next
     value up and the left half for the one before, wrapping round past either end. The scroll wheel steps too, and so
-    do ⌥⌘↑ and ⌥⌘↓ (thinking) and ⌥⌘→ and ⌥⌘← (model). Plain ⌘ arrows are macOS's own and reach the field (the caret
-    jumps to the line's or the text's start and end) and a selected answer's view; ⇧⌘ arrows still select, and ⌃⌘
-    arrows aren't cl_quick's.
+    do fn↑ and fn↓ (thinking) and fn→ and fn← (model), wherever the keyboard is in the panel. On a Mac keyboard these are
+    the Page Up, Page Down, End and Home keys, and the dedicated keys do the same; with ⌘, ⌥ or ⌃ they are not
+    cl_quick's, and nor are ⇧End and ⇧Home (⇧fn↑ and ⇧fn↓ scroll the answers). Plain ⌘ and ⌥⌘ arrows are macOS's own and
+    reach the field (the caret jumps to the line's or the text's start and end) and a selected answer's view; ⇧⌘ arrows
+    still select, and ⌃⌘ arrows aren't cl_quick's.
   - A warm tint marks the costly steps: Fable, and thinking at Extra or Max.
   - The model bars are the newest Haiku, Sonnet, Opus and Fable the account has, as Claude Code itself lists them.
   - **Digit keys** work while the panel has the keyboard, in the bar and in the chat window:
@@ -215,8 +217,8 @@ minutes for a profile.
   - The keys button opens a list of the shortcuts on three pages, under tabs in the look of the cl_audit site's (Model &
     window · Move · Write; click a tab to turn the page; the last page is remembered while cl_quick runs). The pointer is a
     hand over the tabs and an arrow elsewhere on the list, and the text cursor is back once it leaves the list:
-    - **Model & window:** ⌥⌘ arrows (thinking, model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
-    - **Move:** ⌘J, ⇧⌘J, ⌘[ ⌘], fn↑ fn↓ (page up, page down) and fn→ (bottom, and follow) (see "Moving in a chat" below).
+    - **Model & window:** fn↑ fn↓ (thinking), fn→ fn← (model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
+    - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, and the shortcut
       that opens cl_quick.
 

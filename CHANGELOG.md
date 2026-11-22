@@ -4,6 +4,12 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **Model and thinking keys are now the fn arrows, easier to press.** fn↑ fn↓ step thinking up and down, and fn→ fn←
+  step the model up and down, wherever the keyboard is in the panel (the field, an answer, a page). On a Mac keyboard
+  they are the Page Up, Page Down, End and Home keys, and the dedicated keys do the same. ⇧fn↑ and ⇧fn↓ scroll the
+  answers a page up and down (and stop following unless that reaches the bottom), as plain fn↑ and fn↓ did. The ⌥⌘
+  arrows are gone (macOS's and the field's again), and so are plain Page Up and Page Down scrolling and End's jump to
+  the bottom: ⌘J jumps to the latest and follows. The controls' tooltips and the keys list say the new keys.
 - **Moving in a chat.**
   - **Edge handles.** Two thin pills stand in the answers' side gutters, above the field. The pointer resting on one for
     about 0.15 s opens a stack beside it (inward, in a solid box); it closes about 0.5 s after the pointer leaves. Nothing
@@ -14,8 +20,8 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
     the answers' text column is narrower by the gutters (19 pt left, about 31 pt right: the scroller's track and the strip).
   - **Each answer's footer** is now ⤒ copy ↻ (⤒ only while the answer's first line is above the view).
   - **Keys:** ⌘J jump to latest; ⇧⌘J start of the answer in view; ⌘[ ⌘] previous and next message of yours; ⇧⌘C copies the
-    answer in view once you have scrolled up (else the last answer); fn↑ and fn↓ (Page Up and Page Down on a Mac keyboard)
-    scroll the answers (and stop following) and fn→ (End) goes to the bottom, even while the field has the keyboard.
+    answer in view once you have scrolled up (else the last answer); ⇧fn↑ and ⇧fn↓ (⇧Page Up and ⇧Page Down on a Mac
+    keyboard) scroll the answers (and stop following), even while the field has the keyboard.
     Buttons' tooltips end with their key.
   - **Behaviour:** a resize at the bottom keeps the bottom and following; a resize mid-chat keeps what you are reading;
     hiding and reopening restores the place and whether it follows; Ask again jumps to the bottom and follows.
@@ -27,11 +33,11 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 - **Step controls** lose the dot under the step in use (the lit bars already show it); the bars are centred in their column.
 - **No forced scrolling while an answer streams.** The chat followed the end of the text even when you had scrolled up to
   read. Now it follows only while you are at the bottom (within a few points) when new text arrives. Scroll up by any
-  means (wheel, trackpad, scroller, keys, selecting text) and new text never moves the view; scroll back down by hand,
+  means (wheel, trackpad, scroller, ⇧fn↑, selecting text) and new text never moves the view; scroll back down by hand,
   press the new **jump to latest** button (labelled "Jump to latest", shown only while you are not at the bottom, with a
   mark while text has arrived below), or send a message, and it follows again. The jump is instant.
 - **Shortcuts that don't clash with macOS.**
-  - **Model and thinking keys are now ⌥⌘ arrows** (⌥⌘↑ ⌥⌘↓ thinking, ⌥⌘→ ⌥⌘← model). Plain ⌘ arrows were taken by the
+  - **Model and thinking keys are no longer ⌘ arrows** (they are the fn arrows, below). Plain ⌘ arrows were taken by the
     chat, but in a Mac text field they are the caret's jumps to the line's and the text's start and end; they now reach
     the field and a selected answer's view again. ⇧⌘ arrows still select; ⌃⌘ arrows aren't cl_quick's. ⌘1–⌘5 (size) and
     ⌃1–⌃6 (place) are unchanged.
