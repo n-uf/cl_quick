@@ -437,6 +437,9 @@ final class QuickChatModel: ObservableObject {
     /// Claude Code reported the account's limits after an answer: the profile, the account they belong to (the kit's
     /// numbersBelongTo: AccountBook.numbersOwner), the level.
     var levelReported: (String, SignedInAccount, QuickChatLevel) -> Void = { _, _, _ in }
+    /// The numbers kept for an account of a profile (ProfileStore.base), for an answer that isn't the chat's own account's
+    /// to be applied on.
+    var numbersBase: (String, SignedInAccount) -> QuickChatLevel? = { _, _ in nil }
     /// The field has more or fewer lines now: the panel may need to grow to hold it (QuickChat.fit).
     var fieldChanged: () -> Void = {}
     /// An answer failed to authenticate (true) or worked (false), on the account the `claude` is: profile, account.
@@ -1143,8 +1146,10 @@ final class QuickChatModel: ObservableObject {
         case .usage(let u):
             // its limits now, for the account it is (the kit's numbersBelongTo): kept for that account also when the folder
             // has moved since, never put on the one it is on now
-            guard let owner = numbersOwner else { return }
-            var l = (AccountBook.owns(target?.account, email: target?.email, owner) ? level : nil) ?? QuickChatLevel()
+            guard let owner = numbersOwner, let t = target else { return }
+            // the base the answer is applied on: the chat's own level, or what is kept for that account (the fields this
+            // answer lacks stay as they were)
+            var l = (AccountBook.owns(t.account, email: t.email, owner) ? level : numbersBase(t.profileID, owner)) ?? QuickChatLevel()
             // numbers given: kept even when they are the same, so they count as fresh again (an answer with no numbers,
             // `rate_limits` null, changes nothing and leaves the old ones as old as they were)
             if l.apply(usage: u) { reportLevel(l) }
@@ -1496,6 +1501,7 @@ final class QuickChat {
         model.pickProfile = { [weak self] id in self?.move(to: id) }
         // refresh() may end the chat (profile removed, account or folder changed): never from inside the answer's own handling
         model.fieldChanged = { [weak self] in DispatchQueue.main.async { self?.fit() } }
+        model.numbersBase = { [weak self] id, account in self?.store.base(id, for: account) }
         model.levelReported = { [weak self] id, account, l in
             self?.store.record(id, account: account, l)
             DispatchQueue.main.async { self?.refresh() }
