@@ -15,12 +15,15 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
   - **Each answer's footer** is now ⤒ copy ↻ (⤒ only while the answer's first line is above the view).
   - **Keys:** ⌘J jump to latest; ⇧⌘J start of the answer in view; ⌘[ ⌘] previous and next message of yours; ⇧⌘C copies the
     answer in view once you have scrolled up (else the last answer); fn↑ and fn↓ (Page Up and Page Down on a Mac keyboard)
-    scroll the answers (and stop following) and fn→ (End) goes to the bottom, even while the field has the keyboard. Buttons' tooltips end with their key.
+    scroll the answers (and stop following) and fn→ (End) goes to the bottom, even while the field has the keyboard.
+    Buttons' tooltips end with their key.
   - **Behaviour:** a resize at the bottom keeps the bottom and following; a resize mid-chat keeps what you are reading;
     hiding and reopening restores the place and whether it follows; Ask again jumps to the bottom and follows.
   - **No animation anywhere in this:** every jump is instant, and the handles and the keys list's pages switch at once.
-- **The keys list has three pages** (MODEL & WINDOW · MOVE · WRITE, on the Settings tracks' primitive), always the height of the
-  tallest, so it never resizes; a click on a label turns the page, and the last page is remembered.
+- **The keys list has three pages**, as tabs in the look of the cl_audit site's (Model & window · Move · Write: equal
+  segments across the list's width, the chosen one a lit plate that snaps to it), always the height of the tallest, so it
+  never resizes; a click on a tab turns the page, and the last page is remembered. The pointer over the list is a hand
+  over the tabs and an arrow elsewhere, and the text cursor is back once it leaves the list.
 - **Step controls** lose the dot under the step in use (the lit bars already show it); the bars are centred in their column.
 - **No forced scrolling while an answer streams.** The chat followed the end of the text even when you had scrolled up to
   read. Now it follows only while you are at the bottom (within a few points) when new text arrives. Scroll up by any

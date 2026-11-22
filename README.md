@@ -196,8 +196,9 @@ minutes for a profile.
       the bottom keeps the 85 pt gap the first opening has, so ⌃2 is that place). The bar keeps growing as it does
       wherever you drag it. macOS can take ⌃1–⌃6 for itself: when "Switch to Desktop N" is turned on in System
       Settings ▸ Keyboard ▸ Keyboard Shortcuts ▸ Mission Control, cl_quick never sees those keys.
-  - The keys button opens a list of the shortcuts on three pages, under a small track (MODEL & WINDOW · MOVE · WRITE;
-    click a label to turn the page; the last page is remembered while cl_quick runs):
+  - The keys button opens a list of the shortcuts on three pages, under tabs in the look of the cl_audit site's (Model &
+    window · Move · Write; click a tab to turn the page; the last page is remembered while cl_quick runs). The pointer is a
+    hand over the tabs and an arrow elsewhere on the list, and the text cursor is back once it leaves the list:
     - **Model & window:** ⌥⌘ arrows (thinking, model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
     - **Move:** ⌘J, ⇧⌘J, ⌘[ ⌘], fn↑ fn↓ (page up, page down) and fn→ (bottom, and follow) (see "Moving in a chat" below).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, and the shortcut
