@@ -732,6 +732,8 @@ final class QuickChatModel: ObservableObject {
         closeProcess()
         ended = nil
         turns = []
+        // the old chat's pages (their heights and still pictures, in memory) go once their blocks have gone
+        DispatchQueue.main.async { QCInlinePages.shared.forgetUnused() }
         followTick += 1
         returnHeld = false
         sendWhenReady = false
@@ -1514,6 +1516,7 @@ final class QuickChat {
         if !placed || !isOnScreen(p) { place(p); placed = true }
         clampToScreen(p)
         p.orderFrontRegardless()
+        QCInlinePages.shared.scheduleUpdate()          // the page in view goes live again (InlinePage.swift)
         // the first keystroke after the shortcut goes into the field, with another app active too (the panel is
         // non-activating: it becomes key without bringing cl_quick forward). Now, and once more after SwiftUI's layout
         // pass, for a field that is made (or remade, bar ⇄ chat) only then.
@@ -1554,6 +1557,7 @@ final class QuickChat {
         model.cancelSendWhenReady()
         if model.dictating || model.dictationNoticed { dictate(false) }     // Dictation doesn't go on into a hidden field
         panel?.orderOut(nil)
+        QCInlinePages.shared.update()           // no page is in view now: the live one is photographed and let go
     }
 
     /// Whether the mic button has told this run that Dictation is off (it says so once).

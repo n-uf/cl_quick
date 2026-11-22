@@ -138,6 +138,7 @@ struct QCWindow: View {
                         }
                         .padding(chatPadding(scroll))
                         .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
+                        .environment(\.qcChatScroll, scroll)          // a page that changes height tells it first
                         .background(QCScrollProbe(scroll: scroll))
                         .qcDraggable()
                     }
@@ -641,8 +642,8 @@ struct QCAnswer: View, Equatable {
         case .quote(let s):
             prose(s).padding(.leading, 12)
                 .overlay(Rectangle().fill(QCColor.line).frame(width: 2), alignment: .leading)
-        case .code(let lang, let code, _, _):
-            QCCodeBlock(language: lang, code: code)
+        case .code(let lang, let code, let meta, let closed):
+            QCCodeBlock(language: lang, code: code, meta: meta, closed: closed)
         case .rule:
             Rectangle().fill(QCColor.line).frame(height: 1)
         case .table(let header, let align, let rows):
@@ -674,24 +675,49 @@ struct QCAnswer: View, Equatable {
 struct QCCodeBlock: View {
     let language: String
     let code: String
+    /// The fence's words after the language: ```html code shows an html block's code first.
+    var meta = ""
+    /// Its closing fence has come: only then does an html block show its page (InlinePage.swift).
+    var closed = true
+    /// The side the user clicked (Code | Page): it wins for this block.
+    @State private var picked: Bool?
+    /// The page couldn't be made safe (the rule list didn't compile): the code, and a line saying so.
+    @State private var unsafe = false
     @Environment(\.qcRendering) private var rendering
+
+    /// A complete html block: it has the Code | Page switch and ⤢.
+    private var html: Bool { QCHTMLPreview.isHTML(language) && closed }
+    /// The page is the side on show (the model's choice by its fence until the user clicks).
+    private var pageSide: Bool { picked ?? !QCHTMLPreview.codeFirst(meta) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // a 28 pt top row: the language, and Copy as an icon
+            // a 28 pt top row: the language (and an html block's Code | Page), then ⤢ and Copy as icons; it stays above
+            // the page, which is drawn only inside the block below it
             HStack(spacing: 0) {
                 Text(language.isEmpty ? "code" : language).font(.system(size: 11.5)).foregroundColor(QCColor.muted)
+                if html {
+                    QCCodePageSwitch(page: Binding(get: { pageSide }, set: { picked = $0 }), copyText: code).padding(.leading, 8)
+                }
                 Spacer()
-                if QCHTMLPreview.isHTML(language) { QCPreviewButton(html: code) }
-                QCCopyIcon(text: code)
+                if html { QCPreviewButton(html: code) }
+                QCCopyIcon(text: code)         // the code, whichever side shows
             }
             .padding(.leading, 12).padding(.trailing, 2)
             .frame(height: QCSpace.row)
             Rectangle().fill(QCColor.line).frame(height: 1)
-            if rendering {        // a picture can't draw a scroll view
-                codeText.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).clipped()
+            if html && pageSide && !unsafe {
+                QCInlinePageBlock(html: code, failed: $unsafe)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) { codeText }
+                if html && pageSide {
+                    Text("The page can't be made safe here, so its code shows.").font(.system(size: 11.5)).foregroundColor(QCColor.muted)
+                        .padding(EdgeInsets(top: 6, leading: 12, bottom: 0, trailing: 12))
+                }
+                if rendering {        // a picture can't draw a scroll view
+                    codeText.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).clipped()
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) { codeText }
+                }
             }
         }
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(QCColor.code))
@@ -2011,9 +2037,11 @@ struct QCCopyIcon: View {
 }
 
 enum QCCopy {
+    /// Where a code block's Copy goes (the general pasteboard; a check passes its own).
+    static var board = NSPasteboard.general
     static func put(_ s: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(s, forType: .string)
+        board.clearContents()
+        board.setString(s, forType: .string)
     }
 }
 
