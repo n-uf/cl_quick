@@ -529,8 +529,9 @@ for w in [CGFloat(320), 440, 640] {
     spinQuiet(p)
     let five = targets.marks["usage-5h"] ?? .zero, wk = targets.marks["usage-wk"] ?? .zero, ui = targets.marks["usage"] ?? .zero
     if let f = first {
-        check("usage at \(Int(w)), no 5h number: both tracks where they always are", five != .zero && wk != .zero
-              && five == f.five && wk == f.week && ui.minX == f.ui.minX,
+        // a week and no 5-hour number: the account has no 5-hour window (hasFiveHour), so the week's track stands alone, centred
+        check("usage at \(Int(w)), no 5h window: the week's track alone, centred on the row, the row where it always is", five == .zero && wk != .zero
+              && abs(wk.midY - ui.midY) < 0.5 && ui.minX == f.ui.minX,
               "\(five) \(wk) vs \(f) (panel \(p.frame.height) pt, the bar's \(barHeight.map { "\($0)" } ?? "-"))")
     }
     if abs(ui.width - QCUsageView.width(.bars)) > 0.5 {

@@ -94,6 +94,8 @@ struct QuickChatLevel: Codable, Equatable {
     @discardableResult
     mutating func apply(usage u: QuickChatUsage, now: Date = Date()) -> Bool {
         guard u.available, u.fiveHour?.used != nil || u.week?.used != nil else { return false }
+        // a week and no 5-hour number: the account has no 5-hour window now (its plan), so an old one is dropped (hasFiveHour)
+        if u.week?.used != nil, u.fiveHour?.used == nil { fiveHour = nil; fiveHourResets = nil }
         // a window given is taken whole: its reset as given too (none, for a window that hasn't started), so an old reset
         // already past never hides the number it just gave
         if let w = u.fiveHour, let p = w.used { fiveHour = p; fiveHourResets = w.resets }
@@ -172,6 +174,10 @@ struct QuickChatLevel: Codable, Equatable {
         if let r = fiveHourResets, r <= now { return nil }
         return fiveHour
     }
+
+    /// The 5-hour window applies to the account: it has a number, or nothing is known yet. An account whose usage gives a
+    /// week and no 5-hour window (a plan without one) shows the week alone, everywhere: no "5h" row, track or "no numbers yet".
+    var hasFiveHour: Bool { fiveHour != nil || week == nil }
 
     /// Room for a question: not held back, and the week known.
     func room(_ now: Date = Date()) -> Bool { full(now) == nil && weekNow(now) != nil }
@@ -265,10 +271,11 @@ struct QCUsageView: View {
         .accessibilityLabel(QCHeaderLine.tooltip(level).replacingOccurrences(of: "\n", with: ". "))
     }
 
-    /// A column's two cells, the 5-hour window's over the week's, each a track tall.
+    /// A column's two cells, the 5-hour window's over the week's, each a track tall; the week's alone, centred, for an
+    /// account with no 5-hour window (hasFiveHour).
     private func column<V: View>(@ViewBuilder _ cell: @escaping (String) -> V) -> some View {
         VStack(spacing: Self.trackGap) {
-            cell("5h").frame(height: Self.track)
+            if level.hasFiveHour { cell("5h").frame(height: Self.track) }
             cell("wk").frame(height: Self.track)
         }
     }
@@ -311,7 +318,9 @@ struct QCUsageCard: View {
         let b = Self.leftOut(level, rowShowsShare: rowShowsShare)
         let full = level.full()
         Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 5) {
-            line("5h", full?.id == "5h" ? 100 : level.fiveHourNow(), full?.id == "5h" ? full?.resets : level.fiveHourResets, shown: b == "5h")
+            if level.hasFiveHour {
+                line("5h", full?.id == "5h" ? 100 : level.fiveHourNow(), full?.id == "5h" ? full?.resets : level.fiveHourResets, shown: b == "5h")
+            }
             line("wk", full?.id == "wk" ? 100 : level.weekNow(), full?.id == "wk" ? full?.resets : level.weekResets, shown: b == "wk")
         }
         .font(.system(size: 12)).foregroundColor(QCColor.muted)

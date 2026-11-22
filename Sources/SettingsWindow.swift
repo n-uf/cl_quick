@@ -348,8 +348,10 @@ struct LimitBars: View {
         // numbers older than a few minutes are shown as reported (the caption says when), never as a full limit now
         let full = level.isFresh(now) ? level.full(now) : nil
         VStack(alignment: .leading, spacing: 8) {
-            bar("5 hours", full?.id == "5h" ? 100 : level.fiveHourResets.map { $0 <= now } == true ? nil : level.fiveHour,
-                full?.id == "5h" ? full?.resets : level.fiveHourResets, full: full?.id == "5h")
+            if level.hasFiveHour {
+                bar("5 hours", full?.id == "5h" ? 100 : level.fiveHourResets.map { $0 <= now } == true ? nil : level.fiveHour,
+                    full?.id == "5h" ? full?.resets : level.fiveHourResets, full: full?.id == "5h")
+            }
             bar("Week", full?.id == "wk" ? 100 : level.weekNow(now), full?.id == "wk" ? full?.resets : level.weekResets, full: full?.id == "wk")
         }
     }

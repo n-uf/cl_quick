@@ -153,6 +153,7 @@ struct QCMenuProfile: Equatable {
         var rows: [Row] = []
         if let level = shownLevel {
             rows = [row("5h", "5-hour", level.fiveHourNow(now), level.fiveHourResets), row("wk", "Week", level.weekNow(now), level.weekResets)]
+                .filter { $0.id != "5h" || level.hasFiveHour }       // no 5-hour window on the account: the week alone
             // an old saved full limit keeps both rows (so the block has the shape of a fresh one and a fresh answer
             // replaces it live), but the other window's number, over an hour old, is not shown: "–"
             if old { rows = rows.map { $0.id == full?.id ? $0 : Row(id: $0.id, label: $0.label, p: nil, share: QuickChatLevel.pct(nil), resets: "", stale: true) } }

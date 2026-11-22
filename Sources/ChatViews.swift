@@ -282,7 +282,7 @@ struct QCHeaderCard: View {
             // a label that is gone is a loss: the row says which window it is
             return r.share == nil && r.resets == nil && shown.labels ? nil : r
         }
-        return [row("5h", "5h", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets),
+        return [l.hasFiveHour ? row("5h", "5h", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets) : nil,
                 row("wk", "wk", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }
     }
 
@@ -377,8 +377,10 @@ struct QCHeaderLine: View {
             if let l = level {
                 let full = l.full()
                 HStack(spacing: 12) {
-                    QCLevelGroup(label: "5h", p: l.fiveHourNow(), full: full?.id == "5h" ? full : nil,
-                                 resets: l.fiveHourResets, detail: detail)
+                    if l.hasFiveHour {
+                        QCLevelGroup(label: "5h", p: l.fiveHourNow(), full: full?.id == "5h" ? full : nil,
+                                     resets: l.fiveHourResets, detail: detail)
+                    }
                     QCLevelGroup(label: "wk", p: l.weekNow(), full: full?.id == "wk" ? full : nil,
                                  resets: l.weekResets, detail: detail)
                 }
