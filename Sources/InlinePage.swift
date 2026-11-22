@@ -15,8 +15,11 @@
 //     at once. The page that stops being live is photographed (`takeSnapshot`, with its scroll position) and its web
 //     view released; the picture stands in its place (memory only, dropped with the chat) until it is live again, so
 //     nothing animates off screen. A rule list that can't be compiled leaves the block as code, and it says so.
-//   - THE WHEEL: over a page the wheel scrolls the page; at its end (or when it has nothing to scroll) the rest goes on to
-//     the chat. Our script reports which ends the page is at; a still picture never takes the wheel.
+//   - THE WHEEL: a gesture latches where it starts. Over a page it scrolls the page; one that starts with the page at its
+//     end in that direction (or with nothing to scroll), and one begun over the chat, goes to the chat. Our script reports
+//     which ends the page is at; a still picture never takes the wheel.
+//   - THE KEYBOARD: a click in a page may give it the keyboard (to select and ⌘C); typing goes on to the chat's field, and
+//     a click that selects nothing gives the keyboard back to the field.
 //   - CLIPPED: the page is a subview of its host and drawn inside it (rounded at the block's bottom corners); the block's
 //     top row stays above it.
 // Nothing about a page is written anywhere: the memos (height, still picture, scroll position) are in memory only.
@@ -54,6 +57,13 @@ enum QCInlinePageLayout {
       return Math.ceil(h);
     })()
     """
+    /// A number one of our scripts answered: finite and not negative, else nil (a NaN or an infinity never becomes a height
+    /// or a scroll position).
+    static func number(_ r: Result<Any, Error>) -> CGFloat? {
+        guard let d = (try? r.get()) as? Double, d.isFinite, d >= 0 else { return nil }
+        return CGFloat(d)
+    }
+
     /// Ours too: tells the host which ends of the page the document's scroll is at ("t", "b", "tb" or ""), whenever that
     /// changes, and turns the root's overscroll off (no rubber band inside the block to swallow a wheel meant for the chat).
     static let edgeScript = """
@@ -111,6 +121,10 @@ final class QCInlinePages {
         scheduleUpdate()
     }
 
+    /// A host let its web view go outside a switch (a crash, its text replaced, a load given up): it is no longer the live
+    /// one, so the next update can make a page live again.
+    func lost(_ h: QCInlinePageView) { if live === h { live = nil } }
+
     func memo(_ html: String) -> Memo? { memos[html] }
     func setMemo(_ html: String, _ m: Memo) { memos[html] = m }
     func edit(_ html: String, _ change: (inout Memo) -> Void) {
@@ -119,12 +133,8 @@ final class QCInlinePages {
         memos[html] = m
     }
 
-    /// A new chat: what no page on show uses any more goes.
-    func forgetUnused() {
-        let used = Set(hosts.map(\.html))
-        memos = memos.filter { used.contains($0.key) }
-    }
-    /// Checks and renders: everything goes.
+    /// The chat has no turns any more (a new chat, an ended chat left, a send after it ended): every height, still picture
+    /// and scroll position goes at once, with the chat.
     func forgetAll() { memos = [:] }
 
     func madeWebView() { alive += 1; loads += 1; mostAlive = max(mostAlive, alive) }
@@ -155,7 +165,7 @@ final class QCInlinePages {
     /// The page that should be live: one never shown before, first; else the live one while it is in view; else the one
     /// most in view (or the one the pointer woke). None in view: none.
     func pick() -> QCInlinePageView? {
-        let shown = hosts.filter { $0.inView && !$0.failed }
+        let shown = hosts.filter { $0.inView && !$0.failed && $0.crashes < 2 }
         if let w = wanted, shown.contains(where: { $0 === w }) { return w }
         if let fresh = shown.first(where: { memos[$0.html] == nil && $0.tries == 0 }) { return fresh }
         if let l = live, shown.contains(where: { $0 === l }) { return l }
@@ -243,6 +253,8 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
     var managed = true
     /// Loads begun (a page whose load failed isn't put first again as "never shown").
     private(set) var tries = 0
+    /// Its web content process ended under it this many times: made again after the first, never after the second.
+    private(set) var crashes = 0
 
     enum State { case idle, starting, live, retiring }
     private(set) var state = State.idle
@@ -286,12 +298,15 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
 
     // MARK: where it is
 
-    /// Shown in a window that is on show, with some of it inside the chat's visible area.
+    /// Shown in a window that is on show and not covered, with some of it inside the chat's visible area.
     var inView: Bool {
-        guard let w = window, w.isVisible else { return false }
+        guard let w = window, w.isVisible, Self.uncovered(w) else { return false }
         let r = visibleRect
         return r.height >= 1 && r.width >= 1
     }
+
+    /// Whether any of the window can be seen (a check stands in for the window server: its panel is off every screen).
+    static var uncovered: (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) }
 
     var cap: CGFloat { capOverride ?? QCInlinePageLayout.cap(panelHeight: window?.frame.height ?? QuickChatRoot.windowHeight) }
 
@@ -359,6 +374,7 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
         drop()
         html = text
         failed = false
+        tries = 0; crashes = 0           // another page: never shown yet
         showStill()
         QCInlinePages.shared.scheduleUpdate()
     }
@@ -387,7 +403,9 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
             view.navigationDelegate = self
             view.uiDelegate = self
             view.wheel = { [weak self] e in self?.wheel(e) ?? false }
-            view.alphaValue = 0                       // under the picture, not on show, until it is measured
+            view.key = { [weak self] e in self?.typed(e) ?? false }
+            view.clicked = { [weak self] in self?.clickEnded() }
+            view.alphaValue = 0                      // under the picture, not on show, until it is measured
             self.page = view
             QCInlinePages.shared.madeWebView()
             self.addSubview(view, positioned: .below, relativeTo: self.still)
@@ -433,15 +451,16 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
     func retire(then done: @escaping () -> Void) {
         guard let p = page, state == .live else { drop(); return done() }
         state = .retiring
+        let key = html                     // the page photographed, whatever the block shows by the time the picture comes
         var once = false
         let finish: (NSImage?, CGFloat?) -> Void = { [weak self] image, y in
             guard !once else { return }
             once = true
-            if let self {
-                QCInlinePages.shared.edit(self.html) { m in
-                    if let image { m.still = image }
-                    if let y { m.scrollY = y }
-                }
+            QCInlinePages.shared.edit(key) { m in
+                if let image { m.still = image }
+                if let y { m.scrollY = y }
+            }
+            if let self, self.page === p {
                 self.drop()
                 QCInlinePages.shared.trace("still \(self.traceName)")
             }
@@ -449,7 +468,7 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + QCInlinePageLayout.giveUp) { finish(nil, nil) }
         p.evaluateJavaScript("(document.scrollingElement || document.documentElement).scrollTop", in: nil, in: .defaultClient) { r in
-            let y = (try? r.get()).flatMap { $0 as? Double }.map { CGFloat($0) }
+            let y = QCInlinePageLayout.number(r)
             let cfg = WKSnapshotConfiguration()
             cfg.rect = p.bounds
             p.takeSnapshot(with: cfg) { image, _ in finish(image, y) }
@@ -465,7 +484,8 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
             p.stopLoading()
             p.navigationDelegate = nil
             p.uiDelegate = nil
-            p.wheel = nil
+            p.wheel = nil; p.key = nil; p.clicked = nil
+            if let w = window as? QuickChatPanel, w.firstResponder === p { w.focusField() }      // the keyboard isn't lost with it
             p.configuration.userContentController.removeAllScriptMessageHandlers()
             p.removeFromSuperview()
             page = nil
@@ -474,6 +494,7 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
         }
         state = .idle
         showStill()
+        QCInlinePages.shared.lost(self)       // never left as the live one with no web view
         let r = ready; ready = nil
         r?()
     }
@@ -519,7 +540,7 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
         placePage()
         p.evaluateJavaScript(QCInlinePageLayout.measureScript, in: nil, in: .defaultClient) { [weak self] r in
             guard let self, self.page === p else { return }
-            let content = (try? r.get()).flatMap { $0 as? Double }.map { CGFloat($0) } ?? self.frame.height
+            let content = QCInlinePageLayout.number(r) ?? self.frame.height
             let shown = min(max(content, QCInlinePageLayout.least), self.cap)
             QCInlinePages.shared.edit(self.html) { m in m.content = content; m.shown = shown; m.width = self.bounds.width }
             self.setShown(shown)
@@ -538,12 +559,17 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
     /// Whether the page has more than it shows (its content taller than the block).
     var scrollable: Bool { (QCInlinePages.shared.memo(html)?.content ?? 0) > frame.height + 1 }
 
-    /// One wheel event over the live page: true when it went on to the chat. A gesture's first event decides who takes it;
-    /// the page keeps it until it reaches its end in the direction of travel, and then the rest goes to the chat (which
-    /// keeps it to the end). A wheel with no phases (a mouse) decides each event.
+    /// When the trackpad gesture this view saw ended (its momentum may follow, at once).
+    private var gestureEnded: Date?
+
+    /// One wheel event over the live page: true when it went on to the chat. A gesture LATCHES, as AppKit's nested scroll
+    /// views and Safari do: its first event over the page decides who takes all of it, its momentum included. The page takes
+    /// it unless it has nothing to scroll or is already at its end in that direction; then the chat does. So a page scrolled
+    /// to its end stops there, and the next swipe goes on to the chat: no gesture is split, so the chat never gets the middle
+    /// of one without its start, and the page never loses one without its end. A gesture begun elsewhere (the chat's flick or
+    /// its momentum passing over the page) stays the chat's. A wheel with no phases (a mouse) decides each event.
     func wheel(_ e: NSEvent) -> Bool {
         let dy = e.scrollingDeltaY, dx = e.scrollingDeltaX
-        let ends = e.phase.contains(.ended) || e.phase.contains(.cancelled) || e.momentumPhase.contains(.ended) || e.momentumPhase.contains(.cancelled)
         func chatTakes() -> Bool {
             guard scrollable else { return true }
             if abs(dx) > abs(dy) { return false }            // sideways is the page's
@@ -552,13 +578,18 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
             return false
         }
         let plain = e.phase.isEmpty && e.momentumPhase.isEmpty
-        let starts = plain || e.phase.contains(.began) || e.phase.contains(.mayBegin)
-        if starts || wheelToChat == nil { wheelToChat = chatTakes() }
-        else if wheelToChat == false, dy != 0, chatTakes() { wheelToChat = true }
-        let toChat = wheelToChat ?? false
-        // the gesture is over (a plain wheel's event is one on its own; a trackpad's ends with its momentum, or is cancelled):
-        // the next one decides again
-        if plain || ends && (e.momentumPhase.contains(.ended) || e.phase.contains(.cancelled) || e.momentumPhase.contains(.cancelled)) { wheelToChat = nil }
+        if plain || e.phase.contains(.began) || e.phase.contains(.mayBegin) {
+            wheelToChat = chatTakes(); gestureEnded = nil
+        } else if let end = gestureEnded {
+            // the gesture seen here has ended: only its own momentum, starting at once, goes on with the same owner
+            if !(e.momentumPhase.contains(.began) && Date().timeIntervalSince(end) < 0.25) { wheelToChat = nil }
+            gestureEnded = nil
+        }
+        if wheelToChat == nil { wheelToChat = true }             // its start was never seen here: begun over the chat
+        let toChat = wheelToChat ?? true
+        if plain || e.phase.contains(.cancelled) || e.momentumPhase.contains(.ended) || e.momentumPhase.contains(.cancelled) {
+            wheelToChat = nil; gestureEnded = nil
+        } else if e.phase.contains(.ended) { gestureEnded = Date() }
         guard toChat, let chat = enclosingScrollView else { return false }
         Self.handOn(chat, e)
         return true
@@ -608,8 +639,7 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
         QCInlinePages.shared.trace("finished \(traceName)")
         webView.evaluateJavaScript(QCInlinePageLayout.measureScript, in: nil, in: .defaultClient) { [weak self] r in
             guard let self, self.page === webView else { return }
-            let content = (try? r.get()).flatMap { $0 as? Double }.map { CGFloat($0) } ?? QCInlinePageLayout.placeholder
-            self.measured(content)
+            self.measured(QCInlinePageLayout.number(r) ?? QCInlinePageLayout.placeholder)
         }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { loadFailed(webView) }
@@ -622,11 +652,35 @@ final class QCInlinePageView: NSView, WKNavigationDelegate, WKUIDelegate, WKScri
         drop()
     }
 
-    /// The web content process went away: the page is let go; it is made again when it is next picked.
+    /// The web content process went away: the page is let go and made again while it is in view, once; a page whose
+    /// process ends a second time stays its still picture (no crash loop).
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard webView === page else { return }
+        crashes += 1
+        QCInlinePages.shared.trace("crashed \(traceName)")
         drop()
         QCInlinePages.shared.scheduleUpdate()
+    }
+
+    // MARK: the keyboard: typing belongs to the chat's field
+
+    /// A key while the page has the keyboard (a click put it there): ⌘ keys stay the page's (⌘C copies its selection, ⌘A
+    /// selects it all); anything else is typing meant for the chat, so the field takes the keyboard and gets the key.
+    func typed(_ e: NSEvent) -> Bool {
+        guard !e.modifierFlags.contains(.command), let w = window as? QuickChatPanel else { return false }
+        w.focusField()
+        guard let f = w.firstResponder, f !== page else { return false }
+        w.sendEvent(e)
+        return true
+    }
+
+    /// A click in the page ended: with nothing selected the keyboard goes back to the field; a selection keeps it (to copy).
+    func clickEnded() {
+        guard let p = page else { return }
+        p.evaluateJavaScript("String(window.getSelection() || '')", in: nil, in: .defaultClient) { [weak self] r in
+            guard let self, self.page === p, let w = self.window as? QuickChatPanel, w.firstResponder === p else { return }
+            if ((try? r.get()) as? String ?? "").isEmpty { w.focusField() }
+        }
     }
 }
 
@@ -733,8 +787,12 @@ struct QCCodePageSwitch: View {
         .qcMark("page-switch")
         .onAppear {
             // checks only (no pointer can press a SwiftUI button there): this block's Code, Page and Copy
-            if QCQuiet.on { QCBlockActions.last = ["code": { page = false }, "page": { page = true }, "copy": { [copyText] in QCCopy.put(copyText) }] }
+            if QCQuiet.on {
+                QCBlockActions.last = ["code": { page = false }, "page": { page = true }, "copy": { [copyText] in QCCopy.put(copyText) }]
+                QCBlockActions.pageMarked = page
+            }
         }
+        .onChange(of: page) { if QCQuiet.on { QCBlockActions.pageMarked = $0 } }
     }
 
     private func side(_ title: String, on: Bool, _ action: @escaping () -> Void) -> some View {
@@ -765,7 +823,11 @@ private struct QCSwitchSide: View {
 }
 
 /// Checks (QCQuiet) only: the top-row actions of the html block drawn last, by name ("code", "page", "copy").
-enum QCBlockActions { static var last: [String: () -> Void] = [:] }
+enum QCBlockActions {
+    static var last: [String: () -> Void] = [:]
+    /// Whether that block's switch marks Page (else Code).
+    static var pageMarked: Bool?
+}
 
 /// The chat's scroll controller, for a page that changes height (it tells it first).
 private struct QCChatScrollKey: EnvironmentKey { static let defaultValue: QCChatScroll? = nil }

@@ -212,8 +212,14 @@ enum QuickChatSwitchNotice: Equatable {
 /// The chat's state, drawn by ChatViews and driven by its keys. Main thread only.
 final class QuickChatModel: ObservableObject {
     @Published var turns: [QuickChatTurn] = [] {
-        // a setting change that came while an answer was running applies as soon as the answer has ended
-        didSet { if wantedWeb != nil { syncWeb() } }
+        // a setting change that came while an answer was running applies as soon as the answer has ended; none of the old
+        // turns left (a new chat, an ended one left, a send or Ask again after it ended): their pages' heights, still
+        // pictures and scroll positions go now (InlinePage.swift)
+        didSet {
+            if wantedWeb != nil { syncWeb() }
+            // (a token only changes the last turn's text: its id is still last, and nothing more is looked at)
+            if let old = oldValue.last?.id, turns.last?.id != old, !turns.contains(where: { $0.id == old }) { QCInlinePages.shared.forgetAll() }
+        }
     }
     @Published var field = "" {
         // the first keystroke after a chat ended: the dead chat goes (its turns, notices and the ended line), the bar is
@@ -732,8 +738,6 @@ final class QuickChatModel: ObservableObject {
         closeProcess()
         ended = nil
         turns = []
-        // the old chat's pages (their heights and still pictures, in memory) go once their blocks have gone
-        DispatchQueue.main.async { QCInlinePages.shared.forgetUnused() }
         followTick += 1
         returnHeld = false
         sendWhenReady = false

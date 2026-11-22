@@ -336,6 +336,20 @@ final class QCPreviewWebView: WKWebView {
         super.scrollWheel(with: event)
     }
 
+    /// A page in the chat: a key while the page has the keyboard (true: it went to the chat's field instead).
+    var key: ((NSEvent) -> Bool)?
+    override func keyDown(with event: NSEvent) {
+        if key?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
+    /// A page in the chat: told when a click in the page has ended.
+    var clicked: (() -> Void)?
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        clicked?()
+    }
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         Self.filter(menu)

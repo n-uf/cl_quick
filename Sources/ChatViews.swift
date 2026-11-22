@@ -687,8 +687,10 @@ struct QCCodeBlock: View {
 
     /// A complete html block: it has the Code | Page switch and ⤢.
     private var html: Bool { QCHTMLPreview.isHTML(language) && closed }
-    /// The page is the side on show (the model's choice by its fence until the user clicks).
+    /// The page is the side wanted (the model's choice by its fence until the user clicks).
     private var pageSide: Bool { picked ?? !QCHTMLPreview.codeFirst(meta) }
+    /// The page is the side on show (and marked in the switch): not when it couldn't be made safe.
+    private var pageShown: Bool { html && pageSide && !unsafe }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -697,7 +699,7 @@ struct QCCodeBlock: View {
             HStack(spacing: 0) {
                 Text(language.isEmpty ? "code" : language).font(.system(size: 11.5)).foregroundColor(QCColor.muted)
                 if html {
-                    QCCodePageSwitch(page: Binding(get: { pageSide }, set: { picked = $0 }), copyText: code).padding(.leading, 8)
+                    QCCodePageSwitch(page: Binding(get: { pageShown }, set: { picked = $0 }), copyText: code).padding(.leading, 8)
                 }
                 Spacer()
                 if html { QCPreviewButton(html: code) }
@@ -706,7 +708,7 @@ struct QCCodeBlock: View {
             .padding(.leading, 12).padding(.trailing, 2)
             .frame(height: QCSpace.row)
             Rectangle().fill(QCColor.line).frame(height: 1)
-            if html && pageSide && !unsafe {
+            if pageShown {
                 QCInlinePageBlock(html: code, failed: $unsafe)
             } else {
                 if html && pageSide {
@@ -722,6 +724,9 @@ struct QCCodeBlock: View {
         }
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(QCColor.code))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(QCColor.line))
+        // another block in this place (Ask again wrote a new answer): the last one's click and its failure don't carry over
+        .onChange(of: code) { _ in picked = nil; unsafe = false }
+        .onChange(of: meta) { _ in picked = nil }
     }
 
     private var codeText: some View {
