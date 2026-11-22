@@ -71,18 +71,24 @@ final class QCSpeech: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
             code = lang.rawValue.split(separator: "-").first.map(String.init) ?? lang.rawValue   // "zh-Hans" → "zh"
         }
         let own = mine == code || mine.hasPrefix(code + "-")
-        if let best = best(code, region: own ? mine : AVSpeechSynthesisVoice(language: code)?.language) { return best }
+        // the system's voice for the language (for the Mac's own one, the voice chosen in Spoken Content) wins a tie
+        let system = AVSpeechSynthesisVoice(language: own ? mine : code)
+        if let best = best(code, region: own ? mine : system?.language, preferred: system?.identifier) { return best }
         return own ? nil : AVSpeechSynthesisVoice(language: code)
     }
 
     /// The best Premium or Enhanced voice installed for a language ("en"), nil when there is none: higher quality first, then
-    /// the preferred region ("en-US"), then by identifier so the pick is stable. Novelty and Personal voices are never picked.
-    static func best(_ code: String, region: String?, among voices: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices()) -> AVSpeechSynthesisVoice? {
+    /// the system's own pick (`preferred`) at the same quality, then the preferred region ("en-US"), then by identifier so the
+    /// pick is stable. Novelty and Personal voices are never picked.
+    static func best(_ code: String, region: String?, preferred: String? = nil,
+                     among voices: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices()) -> AVSpeechSynthesisVoice? {
         func rank(_ q: AVSpeechSynthesisVoiceQuality) -> Int { q == .premium ? 2 : q == .enhanced ? 1 : 0 }
         return voices
             .filter { ($0.language == code || $0.language.hasPrefix(code + "-")) && rank($0.quality) > 0 && plain($0) }
             .min { a, b in
                 if rank(a.quality) != rank(b.quality) { return rank(a.quality) > rank(b.quality) }
+                let ap = a.identifier == preferred, bp = b.identifier == preferred
+                if ap != bp { return ap }
                 let ar = a.language == region, br = b.language == region
                 if ar != br { return ar }
                 return a.identifier < b.identifier

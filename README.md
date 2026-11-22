@@ -283,7 +283,8 @@ minutes for a profile.
   stop it. What is read is the answer's plain text: the Markdown marks (bold, links, headings, list marks, table
   pipes) are left out, and a code block is not read out: you hear "code block" in its place. The answer is read in the
   best voice installed for its language (your Mac's own when it can't be told): a Premium voice first, then an
-  Enhanced one (the natural Siri voices are among them), in your region's accent when there is a choice. With only the
+  Enhanced one (the natural Siri voices are among them); between voices of the same quality, the one chosen in Spoken
+  Content, then your region's accent. With only the
   compact voices installed, an answer in your own language is read in the voice chosen in System Settings ▸
   Accessibility ▸ Spoken Content and one in another language in the system's default voice for it (yours when none is
   installed). Better voices are a free download there: System voice ▸ Manage Voices…, then a Premium voice such as Ava

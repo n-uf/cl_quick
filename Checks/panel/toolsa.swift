@@ -162,7 +162,7 @@ func readAloudChecks() {
     speech.toggle(m.turns[0].id, answer: m.turns[0].answer)
     m.turns = []
     check("read aloud: the answer going away stops it", speech.reading == nil)
-    // the voice follows the answer's language, else the user's default (nil); never one of another language
+    // the voice follows the answer's language: the best installed for it, else the user's default (nil); never one of another language
     let en = QCSpeech.voice(for: "This is a plain English sentence about reading an answer aloud with the voice of the Mac.")
     let uk = QCSpeech.voice(for: "Це звичайне українське речення про те, як прочитати відповідь уголос голосом комп'ютера.")
     check("read aloud: an English answer gets an English voice (or the default), a Ukrainian one a Ukrainian voice (or the default)",
