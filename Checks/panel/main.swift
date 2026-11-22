@@ -4764,7 +4764,8 @@ func chatHandleChecks() {
         let track = sv.verticalScroller.map { sv.convert($0.frame, to: nil) } ?? .zero
         let taken = (sv.frame.width - clip.frame.width).rounded()      // what the clip view gave up to the scroller
         guard let ls = sc.frames["left.strip"], let rs = sc.frames["right.strip"] else { check("handles: \(label): both strips report their frames", false, "\(sc.frames.keys.sorted())"); return }
-        check("handles: \(label): the strips are 14 × 44, along the edges", near(ls.width, 14) && near(ls.height, 44) && near(rs.width, 14) && near(rs.height, 44), "\(ls) \(rs)")
+        let sw = QCEdgeLayout.stripWidth, sh = QCEdgeLayout.stripHeight
+        check("handles: \(label): the strips are \(Int(sw)) × \(Int(sh)), along the edges", near(ls.width, sw) && near(ls.height, sh) && near(rs.width, sw) && near(rs.height, sh), "\(ls) \(rs)")
         check("handles: \(label): the left strip stands 5 pt in, the right one inward of the scroller's track",
               near(ls.minX, QCEdgeLayout.clear) && near(rs.maxX, W - QCEdgeLayout.scroller(style)), "\(ls.minX) \(rs.maxX) W \(W) style \(style.rawValue) track \(track)")
         check("handles: \(label): the real scroller (\(track.width) pt, takes \(taken) pt out of the clip view) is outside the right strip, and the style is \(style == .legacy ? "legacy" : "overlay")",
@@ -4800,7 +4801,8 @@ func chatHandleChecks() {
         check("handles: \(name): it opens after the rest, and the handle is lit", state.expanded && state.lit)
         settle()
         if let strip = sc.frames["\(name).strip"], let box = sc.frames["\(name).box"] {
-            let pill = name == "left" ? CGRect(x: strip.minX, y: strip.midY - 15, width: 3, height: 30) : CGRect(x: strip.maxX - 3, y: strip.midY - 15, width: 3, height: 30)
+            let pw = QCEdgeLayout.pillWidth, ph = QCEdgeLayout.pillHeight
+            let pill = CGRect(x: name == "left" ? strip.minX : strip.maxX - pw, y: strip.midY - ph / 2, width: pw, height: ph)
             check("handles: \(name): the stack opens beside the handle, inward, 6 pt clear of the pill",
                   name == "left" ? near(box.minX, pill.maxX + 6) : near(box.maxX, pill.minX - 6), "box \(box) pill \(pill)")
             check("handles: \(name): the stack is centred on the handle vertically and never under the pointer's point (the pill's middle)",

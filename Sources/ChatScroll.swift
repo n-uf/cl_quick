@@ -108,6 +108,7 @@ final class QCChatScroll: ObservableObject {
         observers = []
         scrollView = view; self.clip = clip; self.doc = doc
         view.verticalScroller?.controlSize = QCEdgeLayout.scrollerSize     // the thin scroller (QCEdgeLayout.scroller counts it)
+        view.tile()                                                         // its track and the clip view at the new width
         flipped = doc.isFlipped
         clip.postsBoundsChangedNotifications = true
         clip.postsFrameChangedNotifications = true
@@ -251,7 +252,7 @@ final class QCChatScroll: ObservableObject {
     func refresh() {
         guard let g = geometry, let sv = scrollView else { return }
         // a style change ("Show scroll bars") may bring a new scroller: keep it thin
-        if let v = sv.verticalScroller, v.controlSize != QCEdgeLayout.scrollerSize { v.controlSize = QCEdgeLayout.scrollerSize }
+        if let v = sv.verticalScroller, v.controlSize != QCEdgeLayout.scrollerSize { v.controlSize = QCEdgeLayout.scrollerSize; sv.tile() }
         let style = sv.scrollerStyle
         let inset = style == .legacy ? max(0, (sv.frame.width - g.clip.frame.width).rounded()) : 0
         if scrollerStyle != style || scrollerInset != inset {
