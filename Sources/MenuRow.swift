@@ -14,10 +14,16 @@ import AppKit
 import MenuRows
 
 extension MenuRowColumns {
-    /// Where a standby row's lamp and address sit in the menu bar's menu: the usage block's lamp column and address x (27).
-    static let bar = MenuRowColumns(markerX: QCMenuUsageBlock.padX, addressX: QCMenuUsageBlock.padX + QCMenuUsageBlock.textGap)
-    /// And in the chat's profile menu, under the in-use row's dot and name.
+    /// Where a standby row's lamp and address sit in the menu bar's menu: the usage block's address x (27), the lamp 13 pt
+    /// before it, in the block's lamp column.
+    static let bar = MenuRowColumns(addressX: QCMenuUsageBlock.padX + QCMenuUsageBlock.textGap)
+    /// And in the chat's profile menu, under the in-use row's dot and name (the lamp under the dot).
     static let chat = MenuRowColumns(markerX: QCProfileMenuRow.dotX, addressX: QCProfileMenuRow.textX)
+}
+
+extension MenuAccountRowView {
+    /// The address's font in cl_quick's rows: as the block's account line and the profile menu's (11.5 pt).
+    static let quickAddressFont = QCProfileMenuRow.addressFont
 }
 
 final class QCProfileMenuRow: NSView {
@@ -222,82 +228,4 @@ extension NSView {
 
     /// The release of a click is on the view: a release outside it (the press was on it) is no click.
     func releasedOn(_ e: NSEvent) -> Bool { bounds.contains(convert(e.locationInWindow, from: nil)) }
-}
-
-/// "Add an account…" as the last row of a profile's group in a menu, after its standby rows (cl_kit's MenuRows,
-/// MenuAccountRowView: they have an address to draw, this one has none): a small plus in the marker column and the words in
-/// the address column, in the standby rows' size and dimmed like them, lit by the menu's highlight. A click
-/// anywhere on it closes the menu and runs `pick` (the item's action does the same for Return). While a sign-in for the
-/// profile is waited for it is dimmed further, never lit, and does nothing.
-final class QCAddAccountMenuRow: NSView {
-    let enabled: Bool
-    let columns: MenuRowColumns
-    let pick: () -> Void
-    /// For pictures: drawn as if the menu highlighted it.
-    var highlighted = false
-
-    static let title = "Add an account…"
-    /// As tall as a standby row (MenuRows': the blurred address's picture), the highlight a native item's height.
-    static let height = MenuAccountRowView.addressLineH, highlightH = MenuAccountRowView.highlightH
-    static let font = MenuAccountRowView.font
-
-    init(enabled: Bool, columns: MenuRowColumns = .bar, pick: @escaping () -> Void) {
-        self.enabled = enabled; self.columns = columns; self.pick = pick
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(columns: columns), height: Self.height))
-        autoresizingMask = [.width]
-        setAccessibilityElement(true)
-        setAccessibilityRole(.menuItem)
-        setAccessibilityLabel(Self.title)
-        setAccessibilityEnabled(enabled)
-    }
-    required init?(coder: NSCoder) { fatalError("not from a nib") }
-
-    override var isFlipped: Bool { true }
-
-    /// The least width that shows it all.
-    static func width(columns: MenuRowColumns = .bar) -> CGFloat {
-        columns.addressX + ceil((title as NSString).size(withAttributes: [.font: font]).width) + QCMenuUsageBlock.padX
-    }
-
-    /// Whether the row is lit by the menu; a dimmed row never is.
-    var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
-    }
-    override func mouseEntered(with e: NSEvent) { needsDisplay = true }
-    override func mouseExited(with e: NSEvent) { needsDisplay = true }
-    override func mouseUp(with e: NSEvent) { if releasedOn(e) { press() } }
-
-    /// A click anywhere on the row: closes the menu, then runs `pick`. Nothing while dimmed.
-    func press() {
-        guard enabled else { return }
-        closeMenuThen(pick)
-    }
-    override func accessibilityPerformPress() -> Bool {
-        guard enabled else { return false }
-        press()
-        return true
-    }
-
-    override func draw(_ dirty: NSRect) {
-        let on = lit
-        if on {
-            NSColor.selectedContentBackgroundColor.setFill()
-            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - Self.highlightH / 2, width: bounds.width - 10, height: Self.highlightH), xRadius: 4, yRadius: 4).fill()
-        }
-        // a step below the account in use (as a standby row's), dimmed further while a sign-in is waited for
-        let fg: NSColor = on ? .selectedMenuItemTextColor : enabled ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.14)
-        let mid = bounds.midY
-        // the plus, as wide as the lamps are
-        let c = columns.markerX + QCMenuUsageBlock.dotSize / 2, r = QCMenuUsageBlock.dotSize / 2 - 0.6
-        let plus = NSBezierPath()
-        plus.move(to: NSPoint(x: c - r, y: mid)); plus.line(to: NSPoint(x: c + r, y: mid))
-        plus.move(to: NSPoint(x: c, y: mid - r)); plus.line(to: NSPoint(x: c, y: mid + r))
-        plus.lineWidth = 1.2; plus.lineCapStyle = .round
-        fg.setStroke(); plus.stroke()
-        QCMenuUsageBlock.drawText(Self.title, Self.font, fg, x: columns.addressX, midY: mid)
-    }
 }

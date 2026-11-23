@@ -415,16 +415,6 @@ enum QCStatusMenu {
              standby: store.standby(p))
     }
 
-    /// A menu item's action: a closure. An item built off (`enabled` false) stays off whatever the menu does: the menu's
-    /// own validation (autoenablesItems) asks here, and the action itself checks too.
-    private final class Handler: NSObject, NSMenuItemValidation {
-        let run: () -> Void
-        let enabled: Bool
-        init(enabled: Bool = true, _ run: @escaping () -> Void) { self.enabled = enabled; self.run = run }
-        @objc func fire() { if enabled { run() } }
-        func validateMenuItem(_ item: NSMenuItem) -> Bool { enabled }
-    }
-
     /// Whether a click on a standby row may start the switch now: the account is still a standby one of the profile (a
     /// sign-in that finished while the menu was open may have made it the one in use) and no switch is waited for.
     static func mayStartSwitch(_ p: Profile, _ a: KnownAccount, store: ProfileStore = .shared,
@@ -438,7 +428,8 @@ enum QCStatusMenu {
     /// the right while it is lit. It shows no usage. Off (`waiting`) while a sign-in for the profile is waited for: never lit,
     /// does nothing. The address is MenuRows': its stand-in blurred until the pointer is on the row (never the real text).
     static func standbyRow(address: String, waiting: Bool) -> MenuAccountRow {
-        MenuAccountRow(address: address, inUse: false, tag: " · standby", hint: "Switch…", enabled: !waiting, dimmed: true, marker: .hollowLamp)
+        MenuAccountRow(address: address, inUse: false, tag: " · standby", hint: "Switch…", enabled: !waiting, dimmed: true, marker: .hollowLamp,
+                       waiting: waiting)
     }
 
     /// A standby account's row (MenuRows' MenuAccountRowView), in its profile's group: a click anywhere on it asks the switch
@@ -448,7 +439,9 @@ enum QCStatusMenu {
     static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, columns: MenuRowColumns = .bar,
                             switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, MenuAccountRowView) {
         // the menu was built some time ago: the question is asked only if the account is still on standby
-        let item = MenuAccountRowView.item(standbyRow(address: a.email, waiting: waiting), columns: columns) { if allowSwitch(p, a) { switchTo(p, a) } }
+        let item = MenuAccountRowView.item(standbyRow(address: a.email, waiting: waiting), columns: columns, addressFont: MenuAccountRowView.quickAddressFont) {
+            if allowSwitch(p, a) { switchTo(p, a) }
+        }
         return (item, item.view as! MenuAccountRowView)
     }
 
@@ -461,20 +454,22 @@ enum QCStatusMenu {
     /// The rule a click on Add an account… is held to (a seam: the checks replace it).
     static var allowAddAccount: (Profile) -> Bool = { mayAddAccount($0) }
 
-    /// Add an account… (QCAddAccountMenuRow), last in its profile's group: opens Settings on the profile with its Add an
-    /// account… form open (`add`). Nothing new is begun here: the form is Settings' own. Off while a sign-in for the profile
+    /// Add an account… as MenuRows' row with no account (`MenuAccountRow.add`: a "+" and the words), dimmed like a standby row.
+    static func addAccountRow(waiting: Bool) -> MenuAccountRow {
+        var r = MenuAccountRow.add("Add an account…", enabled: !waiting, waiting: waiting)
+        r.dimmed = true
+        return r
+    }
+
+    /// Add an account… (MenuRows' MenuAccountRowView), last in its profile's group: opens Settings on the profile with its Add
+    /// an account… form open (`add`). Nothing new is begun here: the form is Settings' own. Off while a sign-in for the profile
     /// is waited for, as Settings' own key is. Both menus build it here.
     static func addAccountItem(_ p: Profile, waiting: Bool, columns: MenuRowColumns = .bar,
-                               add: @escaping (Profile) -> Void) -> (NSMenuItem, QCAddAccountMenuRow) {
-        let run = { if allowAddAccount(p) { add(p) } }
-        let h = Handler(enabled: !waiting, run)
-        let item = NSMenuItem(title: QCAddAccountMenuRow.title, action: #selector(Handler.fire), keyEquivalent: "")
-        item.target = h
-        item.representedObject = h
-        item.isEnabled = !waiting
-        let row = QCAddAccountMenuRow(enabled: !waiting, columns: columns, pick: run)
-        item.view = row
-        return (item, row)
+                               add: @escaping (Profile) -> Void) -> (NSMenuItem, MenuAccountRowView) {
+        let item = MenuAccountRowView.item(addAccountRow(waiting: waiting), columns: columns, addressFont: MenuAccountRowView.quickAddressFont) {
+            if allowAddAccount(p) { add(p) }
+        }
+        return (item, item.view as! MenuAccountRowView)
     }
 
     /// Every block and row as wide as the widest (the menu then widens them with itself).
@@ -652,12 +647,14 @@ enum QCMenuRender {
             return QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: level, address: address, problem: problem, now: now), joined: joined) {}
         }
         func standby(_ address: String, waiting: Bool = false, lit: Bool = false) -> MenuAccountRowView {
-            let r = MenuAccountRowView(row: QCStatusMenu.standbyRow(address: address, waiting: waiting), columns: .bar) {}
+            let r = MenuAccountRowView(row: QCStatusMenu.standbyRow(address: address, waiting: waiting), columns: .bar,
+                                       addressFont: MenuAccountRowView.quickAddressFont) {}
             r.highlighted = lit
             return r
         }
-        func addRow(waiting: Bool = false, lit: Bool = false) -> QCAddAccountMenuRow {
-            let r = QCAddAccountMenuRow(enabled: !waiting) {}
+        func addRow(waiting: Bool = false, lit: Bool = false) -> MenuAccountRowView {
+            let r = MenuAccountRowView(row: QCStatusMenu.addAccountRow(waiting: waiting), columns: .bar,
+                                       addressFont: MenuAccountRowView.quickAddressFont) {}
             r.highlighted = lit
             return r
         }
