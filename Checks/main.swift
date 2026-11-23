@@ -1246,6 +1246,21 @@ do {
           && !AccountBook.answersForFolder(a2, record: a1) && !AccountBook.answersForFolder(a1, record: nil)
           && !AccountBook.answersForFolder(rec("u1", nil, org: "org-2"), record: rec("u1", nil, org: "org-1")))
     check("broken: the words", SignInProblem.signedOut.words == "Signed out." && SignInProblem.stopped.words == "The sign-in stopped working.")
+    // an older entry (seat not known) folded into a standby seat's row goes with it, so the row doesn't come back
+    let folded = [KnownAccount(uuid: "u1", email: "ultra-1@example.com"), KnownAccount(uuid: "u2", email: "ultra-2@example.com"),
+                  KnownAccount(uuid: "u2", organization: "org-2", email: "ultra-2@example.com")]
+    check("forget: the standby row is one (the older entry folded into its seat)", AccountBook.standby(folded, inUse: a1).map(\.key) == [key("u2", "org-2")])
+    let foldGone = AccountBook.forgetting(key("u2", "org-2"), of: "main", accounts: folded, levels: ["main|u2": 1, "main|u2|org-2": 2, "main|u1": 3], inUse: a1)
+    check("forget: the seat and the older entry it stood for both go, with their weeks; the row doesn't come back",
+          foldGone?.accounts.map(\.key) == [key("u1")] && foldGone?.levels == ["main|u1": 3]
+          && foldGone.map { AccountBook.standby($0.accounts, inUse: a1).isEmpty } == true, foldGone as Any)
+    let twoSeats = folded + [KnownAccount(uuid: "u2", organization: "org-3", email: "ultra-2@example.com")]
+    check("forget: with two seats of the account known, the older entry stays (it isn't that row's)",
+          AccountBook.forgetting(key("u2", "org-2"), of: "main", accounts: twoSeats, levels: weeks, inUse: a1)?.accounts.map(\.key)
+          == [key("u1"), key("u2"), key("u2", "org-3")])
+    check("forget: the account in use's own older entry never goes",
+          AccountBook.forgetting(key("u1", "org-1"), of: "main", accounts: known + [KnownAccount(uuid: "u1", organization: "org-1", email: "ultra-1@example.com")],
+                                 levels: weeks, inUse: rec("u1", "ultra-1@example.com", org: "org-9"))?.accounts.map(\.key) == [key("u1"), key("u2")])
     check("forget: an account without a week", AccountBook.forgetting(key("u2"), of: "main", accounts: known, levels: ["main|u1": 50], inUse: a1)?.levels == ["main|u1": 50])
     // a switch's confirmation says what it affects: Claude Code on the folder, not the Claude app
     let sw0 = AccountBook.switchWords(folder: "~/.claude", isDefault: true)

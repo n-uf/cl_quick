@@ -378,7 +378,8 @@ enum AccountBook {
         levels.filter { $0.key != id && !$0.key.hasPrefix(id + "|") }
     }
 
-    /// Forgets a standby account of a profile: it leaves the list and its week goes (levelKey). The account in use (the
+    /// Forgets a standby account of a profile: it leaves the list and its week goes (levelKey), with the older entries of
+    /// that account whose seat isn't known that its row stands for. The account in use (the
     /// entry the record is, entryIndex, a placeholder or an entry whose seat isn't known included) can't be forgotten, nor
     /// one that isn't in the list: nil. Nothing else moves.
     static func forgetting<V>(_ key: AccountKey, of profile: String, accounts: [KnownAccount], levels: [String: V],
@@ -388,9 +389,20 @@ enum AccountBook {
             if AccountKey(r) == key { return nil }
             if let i = entryIndex(for: r, in: accounts), accounts[i].key == key { return nil }
         }
+        // the entries of that account whose seat isn't known that the tidy folds into this row (its account's one known
+        // seat here), so the row doesn't come back: never the account in use's own entry
+        var gone: Set<AccountKey> = [key]
+        if let org = key.organization {
+            let inUseKey = record.flatMap { r in entryIndex(for: r, in: accounts).map { accounts[$0].key } }
+            var seats = Set(accounts.filter { $0.uuid == key.account }.compactMap(\.organization))
+            if let r = record.flatMap(AccountKey.init), r.account == key.account, let o = r.organization { seats.insert(o) }
+            if seats == [org] {
+                for a in accounts where a.uuid == key.account && a.organization == nil && a.key != inUseKey { gone.insert(a.key) }
+            }
+        }
         var kept = levels
-        kept[levelKey(profile, key)] = nil
-        return (accounts.filter { $0.key != key }, kept)
+        for k in gone { kept[levelKey(profile, k)] = nil }
+        return (accounts.filter { !gone.contains($0.key) }, kept)
     }
 }
 
