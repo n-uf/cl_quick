@@ -1831,6 +1831,16 @@ do {
     refusedWk.fiveHour = 20; refusedWk.fiveHourResets = now.addingTimeInterval(3600); refusedWk.refusedUntil = now.addingTimeInterval(3600)
     check("limit: a refusal with the 5-hour window at 20% names the week", held(refusedWk)?.window == .week)
     check("limit: with no numbers the notice names no window", sentence(nil) == "Main's limit is full.")
+    // a refusal said on one window before any number came: that window is named (ProfileCore's rule: the refusal's own
+    // window when no number is known), and its row is the one drawn full
+    var on5h = QuickChatLevel(); on5h.refusedUntil = now.addingTimeInterval(1800); on5h.refusedOn = "5h"
+    let s5h = sentence(on5h)
+    check("limit: a refusal on the 5-hour window with no numbers names it", held(on5h)?.window == .fiveHour
+          && s5h.hasPrefix("Main's 5-hour limit is full, resets ") && on5h.current(now).binding?.id == "5h", s5h)
+    var onWk = QuickChatLevel(); onWk.refusedUntil = now.addingTimeInterval(1800); onWk.refusedOn = "wk"
+    let sWk = sentence(onWk)
+    check("limit: a refusal on the week with no numbers names it", held(onWk)?.window == .week
+          && sWk.hasPrefix("Main's week is full, resets ") && onWk.current(now).binding?.id == "wk", sWk)
     // refused while get_usage reports both windows with room (5h 20%, week 53%): neither is named, neither drawn full
     var both = QuickChatLevel()
     both.fiveHour = 20; both.fiveHourResets = now.addingTimeInterval(3600)

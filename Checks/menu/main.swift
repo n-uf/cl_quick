@@ -99,6 +99,18 @@ oldRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); oldRefusal.refusedAt
 let oldRefusalBlock = make(oldRefusal)
 check("saved full: the same refusal 3 h old with 5-hour 30% and week 40%: those old numbers aren't shown, two '–' rows, same note",
       oldRefusalBlock.fullNote == refusalBlock.fullNote && oldRefusalBlock.rows.map(\.share) == ["–", "–"] && oldRefusalBlock.shape == rich.shape, "\(oldRefusalBlock.lines)")
+// a dateless 100% (no reset given) read 20 minutes ago: last known, grey, at 100% with no reset words; it never acts, so
+// no full note, and the chat isn't held back by it (ProfileStore.shownLevel takes only fresh numbers, and its display
+// holds nothing back)
+var undatedFull = QuickChatLevel()
+undatedFull.fiveHour = 30; undatedFull.fiveHourResets = now.addingTimeInterval(65 * 60); undatedFull.week = 100; undatedFull.at = now.addingTimeInterval(-20 * 60)
+let undatedBlock = make(undatedFull)
+check("dateless full: a 100% with no reset, 20 min old, shows grey at 100% with no reset words and no full note",
+      undatedBlock.rows.map(\.share) == ["30%", "100%"] && undatedBlock.rows[1].resets == "" && undatedBlock.rows.allSatisfy { $0.colour == Painter.grey }
+      && undatedBlock.fullNote == nil && !undatedBlock.fullNoteStale && undatedBlock.dotP == nil && undatedBlock.updated == "Last known 20 min ago",
+      "\(undatedBlock.lines)")
+check("dateless full: the chat isn't held back by it (not fresh for shownLevel, nothing held back)",
+      undatedFull.age(now) != .fresh && undatedFull.display(now).heldBack == nil && undatedFull.display(now).full == nil)
 var recentRefusal = level(five: 30, week: 40, ago: 12 * 60)
 recentRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); recentRefusal.refusedAt = now.addingTimeInterval(-12 * 60)
 let recentRefusalBlock = make(recentRefusal)

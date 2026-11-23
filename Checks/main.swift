@@ -388,11 +388,21 @@ check("no other provider", env["CLAUDE_CODE_USE_BEDROCK"] == nil && env["AWS_BEA
 check("no telemetry export", env["CLAUDE_CODE_ENABLE_TELEMETRY"] == nil && env["OTEL_EXPORTER_OTLP_ENDPOINT"] == nil)
 check("no headers, model or node options from outside", env["ANTHROPIC_CUSTOM_HEADERS"] == nil && env["ANTHROPIC_MODEL"] == nil && env["NODE_OPTIONS"] == nil)
 check("language and proxy kept", env["LANG"] == "en_GB.UTF-8" && env["LC_CTYPE"] == "UTF-8" && env["HTTPS_PROXY"] == "http://proxy.example:8080")
+// the allow-list written out here, not the kit's own set: a wider one in a later kit fails this until it is looked at
+let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "__CF_USER_TEXT_ENCODING",
+                            "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+                            "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+                            // the user's own client-certificate setup for Claude Code (cl_kit 26.11.5, as in cl_audit)
+                            "CLAUDE_CODE_CERT_STORE", "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY", "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+                            "CLAUDE_CONFIG_DIR", "PATH", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING",
+                            "CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"]
+let certs = ["CLAUDE_CODE_CERT_STORE": "system", "CLAUDE_CODE_CLIENT_CERT": "/Users/sample/cert.pem",
+             "CLAUDE_CODE_CLIENT_KEY": "/Users/sample/key.pem", "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE": "sample"]
+let certEnv = cmd.environment(base.merging(certs) { a, _ in a })
 check("nothing but the allowed, the folder, the PATH and the off switches",
-      Set(env.keys).subtracting(ClaudeEnvironment.passed).subtracting(["CLAUDE_CONFIG_DIR", "PATH", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-                                                                      "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING",
-                                                                      "CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).allSatisfy { $0.hasPrefix("LC_") },
+      Set(env.keys).subtracting(allowed).allSatisfy { $0.hasPrefix("LC_") } && Set(certEnv.keys).subtracting(allowed).allSatisfy { $0.hasPrefix("LC_") },
       env.keys.sorted())
+check("the client-certificate settings reach claude", certs.allSatisfy { certEnv[$0.key] == $0.value }, certEnv.keys.sorted())
 check("the profile's folder", env["CLAUDE_CONFIG_DIR"] == "/Users/sample/.claude-work")
 check("claude's folder first on the PATH", env["PATH"]?.hasPrefix("/opt/sample/bin:") == true, env["PATH"] ?? "")
 check("non-essential traffic off", env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1" && env["DISABLE_TELEMETRY"] == "1")
