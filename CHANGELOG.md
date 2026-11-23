@@ -4,6 +4,7 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- The release can be signed with a Developer ID and notarized by Apple (CL_SIGN_ID and CL_NOTARY_PROFILE, as in cl_audit; docs/signing.md). Until both are set nothing changes: the app is signed ad hoc and the download needs Open Anyway once.
 - **The menu bar icon shows the usage.** The bubble fills with the default profile's fuller limit, in the menu bar's
   own colour; amber from 80%, crimson and full with the time to the reset beside it while a limit holds the account
   back, and a dashed outline with no numbers.

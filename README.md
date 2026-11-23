@@ -25,7 +25,8 @@ Download `cl_quick.dmg` from the [latest release](https://github.com/n-uf/cl_qui
 and drag cl_quick to Applications (or use `cl_quick.zip`, the same app), or build it from source (below). It needs an Apple silicon Mac,
 macOS 13 or later and [Claude Code](https://code.claude.com/docs/en/setup), signed in. cl_quick isn't signed with an
 Apple Developer ID yet, so the first time macOS says it can't verify the app: open System Settings ▸ Privacy &
-Security and click **Open Anyway** (once).
+Security and click **Open Anyway** (once). The release scripts can sign with a Developer ID and have Apple notarize
+the download once a certificate and a notary profile exist: see [docs/signing.md](docs/signing.md).
 
 To build it yourself: `./build.sh` (Xcode's command-line tools; it installs into /Applications and opens it), or
 `./build.sh --no-install`.
@@ -516,6 +517,7 @@ scripts/release.sh --dry-run   # the next version
 scripts/release.sh             # date the notes, commit "release X", tag vX
 scripts/release.sh --push      # the same, then build the zip and disk image, push, publish the GitHub Release
 scripts/release.sh --local     # only build dist/cl_quick.zip and dist/cl_quick.dmg, to check them
+scripts/release.sh --check-signing   # the signing plan (docs/signing.md); nothing is signed or sent
 ```
 
 A version can't signal a breaking change, so read the notes before updating.
