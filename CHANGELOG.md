@@ -4,7 +4,7 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
-Nothing pending.
+- Edge pills click: right to the latest, left to the end of the answer; ▲ ▼ step through answers too; copy your own messages; the copied message lights up
 
 ## 26.11.1 — 2026-11-22
 

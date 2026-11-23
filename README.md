@@ -172,19 +172,26 @@ minutes for a profile.
   full limit or without a profile. Nothing is written to disk.
 - **Moving in a chat.** The chat follows the end of an answer as it streams only while you are at the bottom (within a few
   points) when new text arrives. Scroll up by any means (wheel, trackpad, scroller, ⇧fn↑, selecting text) and new text
-  never moves the view; get back to the bottom (by hand, ⌘J or the ↓ button) or send a message and it follows again.
+  never moves the view; get back to the bottom (by hand, ⌘J or a click on the right pill) or send a message and it follows again.
   Resizing at the bottom keeps the bottom; resizing mid-chat keeps what you are reading in place; hiding and reopening the
   panel restores the place and whether it follows. Every jump is instant (nothing animates).
   - Two **edge handles** stand in the answers' side gutters, above the field: thin pills at rest. The pointer resting on one
     for about 0.15 s opens its stack beside it, inward over the text, in a solid box; it closes about 0.5 s after the pointer
-    leaves both. **Right:** ▲ ▼ (the previous and next message of yours, once there are two, or with one whenever the
-    handle shows: it starts above or below the view, so a long answer read to the bottom still has a way back to its
-    message; the landed bubble is lighter for about a second) and ↓ jump to latest (while not at the bottom; the pill takes the accent colour while text has arrived
-    below, until you reach the bottom). **Left:** ⤒ (the start of the answer, only while its first line is above the view) and
-    copy, for the answer at the view's bottom edge while its footer is out of sight (also while it streams: copy takes the text
-    so far). Each answer's own footer has ⤒ copy ↻ and a speaker (⤒ only while its first line is above the view).
+    leaves both. The pills are buttons too (the pointer shows a tooltip; VoiceOver has the action by name). **Right:** a
+    click on the pill jumps to the latest and follows again (⌘J; at the bottom it changes nothing; the pill takes the accent
+    colour while text has arrived below, until you reach the bottom); its stack has ▲ ▼ (the previous and next message of
+    yours, once there are two, or with one whenever the handle shows: it starts above or below the view, so a long answer
+    read to the bottom still has a way back to its message; the landed bubble is lighter for about a second) and Copy for
+    your message in view (its text; the bubble lights for a moment as it does when landed on; it shows only while such a
+    message is on screen: the topmost one with at least 24 pt of it in the view). **Left:** a click on the pill goes to the
+    end of the answer at the view's bottom edge, its footer row near the view's bottom (the last answer: the bottom, and it
+    follows again); its stack has ▲ (the start of that answer when it is above the view's top, else the start of the answer
+    before) ▼ (the next answer's start; both land the answer near the top, lit for a moment, and stop following) and Copy
+    for the answer, while its footer is out of sight (also while it streams: copy takes the text so far; the answer lights
+    for a moment). Each answer's own footer has ⤒ copy ↻ and a speaker (⤒ only while its first line is above the view).
   - **Keys** (the panel's own, exact modifiers; none is a text edit): ⌘J jump to latest, ⇧⌘J the start of the answer at the
     view's bottom edge (the last one at the bottom), ⌘[ and ⌘] the previous and next message of yours (nothing at the ends),
+    ⌥⌘[ and ⌥⌘] the previous and next answer,
     ⇧⌘C copies the answer in view once you have scrolled up (else the last answer), and ⇧fn↑ and ⇧fn↓ (⇧Page Up and
     ⇧Page Down on a Mac keyboard: they scroll the answers a page, and stop following unless that reaches the bottom) work
     even while the field has the keyboard; plain arrows keep their text meaning there. ⌘J jumps to the latest and follows.
@@ -239,7 +246,7 @@ minutes for a profile.
     window · Move · Write; click a tab to turn the page; the last page is remembered while cl_quick runs). The pointer is a
     hand over the tabs and an arrow elsewhere on the list, and the text cursor is back once it leaves the list:
     - **Model & window:** fn↑ fn↓ (thinking), fn→ fn← (model), the label halves, ⌘1–⌘5 (size) and ⌃1–⌃6 (place).
-    - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above), ⌘F
+    - **Move:** ⌘J (latest, and follow), ⇧⌘J, ⌘[ ⌘], ⌥⌘[ ⌥⌘] and ⇧fn↑ ⇧fn↓ (scroll the answers) (see "Moving in a chat" above), ⌘F
       (find in chat) and ⌘G ⇧⌘G (next, previous match).
     - **Write:** Return, ⇧Return, ⌘N, ⌘D (Dictation on/off), ⇧⌘C (copy the answer in view), Esc and ⌘W, the shortcut
       that opens cl_quick, ↑ in an empty field (your earlier messages) and ⌥⇧⌘C (copy the chat as Markdown).
