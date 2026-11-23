@@ -862,12 +862,13 @@ struct ProfilePage: View {
 
     private func addAccount() {
         let a = address.trimmingCharacters(in: .whitespaces)
-        if store.inUse(profile)?.email.lowercased() == a.lowercased() { problem = "\(a) is the account in use already."; return }
-        problem = nil
-        // an address typed: the seat it was last seen as, when there is only one on that address (else the browser decides)
-        let known = profile.accounts.filter { $0.email.lowercased() == a.lowercased() }
-        let one = known.count == 1 ? known.first : nil
-        switcher.confirmAndSwitch(profile, key: one?.key, email: one?.email ?? a, origin: .settings)
+        // the account in use's address goes on when another seat may be on it (a Team seat beside the personal plan)
+        switch AccountBook.adding(a, record: ClaudeFolder.account(profile.path), accounts: profile.accounts) {
+        case .inUseAlready: problem = "\(a) is the account in use already."; return
+        case .signIn(let key, let email):
+            problem = nil
+            switcher.confirmAndSwitch(profile, key: key, email: email, origin: .settings)
+        }
         address = ""
         adding.wrappedValue = false
     }

@@ -959,6 +959,17 @@ do {
         weeks = AccountBook.recording(95, for: team, profile: "main", accounts: seats, levels: weeks)!.levels
         check("seats: each seat's numbers under its own key, never copied onto the other",
               weeks == ["main|uw-1|org-personal": 20, "main|uw-1|org-team": 95], weeks)
+        // Add an account… with the in-use address: the Team seat can be added beside the personal plan in use
+        check("add: the in-use address goes on to a sign-in when the record names a seat (another may be on the address)",
+              AccountBook.adding("wu@example.com", record: personal, accounts: [seats[0]]) == .signIn(key: nil, email: "wu@example.com"))
+        check("add: …wanting the other seat when it is known", AccountBook.adding(" WU@example.com ", record: personal, accounts: seats)
+              == .signIn(key: key("uw-1", "org-team"), email: "wu@example.com"))
+        check("add: the in-use address with no seat named and none other known is the account in use already",
+              AccountBook.adding("ultra-1@example.com", record: rec("u1", "ultra-1@example.com"), accounts: [KnownAccount(uuid: "u1", email: "ultra-1@example.com")]) == .inUseAlready)
+        check("add: another address is a sign-in, with its seat when one is known",
+              AccountBook.adding("kim@example.org", record: personal, accounts: seats + [KnownAccount(uuid: "uk", email: "kim@example.org")])
+              == .signIn(key: key("uk"), email: "kim@example.org")
+              && AccountBook.adding("new@example.org", record: personal, accounts: seats) == .signIn(key: nil, email: "new@example.org"))
         check("seats: one seat's numbers are never the other's base", AccountBook.numbersBase(for: team, profile: "main", accounts: seats, levels: ["main|uw-1|org-personal": 20]) == nil)
         check("seats: maybe the same (one seat named, one not) but not the other seat",
               AccountBook.profileUsing(team, among: [(name: "Main", inUse: Optional(personal))]) == nil

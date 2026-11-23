@@ -196,6 +196,24 @@ enum AccountBook {
         return tidied.map(knownAccount).sorted { $0.lastSeen > $1.lastSeen }
     }
 
+    /// What Add an account… does with an address typed: a sign-in for it (the seat wanted when exactly one other seat on
+    /// that address is known, else none: the browser picks the seat), or nothing when it is the account in use and no
+    /// other seat can be on that address (none known, and the record names no organisation, so seats can't be told apart).
+    /// A Team seat can be added on the address of the personal plan in use.
+    enum Adding: Equatable {
+        case inUseAlready
+        case signIn(key: AccountKey?, email: String)
+    }
+
+    static func adding(_ address: String, record: SignedInAccount?, accounts: [KnownAccount]) -> Adding {
+        let a = address.trimmingCharacters(in: .whitespaces)
+        let others = standby(accounts, inUse: record).filter { $0.email.lowercased() == a.lowercased() }
+        let one = others.count == 1 ? others.first : nil
+        if let r = record, r.email?.lowercased() == a.lowercased(), others.isEmpty,
+           r.organizationID == nil, r.organizationName == nil { return .inUseAlready }
+        return .signIn(key: one?.key, email: one?.email ?? a)
+    }
+
     /// A key as ProfileCore's seat; nil for an address placeholder (no account id yet).
     static func seat(_ k: AccountKey) -> Seat? { k.isPlaceholder ? nil : Seat(account: k.account, organization: k.organization) }
 
