@@ -1739,6 +1739,7 @@ final class QuickChat {
             // start still waiting for its notice is cancelled the same way.
             if let p = panel, model.dictation != .off || model.isDictationActive {
                 QCDictation.end(for: p.firstResponder) { p.makeFirstResponder(nil); p.focusField() }
+                dictationStopped = Date()           // an enter notice just after is the stopped Dictation's, not a new one
             }
             setDictation(.off)
             return
@@ -1758,24 +1759,38 @@ final class QuickChat {
             let started = QCDictation.begin(for: field)
             guard started else { self.model.dictationNote = QCDictation.failedWords; self.setDictation(.off); return }
             self.dictationStarted = Date()
+            self.dictationStopped = .distantPast            // a fresh start: its enter notice is ours, whatever stopped before
             if self.model.dictation == .on { return }       // the enter notice was quicker than this turn
             self.setDictation(.starting)
         }
     }
 
-    /// The one place the button's state changes: the start timeout goes with any change, and `starting` sets it.
+    /// The one place the button's state changes: the start timeout and the input source look go with any change, and
+    /// `starting` sets them. The enter notice is not the only sign: the field's input source becoming Dictation's also
+    /// says Dictation listens, checked once shortly after the start (`sourceLook`) and again before the timeout says
+    /// "didn't start".
     private var startTimer: DispatchWorkItem?
+    private var sourceTimer: DispatchWorkItem?
     static var startTimeout: TimeInterval = 3
+    static var sourceLook: TimeInterval = 0.3
     private func setDictation(_ s: QuickChatModel.DictationState) {
-        startTimer?.cancel()
-        startTimer = nil
+        startTimer?.cancel(); startTimer = nil
+        sourceTimer?.cancel(); sourceTimer = nil
         model.dictation = s
         guard s == .starting else { return }
         if model.dictationNote == QCDictation.timeoutWords { model.dictationNote = nil }
+        let look = DispatchWorkItem { [weak self] in
+            guard let self, self.model.dictation == .starting else { return }
+            self.sourceTimer = nil
+            if self.model.inputSourceIsDictation() { self.setDictation(.on) }
+        }
+        sourceTimer = look
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.sourceLook, execute: look)
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.model.dictation == .starting else { return }
             self.startTimer = nil
-            self.model.dictation = .off
+            if self.model.inputSourceIsDictation() { self.setDictation(.on); return }
+            self.setDictation(.off)
             self.model.dictationNote = QCDictation.timeoutWords
         }
         startTimer = work
@@ -1788,8 +1803,10 @@ final class QuickChat {
     /// Dictation entered Dictation mode (the button, macOS's shortcut, the Dictation key): the button is on, also when it
     /// showed off or starting (a late notice after the timeout included, which takes its quiet line away). Counted only
     /// while the panel has the keyboard: the notice is system-wide, and Dictation elsewhere is not Dictation in the field.
+    /// Not in the first moments after our own stop (`dictate(false)`), when the notice can be the stopped Dictation's late
+    /// one; a timeout sends no stop, so a late enter after it still counts.
     func dictationEntered() {
-        guard panel?.isKeyWindow == true else { return }
+        guard panel?.isKeyWindow == true, Date().timeIntervalSince(dictationStopped) >= Self.exitGrace else { return }
         if model.dictationNote == QCDictation.timeoutWords { model.dictationNote = nil }
         setDictation(.on)
     }
@@ -1800,9 +1817,12 @@ final class QuickChat {
     let dictationWatch = QCDictationWatch(listen: !QCQuiet.on)
     static var exitGrace: TimeInterval = 0.5
     private var dictationStarted = Date.distantPast
-    /// `starting` and `on` end with any exit: a stale "Dictation runs" would turn an input method's Return into a stop.
+    var dictationStopped = Date.distantPast
+    /// `starting` and `on` end with an exit: a stale "Dictation runs" would turn an input method's Return into a stop.
+    /// The grace only holds while `starting`; once `on`, the enter notice has come and any exit is this Dictation's.
     func dictationExited() {
-        guard model.dictation != .off, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
+        guard model.dictation == .on
+                || (model.dictation == .starting && Date().timeIntervalSince(dictationStarted) >= Self.exitGrace) else { return }
         setDictation(.off)
     }
     /// Esc: the keys list closes if it is open; else the find bar (and its highlights), else the selection's quick actions; else
