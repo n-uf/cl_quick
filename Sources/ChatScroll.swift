@@ -254,7 +254,10 @@ final class QCChatScroll: ObservableObject {
         // a style change ("Show scroll bars") may bring a new scroller: keep it thin
         if let v = sv.verticalScroller, v.controlSize != QCEdgeLayout.scrollerSize { v.controlSize = QCEdgeLayout.scrollerSize; sv.tile() }
         let style = sv.scrollerStyle
-        let inset = style == .legacy ? max(0, (sv.frame.width - g.clip.frame.width).rounded()) : 0
+        // what the scroller has already taken out of the width the text is laid out in: SwiftUI lays the text out at the
+        // scroll view's width less a legacy scroller of its own idea of the size (a regular one), which may be wider than the
+        // thin one the clip view gives up, so the text's own width (the document's) is what counts, not the clip view's
+        let inset = style == .legacy ? max(0, (sv.frame.width - min(g.clip.frame.width, g.doc.frame.width)).rounded()) : 0
         if scrollerStyle != style || scrollerInset != inset {
             scrollerStyle = style; scrollerInset = inset
         }
@@ -595,8 +598,9 @@ enum QCEdgeLayout {
     /// The answers' text starts this far from the left side: the strip fits in the gutter, the pill is 11 pt clear of the text.
     static var leftGutter: CGFloat { clear + stripWidth }
     /// The text's right padding inside the clip view: the scroller's track and the strip, less what the clip view has already
-    /// given up to a legacy scroller (`inset`; 0 for an overlay one), so the text always ends where the right strip starts.
-    static func rightGutter(_ style: NSScroller.Style, inset: CGFloat) -> CGFloat { max(stripWidth, scroller(style) + stripWidth - inset) }
+    /// given up to a legacy scroller (`inset`: what the scroller took from the width the text is laid out in; 0 for an overlay
+    /// one), so the text always ends where the right strip starts.
+    static func rightGutter(_ style: NSScroller.Style, inset: CGFloat) -> CGFloat { max(0, scroller(style) + stripWidth - inset) }
     /// From the answers area's bottom (the field box is under it) to the tallest box's bottom.
     static let bottomGap: CGFloat = 8
     /// A box is at most this tall (three buttons in a stack and its padding), so a handle stays in line at any content.
