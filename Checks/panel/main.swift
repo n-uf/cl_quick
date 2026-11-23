@@ -4768,6 +4768,31 @@ func chatHandleChecks() {
     check("handles: the next answer peeking 3 pt into the bottom edge has no handle yet (and the one before has its footer in view)", sc.pair == nil, "\(String(describing: sc.pair))")
     user(scrollTo: a3 + 40 - clip.bounds.height); settle()
     check("handles: once its first line is really in view (40 pt) the handle is its", sc.pair == ids[2], "\(String(describing: sc.pair))")
+    // the left stack's ▲ ▼ over the answers, found from where the view is; the pill's click goes to the end of the answer in view
+    user(scrollTo: a2 + 100); settle()
+    check("handles: left ▲ in the middle of the second answer goes to that answer's own start (above the view's top)", sc.previousAnswerTarget()?.id == ids[1] && sc.canPreviousAnswer && sc.canNextAnswer,
+          "\(String(describing: sc.previousAnswerTarget())) offset \(sc.offset()) a2 \(a2)")
+    sc.previousAnswer()
+    check("handles: it lands there in one step, lit (the answer, not a bubble), and stops following", near(sc.offset(), min(sc.maxOffset(), a2 - QCChatScroll.inset)) && sc.flashAnswer == ids[1] && sc.flash == nil && !sc.following,
+          "offset \(sc.offset()) want \(a2 - QCChatScroll.inset) flash \(String(describing: sc.flashAnswer))")
+    sc.previousAnswer()
+    check("handles: ▲ again, with that start at the view's top, goes to the answer before", near(sc.offset(), min(sc.maxOffset(), (sc.top(ofAnswer: ids[0]) ?? 0) - QCChatScroll.inset)) && sc.flashAnswer == ids[0], "offset \(sc.offset())")
+    sc.nextAnswer()
+    check("handles: left ▼ goes to the next answer's start", near(sc.offset(), min(sc.maxOffset(), a2 - QCChatScroll.inset)) && sc.flashAnswer == ids[1], "offset \(sc.offset())")
+    user(scrollTo: 0); settle()
+    check("handles: at the top left ▲ has nowhere to go", !sc.canPreviousAnswer && sc.canNextAnswer)
+    user(scrollTo: a2 + 100); settle()
+    check("handles: Copy on the left is for the answer in view, and no message of the user's is on screen in the middle of an answer (no Copy on the right)", sc.pair == ids[1] && sc.promptsShown.isEmpty, "\(sc.promptsShown)")
+    sc.goToEnd(ofAnswer: ids[1])
+    check("handles: a click on the left pill goes to the end of the answer in view: its footer's end near the view's bottom, not following",
+          near(sc.offset(), (sc.bottom(ofFooter: ids[1]) ?? 0) - clip.bounds.height + QCChatScroll.inset) && !sc.following, "offset \(sc.offset()) footer \(String(describing: sc.bottom(ofFooter: ids[1])))")
+    user(scrollTo: (sc.top(ofAnswer: ids[3]) ?? 0) + 100); settle()
+    sc.goToEnd(ofAnswer: ids[3])
+    check("handles: and at the last answer, the chat's end, it follows again", sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    let qTop = sc.top(ofQuestion: ids[1]) ?? 0
+    user(scrollTo: qTop - 10); settle()
+    check("handles: Copy on the right is for the message of the user's on screen (the topmost)", sc.promptsShown.first == ids[1], "\(sc.promptsShown) qTop \(qTop)")
+    sc.jumpToLatest(); settle()
     user(scrollTo: a2 + 100); settle()
 
     // the frames, in points, in BOTH scroller styles: the user's "Show scroll bars" setting decides (a runner shows legacy,
@@ -4866,18 +4891,16 @@ func chatHandleChecks() {
         check("handles: \(name): a second press closes it", !state.expanded)
         state.reset()
     }
-    // focus on the ↓ button, which hides when the view reaches the bottom: the focus goes with it, and the stack is not held open
-    // (and so deaf to the pointer) by a focus that is gone
+    // Copy hides when its message leaves the view (QCIconButton's onDisappear sends its focus away): each button's focus is its own,
+    // so one going leaves another's, and the stack is not held open (and so deaf to the pointer) by a focus that is gone
     user(scrollTo: 0); settle()
-    check("handles: the view is above the bottom, so ↓ is there", !sc.atBottom)
-    sc.right.focus(true, QCEdgeLayout.latestButton)
-    check("handles: focus on ↓ opens the right stack", sc.right.expanded)
-    sc.jumpToLatest(); settle()
-    check("handles: ↓ hides at the bottom", sc.atBottom)
+    sc.right.focus(true, QCEdgeLayout.copyButton)
+    check("handles: focus on Copy opens the right stack", sc.right.expanded)
+    sc.right.focus(false, QCEdgeLayout.copyButton)
     spin(0.7)
-    check("handles: and the focus went with it: the right stack closes", !sc.right.expanded, "expanded \(sc.right.expanded)")
-    sc.right.focus(true, 1); sc.right.focus(true, QCEdgeLayout.latestButton); spin(0.2)
-    sc.right.focus(false, QCEdgeLayout.latestButton); spin(0.8)
+    check("handles: and when that focus goes (Copy hid) the right stack closes", !sc.right.expanded, "expanded \(sc.right.expanded)")
+    sc.right.focus(true, 1); sc.right.focus(true, QCEdgeLayout.copyButton); spin(0.2)
+    sc.right.focus(false, QCEdgeLayout.copyButton); spin(0.8)
     check("handles: a button's focus going leaves another's: the stack stays open", sc.right.expanded)
     sc.right.focus(false, 1); spin(0.8)
     check("handles: when the last focus goes, it closes", !sc.right.expanded)
@@ -5028,6 +5051,14 @@ func chatKeyChecks() {
     let atEnd = sc.offset()
     check("keys: ⌘] at the last position does nothing (and is taken)", key("]", kVK_ANSI_RightBracket, cmd) && sc.offset() == atEnd)
     fieldUntouched("⌘[ and ⌘]")
+    // ⌥⌘[ and ⌥⌘]: the previous and next answer's start, from where the view is, lit, and not following
+    sc.jumpToLatest(); settle()
+    let pa = sc.previousAnswerTarget()
+    check("keys: ⌥⌘[ goes to the previous answer's start, final in one step, lit and not following", pa != nil && key("[", kVK_ANSI_LeftBracket, [.command, .option]) && near(sc.offset(), pa!.offset) && sc.flashAnswer == pa!.id && !sc.following,
+          "offset \(sc.offset()) want \(String(describing: pa))")
+    let na = sc.nextAnswerTarget()
+    check("keys: ⌥⌘] goes to the next one", na != nil && key("]", kVK_ANSI_RightBracket, [.command, .option]) && near(sc.offset(), na!.offset), "offset \(sc.offset()) want \(String(describing: na))")
+    fieldUntouched("⌥⌘[ and ⌥⌘]")
     // by key code, on any layout: the Ukrainian layout has х on the [ key and ї on the ] key (ї and ґ keep typing: no ⌘, no key
     // equivalent; shortcutLetter is untouched, so the Edit keys and the existing Ukrainian check stand)
     sc.jumpToLatest(); settle()
@@ -5154,7 +5185,7 @@ func chatKeyChecks() {
     // exact modifiers
     let off0 = sc.offset()
     let loose = [key("j", kVK_ANSI_J, [.command, .option]), key("j", kVK_ANSI_J, [.command, .control]), key("j", kVK_ANSI_J, []),
-                 key("[", kVK_ANSI_LeftBracket, [.command, .shift]), key("]", kVK_ANSI_RightBracket, [.command, .option])]
+                 key("[", kVK_ANSI_LeftBracket, [.command, .shift]), key("]", kVK_ANSI_RightBracket, [.command, .control])]
     check("keys: other modifier mixes are not taken and move nothing", loose.allSatisfy { !$0 } && sc.offset() == off0, "\(loose)")
     sc.jumpToLatest(); settle()
     let atEndNow = sc.offset()
@@ -5340,6 +5371,12 @@ func chatBehaviourChecks() {
     pb.clearContents()
     let soFar = m.turns[3].answer.trimmingCharacters(in: .whitespacesAndNewlines)
     check("behaviour: the floating copy takes the text so far and says ✓ like the footer's", m.copyAnswer(of: m.turns[3]) && pb.string(forType: .string) == soFar && m.copied == m.turns[3].id)
+    check("behaviour: the copied answer is lit (the same flash as a landing)", sc.flashAnswer == m.turns[3].id)
+    let mine = m.turns[3].question.trimmingCharacters(in: .whitespacesAndNewlines)
+    check("behaviour: Copy on the right takes the user's own message, ticks, and lights its bubble",
+          m.copyQuestion(of: m.turns[3]) && pb.string(forType: .string) == mine && m.copiedQuestion == m.turns[3].id && sc.flash == m.turns[3].id, "\(String(describing: pb.string(forType: .string)))")
+    spin(max(QuickChatModel.copiedFor, QCChatScroll.flashFor) + 0.3)
+    check("behaviour: the tick and both lights go by themselves", m.copiedQuestion == nil && sc.flash == nil && sc.flashAnswer == nil)
     sc.goToStart(ofAnswer: m.turns[3].id)
     check("behaviour: ⤒ works on the streaming answer", near(sc.offset(), min(sc.maxOffset(), streamTop - QCChatScroll.inset)) && !sc.following, "offset \(sc.offset()) top \(streamTop)")
     m.turns[3].phase = .done
