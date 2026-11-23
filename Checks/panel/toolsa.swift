@@ -111,7 +111,9 @@ func chatCopyChecks() {
     // an empty chat: the key is taken, nothing is copied
     m.newChat(); spin(0.2)
     board.clearContents(); board.setString("kept", forType: .string)
-    check("chat copy: with no chat the key is taken and the pasteboard untouched", key([.command, .option, .shift], "Ç") && board.string(forType: .string) == "kept" && m.copied == nil)
+    let emptyTaken = key([.command, .option, .shift], "Ç")
+    check("chat copy: with no chat the key is taken and the pasteboard untouched", emptyTaken && board.string(forType: .string) == "kept" && m.copied == nil,
+          "taken \(emptyTaken) board \(board.string(forType: .string) ?? "nil") copied \(String(describing: m.copied)) key window \(p.isKeyWindow)")
     // the keys list
     let rows = QCKeysView.pages(opener: "⌃⇧Space").first { $0.page == .write }?.rows.map { $0.0 + " " + $0.1 } ?? []
     check("chat copy: the keys list's Write page names ⌥⇧⌘C", rows.contains("⌥⇧⌘C Copy the chat as Markdown"), rows.joined(separator: "\n"))

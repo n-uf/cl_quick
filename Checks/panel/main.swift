@@ -4800,7 +4800,7 @@ func chatHandleChecks() {
             let leftPill = lw.minX + QCEdgeLayout.pillWidth, rightPill = rw.maxX - QCEdgeLayout.pillWidth
             check("handles: \(label): the text column (measured) starts at the left gutter and ends where the right strip starts (the scroller and the strip)",
                   near(col.lowerBound, QCEdgeLayout.leftGutter) && near(col.upperBound, W - QCEdgeLayout.scroller(style) - QCEdgeLayout.stripWidth),
-                  "column \(col) W \(W) scroller \(QCEdgeLayout.scroller(style)) taken \(taken) padding \(QCEdgeLayout.rightGutter(style, inset: taken)) track \(track)")
+                  "column \(col) W \(W) scroller \(QCEdgeLayout.scroller(style)) taken \(taken) padding \(QCEdgeLayout.rightGutter(style, inset: taken)) track \(track) sv \(sv.frame.width) clip \(clip.frame.width) doc \(sv.documentView?.frame.width ?? -1) state \(sc.scrollerStyle.rawValue)/\(sc.scrollerInset) control \(String(describing: sv.verticalScroller?.controlSize.rawValue))")
             check("handles: \(label): the text column (measured) starts 10 pt or more after the left pill and its strip is not over the text", col.lowerBound - leftPill >= 10 && lw.maxX <= col.lowerBound + 0.5,
                   "column \(col) left strip \(lw) pill right edge \(leftPill)")
             check("handles: \(label): the text column (measured) ends 10 pt or more before the right pill and its strip is not over the text", rightPill - col.upperBound >= 10 && rw.minX >= col.upperBound - 0.5,
@@ -5128,10 +5128,20 @@ func chatKeyChecks() {
     tv.setSelectedRange(NSRange(location: 5, length: 0))          // ⇧Home and ⇧End were the field's: its selection moved
     // an input method composing in the field (marked text) keeps these keys: nothing scrolls or steps
     sc.jumpToLatest(); settle(); steps = []
-    tv.setMarkedText("ab", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    // (a real input method swallows the key it is composing with; here nothing does, so a key that falls through reaches the
+    // field, and the field's own handling of it (a page-up that moves the selection) ends the composition. Each key is therefore
+    // sent with the composition freshly marked, and the app is asked about the field's state at that moment.)
+    func compose() { tv.setMarkedText("ab", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0)) }
+    compose()
     let composing = sc.offset()
-    send(fn(NSPageUpFunctionKey), kVK_PageUp, shiftFn); send(fn(NSPageUpFunctionKey), kVK_PageUp, fnFlags); send(fn(NSEndFunctionKey), kVK_End, fnFlags)
-    check("keys: ⇧fn↑, fn↑ and fn→ while the field has marked text are the input method's: nothing scrolls or steps", tv.hasMarkedText() && sc.offset() == composing && sc.following && steps.isEmpty, "offset \(composing) -> \(sc.offset()) \(steps)")
+    var markedAtKey: [Bool] = []
+    for (ch, code, flags) in [(fn(NSPageUpFunctionKey), kVK_PageUp, shiftFn), (fn(NSPageUpFunctionKey), kVK_PageUp, fnFlags), (fn(NSEndFunctionKey), kVK_End, fnFlags)] {
+        compose(); markedAtKey.append(tv.hasMarkedText())
+        send(ch, code, flags)
+    }
+    compose()
+    check("keys: ⇧fn↑, fn↑ and fn→ while the field has marked text are the input method's: nothing scrolls or steps", markedAtKey == [true, true, true] && tv.hasMarkedText() && sc.offset() == composing && sc.following && steps.isEmpty,
+          "offset \(composing) -> \(sc.offset()) \(steps) marked before each key \(markedAtKey), after \(tv.hasMarkedText()) first responder \(String(describing: p.firstResponder.map { type(of: $0) }))")
     tv.unmarkText(); tv.setSelectedRange(NSRange(location: 5, length: 0)); m.field = "hello world"; spin(0.1)
     tv.setSelectedRange(NSRange(location: 5, length: 0))
     // plain arrows stay the field's: they reach it (the caret moves) and the answers do not scroll

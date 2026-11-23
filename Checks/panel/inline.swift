@@ -368,13 +368,15 @@ func inlinePageChecks() {
         handed = []
         if let b = swipe(-20, phase: 1), let c = swipe(-20, phase: 2), let e = swipe(0, phase: 4), let mb = swipe(-15, momentum: 1), let mc = swipe(-10, momentum: 2), let me = swipe(0, momentum: 3) {
             for x in [b, c] { v.scrollWheel(with: x) }
-            h.scrollPage(to: 100000)
-            spinUntil(5) { h.atBottom }
+            // the page takes the swipe's first two events (WebKit starts to scroll it and may be mid-gesture when the script's own
+            // scroll comes, which a slow runner can drop): the end is asked for again until the page reports it, for 20 s at most
+            let reachEnd = Date().addingTimeInterval(20)
+            while !h.atBottom, Date() < reachEnd { h.scrollPage(to: 100000); spinUntil(1) { h.atBottom } }
             for x in [c, e, mb, mc, me] { v.scrollWheel(with: x) }
             check("inline: a swipe that started on the page stays the page's to its end, momentum included, though the page reached its end meanwhile",
-                  handed.isEmpty && h.atBottom, "handed \(handed.count)")
+                  handed.isEmpty && h.atBottom, "handed \(handed.count) page at bottom \(h.atBottom) top \(h.atTop) scrollTop \(scrollTop(v))")
             v.scrollWheel(with: b); v.scrollWheel(with: c)
-            check("inline: the next swipe, with the page at its end, goes to the chat from its start", handed.count == 2, "handed \(handed.count)")
+            check("inline: the next swipe, with the page at its end, goes to the chat from its start", handed.count == 2, "handed \(handed.count) page at bottom \(h.atBottom)")
             v.scrollWheel(with: e); v.scrollWheel(with: me)
             h.scrollPage(to: 0)
             spinUntil(5) { h.atTop && !h.atBottom }
