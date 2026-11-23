@@ -2274,9 +2274,10 @@ do {
     check("the keys list: Model & window (fn arrows, a label, sizes, places), then Move, then Write, in that order",
           !order.contains(nil) && order.compactMap { $0 } == order.compactMap { $0 }.sorted()
           && arrowRows.contains("fn↑  fn↓ Thinking up, down") && arrowRows.contains("fn→  fn← Model up, down"), arrowRows.joined(separator: "\n"))
-    check("the keys list's Move page: ⌘J jumps to the latest and follows, ⌘[ ⌘] and ⇧fn↑  ⇧fn↓ scroll the answers; no ⌥⌘, Page Up, Page Down, End or Home, no Bottom row",
+    check("the keys list's Move page: ⌘J jumps to the latest and follows, ⌘[ ⌘] and ⌥⌘[ ⌥⌘] step through messages and answers, ⇧fn↑  ⇧fn↓ scroll the answers; no Page Up, Page Down, End or Home, no Bottom row",
           arrowRows.contains("⌘J Jump to latest, and follow") && arrowRows.contains("⇧fn↑  ⇧fn↓ Scroll the answers") && arrowRows.contains("⌘[  ⌘] Previous, next message of mine")
-          && !arrowRows.contains { $0.contains("⌥⌘") || $0.contains("Page Up") || $0.contains("Page Down") || $0.hasPrefix("End") || $0.contains("Home") || $0.contains("Bottom") || $0.hasPrefix("fn↑  fn↓ Page") }, arrowRows.joined(separator: "\n"))
+          && arrowRows.contains("⌥⌘[  ⌥⌘] Previous, next answer")
+          && !arrowRows.contains { $0.contains("Page Up") || $0.contains("Page Down") || $0.hasPrefix("End") || $0.contains("Home") || $0.contains("Bottom") || $0.hasPrefix("fn↑  fn↓ Page") }, arrowRows.joined(separator: "\n"))
     check("the controls' key hints are fn← fn→ (model) and fn↓ fn↑ (thinking)", QCStepKeys.model == "fn← fn→" && QCStepKeys.thinking == "fn↓ fn↑", "\(QCStepKeys.model) \(QCStepKeys.thinking)")
     check("the keys list has no plain ⌘ arrows, no ⌃⌘ or ⌃⌥ and no ⌘1 – ⌘4 presets",
           !arrowRows.contains { $0.hasPrefix("⌘↑") || $0.hasPrefix("⌘→") || $0.contains("⌃⌘") || $0.contains("⌃⌥") || $0.hasPrefix("⌘1  ⌘2") || $0.hasPrefix("⌘3  ⌘4") }, arrowRows.joined(separator: "\n"))
@@ -4539,7 +4540,7 @@ do {
     QCHTMLPreview.reveal = true
 }
 
-// ── scrolling: follows the end only while it is at the end; the jump-to-latest button ────────────────────────────────────────────
+// ── scrolling: follows the end only while it is at the end; the right pill's jump to the latest ────────────────────────────────────────────
 // Driven without a screen or a mouse: the real chat window (ordered in, invisible), its real scroll view, and the scroll made
 // the way any scroll is (the clip view's bounds), which is what the wheel, the trackpad, the scroller, a key and a selection's
 // drag all end up doing.
@@ -4573,16 +4574,16 @@ func chatScrollChecks() {
     check("scroll: at the bottom, new text grows the chat and the view follows", sc.maxOffset() > max0 + 50 && sc.isAtBottom && sc.following && !sc.newBelow, "max \(max0) -> \(sc.maxOffset()), offset \(sc.offset())")
     // after a scroll up (by any means), new text never moves the view
     user(scrollTo: sc.maxOffset() - 300); settle()
-    check("scroll: a scroll up stops following, and the jump-to-latest button shows", !sc.following && !sc.atBottom && !sc.isAtBottom, "following \(sc.following) atBottom \(sc.atBottom)")
+    check("scroll: a scroll up stops following (not at the bottom: a click on the right pill would move)", !sc.following && !sc.atBottom && !sc.isAtBottom, "following \(sc.following) atBottom \(sc.atBottom)")
     let held = sc.offset()
     stream("\n\n" + ChatScrollRig.lines(4, "more"))
     check("scroll: after a scroll up, new text does not move the view, and says there is new text below", sc.offset() == held && !sc.following && sc.newBelow && !sc.atBottom, "offset \(held) -> \(sc.offset()) new \(sc.newBelow)")
-    // the button: back to the bottom, following again
+    // the right pill's click (jumpToLatest): back to the bottom, following again
     sc.jumpToLatest(); settle()
-    check("scroll: the button returns to the bottom and resumes following (the dot and the button go)", sc.isAtBottom && sc.following && sc.atBottom && !sc.newBelow, "offset \(sc.offset()) max \(sc.maxOffset())")
+    check("scroll: the jump to the latest returns to the bottom and resumes following (the new-text mark goes)", sc.isAtBottom && sc.following && sc.atBottom && !sc.newBelow, "offset \(sc.offset()) max \(sc.maxOffset())")
     let max1 = sc.maxOffset()
     stream("\n\n" + ChatScrollRig.lines(3, "after-jump"))
-    check("scroll: after the button, new text follows again", sc.maxOffset() > max1 + 30 && sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
+    check("scroll: after the jump to the latest, new text follows again", sc.maxOffset() > max1 + 30 && sc.isAtBottom && sc.following, "offset \(sc.offset()) max \(sc.maxOffset())")
     // by hand, down to the bottom: following resumes
     user(scrollTo: sc.maxOffset() - 400); settle()
     check("scroll: scrolled up again, not following", !sc.following && !sc.atBottom)
@@ -4595,7 +4596,7 @@ func chatScrollChecks() {
     // 1 to 3 points are a scroll up, and the next text must not pull the view back; a move down into the slack resumes it
     sc.jumpToLatest(); settle()
     user(scrollTo: sc.maxOffset() - 2); settle()
-    check("scroll: a 2 pt scroll up stops following (the button stays hidden: still within the slack)", !sc.following && sc.atBottom, "following \(sc.following) atBottom \(sc.atBottom)")
+    check("scroll: a 2 pt scroll up stops following (still at the bottom: within the slack)", !sc.following && sc.atBottom, "following \(sc.following) atBottom \(sc.atBottom)")
     let held2 = sc.offset()
     stream("\n\n" + ChatScrollRig.lines(3, "gentle"))
     check("scroll: after a 2 pt scroll up, streaming text does not pull the view back", abs(sc.offset() - held2) < 1 && !sc.following, "offset \(held2) -> \(sc.offset())")
@@ -4625,9 +4626,9 @@ func chatScrollChecks() {
     check("scroll: a message sent (followTick) jumps to the bottom and follows", sc.isAtBottom && sc.following && sc.atBottom, "offset \(sc.offset()) max \(sc.maxOffset())")
     // a jump is one step: final the moment the call returns (no spin, no animation to wait for)
     user(scrollTo: 0); settle()
-    check("scroll: at the top the button shows", !sc.atBottom && !sc.following)
+    check("scroll: at the top the view is not at the bottom and not following", !sc.atBottom && !sc.following)
     sc.jumpToLatest()
-    check("scroll: the jump-to-latest button is final in one step (at the bottom, following, the button gone)",
+    check("scroll: the jump to the latest is final in one step (at the bottom, following)",
           sc.isAtBottom && sc.following && sc.atBottom && !sc.newBelow, "offset \(sc.offset()) max \(sc.maxOffset())")
 
     // ▲ ▼: the messages of the user's own, found from where the view is
@@ -4758,9 +4759,9 @@ func chatHandleChecks() {
     let a2 = sc.top(ofAnswer: ids[1]) ?? 0, a3 = sc.top(ofAnswer: ids[2]) ?? 0
     user(scrollTo: a2 + 100); settle()
     check("handles: reading the middle of the second answer, the left handle belongs to it", sc.pair == ids[1], "\(String(describing: sc.pair)) offset \(sc.offset()) a2 \(a2) a3 \(a3)")
-    check("handles: its ⤒ is there (the first line is above the view)", sc.answersAbove.contains(ids[1]))
+    check("handles: its first line is above the view (left ▲ goes to its own start)", sc.answersAbove.contains(ids[1]))
     user(scrollTo: a2 - 60); settle()
-    check("handles: with the second answer's first line in view the handle is still its (copy only, no ⤒)", sc.pair == ids[1] && !sc.answersAbove.contains(ids[1]), "\(String(describing: sc.pair))")
+    check("handles: with the second answer's first line in view the handle is still its (its start is in view: left ▲ goes to the answer before)", sc.pair == ids[1] && !sc.answersAbove.contains(ids[1]), "\(String(describing: sc.pair))")
     // the view's bottom edge just below the second answer's footer: its end and its footer are in view
     user(scrollTo: (sc.bottom(ofFooter: ids[1]) ?? 0) + 2 - clip.bounds.height); settle()
     check("handles: once the answer's own footer is in view the left handle goes", sc.pair != ids[1], "\(String(describing: sc.pair))")
@@ -4880,28 +4881,37 @@ func chatHandleChecks() {
         check("handles: \(name): focus gone: still open for a moment", state.expanded)
         spin(0.4)
         check("handles: \(name): and closed after it", !state.expanded)
-        // VoiceOver's press (the pointer elsewhere) pins it: no timer closes it under the VoiceOver cursor on ▲ or ▼
+        // VoiceOver's "Show buttons" action (the pointer elsewhere; a click on the pill is the jump) pins it: no timer closes it under the
+        // VoiceOver cursor on ▲ or ▼
         state.activate()
-        check("handles: \(name): a press on the handle opens the stack at once", state.expanded)
+        check("handles: \(name): \"Show buttons\" opens the stack at once", state.expanded)
         spin(4.6)
         check("handles: \(name): and it is still open after 4.6 s (no timer)", state.expanded)
         state.strip(true); state.strip(false); spin(0.8)
         check("handles: \(name): a pointer visit while pinned does not close it", state.expanded)
         state.activate()
-        check("handles: \(name): a second press closes it", !state.expanded)
+        check("handles: \(name): doing it again closes it", !state.expanded)
+        // with the pointer on the pill it always pins (nothing is special-cased for a pointer): the action pins, the second closes
+        state.strip(true); state.activate()
+        check("handles: \(name): with the pointer on the pill \"Show buttons\" pins it too", state.pinned && state.expanded)
+        state.strip(false); spin(0.8)
+        check("handles: \(name): and it stays open after the pointer leaves", state.expanded)
+        state.activate()
+        check("handles: \(name): and the second action closes it", !state.expanded)
         state.reset()
     }
-    // Copy hides when its message leaves the view (QCIconButton's onDisappear sends its focus away): each button's focus is its own,
-    // so one going leaves another's, and the stack is not held open (and so deaf to the pointer) by a focus that is gone
+    // The focus state machine (a state check: the real path, QCIconButton's onDisappear sending the focus of a Copy that hid, needs
+    // SwiftUI's own focus on a drawn button and is not driven here): each button's focus id is its own, so one going leaves
+    // another's, and the stack is not held open (and so deaf to the pointer) by a focus that is gone
     user(scrollTo: 0); settle()
     sc.right.focus(true, QCEdgeLayout.copyButton)
-    check("handles: focus on Copy opens the right stack", sc.right.expanded)
+    check("handles: state: focus on id 3 (Copy) opens the right stack", sc.right.expanded)
     sc.right.focus(false, QCEdgeLayout.copyButton)
     spin(0.7)
-    check("handles: and when that focus goes (Copy hid) the right stack closes", !sc.right.expanded, "expanded \(sc.right.expanded)")
+    check("handles: state: and when that focus goes the right stack closes", !sc.right.expanded, "expanded \(sc.right.expanded)")
     sc.right.focus(true, 1); sc.right.focus(true, QCEdgeLayout.copyButton); spin(0.2)
     sc.right.focus(false, QCEdgeLayout.copyButton); spin(0.8)
-    check("handles: a button's focus going leaves another's: the stack stays open", sc.right.expanded)
+    check("handles: state: one button's focus going leaves another's: the stack stays open", sc.right.expanded)
     sc.right.focus(false, 1); spin(0.8)
     check("handles: when the last focus goes, it closes", !sc.right.expanded)
     sc.right.reset()
@@ -5373,12 +5383,15 @@ func chatBehaviourChecks() {
     check("behaviour: the floating copy takes the text so far and says ✓ like the footer's", m.copyAnswer(of: m.turns[3]) && pb.string(forType: .string) == soFar && m.copied == m.turns[3].id)
     check("behaviour: the copied answer is lit (the same flash as a landing)", sc.flashAnswer == m.turns[3].id)
     let mine = m.turns[3].question.trimmingCharacters(in: .whitespacesAndNewlines)
+    // the message is on screen first: Copy on the right is only there then (the topmost message in view)
+    user(scrollTo: max(0, (sc.top(ofQuestion: m.turns[3].id) ?? 0) - 10)); settle()
+    check("behaviour: with the message scrolled into view it is the one Copy on the right acts on", sc.promptsShown.first == m.turns[3].id, "\(sc.promptsShown)")
     check("behaviour: Copy on the right takes the user's own message, ticks, and lights its bubble",
           m.copyQuestion(of: m.turns[3]) && pb.string(forType: .string) == mine && m.copiedQuestion == m.turns[3].id && sc.flash == m.turns[3].id, "\(String(describing: pb.string(forType: .string)))")
     spin(max(QuickChatModel.copiedFor, QCChatScroll.flashFor) + 0.3)
     check("behaviour: the tick and both lights go by themselves", m.copiedQuestion == nil && sc.flash == nil && sc.flashAnswer == nil)
     sc.goToStart(ofAnswer: m.turns[3].id)
-    check("behaviour: ⤒ works on the streaming answer", near(sc.offset(), min(sc.maxOffset(), streamTop - QCChatScroll.inset)) && !sc.following, "offset \(sc.offset()) top \(streamTop)")
+    check("behaviour: goToStart (the footer's ⤒, ⇧⌘J) works on the streaming answer", near(sc.offset(), min(sc.maxOffset(), streamTop - QCChatScroll.inset)) && !sc.following, "offset \(sc.offset()) top \(streamTop)")
     m.turns[3].phase = .done
     m.newChat(); chat.hide(); spin(0.2)
 }
