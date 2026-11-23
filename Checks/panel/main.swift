@@ -1411,6 +1411,7 @@ do {
         n = sent.count
         m.dictate(false)
         check("mic: marked text alone (an input method's composition) is left alone: nothing ended", sent.count == n && tv.hasMarkedText(), steps(since: n))
+        chat.dictationStopped = .distantPast
         chat.dictationWatch.entered(Notification(name: QCDictationWatch.enterName))
         m.dictate(false)
         check("mic: marked text with the button off and an enter notice (macOS's shortcut): committed and ended",
@@ -1494,16 +1495,58 @@ do {
         check("mic: a late enter notice turns it on and takes the line away", m.dictation == .on && m.dictationNote == nil)
         chat.dictationWatch.exited(exit)
         // an enter notice in time cancels the timeout
-        m.dictate(true); spin(0.05)
+        m.dictate(true); spin(0.1)
         chat.dictationWatch.entered(enter)
         spin(0.4)
         check("mic: an enter notice in time cancels the timeout", m.dictation == .on && m.dictationNote == nil)
         chat.dictationWatch.exited(exit)
         // the panel losing the keyboard cancels it too
-        m.dictate(true); spin(0.05)
+        m.dictate(true); spin(0.1)
         p.onKeyLost()
         spin(0.4)
         check("mic: the keyboard lost cancels the timeout: off, no line", m.dictation == .off && m.dictationNote == nil)
+        QuickChat.startTimeout = wasTimeout
+
+        // the exit grace holds only while starting: once on, any exit turns it off at once
+        QuickChat.exitGrace = 0.5
+        m.dictate(true); spin(0.1)
+        chat.dictationWatch.entered(enter)
+        chat.dictationWatch.exited(exit)
+        check("mic: once on, an exit notice right after the enter turns it off (no grace)", m.dictation == .off)
+        // an enter notice right after our own stop is the stopped Dictation's late one: ignored; later ones count
+        m.dictate(true); spin(0.1)
+        chat.dictationWatch.entered(enter)
+        m.dictate(false)
+        chat.dictationWatch.entered(enter)
+        check("mic: an enter notice within the grace after our own stop does not turn it back on", m.dictation == .off)
+        chat.dictationStopped = Date().addingTimeInterval(-1)
+        chat.dictationWatch.entered(enter)
+        check("mic: an enter notice after that grace turns it on", m.dictation == .on)
+        chat.dictationWatch.exited(exit)
+        QuickChat.exitGrace = 0
+
+        // the field's input source becoming Dictation's also says Dictation listens: a look shortly after the start...
+        let wasSource = QCDictation.inputSource, wasLook = QuickChat.sourceLook
+        m.dictate(true); spin(0.1)
+        QCDictation.inputSource = { _ in QCDictation.sourceID }
+        check("mic: starting stays starting until the look", m.dictation == .starting)
+        spin(QuickChat.sourceLook + 0.2)
+        check("mic: the input source turning Dictation's (no enter notice) turns starting on, no line", m.dictation == .on && m.dictationNote == nil)
+        QCDictation.inputSource = wasSource
+        chat.dictationWatch.exited(exit)
+        // ...and one before the timeout says "didn't start"
+        QuickChat.sourceLook = 5; QuickChat.startTimeout = 0.3
+        m.dictate(true); spin(0.1)
+        QCDictation.inputSource = { _ in QCDictation.sourceID }
+        spin(0.4)
+        check("mic: at the timeout, Dictation's input source means on, not \"didn't start\"", m.dictation == .on && m.dictationNote == nil)
+        QCDictation.inputSource = wasSource
+        chat.dictationWatch.exited(exit)
+        m.dictate(true); spin(0.1)
+        spin(0.4)
+        check("mic: at the timeout with another input source it still says it didn't start", m.dictation == .off && m.dictationNote == QCDictation.timeoutWords)
+        m.dictationNote = nil
+        QuickChat.sourceLook = wasLook
         QuickChat.startTimeout = wasTimeout
         QuickChat.exitGrace = wasGrace
         p.makeKey(); p.focusField(); spin(0.1)
@@ -1577,6 +1620,7 @@ do {
         // Dictation started with macOS's own shortcut (an enter notice, the button off): ⌘D stops it
         p.makeKey(); p.focusField(); spin(0.1)
         m.dictation = .off
+        chat.dictationStopped = .distantPast
         chat.dictationWatch.entered(Notification(name: QCDictationWatch.enterName))
         check("⌘D: the enter notice turned the button on, though nobody clicked", m.dictation == .on)
         n = sent.count
@@ -1617,13 +1661,13 @@ do {
         check("return: Dictation running, the first Return ends it and keeps the transcript in the field, nothing sent",
               m.turns.count == 1 && m.field == "dictated words" && m.dictation == .off && stopped(since: n0, field: tvNow()),
               "\(m.turns.count) \(m.field.debugDescription) \(m.dictation) \(steps(since: n0))")
-        // starting is not Dictation yet: the Return sends (and cancels the start), nothing is held
-        fresh(); m.field = "typed while starting"; m.dictation = .starting
-        m.submit(marked: false)
-        check("return: while starting (no enter notice yet) Return sends at once and the button goes off",
-              m.turns.count == 2 && m.field.isEmpty && m.dictation == .off && !m.returnHeld, "\(m.turns.count) \(m.field.debugDescription)")
         m.submit(marked: false)
         check("return: the next Return sends it", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
+        // starting is not Dictation yet, so nothing has been dictated: the Return sends at once and cancels the start
+        fresh(); m.field = "typed while starting"; m.dictation = .starting
+        m.submit(marked: false)
+        check("return: while starting nothing is dictated yet, so Return sends at once (no hold) and cancels the start",
+              m.turns.count == 2 && m.field.isEmpty && m.dictation == .off && !m.returnHeld, "\(m.turns.count) \(m.field.debugDescription)")
 
         // the operator's case: Dictation running with its last words still marked; the first Return commits them, ends
         // Dictation in the field's input context, keeps the panel key and the field focused, and sends nothing
@@ -1650,6 +1694,7 @@ do {
             check("return: the watch listens for DictationIM's enter notice too",
                   QCDictationWatch.enterName.rawValue == "DictationIMNotificationDidEnterDictationMode")
             check("return: marked text alone is not Dictation", !m.isDictationActive && m.dictation == .off)
+            chat.dictationStopped = .distantPast
             chat.dictationWatch.entered(enter)
             check("return: an enter notice makes Dictation active, and the button on", m.isDictationActive && m.dictation == .on)
             chat.dictationWatch.exited(exit)
