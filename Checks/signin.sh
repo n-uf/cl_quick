@@ -3,8 +3,9 @@
 # it, against a stand-in Terminal and a stand-in `claude auth login` (Checks/signin/bin/claude): each outcome, a wrong account
 # by id and by address and organisation, stop and a second start ending the login, the lock and the process guard, a folder
 # that isn't ready, cl_quick's own word (a short claude's `initialize`). First, the Keychain lint: nothing cl_quick compiles
-# can read the Keychain (no Auth/Keychain.swift, no `security`, no Security framework), in the sources and in the app built
-# (./build.sh --no-install first, for the app's part). The whole app but its main.swift, and Checks/signin/main.swift in its
+# can read the Keychain (no Auth/Keychain.swift, no `security`, no Security framework), in the sources (what the app ships:
+# the kit's no-keychain build leaves out Auth/Keychain.swift and Auth/DiscoveryApp.swift, the chat and session readers) and in
+# the app built (./build.sh --no-install first, for the app's part). The whole app but its main.swift, and Checks/signin/main.swift in its
 # place. No window, no real Terminal or claude, nothing outside build/ written; only its own processes are signalled.
 #   Checks/signin.sh
 set -euo pipefail
@@ -17,15 +18,29 @@ mkdir -p "$out"
 # ── the Keychain lint ──
 lint=0; lintn=0
 fail() { echo "FAIL keychain lint: $*"; lint=1; }
-compiled=("$repo"/Sources/*.swift)
-while IFS= read -r f; do compiled+=("$f"); done < <(module_sources Core; module_sources Run; module_sources Auth Keychain.swift)
-for f in "${compiled[@]}"; do
-  lintn=$((lintn + 1))
+# the leave-out list of the kit's no-keychain build (kit_build: Auth/Keychain.swift and Auth/DiscoveryApp.swift); the lint
+# reads what the app ships, so it leaves out the same two, and checks the vendored recipe still leaves out exactly them
+lintn=$((lintn + 1))
+grep -q 'kit_sources Auth Keychain.swift DiscoveryApp.swift' "$modules_kit/scripts/modules.sh" \
+  || fail "the vendored recipe's no-keychain build leaves out other than Auth/Keychain.swift and Auth/DiscoveryApp.swift"
+# one file's part of the lint (a function, so the self-check below can run it on Keychain.swift itself)
+lint_file() {
+  local f="$1"
   [ "$(basename "$f")" = Keychain.swift ] && fail "$f is compiled into cl_quick"
   if grep -n -E 'KeychainSignIn|/usr/bin/security|find-generic-password|SecItem|SecKeychain|kSecClass|import Security' "$f" >/dev/null; then
     fail "$f names the Keychain: $(grep -n -E 'KeychainSignIn|/usr/bin/security|find-generic-password|SecItem|SecKeychain|kSecClass|import Security' "$f" | head -3)"
   fi
+  return 0
+}
+compiled=("$repo"/Sources/*.swift)
+while IFS= read -r f; do compiled+=("$f"); done < <(module_sources Core; module_sources Run; module_sources Auth Keychain.swift DiscoveryApp.swift; module_sources MenuRows)
+for f in "${compiled[@]}"; do
+  lintn=$((lintn + 1))
+  lint_file "$f"
 done
+# the lint still fails when Keychain.swift is compiled in: run it on the kit's own file, it must say so
+lintn=$((lintn + 1))
+if [ -z "$(lint_file "$modules_kit/Auth/Keychain.swift" 2>&1)" ]; then fail "the lint would not catch Auth/Keychain.swift compiled in"; fi
 lintn=$((lintn + 1))
 grep -q -- '-framework Security' "$repo/build.sh" && fail "build.sh links the Security framework"
 lintn=$((lintn + 1))
