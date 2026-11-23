@@ -234,11 +234,11 @@ func standbyMenu(_ infos: [QCStatusMenu.Info], switching: @escaping (Profile) ->
 }
 /// The menu's shape in one string: B a profile's block, R a standby row, A Add an account…, - a separator.
 func shape(_ items: [NSMenuItem]) -> String {
-    items.map { $0.isSeparatorItem ? "-" : $0.view is QCMenuUsageBlock ? "B" : $0.view is MenuAccountRowView ? "R" : $0.view is QCAddAccountMenuRow ? "A" : "?" }.joined()
+    items.map { $0.isSeparatorItem ? "-" : $0.view is QCMenuUsageBlock ? "B" : $0.view is MenuAccountRowView ? ($0.view as! MenuAccountRowView).row.isAdd ? "A" : "R" : "?" }.joined()
 }
 /// A standby row as the menu builds it (cl_kit's MenuRows, QCStatusMenu.standbyRow), for an address.
 func standbyView(_ address: String, enabled: Bool = true, pick: @escaping () -> Void = {}) -> MenuAccountRowView {
-    MenuAccountRowView(row: QCStatusMenu.standbyRow(address: address, waiting: !enabled), columns: .bar, pick: pick)
+    MenuAccountRowView(row: QCStatusMenu.standbyRow(address: address, waiting: !enabled), columns: .bar, addressFont: MenuAccountRowView.quickAddressFont, pick: pick)
 }
 let mainOne = QCStatusMenu.Info(profile: main, level: level(five: 13, week: 88), address: mainAddress, problem: nil, standby: [KnownAccount(uuid: "u9", email: zedAddress)])
 let mainTwo = QCStatusMenu.Info(profile: main, level: level(five: 13, week: 88), address: mainAddress, problem: nil, standby: [KnownAccount(uuid: "u9", email: zedAddress), yan])
@@ -299,14 +299,16 @@ check("places: the lamp column and the address's x are the block's account line'
       MenuRowColumns.bar.markerX == QCMenuUsageBlock.padX && MenuRowColumns.bar.addressX == groupBlockOfTwo.addressRect.minX && MenuRowColumns.bar.addressX == 27
       && zedRow.columns == .bar && zedRow.addressX == groupBlockOfTwo.addressRect.minX
       && MenuAccountRowView.smallFont.pointSize == QCMenuUsageBlock.accountFont.pointSize && MenuAccountRowView.smallFont.pointSize == 11)
-let blurPicture = AddressInk.blurred(AddressText.standIn, color: .labelColor, font: MenuAccountRowView.font)
+let blurPicture = AddressInk.blurred(AddressText.standIn, color: .labelColor, font: QCProfileMenuRow.addressFont)
+check("places: the address is the block's 11.5 pt font (the row's height and width as before the kit's rows)",
+      zedRow.addressFont === QCProfileMenuRow.addressFont && QCProfileMenuRow.addressFont.pointSize == 11.5)
 check("places: the row is as tall as the whole blurred picture of the address, so the blur is not cut",
-      blurPicture != nil && blurPicture!.size.height <= MenuAccountRowView.addressLineH && MenuAccountRowView.addressLineH >= MenuAccountRowView.highlightH
-      && zedRow.frame.height == MenuAccountRowView.addressLineH, "\(String(describing: blurPicture?.size)) in \(MenuAccountRowView.addressLineH)")
+      blurPicture != nil && blurPicture!.size.height <= zedRow.lineH && zedRow.lineH >= MenuAccountRowView.highlightH
+      && zedRow.frame.height == zedRow.lineH, "\(String(describing: blurPicture?.size)) in \(zedRow.lineH)")
 
 do {
     let row = zedRow
-    row.frame = NSRect(x: 0, y: 0, width: max(row.frame.width, 340), height: MenuAccountRowView.addressLineH)
+    row.frame = NSRect(x: 0, y: 0, width: max(row.frame.width, 340), height: row.lineH)
     check("light: at rest the row is not lit", !row.lit)
     row.highlighted = true
     check("light: highlighted, the row is lit", row.lit)
@@ -324,7 +326,7 @@ do {
         guard let rep = picture(lit: lit) else { return (0, 0) }
         let scale = Double(rep.pixelsWide) / Double(row.bounds.width)
         let x0 = Int(Double(MenuRowColumns.bar.addressX) * scale) + 2
-        let x1 = Int(Double(MenuRowColumns.bar.addressX + ceil((zedAddress as NSString).size(withAttributes: [.font: MenuAccountRowView.font]).width)) * scale) - 2
+        let x1 = Int(Double(MenuRowColumns.bar.addressX + ceil((zedAddress as NSString).size(withAttributes: [.font: QCProfileMenuRow.addressFont]).width)) * scale) - 2
         // each pixel's grey as seen over a mid grey (what the menu's own background would be under it)
         func seen(_ x: Int, _ y: Int) -> (grey: Double, alpha: Double) {
             guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0.5, 0) }
@@ -422,9 +424,9 @@ do {
         return total
     }
     oRow.frame.size.width = 340
-    // (MenuRows draws a disabled row in the system's disabled colour, which is about as faint as a standby row's own: so it is
-    // drawn, and no stronger than a standby row at rest)
-    check("waiting: a dimmed row is drawn (it has ink) and no stronger than a standby row at rest", ink(wRow) > 0 && ink(wRow) <= ink(oRow) * 1.1, "\(ink(wRow)) vs \(ink(oRow))")
+    check("waiting: a dimmed row is drawn fainter than a standby row at rest (MenuRows' waiting look), and has ink", ink(wRow) < ink(oRow) && ink(wRow) > 0, "\(ink(wRow)) vs \(ink(oRow))")
+    check("waiting: VoiceOver says the waiting row is waiting, and the other not", wRow.row.waiting && !oRow.row.waiting
+          && (wRow.accessibilityValue() as? String) == MenuRowWords.standard.waiting && oRow.accessibilityValue() == nil)
     check("waiting: the block of the waiting profile still opens the chat", (waitingMenu[0].view as? QCMenuUsageBlock) != nil && waitingMenu[0].isEnabled)
 }
 // a waiting item stays off on its own, not only because the menu doesn't validate its items: with autoenablesItems on
@@ -459,14 +461,15 @@ do {
     check("add: no addAccount path, no row (the menu is as before)", shape(standbyMenu([mainTwo, workNone])) == "BRR-B" && shape(items) == "B-B")
     check("add: the block ends close to the rows after it even with no standby account",
           (noStandby[0].view as? QCMenuUsageBlock)?.frame.height == QCMenuUsageBlock.height((noStandby[0].view as! QCMenuUsageBlock).model, joined: true))
-    let addItem = two[3], addRow = two[3].view as! QCAddAccountMenuRow
-    check("add: the item and the row say Add an account… (title, VoiceOver label), a menu item, no address in it",
+    let addItem = two[3], addRow = two[3].view as! MenuAccountRowView
+    check("add: the item and the row say Add an account… (title, VoiceOver label), a menu item, no address in it and none drawn (MenuAccountRow.add)",
           addItem.title == "Add an account…" && addRow.accessibilityLabel() == "Add an account…" && addRow.accessibilityRole() == .menuItem
-          && addRow.isAccessibilityEnabled() && addItem.isEnabled && addItem.action != nil && !addItem.title.contains("@"))
+          && addRow.isAccessibilityEnabled() && addItem.isEnabled && addItem.action != nil && !addItem.title.contains("@")
+          && addRow.row.isAdd && addRow.row.marker == .plus && addRow.row.dimmed && addRow.drawnAddress == "" && addRow.room == 0)
     check("add: every block and row of the menu is as wide as the widest", Set(two.compactMap { $0.view?.frame.width }).count == 1, "\(two.compactMap { $0.view?.frame.width })")
     check("add: the columns are the standby row's (lamp and words where its lamp and address are), and its height and font are the standby row's too",
-          addRow.columns == .bar && addRow.columns == (two[1].view as! MenuAccountRowView).columns && QCAddAccountMenuRow.height == (two[1].view as! MenuAccountRowView).frame.height
-          && QCAddAccountMenuRow.font === MenuAccountRowView.font)
+          addRow.columns == .bar && addRow.columns == (two[1].view as! MenuAccountRowView).columns && addRow.frame.height == (two[1].view as! MenuAccountRowView).frame.height
+          && addRow.addressFont === (two[1].view as! MenuAccountRowView).addressFont)
     // a click, Return and VoiceOver's press open it on that profile (once each, after the menu closes)
     added = []; addRow.press(); spin(0.1)
     check("add: a click opens Add an account… for its own profile (the one its group is of)", added == ["main"], "\(added)")
@@ -476,7 +479,7 @@ do {
     added = []
     _ = addRow.accessibilityPerformPress(); spin(0.1)
     check("add: VoiceOver's press does the same", added == ["main"], "\(added)")
-    added = []; (two[6].view as? QCAddAccountMenuRow)?.press(); spin(0.1)
+    added = []; (two[6].view as? MenuAccountRowView)?.press(); spin(0.1)
     check("add: the second profile's own row opens it for that profile", added == ["work"], "\(added)")
     // the click's own rule: nothing while a switch is waited for on the profile (a menu built a while ago)
     check("add: the rule is no switch waited for on the profile",
@@ -495,8 +498,9 @@ do {
     let waitingAdd = addMenu([mainOne, workOne], switching: { $0.id == "main" })
     let offItem = waitingAdd[2], onItem = waitingAdd[6]       // BRA-BRA
     check("add waiting: the waiting profile's row is off, like its standby rows, the other's on",
-          shape(waitingAdd) == "BRA-BRA" && !offItem.isEnabled && !(offItem.view as! QCAddAccountMenuRow).enabled && onItem.isEnabled && (onItem.view as! QCAddAccountMenuRow).enabled)
-    let offRow = offItem.view as! QCAddAccountMenuRow
+          shape(waitingAdd) == "BRA-BRA" && !offItem.isEnabled && !(offItem.view as! MenuAccountRowView).row.enabled && onItem.isEnabled && (onItem.view as! MenuAccountRowView).row.enabled
+          && (offItem.view as! MenuAccountRowView).row.waiting && !(onItem.view as! MenuAccountRowView).row.waiting)
+    let offRow = offItem.view as! MenuAccountRowView
     offRow.highlighted = true
     added = []; offRow.press(); _ = offRow.accessibilityPerformPress()
     if let t = offItem.target, let a = offItem.action { _ = t.perform(a, with: offItem) }
@@ -516,7 +520,7 @@ do {
         for y in 0..<rep.pixelsHigh { for x in 0..<rep.pixelsWide { total += Double(rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) } }
         return total
     }
-    let onRow = onItem.view as! QCAddAccountMenuRow
+    let onRow = onItem.view as! MenuAccountRowView
     onRow.frame.size.width = 340; offRow.frame.size.width = 340
     offRow.highlighted = false
     let restPicture = picture(onRow)
@@ -525,10 +529,15 @@ do {
     onRow.highlighted = false
     check("add look: dimmed while a sign-in is waited for it is fainter than at rest, and has ink", ink(offRow) < ink(onRow) && ink(offRow) > 0, "\(ink(offRow)) \(ink(onRow))")
     // the chat's columns: the words start where the in-use row's name does
-    let chatRow = QCAddAccountMenuRow(enabled: true, columns: .chat) {}
+    func addView(_ columns: MenuRowColumns) -> MenuAccountRowView {
+        MenuAccountRowView(row: QCStatusMenu.addAccountRow(waiting: false), columns: columns, addressFont: MenuAccountRowView.quickAddressFont) {}
+    }
+    let chatRow = addView(.chat)
     check("add: in the chat's menu its words start at the in-use row's text, and its lamp at the dot's",
           MenuRowColumns.chat.addressX == QCProfileMenuRow.textX && MenuRowColumns.chat.markerX == QCProfileMenuRow.dotX
-          && chatRow.frame.width == QCAddAccountMenuRow.width(columns: .chat) && QCAddAccountMenuRow.width(columns: .chat) > QCAddAccountMenuRow.width(columns: .bar))
+          && chatRow.frame.width == chatRow.naturalWidth && chatRow.naturalWidth > addView(.bar).naturalWidth)
+    check("columns: the menu bar's are MenuRowColumns(addressX: 27), the lamp 13 pt before it at the block's lamp column",
+          MenuRowColumns.bar == MenuRowColumns(addressX: 27) && MenuRowColumns.bar.markerX == QCMenuUsageBlock.padX)
     QCStatusMenu.allowAddAccount = realAdd
 }
 
@@ -610,10 +619,8 @@ do {
     check("stand-in: lit, the standby row draws the address", r1.drawnAddress == one)
     r1.highlighted = false
     check("stand-in: the standby row is as wide for both addresses, so a reveal moves nothing", r1.frame.width == r2.frame.width)
-    // the pointer-only reveal (MenuRows: worked out when drawn, never remembered), with the kit's public API. What it can't
-    // set headlessly is the menu lighting a row for the keyboard alone (the item's own highlight, kept by the menu's
-    // tracking): that case, "arrowing away and back without the pointer reveals nothing", is the kit's own suite (menurows,
-    // through Checks/vendor.sh) and the hub's real try.
+    // the pointer-only reveal (MenuRows: worked out when drawn, never remembered), with the kit's stand-ins for the mouse
+    // (`pointer(_:)`) and for the menu's keyboard highlight (`standInMenuLit(_:)`); the real mouse is the hub's try.
     let pointerMenu = NSMenu()
     let (pointerItem, pointerRow) = QCStatusMenu.standbyItem(main, KnownAccount(uuid: "p1", email: one), waiting: false) { _, _ in }
     pointerMenu.addItem(pointerItem)
@@ -624,6 +631,20 @@ do {
     check("pointer: highlighted for a picture (the kit's override: lit with the pointer on it), the address shows", pointerRow.sharp && pointerRow.drawnAddress == one)
     pointerRow.highlighted = false
     check("pointer: when the light goes it is the stand-in at once (worked out at draw time, nothing kept)", !pointerRow.sharp && pointerRow.drawnAddress == AddressText.standIn)
+    // the keyboard: the menu lights the row (the arrow keys), the pointer is elsewhere
+    pointerRow.pointer(false)
+    pointerRow.standInMenuLit(true)
+    check("keyboard: lit by the arrow keys alone the row is lit but the address stays the stand-in", pointerRow.lit && !pointerRow.sharp && pointerRow.drawnAddress == AddressText.standIn)
+    pointerRow.standInMenuLit(false)
+    check("keyboard: arrowing away unlights it", !pointerRow.lit && !pointerRow.sharp)
+    pointerRow.standInMenuLit(true)
+    check("keyboard: arrowing back lights it again and still reveals nothing (no pointer)", pointerRow.lit && !pointerRow.sharp && pointerRow.drawnAddress == AddressText.standIn)
+    pointerRow.pointer(true)
+    check("keyboard: with the pointer on the lit row the address shows (the pointer alone reveals)", pointerRow.sharp && pointerRow.drawnAddress == one)
+    pointerRow.pointer(false)
+    check("keyboard: and the pointer gone, it hides at once", pointerRow.lit && !pointerRow.sharp)
+    pointerRow.standInMenuLit(nil)
+    pointerRow.pointer(true)
     NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: NSMenu()); spin(0.05)
     check("pointer: another menu closing changes nothing", pointerRow.pointerStandIn == true)
     NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: pointerMenu); spin(0.05)
