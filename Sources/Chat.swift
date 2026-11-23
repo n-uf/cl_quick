@@ -12,6 +12,7 @@ import Carbon.HIToolbox
 import ClaudeAuth
 import Combine
 import ProfileCore
+import Runs
 import SwiftUI
 
 // MARK: - Settings
@@ -2009,14 +2010,14 @@ final class QuickChat {
         }
     }
 
-    /// Where `claude` is: found once, off the main thread (ClaudeLocator), and again when it's gone.
+    /// Where `claude` is: found once, off the main thread (cl_kit's ClaudeFinder), and again when it's gone.
     private func resolveClaude(_ done: @escaping (String?) -> Void) {
-        if let p = claudePath, ClaudeLocator.isExecutable(p) { done(p); return }
+        if let p = claudePath, ClaudeFinder.isExecutable(p) { done(p); return }
         claudePath = nil
         looking.append(done)
         guard looking.count == 1 else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let found = ClaudeLocator.find()?.path
+            let found = ClaudeFinder.find()?.path
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.claudePath = found

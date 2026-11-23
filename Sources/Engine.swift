@@ -7,9 +7,12 @@
 // and in quick chat's own work folder. Incognito: it keeps no session (`--no-session-persistence`), so the conversation
 // lives only in that process and ends with it. Nothing else is sent anywhere.
 //
-// Everything here but `QuickChatProcess` is a plain function of its input, for the checks (Checks/quick-chat).
+// Everything here but `QuickChatProcess` is a plain function of its input, for the checks (Checks/quick-chat). The
+// environment a run gets (the allow-list, the PATH) and the reading of `get_usage`'s answer are cl_kit's (Runs:
+// ClaudeEnvironment, ClaudeAsk), the same as cl_audit's; the stream engine and its control requests are cl_quick's.
 
 import Foundation
+import Runs
 
 // MARK: - What Claude Code prints
 
@@ -36,8 +39,10 @@ enum QuickChatEvent: Equatable {
     /// (`email`, `organization`; empty when it names no one), as ClaudeAuth's SignedInAccount.process takes them.
     case models([QuickChatModelEntry], account: [String: String])
     /// The account's limits now, from Claude Code's answer to `get_usage` (sent when `claude` starts, after each answer
-    /// and when the panel opens again; nothing goes to a model).
-    case usage(QuickChatUsage)
+    /// and when the panel opens again; nothing goes to a model), read as cl_kit's short ask reads it (ClaudeAsk.limits).
+    /// Experimental in Claude Code, so `rate_limit_event` after each answer stays as well; when it says the limits aren't
+    /// available, nothing changes.
+    case usage(ClaudeAsk.Limits)
     /// Claude calls a web tool (WebFetch, WebSearch): the short line to show while it runs ("Reading example.com…").
     /// Never what the tool returns: a `tool_result` is ignored.
     case tool(line: String)
@@ -69,21 +74,6 @@ struct QuickChatDocumentData: Equatable {
 enum QuickChatAttachment: Equatable {
     case image(QuickChatImageData)
     case document(QuickChatDocumentData)
-}
-
-/// What `get_usage` says about the account's limits: the 5-hour and weekly windows. Experimental in Claude Code, so
-/// `rate_limit_event` after each answer stays as well; when it says the limits aren't available, nothing changes.
-struct QuickChatUsage: Equatable {
-    struct Window: Equatable {
-        /// The share used, 0…100.
-        var used: Double?
-        var resets: Date?
-        /// Claude Code says the account is held back on this window (`locked_reason` set).
-        var locked = false
-    }
-    var available: Bool
-    var fiveHour: Window?
-    var week: Window?
 }
 
 /// One model Claude Code offers: what `--model` and `set_model` take ("claude-fable-5-2", "opus"), its name ("Fable 5.2")
@@ -301,7 +291,7 @@ enum QuickChatParse {
             }
             // the answer to `get_usage`: the account's limits (an error is just a control answer: nothing changes)
             if error == nil, let u = r["response"] as? [String: Any], u["rate_limits"] != nil || u["rate_limits_available"] != nil {
-                return .usage(usage(u))
+                return .usage(ClaudeAsk.limits(u))
             }
             return .control(id: id, error: error, model: (r["response"] as? [String: Any])?["model"] as? String)
         case "result":
@@ -318,32 +308,6 @@ enum QuickChatParse {
         guard let value = m["value"] as? String, let name = m["displayName"] as? String else { return nil }
         let efforts = (m["supportedEffortLevels"] as? [String]) ?? ((m["supportsEffort"] as? Bool) == false ? [] : nil)
         return QuickChatModelEntry(value: value, displayName: name, description: m["description"] as? String, efforts: efforts)
-    }
-
-    /// `get_usage`'s answer: `rate_limits.five_hour` and `.seven_day`, each `{utilization: 0…100, resets_at: ISO 8601,
-    /// locked_reason}`; every other key (spend, extra usage, the per-model weeks…) is left alone.
-    static func usage(_ u: [String: Any]) -> QuickChatUsage {
-        let limits = u["rate_limits"] as? [String: Any]
-        func window(_ key: String) -> QuickChatUsage.Window? {
-            guard let w = (limits?[key] ?? u[key]) as? [String: Any] else { return nil }
-            let used = (w["utilization"] as? NSNumber)?.doubleValue
-            let reason = w["locked_reason"]
-            return .init(used: used.map { min(100, max(0, $0)) }, resets: (w["resets_at"] as? String).flatMap(isoDate),
-                         locked: !(reason == nil || reason is NSNull || (reason as? String)?.isEmpty == true))
-        }
-        let available = (u["rate_limits_available"] as? Bool) ?? (limits != nil)
-        return QuickChatUsage(available: available, fiveHour: window("five_hour"), week: window("seven_day"))
-    }
-
-    /// "2026-11-12T18:00:00Z", with or without fractional seconds (any number of digits) or an offset.
-    static func isoDate(_ s: String) -> Date? {
-        let f = ISO8601DateFormatter()
-        if let d = f.date(from: s) { return d }
-        // fractional seconds of any length: dropped (a second's precision is plenty for "resets at")
-        guard let dot = s.firstIndex(of: "."), s[s.index(after: dot)...].first?.isNumber == true else { return nil }
-        var end = s.index(after: dot)
-        while end < s.endIndex, s[end].isNumber { end = s.index(after: end) }
-        return f.date(from: String(s[..<dot]) + String(s[end...]))
     }
 
     /// One message for Claude Code's input (stream-json), ending in a newline. Plain text goes as a string; with images
@@ -619,32 +583,15 @@ struct QuickChatCommand: Equatable {
         return a
     }
 
-    /// What `claude` takes from the Mac's environment: who and where the user is, the language, and the network's
-    /// proxies and certificates. Nothing else: no key or token, no other provider (Bedrock, Vertex, Foundry and their
-    /// credentials), no model override, no custom headers and no telemetry export, so it answers on the folder's own
-    /// sign-in and sends nothing but the chat.
-    static let passed: Set<String> = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "__CF_USER_TEXT_ENCODING",
-                                      "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy",
-                                      "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"]
-
-    /// The environment `claude` gets: the allowed part of the Mac's (`passed`), the profile's folder, `claude`'s own
-    /// folder first on the PATH (an npm install needs its `node`), and Claude Code's non-essential traffic (telemetry,
-    /// error reports, update checks) off.
+    /// The environment `claude` gets: cl_kit's one allow-list for a claude run (ClaudeEnvironment.make): who and where the
+    /// user is, the language, the network's proxies and certificates (a company's certificate store and client certificate
+    /// too), nothing else (no key or token, no other provider, no model override, no custom headers, no telemetry export),
+    /// so it answers on the folder's own sign-in and sends nothing but the chat; the profile's folder; `claude`'s own folder
+    /// first on the PATH (an npm install needs its `node`; absolute entries only, ClaudeEnvironment.path); Claude Code's
+    /// non-essential traffic off. And traceless, as quick chats are incognito to the file: no AGENTS.md session marker in
+    /// plugins/store/ and no auto-memory folder in the profile's projects/ (ClaudeEnvironment.traceless).
     func environment(_ base: [String: String]) -> [String: String] {
-        var env = base.filter { Self.passed.contains($0.key) || $0.key.hasPrefix("LC_") }
-        if !isDefaultDir { env["CLAUDE_CONFIG_DIR"] = configDir }
-        let own = (claude as NSString).deletingLastPathComponent
-        env["PATH"] = [own, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", base["PATH"] ?? ""]
-            .filter { !$0.isEmpty }.joined(separator: ":")
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-        env["DISABLE_TELEMETRY"] = "1"
-        env["DISABLE_ERROR_REPORTING"] = "1"
-        // Incognito, to the file: Claude Code's built-in AGENTS.md plugin otherwise notes the session's id in
-        // plugins/store/ (a once-per-session marker); this has it send per process and note nothing (checked against
-        // 2.1.318). And no auto-memory folder in the profile's projects/ (an empty one appears without a system prompt).
-        env["CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS"] = "1"
-        env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
-        return env
+        ClaudeEnvironment.make(base, claude: claude, configDir: isDefaultDir ? nil : configDir, traceless: true)
     }
 
     /// The folder name Claude Code kept this work folder's sessions under, in the profile's folder, before quick chats

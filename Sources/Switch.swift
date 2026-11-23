@@ -10,6 +10,7 @@
 import AddressPrivacy
 import AppKit
 import ClaudeAuth
+import Runs
 
 /// A switch under way: which profile, the account wanted, and the account it was on when it began.
 struct SwitchGoal: Equatable {
@@ -95,7 +96,7 @@ final class AccountSwitcher {
 
     /// Where `claude` is (off the main thread), and how a sign-in is made: the checks put stand-ins here (no Terminal, a
     /// stand-in claude, folders under build/).
-    var findClaude: () -> String? = { ClaudeLocator.find()?.path }
+    var findClaude: () -> String? = { ClaudeFinder.find()?.path }
     var makeSignIn: (_ folder: String, _ wanted: SignedInAccount?, _ claude: String) -> ClaudeSignIn = AccountSwitcher.realSignIn
 
     /// Made once, as cl_quick starts (the chat holds it): a sign-in script an older version left behind goes, and so do the
@@ -409,29 +410,18 @@ enum SignInWords {
     }
 }
 
-/// cl_quick's verified word on a folder's account, for ClaudeSignIn: a short `claude` on the folder, started the way the
-/// quick chat starts one (QuickChatCommand: no tools, nothing kept), asked `initialize` (nothing goes to a model), and its
+/// cl_quick's verified word on a folder's account, for ClaudeSignIn: cl_kit's short ask (ClaudeAsk: a `claude` on the
+/// folder with nothing kept or loaded, in the work folder), asked `initialize` only (nothing goes to a model), and its
 /// answer's `account` (SignedInAccount.process); then stopped. nil when it says nobody or doesn't answer in 20 seconds.
-/// Never the Keychain. Blocks: ClaudeSignIn calls it off the main thread (the answer comes through the main queue).
+/// Never the Keychain. Blocks: ClaudeSignIn calls it off the main thread.
 enum SignInWord {
     static func confirm(claude: String, workFolder: String, wait: TimeInterval = 20) -> ClaudeSignIn.Confirm {
         return { folder in
-            let p = QuickChatProcess(QuickChatCommand(claude: claude, configDir: folder.path, isDefaultDir: folder.isDefault,
-                                                      workFolder: workFolder, model: ""))
-            let answered = DispatchSemaphore(value: 0)
-            let lock = NSLock()
-            var said: [String: String]?
-            p.onEvent = { e in
-                guard case .models(_, let who) = e else { return }
-                lock.lock(); said = who; lock.unlock()
-                answered.signal()
-            }
-            p.onExit = { _, _ in answered.signal() }
-            guard (try? p.start()) != nil, p.initialize() else { p.stop(); return nil }
-            _ = answered.wait(timeout: .now() + wait)
-            p.stop()
-            lock.lock(); let who = said; lock.unlock()
-            return SignedInAccount.process(who.map { $0 as [String: Any] })
+            guard (try? FileManager.default.createDirectory(atPath: workFolder, withIntermediateDirectories: true)) != nil else { return nil }
+            let env = ClaudeEnvironment.make(ProcessInfo.processInfo.environment, claude: claude,
+                                             configDir: folder.isDefault ? nil : folder.path, traceless: true)
+            let answer = ClaudeAsk.ask(claude: claude, environment: env, folder: workFolder, usage: false, timeout: wait)
+            return SignedInAccount.process(answer.account.map { $0 as [String: Any] })
         }
     }
 }

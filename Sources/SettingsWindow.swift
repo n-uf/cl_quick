@@ -11,6 +11,7 @@ import AppKit
 import Carbon.HIToolbox
 import ClaudeAuth
 import ProfileCore
+import Runs
 import ServiceManagement
 import SwiftUI
 
@@ -1077,7 +1078,7 @@ struct AddPage: View {
         guard !FileManager.default.fileExists(atPath: expand(folder)) else { problem = "\(folder) is there already: add it with Choose a folder…."; return }
         // the full look for claude can take a few seconds (the login shell): off the main thread
         DispatchQueue.global(qos: .userInitiated).async {
-            let claude = ClaudeLocator.find()?.path
+            let claude = ClaudeFinder.find()?.path
             DispatchQueue.main.async { startSignIn(name: n, folder: folder, claude: claude) }
         }
     }

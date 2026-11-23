@@ -39,7 +39,7 @@ struct KnownAccount: Codable, Identifiable, Equatable, Hashable {
     /// Known by its address only (no account id yet).
     var isPlaceholder: Bool { key.isPlaceholder }
     /// The entry as an account: its key, with its address.
-    var identity: SignedInAccount { AccountBook.identity(key, email: email) }
+    var identity: SignedInAccount { key.identity(email: email) }
 }
 
 /// The folders' records (.claude.json), through the kit's one reader (FolderRecordReader: named fields only, bounded, one
@@ -126,18 +126,11 @@ enum AccountBook {
 
     // MARK: the seat rule (the kit's: ClaudeAuth's AccountKey and FolderSignIn, ProfileCore's one seat comparison)
 
-    /// A key as an account, with an address beside it (the key keeps one only while it is a placeholder).
-    static func identity(_ key: AccountKey, email: String?) -> SignedInAccount {
-        var a = key.identity
-        if a.email == nil, let e = email, !e.isEmpty { a.email = e }
-        return a
-    }
-
-    /// Another account or seat: two keys (each with its address) that the one seat comparison tells apart. A placeholder
-    /// upgraded to its id, or a seat that was only not known, is the same one.
+    /// Another account or seat: two keys (each with its address, AccountKey.identity(email:)) that the one seat
+    /// comparison tells apart. A placeholder upgraded to its id, or a seat that was only not known, is the same one.
     static func anotherSeat(_ a: AccountKey?, _ aEmail: String?, _ b: AccountKey?, _ bEmail: String?) -> Bool {
         guard let a, let b else { return false }
-        return identity(a, email: aEmail).match(identity(b, email: bEmail)) == .different
+        return a.match(b.identity(email: bEmail), email: aEmail) == .different
     }
 
     /// The entry of a profile's list an account is (the record's account in use, or the account numbers belong to): the
@@ -256,7 +249,7 @@ enum AccountBook {
         case .guessed: guard a.numbersBelongTo != nil else { return false }
         case .differs, .none: return false
         }
-        return identity(target, email: targetEmail).match(r) != .different
+        return target.match(r, email: targetEmail) != .different
     }
 
     /// An answer from `owner` speaks for the folder's sign-in (sets or clears its "sign in again" flag): the owner is maybe
@@ -268,7 +261,7 @@ enum AccountBook {
     /// Numbers that belong to `owner` are the account `target` names (the chat's own level).
     static func owns(_ target: AccountKey?, email: String?, _ owner: SignedInAccount) -> Bool {
         guard let target else { return false }
-        return identity(target, email: email).match(owner) != .different
+        return target.match(owner, email: email) != .different
     }
 
     /// What a running claude and the account's model list are kept under: the account alone (its id, or its address

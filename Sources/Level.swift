@@ -6,6 +6,7 @@
 
 import AppKit
 import ProfileCore
+import Runs
 import SwiftUI
 
 /// The level colours under cl_audit's names, which Faces.swift uses as it is. Which one a share takes is ProfileCore's
@@ -167,7 +168,7 @@ struct QuickChatLevel: Codable, Equatable {
     /// Claude Code says the limits aren't available (`rate_limits` null: its usage endpoint gave nothing), nothing
     /// changes and false comes back: the last numbers stay, as old as they were (never made fresh by an empty answer).
     @discardableResult
-    mutating func apply(usage u: QuickChatUsage, now: Date = Date()) -> Bool {
+    mutating func apply(usage u: ClaudeAsk.Limits, now: Date = Date()) -> Bool {
         guard u.available, u.fiveHour?.used != nil || u.week?.used != nil else { return false }
         // a window given is taken whole: its reset as given too (none, for a window that hasn't started), so an old reset
         // already past never hides the number it just gave

@@ -13,14 +13,17 @@
 // fresh one, so a fresh answer replaces it live while the menu is open. It is
 // only the menu's: the chat, "Ask on …" and the switch offers never act on a number that isn't fresh (ProfileStore.shownLevel),
 // and a fresh answer replaces it at once. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
-// background: a short-lived `claude` per profile, one at a time, that is sent `get_usage` and nothing else (no message
-// to a model), and ends as soon as it has answered. Nothing is read from the Keychain; no token is ever seen.
+// background: cl_kit's short ask (ClaudeAsk) per profile, one at a time, sent `initialize` and `get_usage` and nothing
+// else (no message to a model), and stopped as soon as it has answered. Nothing is read from the Keychain; no token is
+// ever seen. The rules the block follows (how old, what holds the account back, the colours, the week-only rule, the
+// time words) are ProfileCore's (QuickChatLevel.display).
 
 import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import Combine
 import ProfileCore
+import Runs
 
 // MARK: - What a profile's block says
 
@@ -535,10 +538,11 @@ enum QCStatusMenu {
 
 // MARK: - Fresh numbers
 
-/// Keeps the menu's numbers from going stale: when the menu opens and a profile's numbers are older than a few minutes
-/// (or it has none), a short-lived `claude` on that folder is asked `get_usage` (Claude Code's own sign-in; nothing goes
-/// to a model; no Keychain, no token) and ended as soon as it answers. One at a time, at most one try per profile every
-/// few minutes, so opening the menu again and again starts nothing more. A profile with no account signed in, or whose
+/// Keeps the menu's numbers from going stale: when the menu opens and a profile's numbers are no longer fresh (or it has
+/// none), cl_kit's short ask (ClaudeAsk: a `claude` on that folder with nothing kept or loaded) is asked `initialize` and
+/// `get_usage` (Claude Code's own sign-in; nothing goes to a model; no Keychain, no token) and stopped as soon as it has
+/// answered (its input closed, then SIGTERM, then SIGKILL). One at a time, at most one try per profile every few
+/// minutes, so opening the menu again and again starts nothing more. A profile with no account signed in, or whose
 /// sign-in is broken, is left alone. The answer is kept as a report after a chat answer is (ProfileStore.record).
 final class QCMenuUsageRefresher {
     static let shared = QCMenuUsageRefresher()
@@ -549,24 +553,18 @@ final class QCMenuUsageRefresher {
 
     /// Where `claude` is (looked for off the main thread, kept once found). The checks replace it.
     var findClaude: (@escaping (String?) -> Void) -> Void = { done in
-        DispatchQueue.global(qos: .utility).async { let p = ClaudeLocator.find()?.path; DispatchQueue.main.async { done(p) } }
+        DispatchQueue.global(qos: .utility).async { let p = ClaudeFinder.find()?.path; DispatchQueue.main.async { done(p) } }
     }
-    /// The command for a profile (the checks give it a work folder of their own).
-    var command: (Profile, String) -> QuickChatCommand = { p, claude in
-        QuickChatCommand(claude: claude, configDir: p.path, isDefaultDir: p.isDefaultFolder, workFolder: p.workFolder, model: "", effort: nil)
-    }
+    /// The folder `claude` runs in for a profile: its quick chat work folder (the checks give it one of their own).
+    var workFolder: (Profile) -> String = { $0.workFolder }
     /// Told as a `claude` starts and as it ends (the checks count them).
     var onStart: (String) -> Void = { _ in }
     var onEnd: (String) -> Void = { _ in }
 
     private var queue: [String] = []
     private var running: String?
-    private var current: QuickChatProcess?
     private var claudePath: String?
     private var lastTried: [String: Date] = [:]
-    private var timeout: Timer?
-    /// The id of the running `claude`'s `get_usage` request.
-    private var usageRequest: String?
 
     /// Whether a profile's numbers are worth asking for now.
     func needs(_ p: Profile, store: ProfileStore = .shared, now: Date = Date()) -> Bool {
@@ -594,57 +592,41 @@ final class QCMenuUsageRefresher {
             self.claudePath = path
             self.launch(p, claude: path, store)
         }
-        if let path = claudePath, ClaudeLocator.isExecutable(path) { start(path) } else { findClaude(start) }
+        if let path = claudePath, ClaudeFinder.isExecutable(path) { start(path) } else { findClaude(start) }
     }
 
     private func launch(_ p: Profile, claude: String, _ store: ProfileStore) {
-        let process = QuickChatProcess(command(p, claude))
+        let folder = workFolder(p)
+        guard (try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)) != nil else { finish(p.id, store); return }
         // the account the folder names as it starts (read now, not when the menu opened); the process's own word
         // (initialize) then says who it is
         var trail = ProcessTrail(launchedOn: ClaudeFolder.account(p.path))
-        process.onEvent = { [weak self, weak process] e in
-            guard let self, let process, process === self.current else { return }
-            switch e {
-            case .models(_, let who):
-                trail.said(SignedInAccount.process(who))
-            case .usage(let u):
+        let env = ClaudeEnvironment.make(ProcessInfo.processInfo.environment, claude: claude,
+                                         configDir: p.isDefaultFolder ? nil : p.path, traceless: true)
+        let giveUp = Self.giveUp
+        onStart(p.id)
+        // the ask blocks until every answer came, `claude` ended or the time ran out (then it is stopped): off the main
+        // thread; the answer is taken on the main queue, which an open menu's run loop serves too
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let answer = ClaudeAsk.ask(claude: claude, environment: env, folder: folder, usage: true, timeout: giveUp)
+            DispatchQueue.main.async {
+                guard let self, self.running == p.id else { return }
+                trail.said(SignedInAccount.process(answer.account.map { $0 as [String: Any] }))
                 // kept for the account the numbers belong to (the kit's numbersBelongTo with the process's trail): an
-                // answer that comes after the folder moved to another account stays that account's, never the new one's
-                if let owner = AccountBook.numbersOwner(record: ClaudeFolder.account(p.path), trail: trail) {
+                // answer that comes after the folder moved to another account stays that account's, never the new one's.
+                // An error answer, or none, keeps nothing.
+                if let u = answer.limits, let owner = AccountBook.numbersOwner(record: ClaudeFolder.account(p.path), trail: trail) {
                     var l = store.base(p.id, for: owner) ?? QuickChatLevel()
                     if l.apply(usage: u) { store.record(p.id, account: owner, l) }
                 }
                 self.finish(p.id, store)
-            case .control(let id, _, _):
-                // Claude Code answered `get_usage` with something that isn't limits (an error, say): nothing to keep, and
-                // nothing more to wait for
-                if id == self.usageRequest { self.finish(p.id, store) }
-            default: break
             }
         }
-        process.onExit = { [weak self, weak process] _, _ in
-            guard let self, let process, process === self.current else { return }
-            self.finish(p.id, store)
-        }
-        do { try process.start() } catch { finish(p.id, store); return }
-        current = process
-        onStart(p.id)
-        process.initialize()          // as the chat's own `claude` is, at its start (nothing goes to a model)
-        usageRequest = process.getUsage()
-        // in .common mode: an open menu runs the run loop in the event-tracking mode, where a default-mode timer waits
-        let t = Timer(timeInterval: Self.giveUp, repeats: false) { [weak self] _ in self?.finish(p.id, store) }
-        RunLoop.main.add(t, forMode: .common)
-        timeout = t
     }
 
     private func finish(_ id: String, _ store: ProfileStore) {
         guard running == id else { return }
-        timeout?.invalidate(); timeout = nil
-        let p = current
-        current = nil
-        usageRequest = nil
         running = nil
-        p?.stop()
         onEnd(id)
         pump(store)
     }
