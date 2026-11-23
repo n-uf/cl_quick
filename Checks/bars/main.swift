@@ -16,6 +16,7 @@
 //   Checks/bars.sh
 
 import AppKit
+import ProfileCore
 import SwiftUI
 
 Files.readOnly = true
@@ -357,6 +358,13 @@ func scenario(_ name: String, families: [QuickChatModelChoice]) {
     }
     check("\(name): the keys list is the same size on every page", sizes.dropFirst().allSatisfy { $0 == sizes[0] } && sizes[0].height > 0, "\(sizes)")
     QCKeys.shared.page = .modelWindow
+    // a plain arrow as a key equivalent: whether the panel takes it (it never does: ← and → are the field's)
+    func arrow(_ f: Int, _ code: UInt16, _ flags: NSEvent.ModifierFlags) -> Bool {
+        let ch = String(UnicodeScalar(UInt16(f))!)
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: p.windowNumber,
+                                       context: nil, characters: ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
+        return p.performKeyEquivalent(with: e)
+    }
     check("\(name): ← and → are not taken while the list is closed (the field's)", !arrow(Int(NSRightArrowFunctionKey), 124, []) && !arrow(Int(NSLeftArrowFunctionKey), 123, []) && keysList.page == .modelWindow)
     keysList.open(); spin()
     let listSize = QCFloat.keys.shownFrame?.size
@@ -478,7 +486,7 @@ for w in [CGFloat(320), 440, 640] {
         // layout of the level set, once the window has stopped changing
         l.weekResets = Date().addingTimeInterval(3 * 86400); m.level = l; spin(); spinQuiet(p)
         if first == nil { barHeight = p.frame.height }
-        let higher = l.binding()?.id ?? "-"
+        let higher = l.current().binding?.id ?? "-"
         let ui = targets.marks["usage"] ?? .zero, label = targets.marks["usage-label"] ?? .zero, share = targets.marks["usage-share"] ?? .zero
         let row = targets.marks["usage-\(higher)"] ?? .zero
         let rows = (five: targets.marks["usage-5h"] ?? .zero, week: targets.marks["usage-wk"] ?? .zero)
@@ -493,7 +501,8 @@ for w in [CGFloat(320), 440, 640] {
             check("\(name): with room, its label is shown", says == .all || says == .label, "\(ui)")
         }
         if w >= 640 { check("\(name): with more room, its share too", says == .all, "\(ui)") }
-        check("\(name): \(higher) is the higher one", higher == (five >= week || l.full()?.id == "5h" ? "5h" : "wk") || (l.full()?.id == "wk" && higher == "wk"))
+        let full = l.current().heldBack?.window
+        check("\(name): \(higher) is the higher one", higher == (five >= week || full == .fiveHour ? "5h" : "wk") || (full == .week && higher == "wk"))
         if says != .bars {
             // the label, then the bars, then the share, the label and share on the higher window's row
             check("\(name): its label sits on the \(higher) row", label != .zero && abs(label.midY - row.midY) <= 1.5, "\(label.midY) vs \(row.midY)")

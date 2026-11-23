@@ -6,6 +6,7 @@
 // it remembers earlier turns, Stop (interrupt) keeps the conversation, the model changes in the running process.
 
 import Foundation
+import Runs
 
 let env = ProcessInfo.processInfo.environment
 guard let claude = env["QC_CLAUDE"], let config = env["QC_CONFIG"], let work = env["QC_WORK"] else {
@@ -105,6 +106,10 @@ for e in events {
     case .limit(let type, let used, let status, _): print("limit: \(type ?? "?") used \(used.map { String($0) } ?? "?") \(status ?? "?")")
     case .done(let isError, let t, let ms, _): print("done: error \(isError), \(ms) ms, \(t.prefix(80).debugDescription)")
     case .control(let id, let err, let m): print("control \(id): \(err.map { "error \($0)" } ?? "ok")\(m.map { ", model \($0)" } ?? "")")
+    // (the address only as "<address>": never printed)
+    case .models(let list, let who): print("models: \(list.count), account \(who["email"] != nil ? "<address>" : "none")")
+    case .usage(let u): print("usage: available \(u.available), 5-hour \(u.fiveHour == nil ? "none" : "given"), week \(u.week == nil ? "none" : "given")")
+    case .tool(let line): print("tool: \(line)")
     case .ignored: break
     }
 }

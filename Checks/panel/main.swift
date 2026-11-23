@@ -12,6 +12,8 @@ import AppKit
 import ClaudeAuth
 import Carbon.HIToolbox
 import PDFKit
+import ProfileCore
+import Runs
 import SwiftUI
 import Network
 import WebKit
@@ -1809,41 +1811,44 @@ do {
     var five = QuickChatLevel()          // the 5-hour window full, the week with room
     five.fiveHour = 100; five.fiveHourResets = now.addingTimeInterval(2 * 3600)
     five.week = 53; five.weekResets = now.addingTimeInterval(3 * 86400)
-    check("limit: a full 5-hour window is the full one", five.full(now)?.id == "5h", "\(String(describing: five.full(now)))")
-    let s5 = QuickChatLevel.fullSentence(five, who: "Main", now: now)
+    // (what the chat draws: QuickChatLevel.current, ProfileCore's display value of numbers taken as fresh)
+    func held(_ l: QuickChatLevel) -> HeldBack? { l.current(now).heldBack }
+    func sentence(_ l: QuickChatLevel?) -> String { HeldBack.sentence(l?.current(now).heldBack, who: "Main", now: now) }
+    check("limit: a full 5-hour window is the full one", held(five)?.window == .fiveHour, "\(String(describing: held(five)))")
+    let s5 = sentence(five)
     check("limit: the notice names the 5-hour limit and its reset", s5.hasPrefix("Main's 5-hour limit is full, resets ") && !s5.contains("week"), s5)
     var wk = QuickChatLevel()            // the week full, the 5-hour window with room
     wk.fiveHour = 12; wk.fiveHourResets = now.addingTimeInterval(2 * 3600)
     wk.week = 100; wk.weekResets = now.addingTimeInterval(3 * 86400)
-    let sw = QuickChatLevel.fullSentence(wk, who: "Main", now: now)
-    check("limit: the notice names the week when the week is full", wk.full(now)?.id == "wk" && sw.hasPrefix("Main's week is full, resets "), sw)
+    let sw = sentence(wk)
+    check("limit: the notice names the week when the week is full", held(wk)?.window == .week && sw.hasPrefix("Main's week is full, resets "), sw)
     // Claude Code refused before any 5-hour number came, the week known at 53%: the 5-hour window, not the week
     var refused = QuickChatLevel()
     refused.week = 53; refused.weekResets = now.addingTimeInterval(3 * 86400)
     refused.refusedUntil = now.addingTimeInterval(3600)
-    check("limit: a refusal with the week at 53% names the 5-hour window", refused.full(now)?.id == "5h", "\(String(describing: refused.full(now)))")
+    check("limit: a refusal with the week at 53% names the 5-hour window", held(refused)?.window == .fiveHour, "\(String(describing: held(refused)))")
     var refusedWk = QuickChatLevel()     // the 5-hour window known to have room: the week
     refusedWk.fiveHour = 20; refusedWk.fiveHourResets = now.addingTimeInterval(3600); refusedWk.refusedUntil = now.addingTimeInterval(3600)
-    check("limit: a refusal with the 5-hour window at 20% names the week", refusedWk.full(now)?.id == "wk")
-    check("limit: with no numbers the notice names no window", QuickChatLevel.fullSentence(nil, who: "Main", now: now) == "Main's limit is full.")
+    check("limit: a refusal with the 5-hour window at 20% names the week", held(refusedWk)?.window == .week)
+    check("limit: with no numbers the notice names no window", sentence(nil) == "Main's limit is full.")
     // refused while get_usage reports both windows with room (5h 20%, week 53%): neither is named, neither drawn full
     var both = QuickChatLevel()
     both.fiveHour = 20; both.fiveHourResets = now.addingTimeInterval(3600)
     both.week = 53; both.weekResets = now.addingTimeInterval(3 * 86400)
     both.refusedUntil = now.addingTimeInterval(1800)
-    let sb = QuickChatLevel.fullSentence(both, who: "Main", now: now)
-    check("limit: refused with 5h at 20% and the week at 53% names neither window", both.full(now)?.id == FullLimit.any
+    let sb = sentence(both)
+    check("limit: refused with 5h at 20% and the week at 53% names neither window", held(both)?.window == .any
           && sb.hasPrefix("Main's limit is full, resets ") && !sb.contains("week") && !sb.contains("5-hour"), sb)
-    check("limit: …and the dot marks neither full (the fuller share as it is)", both.binding(now)?.id == "wk" && both.binding(now)?.p == 53,
-          "\(String(describing: both.binding(now)))")
-    check("limit: …while the account is still held back", both.full(now) != nil)
+    check("limit: …and the dot marks neither full (the fuller share as it is)", both.current(now).binding?.id == "wk" && both.current(now).binding?.p == 53,
+          "\(String(describing: both.current(now).binding))")
+    check("limit: …while the account is still held back", held(both) != nil)
     var none = QuickChatLevel(); none.refusedUntil = now.addingTimeInterval(1800)
-    check("limit: refused with no numbers names no window", none.full(now)?.id == FullLimit.any && none.binding(now) == nil)
+    check("limit: refused with no numbers names no window", held(none)?.window == .any && none.current(now).binding == nil)
     // the header and the notice agree, and the dot (binding) points at the same window
-    check("limit: the dot's window is the full one", five.binding(now)?.id == "5h" && wk.binding(now)?.id == "wk")
+    check("limit: the dot's window is the full one", five.current(now).binding?.id == "5h" && wk.current(now).binding?.id == "wk")
     // the offer shows the other profile's fuller window, not its week alone
     var other = QuickChatLevel(); other.fiveHour = 95; other.fiveHourResets = now.addingTimeInterval(3600); other.week = 18
-    check("limit: an offer's share is its fuller window (95, not the week's 18)", other.binding(now)?.p == 95)
+    check("limit: an offer's share is its fuller window (95, not the week's 18)", other.current(now).binding?.p == 95)
 }
 
 // live usage: a get_usage answer that comes while the bar is open changes what the bar shows (model.level, which the
@@ -1873,8 +1878,8 @@ do {
     let end = Date().addingTimeInterval(8)
     while m.level?.fiveHour == nil, Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     check("live usage: the stand-in was found", FileManager.default.isExecutableFile(atPath: stub), stub)
-    check("live usage: the answer replaced the older level", m.level?.weekNow() == 12 && m.level?.fiveHourNow() == 44, "\(String(describing: m.level))")
-    check("live usage: the 5-hour number shows with its reset", m.level?.fiveHourResets != nil && m.level?.binding() != nil)
+    check("live usage: the answer replaced the older level", m.level?.current().number("wk") == 12 && m.level?.current().number("5h") == 44, "\(String(describing: m.level))")
+    check("live usage: the 5-hour number shows with its reset", m.level?.fiveHourResets != nil && m.level?.current().binding != nil)
     check("live usage: the view was told", drawn > 0)
     check("live usage: kept for that profile and account (the process's word, with the record's id)",
           recorded?.0 == "usage-check" && recorded?.1.accountID == "u-check" && recorded?.1.email == "alex@example.com" && recorded?.2.week == 12)
@@ -1998,9 +2003,9 @@ do {
 // a window get_usage gives is taken whole: an old reset already past never hides the number it just gave
 do {
     var l = QuickChatLevel(); l.fiveHour = 80; l.fiveHourResets = Date().addingTimeInterval(-3600); l.week = 50
-    l.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 0, resets: nil), week: .init(used: 62, resets: Date().addingTimeInterval(86400))))
-    check("usage: a window with no reset yet still shows its number", l.fiveHourNow() == 0 && l.weekNow() == 62, "\(l)")
-    var kept = l; kept.apply(usage: QuickChatUsage(available: false))
+    l.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: .init(used: 0, resets: nil, locked: false), week: .init(used: 62, resets: Date().addingTimeInterval(86400), locked: false)))
+    check("usage: a window with no reset yet still shows its number", l.current().number("5h") == 0 && l.current().number("wk") == 62, "\(l)")
+    var kept = l; kept.apply(usage: ClaudeAsk.Limits(available: false, fiveHour: nil, week: nil))
     check("usage: not available keeps the last numbers", kept.fiveHour == 0 && kept.week == 62)
 }
 
@@ -2010,31 +2015,32 @@ do {
     var day = QuickChatLevel()
     day.week = 100; day.weekResets = now.addingTimeInterval(4 * 86400); day.refusedUntil = day.weekResets; day.refusedOn = "wk"
     day.at = now.addingTimeInterval(-28 * 3600)
-    check("fresh: numbers a day old aren't the account now", !day.isFresh(now) && day.full(now)?.id == "wk")
-    check("fresh: numbers given a minute ago are", { var l = day; l.at = now.addingTimeInterval(-60); return l.isFresh(now) }())
+    // (by ProfileCore's ages, QuickChatLevel.ages: fresh for 5 minutes; a dated full limit stays held back until its reset)
+    check("fresh: numbers a day old aren't the account now", day.age(now) != .fresh && day.display(now).heldBack?.window == .week)
+    check("fresh: numbers given a minute ago are", { var l = day; l.at = now.addingTimeInterval(-60); return l.age(now) == .fresh }())
     // get_usage as Claude Code 2.1.318 answers when its usage endpoint gave nothing: rate_limits null
     var empty = day
-    let took = empty.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: nil), now: now)
-    check("fresh: an answer with rate_limits null takes nothing and makes nothing fresh", !took && empty == day && !empty.isFresh(now))
+    let took = empty.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: nil, week: nil), now: now)
+    check("fresh: an answer with rate_limits null takes nothing and makes nothing fresh", !took && empty == day && empty.age(now) != .fresh)
     // get_usage with numbers (week 11%, the 5-hour window not started): the day-old refusal is over
     var fresh = day
-    fresh.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
-    check("fresh: a get_usage with room lifts a refusal said a day ago", fresh.full(now) == nil && fresh.weekNow(now) == 11 && fresh.isFresh(now),
-          "\(fresh)")
+    fresh.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets, locked: false)), now: now)
+    check("fresh: a get_usage with room lifts a refusal said a day ago",
+          fresh.display(now).heldBack == nil && fresh.display(now).number("wk") == 11 && fresh.age(now) == .fresh, "\(fresh)")
     // a partial answer (five_hour null, as get_usage gives at times) lifts only a refusal on the window it gave
     var partial = day
     partial.refusedOn = "5h"
-    partial.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
+    partial.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets, locked: false)), now: now)
     check("fresh: a get_usage that gave only the week doesn't lift a refusal on the 5-hour window", partial.refusedUntil != nil && partial.refusedOn == "5h", "\(partial)")
     var unknownWindow = day
     unknownWindow.refusedOn = nil
-    unknownWindow.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets)), now: now)
+    unknownWindow.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: nil, week: .init(used: 11, resets: day.weekResets, locked: false)), now: now)
     check("fresh: …nor one whose window isn't known, from a single window", unknownWindow.refusedUntil != nil, "\(unknownWindow)")
-    unknownWindow.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 5, resets: nil), week: .init(used: 11, resets: day.weekResets)), now: now)
+    unknownWindow.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: .init(used: 5, resets: nil, locked: false), week: .init(used: 11, resets: day.weekResets, locked: false)), now: now)
     check("fresh: both windows given with room lift it whichever refused", unknownWindow.refusedUntil == nil && unknownWindow.refusedOn == nil, "\(unknownWindow)")
     var locking = QuickChatLevel()
-    locking.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 100, resets: now.addingTimeInterval(3600), locked: true),
-                                        week: .init(used: 20, resets: now.addingTimeInterval(86400))), now: now.addingTimeInterval(-3600))
+    locking.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: .init(used: 100, resets: now.addingTimeInterval(3600), locked: true),
+                                          week: .init(used: 20, resets: now.addingTimeInterval(86400), locked: false)), now: now.addingTimeInterval(-3600))
     check("fresh: a lock on one window records that window", locking.refusedOn == "5h" && locking.refusedUntil != nil, "\(locking)")
     var evRefused = QuickChatLevel()
     evRefused.apply(type: "five_hour", used: 1.0, status: "rejected", resets: now.addingTimeInterval(3600), now: now.addingTimeInterval(-3600))
@@ -2042,22 +2048,22 @@ do {
     // a refusal said a minute ago stays (it may be a limit get_usage doesn't show)
     var recent = QuickChatLevel()
     recent.apply(type: "seven_day", used: 1.0, status: "rejected", resets: now.addingTimeInterval(86400), now: now.addingTimeInterval(-60))
-    recent.apply(usage: QuickChatUsage(available: true, fiveHour: .init(used: 20, resets: nil), week: .init(used: 40, resets: nil)), now: now)
-    check("fresh: a refusal said a minute ago stays through a get_usage with room", recent.full(now) != nil, "\(recent)")
+    recent.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: .init(used: 20, resets: nil, locked: false), week: .init(used: 40, resets: nil, locked: false)), now: now)
+    check("fresh: a refusal said a minute ago stays through a get_usage with room", recent.display(now).heldBack != nil, "\(recent)")
     // a per-model week (Opus) refusing holds back that model, not the account
     var opus = QuickChatLevel(); opus.week = 11; opus.weekResets = now.addingTimeInterval(86400); opus.at = now
     let before = opus
     opus.apply(type: "seven_day_opus", used: 1.0, status: "rejected", resets: now.addingTimeInterval(86400), now: now)
-    check("fresh: a per-model week's refusal (seven_day_opus) doesn't hold the account back", opus.full(now) == nil && opus == before, "\(opus)")
+    check("fresh: a per-model week's refusal (seven_day_opus) doesn't hold the account back", opus.display(now).heldBack == nil && opus == before, "\(opus)")
     var overage = QuickChatLevel()
     overage.apply(type: "overage", used: nil, status: "rejected", resets: nil, now: now)
-    check("fresh: overage refusing doesn't either", overage.full(now) == nil && overage.at == nil)
+    check("fresh: overage refusing doesn't either", overage.current(now).heldBack == nil && overage.at == nil)
     // rate_limit_event's utilization is a fraction (0…1, from the API's headers), get_usage's is percent (0…100)
     var ev = QuickChatLevel()
     ev.apply(type: "seven_day", used: 0.11, status: "allowed", resets: now.addingTimeInterval(86400), now: now)
     check("scale: a rate_limit_event's 0.11 is 11%", ev.week.map { abs($0 - 11) < 0.001 } == true, "\(ev)")
     var gu = QuickChatLevel()
-    gu.apply(usage: QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: nil)), now: now)
+    gu.apply(usage: ClaudeAsk.Limits(available: true, fiveHour: nil, week: .init(used: 11, resets: nil, locked: false)), now: now)
     check("scale: get_usage's 11 is 11%", gu.week == 11)
 }
 

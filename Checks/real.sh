@@ -18,8 +18,11 @@ claude="${QC_CLAUDE:-$(command -v claude)}"
 work="$out/real-work"
 config="${QC_CONFIG:-$out/throwaway-config}"
 mkdir -p "$config" "$work"
+. "$repo/scripts/modules.sh"          # Engine.swift imports Runs (the environment allow-list, get_usage's reading)
+build_modules "$out/modules-real" no-keychain -Onone
+link=(); while IFS= read -r f; do link+=("$f"); done < <(modules_link "$out/modules-real")
 swiftc -swift-version 5 -target arm64-apple-macos13.0 -o "$out/real" \
-  "$repo/Sources/Engine.swift" "$here/real/main.swift"
+  "$repo/Sources/Engine.swift" "$here/real/main.swift" "${link[@]}"
 marker="$out/real-marker"
 touch "$marker"; sleep 1
 status=0

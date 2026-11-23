@@ -4,6 +4,7 @@
 import AddressPrivacy
 import AppKit
 import ClaudeAuth
+import ProfileCore
 
 Files.readOnly = true
 _ = NSApplication.shared
@@ -674,9 +675,7 @@ try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encodin
 let refresher = QCMenuUsageRefresher()
 var started: [String] = [], ended: [String] = [], running = 0, mostAtOnce = 0, lookedFor = 0
 refresher.findClaude = { done in lookedFor += 1; done(stub) }
-refresher.command = { p, claude in
-    QuickChatCommand(claude: claude, configDir: p.path, isDefaultDir: false, workFolder: work + "/" + p.id, model: "", effort: nil)
-}
+refresher.workFolder = { p in work + "/" + p.id }
 refresher.onStart = { started.append($0); running += 1; mostAtOnce = max(mostAtOnce, running) }
 refresher.onEnd = { ended.append($0); running -= 1 }
 
@@ -713,7 +712,7 @@ do {
     try? "mode=ok\nusage=error\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
     let refused = QCMenuUsageRefresher()
     refused.findClaude = refresher.findClaude
-    refused.command = refresher.command
+    refused.workFolder = refresher.workFolder
     var refusedEnded: [String] = []
     refused.onEnd = { refusedEnded.append($0) }
     let t0 = Date()
@@ -730,7 +729,7 @@ do {
     try? "mode=ok\nusage=none\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
     let waiting = QCMenuUsageRefresher()
     waiting.findClaude = refresher.findClaude
-    waiting.command = refresher.command
+    waiting.workFolder = refresher.workFolder
     var waitEnded: [String] = []
     waiting.onEnd = { waitEnded.append($0) }
     let saved = QCMenuUsageRefresher.giveUp
@@ -791,7 +790,7 @@ do {
     // the refresh asks B's numbers and keeps them under B
     try? "mode=ok\nargs=\(argsFile)\n".write(toFile: conf, atomically: true, encoding: .utf8)
     let r = QCMenuUsageRefresher()
-    r.findClaude = refresher.findClaude; r.command = refresher.command
+    r.findClaude = refresher.findClaude; r.workFolder = refresher.workFolder
     var rEnded: [String] = []
     r.onEnd = { rEnded.append($0) }
     check("switched: B with no numbers needs them", r.needs(pg, store: store))
@@ -808,7 +807,7 @@ do {
     func ask(_ settings: String, during: (() -> Void)? = nil) -> Bool {
         try? (settings + "args=\(argsFile)\n").write(toFile: conf, atomically: true, encoding: .utf8)
         let q = QCMenuUsageRefresher()
-        q.findClaude = refresher.findClaude; q.command = refresher.command
+        q.findClaude = refresher.findClaude; q.workFolder = refresher.workFolder
         var began = 0, ended: [String] = []
         q.onStart = { _ in began += 1 }
         q.onEnd = { ended.append($0) }

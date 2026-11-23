@@ -2,6 +2,7 @@
 
 import ClaudeAuth
 import Foundation
+import Runs
 
 var passed = 0, failed = 0
 func check(_ name: String, _ ok: Bool, _ got: @autoclosure () -> Any = "") {
@@ -388,7 +389,7 @@ check("no telemetry export", env["CLAUDE_CODE_ENABLE_TELEMETRY"] == nil && env["
 check("no headers, model or node options from outside", env["ANTHROPIC_CUSTOM_HEADERS"] == nil && env["ANTHROPIC_MODEL"] == nil && env["NODE_OPTIONS"] == nil)
 check("language and proxy kept", env["LANG"] == "en_GB.UTF-8" && env["LC_CTYPE"] == "UTF-8" && env["HTTPS_PROXY"] == "http://proxy.example:8080")
 check("nothing but the allowed, the folder, the PATH and the off switches",
-      Set(env.keys).subtracting(QuickChatCommand.passed).subtracting(["CLAUDE_CONFIG_DIR", "PATH", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      Set(env.keys).subtracting(ClaudeEnvironment.passed).subtracting(["CLAUDE_CONFIG_DIR", "PATH", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
                                                                       "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING",
                                                                       "CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).allSatisfy { $0.hasPrefix("LC_") },
       env.keys.sorted())
@@ -671,10 +672,10 @@ do {
 run("ok") { p, events, _ in
     check("usage: asked before any message", p.getUsage() != nil)
     wait(3) { events().contains { if case .usage = $0 { return true }; return false } }
-    let u = events().compactMap { e -> QuickChatUsage? in if case .usage(let u) = e { return u }; return nil }.first
+    let u = events().compactMap { e -> ClaudeAsk.Limits? in if case .usage(let u) = e { return u }; return nil }.first
     check("usage: both windows", u?.available == true && u?.fiveHour?.used == 44 && u?.week?.used == 12 && u?.fiveHour?.locked == false, u as Any)
     check("usage: reset times, fractional seconds and offset", u?.fiveHour?.resets == Date(timeIntervalSince1970: 2_109_952_800)
-          && u?.week?.resets == QuickChatParse.isoDate("2036-11-14T09:00:00Z"), u as Any)
+          && u?.week?.resets == ClaudeAsk.isoDate("2036-11-14T09:00:00Z"), u as Any)
     let ctl = (try? String(contentsOfFile: argsFile + ".ctl", encoding: .utf8)) ?? ""
     check("usage: no message was sent for it", ctl.contains("CTRL get_usage") && !ctl.contains("USER"), ctl)
     check("usage: the process still takes a message after it", p.send("a question") && { wait(5) { done(events()) == 1 }; return done(events()) == 1 }())
@@ -686,22 +687,22 @@ func usageEvent(_ body: String) -> QuickChatEvent {
     QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-5","response":"# + body + "}}"))
 }
 let locked = usageEvent(#"{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":100,"resets_at":"2026-11-10T18:00:00Z","locked_reason":"five_hour_limit"},"seven_day":{"utilization":130.5,"resets_at":"2026-11-14T09:00:00Z"}}}"#)
-check("usage: a lock is read, a share is kept within 0…100", locked == .usage(QuickChatUsage(available: true,
-      fiveHour: .init(used: 100, resets: QuickChatParse.isoDate("2026-11-10T18:00:00Z"), locked: true),
-      week: .init(used: 100, resets: QuickChatParse.isoDate("2026-11-14T09:00:00Z"), locked: false))), locked)
+check("usage: a lock is read, a share is kept within 0…100", locked == .usage(ClaudeAsk.Limits(available: true,
+      fiveHour: .init(used: 100, resets: ClaudeAsk.isoDate("2026-11-10T18:00:00Z"), locked: true),
+      week: .init(used: 100, resets: ClaudeAsk.isoDate("2026-11-14T09:00:00Z"), locked: false))), locked)
 check("usage: not available says so", usageEvent(#"{"rate_limits_available":false,"rate_limits":{}}"#)
-      == .usage(QuickChatUsage(available: false, fiveHour: nil, week: nil)))
+      == .usage(ClaudeAsk.Limits(available: false, fiveHour: nil, week: nil)))
 check("usage: a window missing is nil, an empty lock reason isn't a lock", usageEvent(#"{"rate_limits":{"seven_day":{"utilization":5,"locked_reason":""}}}"#)
-      == .usage(QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 5, resets: nil, locked: false))))
+      == .usage(ClaudeAsk.Limits(available: true, fiveHour: nil, week: .init(used: 5, resets: nil, locked: false))))
 check("usage: an error is just a control answer", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"error","request_id":"qc-6","error":"Unknown subtype"}}"#))
       == .control(id: "qc-6", error: "Unknown subtype", model: nil))
 check("usage: other control answers are untouched", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-7","response":{"still_queued":[]}}}"#))
       == .control(id: "qc-7", error: nil, model: nil))
-check("iso dates: Z, offset, any fraction; garbage is nil", QuickChatParse.isoDate("2026-11-14T09:00:00Z") == Date(timeIntervalSince1970: 1_794_646_800)
-      && QuickChatParse.isoDate("2026-11-14T11:00:00.5+02:00") == Date(timeIntervalSince1970: 1_794_646_800)
-      && QuickChatParse.isoDate("2026-11-14T09:00:00.123456789Z") == Date(timeIntervalSince1970: 1_794_646_800)
-      && QuickChatParse.isoDate("soon") == nil)
-check("usage: a stale answer's filter lets it through", { var s = StaleAnswers(); s.abandon(); return s.fate(of: .usage(QuickChatUsage(available: true))) == .pass }())
+check("iso dates (the kit's, ClaudeAsk.isoDate): Z, offset, any fraction; garbage is nil", ClaudeAsk.isoDate("2026-11-14T09:00:00Z") == Date(timeIntervalSince1970: 1_794_646_800)
+      && ClaudeAsk.isoDate("2026-11-14T11:00:00.5+02:00") == Date(timeIntervalSince1970: 1_794_646_800)
+      && ClaudeAsk.isoDate("2026-11-14T09:00:00.123456789Z") == Date(timeIntervalSince1970: 1_794_646_800)
+      && ClaudeAsk.isoDate("soon") == nil)
+check("usage: a stale answer's filter lets it through", { var s = StaleAnswers(); s.abandon(); return s.fate(of: .usage(ClaudeAsk.Limits(available: true, fiveHour: nil, week: nil))) == .pass }())
 
 // MARK: the account's models (Claude Code's `initialize`)
 
@@ -723,11 +724,11 @@ check("identity: an empty address is no one", identity(#","account":{"email":""}
 // get_usage as 2.1.318 answers when its usage endpoint gave nothing (observed on a signed-in folder): no numbers
 check("usage: rate_limits null is available with no windows (nothing to take)",
       usageEvent(#"{"session":{"total_cost_usd":0},"subscription_type":"max","rate_limits_available":true,"rate_limits":null,"behaviors":null}"#)
-      == .usage(QuickChatUsage(available: true, fiveHour: nil, week: nil)))
+      == .usage(ClaudeAsk.Limits(available: true, fiveHour: nil, week: nil)))
 // the per-model weeks get_usage also gives are left alone: the week is seven_day, all models (what Claude's app shows)
 check("usage: the week is seven_day (all models), not a per-model week",
       usageEvent(#"{"rate_limits_available":true,"rate_limits":{"five_hour":null,"seven_day":{"utilization":11,"resets_at":"2026-11-15T21:00:00Z"},"seven_day_opus":{"utilization":100,"resets_at":"2026-11-15T21:00:00Z"},"seven_day_sonnet":{"utilization":3},"model_scoped":[{"display_name":"Fable","utilization":40,"resets_at":"2026-11-15T21:00:00Z"}]}}"#)
-      == .usage(QuickChatUsage(available: true, fiveHour: nil, week: .init(used: 11, resets: QuickChatParse.isoDate("2026-11-15T21:00:00Z"), locked: false))))
+      == .usage(ClaudeAsk.Limits(available: true, fiveHour: nil, week: .init(used: 11, resets: ClaudeAsk.isoDate("2026-11-15T21:00:00Z"), locked: false))))
 check("models: efforts read", ml.first { $0.value == "opus" }?.efforts == ["low", "medium", "high", "xhigh", "max"] && ml.first { $0.value == "opus" }?.description == "For the hardest work")
 check("models: no effort said is nil, supportsEffort false is none", ml.first { $0.value == "fable" }?.efforts == nil && ml.first { $0.value == "haiku" }?.efforts == [])
 check("models: another control answer is still a control", QuickChatParse.event(line(#"{"type":"control_response","response":{"subtype":"success","request_id":"qc-2","response":{"model":"claude-sonnet-5-5"}}}"#))
