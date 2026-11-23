@@ -13,9 +13,17 @@
 // running; sent after Dictation ended, it could start it again. Dictation is an input method (Ironwood) of the field's
 // text input context, so it is ended there, as switching apps ends it (`end`).
 //
-// macOS has no API that says whether Dictation is running, so the button keeps its own state: on after a start, off
-// after a stop, a send, a new chat or the panel hiding (each of which also stops Dictation), and off when Dictation's
-// input method says it left Dictation mode, whatever ended it (QCDictationWatch).
+// macOS has no API that says whether Dictation is running, but its input method posts a notice when it enters and when
+// it leaves Dictation mode (QCDictationWatch), so the button follows those (QuickChatModel.DictationState):
+//   off       a plain mic.
+//   starting  after a click (or ⌘D) once `startDictation:` was sent, until the enter notice comes while the panel is
+//             key; a still, paler mic, "Starting Dictation…". A click cancels. With no enter notice within 3 s it goes
+//             back to off and says "Dictation didn't start." (an enter that comes later turns it on, and takes the
+//             line away).
+//   on        the enter notice came while the panel is key, whoever started Dictation: the button, macOS's shortcut,
+//             the Dictation key. mic.fill in clay, "Stop dictation".
+// An exit notice (not in the first moments after a start: a stale one), a send, Stop, a new chat, the panel hiding and
+// the panel losing the keyboard turn starting or on back to off (the ones from our side also stop Dictation).
 
 import AppKit
 
@@ -29,9 +37,10 @@ import AppKit
 /// tinted button gone while Dictation runs on (the next click starts it again: still harmless).
 ///
 /// Its twin, `DictationIMNotificationDidEnterDictationMode`, says Dictation started, also when macOS's own shortcut or
-/// the Dictation key started it, which the mic button's state doesn't know. Return with marked text counts as Dictation's
-/// only while Dictation is known to run (the button's state, an enter notice with no exit since, or the field's input
-/// source being Dictation's); marked text is also what an input method (Korean, Japanese, Chinese, Vietnamese) composes.
+/// the Dictation key started it, which only this notice tells. Return with marked text counts as Dictation's only once
+/// Dictation really entered (the button is `on`: an enter notice with no exit since, or the field's input source is
+/// Dictation's), never for `starting`, which waits for the notice; marked text is also what an input method (Korean,
+/// Japanese, Chinese, Vietnamese) composes.
 final class QCDictationWatch: NSObject {
     static let exitName = Notification.Name("DictationIMNotificationDidExitDictationMode")
     static let enterName = Notification.Name("DictationIMNotificationDidEnterDictationMode")
@@ -109,6 +118,8 @@ enum QCDictation {
     /// The one line said when it is off (once a run), and when it didn't start.
     static let offWords = "Dictation is off: System Settings ▸ Keyboard ▸ Dictation."
     static let failedWords = "Dictation didn't start. Try again, or press the Dictation key."
+    /// The quiet line when macOS's enter notice didn't come within `QuickChat.startTimeout` of a start.
+    static let timeoutWords = "Dictation didn't start."
 
     /// Starts Dictation for the field (the panel's first responder); whether it was taken.
     @discardableResult static func begin(for field: NSResponder?) -> Bool { send(start, field) }

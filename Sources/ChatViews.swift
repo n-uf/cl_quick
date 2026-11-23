@@ -1998,27 +1998,29 @@ struct QCIconButton: View {
 }
 
 /// The mic button just left of Send, Send's size: macOS Dictation into the field (QuickChat.dictate). At rest a soft
-/// `mic`; while dictating a `mic.fill` in Claude's clay on a warm fill, "Stop dictation". A control: a press never
-/// moves the window.
+/// `mic`; after a click, until macOS says Dictation has started, a still `mic` in a paler clay on a paler warm fill
+/// ("Starting Dictation…": a click cancels); once macOS says it listens (whoever started it) a `mic.fill` in Claude's clay
+/// on a warm fill, "Stop dictation". A control: a press never moves the window.
 struct QCMicButton: View {
     @ObservedObject var model: QuickChatModel
     @State private var hover = false
 
     var body: some View {
-        let on = model.dictating
-        Button { model.dictate(!on) } label: {
+        let state = model.dictation
+        let on = state == .on, starting = state == .starting
+        Button { model.dictate(state == .off) } label: {
             Image(systemName: on ? "mic.fill" : "mic").font(.system(size: 13, weight: .medium))
                 .frame(width: QCSpace.row, height: QCSpace.row)
-                .foregroundColor(on ? QCColor.accent : hover ? QCColor.text : QCColor.muted)
+                .foregroundColor(on ? QCColor.accent : starting ? QCColor.accent.opacity(0.55) : hover ? QCColor.text : QCColor.muted)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(on ? QCColor.accent.opacity(0.18) : hover ? QCColor.hover : .clear))
+                    .fill(on ? QCColor.accent.opacity(0.18) : starting ? QCColor.accent.opacity(0.08) : hover ? QCColor.hover : .clear))
                 .qcControl()
         }
         .buttonStyle(.plain)
-        .help(on ? "Stop dictation (⌘D)" : "Dictate (⌘D)")
+        .help(on ? "Stop dictation (⌘D)" : starting ? "Starting Dictation…" : "Dictate (⌘D)")
         .onHover { hover = $0 }
         .qcMark("mic")
-        .accessibilityLabel(on ? "Stop dictation" : "Dictate")
+        .accessibilityLabel(on ? "Stop dictation" : starting ? "Starting dictation" : "Dictate")
     }
 }
 
@@ -2793,8 +2795,10 @@ enum QuickChatRender {
         case "usage-wk": level.fiveHour = 30; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 85; m.level = level
         case "usage-full": level.fiveHour = 100; level.fiveHourResets = Date().addingTimeInterval(2 * 3600); level.week = 64; m.level = level
         case "usage-no5h": level.week = 21; m.level = level           // no 5-hour number yet: its track an outline
-        // the mic button: dictating (mic.fill in clay), dictation-off (macOS has Dictation off: the one line)
-        case "dictating": m.dictating = true; m.field = "How do I find which process"
+        // the mic button: dictating (mic.fill in clay), dictation-starting (a paler still mic, until macOS says it listens),
+        // dictation-off (macOS has Dictation off: the one line)
+        case "dictating": m.dictation = .on; m.field = "How do I find which process"
+        case "dictation-starting": m.dictation = .starting; m.field = "How do I find which process"
         case "dictation-off": m.dictationNote = QCDictation.offWords
         case "notinstalled": m.field = q1; m.barProblem = .notInstalled
         case "streaming": var t = t1; t.answer = String(a1.prefix(90)); t.phase = .streaming; m.turns = [t]

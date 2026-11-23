@@ -25,7 +25,7 @@
 //                                       accounts and Add an account…: profilemenu-accounts, -accounts-lit,
 //                                       -accounts-waiting (a switch waited for, the hidden note's Show row); the waiting
 //                                       note: switching, switching-hidden (its × pressed: the picker's lamp waits),
-//                                       switching-stale; the mic button: dictating, dictation-off
+//                                       switching-stale; the mic button: dictating, dictation-starting, dictation-off
 //   --render-settings OUT.png PAGE      the settings window with sample profiles: a profile (profile, accounts-one,
 //                                       accounts-two, accounts-switching, accounts-wrong, accounts-wrong-also,
 //                                       accounts-timedout, accounts-declined, accounts-unverified, accounts-failed,

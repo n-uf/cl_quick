@@ -318,8 +318,11 @@ final class QuickChatModel: ObservableObject {
     @Published var accountNote: QCWords?
     /// Set while the turns on screen belong to a chat that has ended (its `claude` is gone): said under the chat.
     @Published var ended: QuickChatEnd?
-    /// macOS Dictation into the field is on (the mic button's own state: macOS doesn't say; QCDictation).
-    @Published var dictating = false
+    /// What the mic button shows of macOS's Dictation: `off`; `starting` (the button or ⌘D sent `startDictation:`, macOS
+    /// hasn't said yet that Dictation entered: a still icon, "Starting Dictation…"); `on` (macOS said so while the panel is
+    /// key, whoever started it: the button, macOS's shortcut, the Dictation key). QCDictation, QuickChat.dictationEntered.
+    enum DictationState { case off, starting, on }
+    @Published var dictation: DictationState = .off
     /// One line over the field when the mic button finds Dictation off in macOS (once a run); goes with the next send.
     @Published var dictationNote: String?
     /// The images attached to the message being written (thumbnails over the field), up to QCImages.maxCount, in memory only.
@@ -549,20 +552,19 @@ final class QuickChatModel: ObservableObject {
     /// whatever marked text Dictation's last words may still have for a moment. Cleared by a send, a new chat, or the mic.
     var returnHeld = false
 
-    /// An enter notice from Dictation's input method with no exit since: Dictation runs, whoever started it (macOS's own
-    /// shortcut included, which the mic button's state doesn't know). Cleared with the keyboard, a stop, a new chat.
-    var dictationNoticed = false
     /// Whether the field's text input context has Dictation's input source selected (set by QuickChat; a check replaces it).
     var inputSourceIsDictation: () -> Bool = { false }
     /// Commits what an input method is composing in the field, no more (set by QuickChat).
     var commitComposition: () -> Void = {}
-    /// Dictation is actually running: the mic button's state, an enter notice not yet followed by an exit, or the field's
-    /// input source being Dictation's. Marked text alone is not enough to say so: an input method (Korean, Japanese,
+    /// Dictation is actually running: macOS said it entered (`on`: an enter notice not yet followed by an exit, whoever
+    /// started it, macOS's own shortcut included) or the field's input source is Dictation's. `starting` is not enough
+    /// (nothing has said yet that Dictation listens), nor is marked text alone: an input method (Korean, Japanese,
     /// Chinese, Vietnamese…) composes in marked text too.
-    var isDictationActive: Bool { dictating || dictationNoticed || inputSourceIsDictation() }
+    var isDictationActive: Bool { dictation == .on || inputSourceIsDictation() }
 
-    /// ⌘D: the mic button's other way in. Off when Dictation actually runs (also one macOS's shortcut started), else on.
-    func toggleDictation() { dictate(!isDictationActive) }
+    /// ⌘D: the mic button's other way in. Off when Dictation runs (also one macOS's shortcut started) or is starting
+    /// (a cancel), else on.
+    func toggleDictation() { dictate(dictation == .off && !isDictationActive) }
 
     /// Return in the field; `marked`: the field has marked text (Dictation's provisional words, or an input method's
     /// composition: only Dictation running makes it Dictation's, see `isDictationActive`). While Dictation runs and the
@@ -608,7 +610,7 @@ final class QuickChatModel: ObservableObject {
     func send() {
         returnHeld = false
         // what was dictated is sent: Dictation stops first, so the field holds its last words before it is read
-        if dictating || dictationNoticed, !busy, !blocked { dictate(false) }
+        if dictation != .off, !busy, !blocked { dictate(false) }
         let q = field.trimmingCharacters(in: .whitespacesAndNewlines)
         // images still being read: the message goes as soon as they are in (attach calls send() again), whoever asked
         // (Return, an automatic resend after an account switch or Ask on …)
@@ -639,7 +641,7 @@ final class QuickChatModel: ObservableObject {
         guard !q.isEmpty, !turns.isEmpty, !busy, !blocked, ended == nil, !sendWhenReady, preparing == 0 else { return false }
         guard target != nil else { barProblem = .noProfile; return false }
         // as send() does: Dictation stops first, so the field holds its last words
-        if dictating || dictationNoticed { dictate(false) }
+        if dictation != .off { dictate(false) }
         dictationNote = nil
         barProblem = nil
         turns.append(QuickChatTurn(question: q, thinkingTitle: effectiveThinking.effort == nil ? nil : effectiveThinking.title))
@@ -878,7 +880,7 @@ final class QuickChatModel: ObservableObject {
         followTick += 1
         returnHeld = false
         sendWhenReady = false
-        if dictating || dictationNoticed { dictate(false) }
+        if dictation != .off { dictate(false) }
         // (what was still being read is dropped when it lands, and no longer counts: a read that never lands can't hold
         // Send off, and the late ones can't push the count below zero)
         if !keepField { field = ""; images = []; files = []; imageNote = nil; attachGeneration += 1; preparing = 0 }
@@ -1718,7 +1720,7 @@ final class QuickChat {
         model.cancelSendWhenReady()
         model.find.close()                      // the find bar and its text go with the panel (memory only)
         model.quick.hideBar()
-        if model.dictating || model.dictationNoticed { dictate(false) }     // Dictation doesn't go on into a hidden field
+        if model.dictation != .off { dictate(false) }     // Dictation doesn't go on into a hidden field
         panel?.orderOut(nil)
         QCInlinePages.shared.update()           // no page is in view now: the live one is photographed and let go
     }
@@ -1728,16 +1730,17 @@ final class QuickChat {
 
     /// The mic button. On: the panel takes the keyboard (key, without activating cl_quick), the field becomes its first
     /// responder, and macOS's Dictation starts for it; Dictation turned off in macOS says where to turn it on, once.
-    /// Off: Dictation stops. The state is the button's own (QCDictation).
+    /// Off: Dictation stops. A start shows `starting` until macOS's enter notice says Dictation listens (`dictationEntered`),
+    /// and goes back to off with a quiet line when it doesn't within `startTimeout` (QCDictation).
     func dictate(_ on: Bool) {
         guard on else {
-            // also when the button's state is off: Dictation started with macOS's own shortcut ends the same way (known by
-            // its enter notice or its input source; marked text alone may be an input method's composition, left alone)
-            if let p = panel, model.isDictationActive {
+            // also when the button shows off: Dictation started with macOS's own shortcut ends the same way (known by its
+            // enter notice or its input source; marked text alone may be an input method's composition, left alone). A
+            // start still waiting for its notice is cancelled the same way.
+            if let p = panel, model.dictation != .off || model.isDictationActive {
                 QCDictation.end(for: p.firstResponder) { p.makeFirstResponder(nil); p.focusField() }
             }
-            model.dictating = false
-            model.dictationNoticed = false
+            setDictation(.off)
             return
         }
         model.returnHeld = false
@@ -1753,20 +1756,42 @@ final class QuickChat {
         DispatchQueue.main.async { [weak self, weak p] in
             guard let self, let p, p.isVisible, p.isKeyWindow, let field = p.firstResponder as? QCTextView else { return }
             let started = QCDictation.begin(for: field)
-            if started { self.dictationStarted = Date() }
-            self.model.dictating = started
-            if !started { self.model.dictationNote = QCDictation.failedWords }
+            guard started else { self.model.dictationNote = QCDictation.failedWords; self.setDictation(.off); return }
+            self.dictationStarted = Date()
+            if self.model.dictation == .on { return }       // the enter notice was quicker than this turn
+            self.setDictation(.starting)
         }
     }
 
-    /// The panel gave up the keyboard (another app, a click elsewhere): Dictation, which follows the keyboard, has ended.
-    func keyLost() { model.dictating = false; model.dictationNoticed = false; model.quick.hideBar() }
+    /// The one place the button's state changes: the start timeout goes with any change, and `starting` sets it.
+    private var startTimer: DispatchWorkItem?
+    static var startTimeout: TimeInterval = 3
+    private func setDictation(_ s: QuickChatModel.DictationState) {
+        startTimer?.cancel()
+        startTimer = nil
+        model.dictation = s
+        guard s == .starting else { return }
+        if model.dictationNote == QCDictation.timeoutWords { model.dictationNote = nil }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.model.dictation == .starting else { return }
+            self.startTimer = nil
+            self.model.dictation = .off
+            self.model.dictationNote = QCDictation.timeoutWords
+        }
+        startTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.startTimeout, execute: work)
+    }
 
-    /// Dictation entered Dictation mode (the button, macOS's shortcut, the Dictation key). Counted only while the panel
-    /// has the keyboard: the notice is system-wide, and Dictation elsewhere is not Dictation in the field.
+    /// The panel gave up the keyboard (another app, a click elsewhere): Dictation, which follows the keyboard, has ended.
+    func keyLost() { setDictation(.off); model.quick.hideBar() }
+
+    /// Dictation entered Dictation mode (the button, macOS's shortcut, the Dictation key): the button is on, also when it
+    /// showed off or starting (a late notice after the timeout included, which takes its quiet line away). Counted only
+    /// while the panel has the keyboard: the notice is system-wide, and Dictation elsewhere is not Dictation in the field.
     func dictationEntered() {
         guard panel?.isKeyWindow == true else { return }
-        model.dictationNoticed = true
+        if model.dictationNote == QCDictation.timeoutWords { model.dictationNote = nil }
+        setDictation(.on)
     }
 
     /// Dictation left Dictation mode (its floating mic clicked, Esc, the Dictation key, a timeout): the button goes off.
@@ -1775,11 +1800,10 @@ final class QuickChat {
     let dictationWatch = QCDictationWatch(listen: !QCQuiet.on)
     static var exitGrace: TimeInterval = 0.5
     private var dictationStarted = Date.distantPast
-    /// The enter notice state ends with any exit: a stale "Dictation runs" would turn an input method's Return into a stop.
+    /// `starting` and `on` end with any exit: a stale "Dictation runs" would turn an input method's Return into a stop.
     func dictationExited() {
-        if Date().timeIntervalSince(dictationStarted) >= Self.exitGrace { model.dictationNoticed = false }
-        guard model.dictating, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
-        model.dictating = false
+        guard model.dictation != .off, Date().timeIntervalSince(dictationStarted) >= Self.exitGrace else { return }
+        setDictation(.off)
     }
     /// Esc: the keys list closes if it is open; else the find bar (and its highlights), else the selection's quick actions; else
     /// the panel hides.
