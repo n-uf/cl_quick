@@ -455,7 +455,8 @@ cl_quick runs with or without [cl_audit](https://github.com/n-uf/cl_audit) and s
 but a folder's sign-in lock (`~/Library/Caches/n-uf/signin-*.lock`), so the two never sign one folder in at once. Both
 compile the same shared modules from source: a tagged release of [cl_kit](https://github.com/n-uf/cl_kit), copied into
 `Vendor/cl_kit-<tag>/` by `scripts/vendor.sh <tag>` and never edited here (a change is a pull request to cl_kit and a new
-tag). cl_quick builds them without cl_kit's `Auth/Keychain.swift`.
+tag). cl_quick builds them without cl_kit's `Auth/Keychain.swift` and `Auth/DiscoveryApp.swift` (its chat and session
+readers). The menu bar menu's standby rows are cl_kit's `MenuRows` (`MenuAccountRowView`).
 On its first run it copies cl_audit's old quick chat settings (the shortcut, model and thinking), if there are any.
 
 ## Checks
