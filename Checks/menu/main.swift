@@ -4,6 +4,7 @@
 import AddressPrivacy
 import AppKit
 import ClaudeAuth
+import Combine
 import MenuRows
 import ProfileCore
 
@@ -36,8 +37,8 @@ func level(five: Double?, fiveIn: TimeInterval = 65 * 60, week: Double?, weekIn:
     l.at = now.addingTimeInterval(-ago)
     return l
 }
-func make(_ l: QuickChatLevel?, address: String? = mainAddress, problem: SignInProblem? = nil, profile: Profile = main) -> QCMenuProfile {
-    QCMenuProfile.make(profile: profile, level: l, address: address, problem: problem, now: now)
+func make(_ l: QuickChatLevel?, address: String? = mainAddress, problem: SignInProblem? = nil, profile: Profile = main, reading: Bool = false) -> QCMenuProfile {
+    QCMenuProfile.make(profile: profile, level: l, address: address, problem: problem, reading: reading, now: now)
 }
 
 // ── the words of a block ───────────────────────────────────────────────────────────────────────────
@@ -75,14 +76,14 @@ let savedWeek = make(level(five: 40, week: 100, ago: 2 * 3600))
 check("saved full: a 2 h old full week with its reset ahead: grey 'Week full · last known', no dot colour, 'Last known 2 h ago' under the bars",
       savedWeek.fullNote == "Week full · last known" && savedWeek.fullNoteStale && savedWeek.dotP == nil && !savedWeek.noUsage && savedWeek.updated == "Last known 2 h ago",
       "\(savedWeek.lines)")
-check("saved full: the full window's row grey at 100% with when it is back; the other one's 40% (over an hour old) is not shown: '–'",
-      savedWeek.rows.map(\.id) == ["5h", "wk"] && savedWeek.rows.map(\.share) == ["–", "100%"] && savedWeek.rows[0].p == nil && savedWeek.rows[1].colour == Painter.grey
-      && savedWeek.rows[1].resets == TimeWords.back(now.addingTimeInterval(29 * 3600), now: now) && savedWeek.rows[0].resets == "",
+check("saved full: the full window's row grey at 100% with when it is back; the other one's 40% (2 h old) grey as last known, with its countdown",
+      savedWeek.rows.map(\.id) == ["5h", "wk"] && savedWeek.rows.map(\.share) == ["40%", "100%"] && savedWeek.rows.allSatisfy { $0.colour == Painter.grey }
+      && savedWeek.rows[1].resets == TimeWords.back(now.addingTimeInterval(29 * 3600), now: now) && savedWeek.rows[0].resets == "in 1h 5m",
       "\(savedWeek.lines)")
 check("saved full: the words never read as now ('last known', no 'Updated')", !savedWeek.lines.joined().contains("Updated") && savedWeek.spoken.contains("last known"))
 let savedFive = make(level(five: 100, week: 20, ago: 3 * 3600))
-check("saved full: a 3 h old full 5-hour window the same way: '5-hour full · last known', its row 100% back …, the week '–'",
-      savedFive.fullNote == "5-hour full · last known" && savedFive.fullNoteStale && savedFive.rows.map(\.share) == ["100%", "–"] && savedFive.rows[0].resets.hasPrefix("back")
+check("saved full: a 3 h old full 5-hour window the same way: '5-hour full · last known', its row 100% back …, the week's 20% grey",
+      savedFive.fullNote == "5-hour full · last known" && savedFive.fullNoteStale && savedFive.rows.map(\.share) == ["100%", "20%"] && savedFive.rows[0].resets.hasPrefix("back")
       && savedFive.updated == "Last known 3 h ago" && savedFive.dotP == nil, "\(savedFive.lines)")
 let savedDay = make(level(five: 30, fiveIn: -60, week: 100, ago: 28 * 3600))
 check("saved full: a day-old full week with its reset still ahead: 'Week full · last known', 'Last known yesterday'",
@@ -98,8 +99,9 @@ check("saved full: a refusal that names no window, 3 h old: 'Limit full · back 
 var oldRefusal = level(five: 30, week: 40, ago: 3 * 3600)
 oldRefusal.refusedUntil = now.addingTimeInterval(2 * 3600); oldRefusal.refusedAt = now.addingTimeInterval(-3 * 3600)
 let oldRefusalBlock = make(oldRefusal)
-check("saved full: the same refusal 3 h old with 5-hour 30% and week 40%: those old numbers aren't shown, two '–' rows, same note",
-      oldRefusalBlock.fullNote == refusalBlock.fullNote && oldRefusalBlock.rows.map(\.share) == ["–", "–"] && oldRefusalBlock.shape == rich.shape, "\(oldRefusalBlock.lines)")
+check("saved full: the same refusal 3 h old with 5-hour 30% and week 40%: those numbers grey as last known, same note",
+      oldRefusalBlock.fullNote == refusalBlock.fullNote && oldRefusalBlock.rows.map(\.share) == ["30%", "40%"] && oldRefusalBlock.rows.allSatisfy { $0.colour == Painter.grey }
+      && oldRefusalBlock.shape == rich.shape, "\(oldRefusalBlock.lines)")
 // a dateless 100% (no reset given) read 20 minutes ago: last known, grey, at 100% with no reset words; it never acts, so
 // no full note, and the chat isn't held back by it (ProfileStore.shownLevel takes only fresh numbers, and its display
 // holds nothing back)
@@ -119,27 +121,55 @@ check("saved full: the same refusal 12 min old (rows shown): its end is in the n
       recentRefusalBlock.fullNote == refusalBlock.fullNote && recentRefusalBlock.rows.map(\.share) == ["30%", "40%"] && recentRefusalBlock.updated == "Last known 12 min ago",
       "\(recentRefusalBlock.lines)")
 var savedNoReset = level(five: nil, week: 100, ago: 2 * 3600); savedNoReset.weekResets = nil
-check("saved full: a 100% with no reset date is not kept (nothing says it still stands)", make(savedNoReset).noUsage && make(savedNoReset).fullNote == nil)
+check("saved full: a 100% with no reset date is no full limit (nothing says it still stands): grey 100% as last known, no note",
+      make(savedNoReset).rows.map(\.share) == ["100%"] && make(savedNoReset).rows[0].resets == "" && make(savedNoReset).fullNote == nil
+      && make(savedNoReset).updated == "Last known 2 h ago", "\(make(savedNoReset).lines)")
 var dateless = level(five: 100, week: 100, ago: 2 * 3600); dateless.weekResets = nil
 let datelessBlock = make(dateless)
 check("saved full: a week 100% with no date doesn't hide a 5-hour 100% that has one: '5-hour full · last known', its row 100% back …",
-      datelessBlock.fullNote == "5-hour full · last known" && datelessBlock.rows.map(\.share) == ["100%", "–"] && datelessBlock.rows[0].resets.hasPrefix("back"), "\(datelessBlock.lines)")
+      datelessBlock.fullNote == "5-hour full · last known" && datelessBlock.rows.map(\.share) == ["100%", "100%"] && datelessBlock.rows[0].resets.hasPrefix("back")
+      && datelessBlock.rows[1].resets == "", "\(datelessBlock.lines)")
 var datelessRefused = level(five: nil, week: 100, ago: 2 * 3600); datelessRefused.weekResets = nil
 datelessRefused.refusedUntil = now.addingTimeInterval(3600); datelessRefused.refusedAt = now.addingTimeInterval(-2 * 3600)
 check("saved full: nor does it hide a refusal that is still ahead", make(datelessRefused).fullNote?.hasSuffix("last known") == true && make(datelessRefused).fullNote?.contains("full") == true,
       "\(make(datelessRefused).lines)")
 let afterReset = make(level(five: nil, week: 100, weekIn: -60, ago: 2 * 3600))
-check("saved full: once its reset is past, normal rules: 'No recent numbers', no note",
-      afterReset.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No recent numbers"] && afterReset.fullNote == nil && !afterReset.fullNoteStale
+check("saved full: once its reset is past, no number says anything: 'No usage yet', no note",
+      afterReset.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No usage yet"] && afterReset.fullNote == nil && !afterReset.fullNoteStale
       && afterReset.rows.isEmpty && afterReset.dotP == nil, "\(afterReset.lines)")
 let afterResetFive = make(level(five: 100, fiveIn: -60, week: 30, weekIn: -60, ago: 90 * 60))
-check("saved full: both windows reset since, over an hour old: 'No recent numbers'", afterResetFive.noUsage && afterResetFive.noUsageText == "No recent numbers" && afterResetFive.fullNote == nil)
-check("saved full: a not-full old number is still hidden: 'No recent numbers'", make(level(five: 40, week: 88, ago: 2 * 3600)).noUsageText == "No recent numbers")
+check("saved full: both windows reset since: 'No usage yet'", afterResetFive.noUsage && afterResetFive.noUsageText == "No usage yet" && afterResetFive.fullNote == nil)
+// numbers however old show, grey, as last known (the menu reads fresh ones as it opens)
+let twoHours = make(level(five: 40, week: 88, ago: 2 * 3600))
+check("last known: 2 h old 40% and 88% show grey with their countdowns, 'Last known 2 h ago', no dot colour, no note",
+      twoHours.rows.map(\.share) == ["40%", "88%"] && twoHours.rows.map(\.resets) == ["in 1h 5m", "in 1d 5h"] && twoHours.rows.allSatisfy { $0.colour == Painter.grey }
+      && twoHours.updated == "Last known 2 h ago" && twoHours.dotP == nil && twoHours.fullNote == nil && twoHours.shape == rich.shape, "\(twoHours.lines)")
 let dayOld = make(level(five: nil, week: 100, weekIn: -3600, ago: 28 * 3600))
-check("stale: a day-old week whose reset is past isn't shown at all: 'No recent numbers', no bars, no note, no age",
-      dayOld.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No recent numbers"] && dayOld.rows.isEmpty && dayOld.fullNote == nil
+check("last known: a day-old week whose reset is past says nothing now: 'No usage yet', no bars, no note, no age",
+      dayOld.lines == ["Claude Main", AddressText.mask(mainAddress) + " · in use", "No usage yet"] && dayOld.rows.isEmpty && dayOld.fullNote == nil
       && dayOld.dotP == nil && dayOld.updated == nil, "\(dayOld.lines)")
-check("stale: 'No recent numbers' sizes the block like 'No usage yet'", QCMenuUsageBlock.height(dayOld) == QCMenuUsageBlock.height(make(nil)))
+check("last known: no number left sizes the block like no numbers at all", QCMenuUsageBlock.height(dayOld) == QCMenuUsageBlock.height(make(nil)))
+// while the refresher asks for fresh numbers
+let readingOld = make(level(five: 40, week: 88, ago: 3 * 3600), reading: true)
+check("reading: 'Reading now… · last known 3 h ago' under the grey bars, the shape of 'Last known' (the answer replaces it live)",
+      readingOld.updated == "Reading now… · last known 3 h ago" && readingOld.rows.map(\.share) == ["40%", "88%"] && readingOld.shape == twoHours.shape, "\(readingOld.lines)")
+check("reading: no numbers yet says 'Reading now…' in place of 'No usage yet'",
+      make(nil, reading: true).lines.last == "Reading now…" && make(nil, reading: true).shape == make(nil).shape)
+check("reading: fresh numbers still say 'Updated'", make(level(five: 13, week: 88), reading: true).updated == "Updated just now")
+// an answer that changes the block's height waits for the next opening, but the block stops saying it is reading
+let readingNone = QCMenuUsageBlock(make(nil, reading: true)) {}
+readingNone.reload(make(level(five: 13, week: 88)))
+check("reading: an answer that brings the bars to a block with none: 'No usage yet' until the menu opens again (never stuck on 'Reading now…')",
+      readingNone.model.lines.last == "No usage yet" && readingNone.model.rows.isEmpty, "\(readingNone.model.lines)")
+let readingOldBlock = QCMenuUsageBlock(readingOld) {}
+readingOldBlock.reload(make(level(five: 40, week: 88, ago: 3 * 3600)))
+check("reading: a read that ends with no answer: 'Last known 3 h ago' again", readingOldBlock.model.updated == "Last known 3 h ago", "\(readingOldBlock.model.lines)")
+readingOldBlock.reload(make(level(five: 50, week: 90), reading: false))
+check("reading: and an answer of the same shape replaces the numbers live", readingOldBlock.model.updated == "Updated just now" && readingOldBlock.model.rows.map(\.share) == ["50%", "90%"])
+var undated = level(five: 40, week: 88); undated.at = nil
+check("last known: numbers kept before their report time was: grey, 'Last known' with no age",
+      make(undated).updated == "Last known" && make(undated, reading: true).updated == "Reading now… · last known" && make(undated).rows.map(\.share) == ["40%", "88%"],
+      "\(make(undated).lines)")
 check("fresh full: a full week 2 min old is still the crimson note ('Week full · in 1d 5h'), the 5-hour row as it is, the dot crimson",
       make(level(five: 40, week: 100, ago: 2 * 60)).fullNote == "Week full · in 1d 5h" && !make(level(five: 40, week: 100, ago: 2 * 60)).fullNoteStale
       && make(level(five: 40, week: 100, ago: 2 * 60)).dotP == 100 && make(level(five: 40, week: 100, ago: 2 * 60)).rows.map(\.share) == ["40%", "100%"])
@@ -164,6 +194,24 @@ check("a full 5-hour limit: 100% in crimson, the header says so, the bar's reset
       "\(full.rows[0]) \(String(describing: full.fullNote))")
 check("signed out: one line, no bars, no usage", make(level(five: 13, week: 88), address: nil).lines == ["Claude Main", "Signed out."])
 check("a sign-in that stopped: its words, no bars, no usage", make(level(five: 13, week: 88), problem: .stopped).lines == ["Claude Main", "The sign-in stopped working."])
+
+// ── the menu bar icon: the bubble fills with the fuller limit ──────────────────────────────────────
+func icon(_ l: QuickChatLevel?, signedIn: Bool = true) -> QCStatusIconState { .make(name: "Main", level: l, signedIn: signedIn, now: now) }
+check("icon: no numbers, signed out or a broken sign-in: the dashed outline (no share), no colour, no countdown",
+      [icon(nil), icon(level(five: 13, week: 88), signedIn: false)].allSatisfy { $0.p == nil && !$0.warn && !$0.full && $0.countdown == nil })
+check("icon: the fuller limit fills it (13% and 46%: 46), plain", icon(level(five: 13, week: 46)).p == 46 && !icon(level(five: 13, week: 46)).warn)
+check("icon: amber from 80% (79.6 reads as 80), not below", icon(level(five: 79.6, week: 10)).warn && !icon(level(five: 79.4, week: 10)).warn)
+let iconFull = icon(level(five: 100, week: 52))
+check("icon: a full 5-hour limit: full, crimson, with the time to its reset beside it",
+      iconFull.full && iconFull.p == 100 && iconFull.countdown == "1h 5m" && iconFull.spoken == "cl_quick, Main: 5-hour limit full, back in 1h 5m", "\(iconFull)")
+check("icon: 2 h old numbers still fill it, said as last known", icon(level(five: 40, week: 88, ago: 2 * 3600)).p == 88
+      && icon(level(five: 40, week: 88, ago: 2 * 3600)).spoken.hasSuffix("last known"))
+check("icon: a window that reset since doesn't count (the week's 70% from before its reset)", icon(level(five: 20, week: 70, weekIn: -60)).p == 20)
+check("icon: every window reset since: the dashed outline", icon(level(five: 30, fiveIn: -60, week: 70, weekIn: -60, ago: 2 * 3600)).p == nil)
+check("icon: a saved full week whose reset is ahead stays full, however old", icon(level(five: 40, week: 100, ago: 2 * 3600)).full)
+check("icon: plain ones are template images (the menu bar's own colour); amber and crimson ones aren't",
+      QCStatusIconImage.image(icon(level(five: 13, week: 46))).isTemplate && QCStatusIconImage.image(icon(nil)).isTemplate
+      && !QCStatusIconImage.image(icon(level(five: 88, week: 10))).isTemplate && !QCStatusIconImage.image(iconFull).isTemplate)
 
 // ── the view: the address is blurred until the pointer is on it ─────────────────────────────────────
 var picked: [String] = []
@@ -751,10 +799,17 @@ refresher.onEnd = { ended.append($0); running -= 1 }
 
 check("refresh: a profile with no numbers needs them", refresher.needs(pa, store: store) && refresher.needs(pb, store: store))
 check("refresh: a profile with no account signed in is left alone", !refresher.needs(Profile(id: "gone", name: "Gone", folder: home + "/.claude-nowhere"), store: store))
+var readChanges = 0
+let readWatch = refresher.changed.sink { readChanges += 1 }
 refresher.refresh(store: store)
+check("refresh: both profiles are being read as the menu opens (the blocks, built after, say 'Reading now…')",
+      refresher.reading("alpha") && refresher.reading("beta") && readChanges == 0, "\(readChanges)")
 refresher.refresh(store: store)         // the menu opened again at once: nothing more is started
 spin(until: { ended.count >= 2 })
 check("refresh: each profile asked once, one at a time", started == ["alpha", "beta"] && ended == ["alpha", "beta"] && mostAtOnce == 1, "\(started) \(ended) \(mostAtOnce)")
+check("refresh: once both are read, neither is 'Reading now…', and the menu was told as each ended",
+      !refresher.reading("alpha") && !refresher.reading("beta") && readChanges == 2, "\(readChanges)")
+readWatch.cancel()
 check("refresh: claude was looked for once", lookedFor == 1, "\(lookedFor)")
 let got = store.level(of: pa)
 check("refresh: the account in use's numbers are kept (5-hour 44%, week 12%)", got?.fiveHour == 44 && got?.week == 12 && got?.at != nil, "\(String(describing: got))")

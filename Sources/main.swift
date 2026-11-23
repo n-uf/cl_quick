@@ -40,9 +40,12 @@
 //                                       to Built in; chat-noweb, chat-builtin-noweb: the same with Links and search off,
 //                                       so the other built-in text; chat-near: 962 characters; chat-limit: 1,000)
 //   --render-menu OUT.png STATE [dark]  the menu bar menu's profile blocks in a drawn menu, light or dark (STATE: menu,
-//                                       address (the pointer on the first profile's address), full, one, signedout;
+//                                       address (the pointer on the first profile's address), full, one, signedout,
+//                                       reading, lastknown (3 h old numbers, grey, while read again / after);
 //                                       with standby rows: standby, standby-lit, standby-waiting, standby2; with Add an
 //                                       account… after them: add, add-lit, add-waiting, add2)
+//   --render-icon OUT.png               the menu bar icon at each fill (none, 12%, 46%, 68%, 88%, full with its
+//                                       countdown) on a dark and a light menu bar, twice the size
 //   --version
 
 import AppKit
@@ -73,8 +76,16 @@ if args.count >= 4, args[1] == "--render-menu" {
     exit(0)
 }
 
+if args.count >= 3, args[1] == "--render-icon" {
+    Files.readOnly = true
+    QCStatusIconRender.write(to: args[2])
+    exit(0)
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var item: NSStatusItem?
+    /// The icon's fill: the default profile's usage (StatusIcon.swift).
+    private var icon: QCStatusIcon?
     private let chat = QuickChat.shared
 
     /// Before launch ends, so a Services request that launched the app finds its provider (Sources/Service.swift).
@@ -111,8 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         chat.openAddAccount = { id in SettingsWindow.shared.show(profile: id, addAccount: true) }
         chat.start()
         let it = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        it.button?.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "cl_quick")
-        it.button?.image?.isTemplate = true
+        // the bubble fills with the default profile's fuller limit (amber from 80%, crimson when full)
+        icon = QCStatusIcon(button: it.button) { [chat] in store.profile(chat.settings.defaultProfile) ?? store.profiles.first }
         let menu = NSMenu()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -144,17 +155,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let store = ProfileStore.shared
         store.noteAccounts()
         store.reload()          // off the main thread; the next look at the menu has what changed
+        // numbers older than a few minutes are asked for, in the background: first, so their blocks say "Reading now…"
+        let refresher = QCMenuUsageRefresher.shared
+        refresher.refresh(store: store)
+        icon?.update()
         // each profile: its name, the account in use, and that account's two limits (MenuUsage.swift); a click opens the chat on it
         // (a profile's standby accounts are rows under its block: a click asks the same question and sign-in as Settings' Switch…;
         // after them Add an account…, which opens Settings on the profile with that form open)
-        QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) },
+        QCStatusMenu.items(QCStatusMenu.infos(store), live: { QCStatusMenu.info($0, store) }, reading: { refresher.reading($0.id) },
                            switching: { AccountSwitcher.shared.waiting[$0.id] != nil },
                            switchTo: { p, a in AccountSwitcher.shared.confirmAndSwitch(p, key: a.key, email: a.email, origin: .settings) },
                            addAccount: { p in SettingsWindow.shared.show(profile: p.id, addAccount: true) },
                            pick: { [chat = self.chat] id in chat.open(profile: id) })
             .forEach(menu.addItem)
         if !store.profiles.isEmpty { menu.addItem(.separator()) }
-        QCMenuUsageRefresher.shared.refresh(store: store)      // numbers older than a few minutes are asked for, in the background
         if let u = UpdateChecker.shared.available {
             let up = NSMenuItem(title: "Update available: \(u.version)", action: #selector(openUpdate(_:)), keyEquivalent: "")
             up.target = self; up.representedObject = u.page

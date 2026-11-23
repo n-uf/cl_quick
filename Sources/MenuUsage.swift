@@ -4,15 +4,14 @@
 // to the reset, and how old the numbers are. Only the account in use shows usage; a standby account shows none.
 //
 // The numbers are the ones cl_quick already keeps (levels.json, from Claude Code's `get_usage`); the menu shows them at
-// once when it opens: fresh ones in their colours (a full limit as a crimson note), ones over a few minutes old grey as
-// "Last known …", ones over an hour old not at all. One exception: a saved full limit (Week or 5-hour at 100%, or a
-// refusal) whose reset is still ahead stays, grey, until that reset, however old: "Week full · last known" in the
-// header, its row at 100% with "back …" and "Last known 3 h ago" under the bars; when over an hour old the other
-// window's row is "–" (its number is old and nothing bounds it, while a reset still ahead is what says the full one
-// still stands). A refusal that names no window puts its end in the note. No dot colour; the block has the shape of a
-// fresh one, so a fresh answer replaces it live while the menu is open. It is
-// only the menu's: the chat, "Ask on …" and the switch offers never act on a number that isn't fresh (ProfileStore.shownLevel),
-// and a fresh answer replaces it at once. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
+// once when it opens: fresh ones in their colours (a full limit as a crimson note), older ones grey however old, as
+// "Last known 3 h ago", or "Reading now… · last known 3 h ago" while QCMenuUsageRefresher asks for fresh ones (it starts
+// as the menu opens). A window whose reset has passed since shows "–" (its old number says nothing now). A saved full
+// limit (Week or 5-hour at 100%, or a refusal) whose reset is still ahead stays until that reset: "Week full · last
+// known" in the header, grey, its row at 100% with "back …". A refusal that names no window puts its end in the note.
+// No dot colour; the block has the shape of a fresh one, so a fresh answer replaces it live while the menu is open. It
+// is only the menu's: the chat, "Ask on …" and the switch offers never act on a number that isn't fresh
+// (ProfileStore.shownLevel), and a fresh answer replaces it at once. When they are older than a few minutes, QCMenuUsageRefresher asks Claude Code again in the
 // background: cl_kit's short ask (ClaudeAsk) per profile, one at a time, sent `initialize` and `get_usage` and nothing
 // else (no message to a model), and stopped as soon as it has answered. Nothing is read from the Keychain; no token is
 // ever seen. The rules the block follows (how old, what holds the account back, the colours, the week-only rule, the
@@ -66,20 +65,19 @@ struct QCMenuProfile: Equatable {
     let account: Account
     /// The two windows; empty with no numbers.
     let rows: [Row]
-    /// The account in use has no numbers yet, or none recent: one muted line instead of the bars.
+    /// The account in use has no numbers yet (or none that still say anything): one muted line instead of the bars.
     let noUsage: Bool
-    /// "Updated just now", "Updated 3 min ago"; "Last known 12 min ago" for numbers no longer fresh.
-    let updated: String?
-    /// The muted line when `noUsage`: "No usage yet", or "No recent numbers" when the last ones are over an hour old.
+    /// "Updated just now", "Updated 3 min ago"; "Last known 3 h ago" for numbers no longer fresh, "Reading now… · last
+    /// known 3 h ago" while fresh ones are being asked for.
+    var updated: String?
+    /// The muted line when `noUsage`: "No usage yet", or "Reading now…" while numbers are being asked for.
     var noUsageText = Self.noUsageWords
     /// `fullNote` is a saved full limit, last known and not now: drawn grey, not crimson.
     var fullNoteStale = false
 
     static let noUsageWords = "No usage yet"
-    /// Numbers older than an hour (QuickChatLevel.ages' `hiddenAfter`) aren't shown at all, not even muted: the plan, the
-    /// account or the week may have changed since (the refresh asks for new ones as the menu opens). Except a full limit
-    /// whose reset is still ahead.
-    static let noRecentWords = "No recent numbers"
+    /// Said while QCMenuUsageRefresher asks Claude Code for this profile's numbers (it starts as the menu opens).
+    static let readingWords = "Reading now…"
 
     /// "Claude Main"; a name that starts with Claude as it is.
     static func title(_ name: String) -> String { name.lowercased().hasPrefix("claude") ? name : "Claude " + name }
@@ -105,12 +103,29 @@ struct QCMenuProfile: Equatable {
     var spoken: String { lines.joined(separator: ". ") }
 
     /// What sets the block's height (see QCMenuUsageBlock.height): a live update that changes it waits for the next time
-    /// the menu opens. The header note doesn't (but its width does: QCMenuUsageBlock.reload).
+    /// the menu opens (but for the reading words: `notReading`). The header note doesn't (but its width does:
+    /// QCMenuUsageBlock.reload).
     var shape: [Int] { [rows.count, noUsage ? 1 : 0, updated == nil ? 0 : 1] }
 
+    private static let readingLead = readingWords + " · last known"
+
+    /// Whether it says fresh numbers are being read.
+    var isReading: Bool { noUsageText == Self.readingWords || updated?.hasPrefix(Self.readingLead) == true }
+
+    /// The same block, no longer saying a read is under way: "Reading now…" back to "No usage yet", "Reading now… · last
+    /// known 3 h ago" to "Last known 3 h ago". What an open menu shows when the read ended with an answer that changes
+    /// the block's height (the numbers then wait for the next time it opens; the words mustn't say it is still reading).
+    var notReading: QCMenuProfile {
+        var m = self
+        if m.noUsageText == Self.readingWords { m.noUsageText = Self.noUsageWords }
+        if let u = m.updated, u.hasPrefix(Self.readingLead) { m.updated = "Last known" + u.dropFirst(Self.readingLead.count) }
+        return m
+    }
+
     /// The block for a profile: `address` is the account in use (nil: signed out), `problem` what is wrong with its sign-in,
-    /// `level` its numbers as last reported (nil: none yet).
-    static func make(profile p: Profile, level: QuickChatLevel?, address: String?, problem: SignInProblem?, now: Date = Date()) -> QCMenuProfile {
+    /// `level` its numbers as last reported (nil: none yet), `reading` whether fresh ones are being asked for now.
+    static func make(profile p: Profile, level: QuickChatLevel?, address: String?, problem: SignInProblem?, reading: Bool = false,
+                     now: Date = Date()) -> QCMenuProfile {
         guard let address, problem != .signedOut else {
             return QCMenuProfile(id: p.id, title: title(p.name), dotP: nil, fullNote: nil, account: .problem(words: SignInProblem.signedOut.words),
                                  rows: [], noUsage: false, updated: nil)
@@ -119,18 +134,15 @@ struct QCMenuProfile: Equatable {
             return QCMenuProfile(id: p.id, title: title(p.name), dotP: nil, fullNote: nil, account: .problem(words: problem.words),
                                  rows: [], noUsage: false, updated: nil)
         }
-        // how old the numbers are: fresh ones are the account now; ones over a few minutes old are what Claude Code said
-        // last, drawn grey (the refresh asks again as the menu opens); over an hour old, not shown, except a saved full
-        // limit whose reset is still ahead: that stays, grey and worded "last known", until the reset
-        // (ProfileCore's display value by cl_quick's ages, QuickChatLevel.ages: fresh numbers act; older ones are drawn
-        // grey; past the hour none show but what holds the account back with a known end still ahead)
+        // how old the numbers are: fresh ones are the account now; older ones are what Claude Code said last, drawn grey
+        // however old (the refresh asks again as the menu opens), a window whose reset has passed since as "–"; a saved
+        // full limit whose reset is still ahead stays, grey and worded "last known", until the reset (ProfileCore's
+        // display value by cl_quick's ages, QuickChatLevel.ages: fresh numbers act; older ones are only drawn)
         let d = level?.display(now)
         let fresh = d?.tier == .fresh
-        let old = level?.age(now) == .hidden
         // what holds the account back: while fresh, any; else a saved full limit (or refusal) whose end is still ahead
         let full = d?.heldBack
         let savedFull = fresh ? nil : full
-        let shown = level != nil && !(old && savedFull == nil)
         func row(_ id: String, _ label: String) -> Row {
             let isFull = full?.window.id == id
             let p = isFull ? 100 : d?.number(id)
@@ -140,16 +152,14 @@ struct QCMenuProfile: Equatable {
             return Row(id: id, label: label, p: p, share: QuickChatLevel.pct(p), resets: words, stale: !fresh)
         }
         var rows: [Row] = []
-        if shown, let d {
+        if let d {
             rows = [row("5h", "5-hour"), row("wk", "Week")]
                 .filter { $0.id != "5h" || d.hasFiveHour }       // no 5-hour window on the account: the week alone
-            // an old saved full limit keeps both rows (so the block has the shape of a fresh one and a fresh answer
-            // replaces it live), but the other window's number, over an hour old, is not shown: "–"
-            if old { rows = rows.map { $0.id == full?.window.id ? $0 : Row(id: $0.id, label: $0.label, p: nil, share: QuickChatLevel.pct(nil), resets: "", stale: true) } }
-            // two "–" rows stay for a saved full that names no window, so it keeps a fresh block's shape too
+            // two "–" rows stay for a saved full that names no window, so it keeps a fresh block's shape too; with no
+            // full one, rows that all say nothing (every window reset since) are no numbers
             if savedFull == nil, rows.allSatisfy({ $0.p == nil }) { rows = [] }
         }
-        let agoWords = shown ? level?.at.map { AccountBook.ago($0, now: now) } : nil
+        let agoWords = level?.at.map { AccountBook.ago($0, now: now) }
         let name = full.map { $0.window == .fiveHour ? "5-hour" : $0.window == .week ? "Week" : "Limit" }
         // fresh: "Week full · in 2d 3h", crimson. Saved: "Week full · last known", grey, with the age on the line under
         // the bars as for any last known number; a refusal that names no window has no row to carry its end, so its
@@ -158,8 +168,12 @@ struct QCMenuProfile: Equatable {
             fresh ? name.map { $0 + " full" + (f.resets.map { " · in " + TimeWords.countdown($0, now: now) } ?? "") }
                   : name.map { $0 + " full" + (f.window == .any ? f.resets.map { " · " + TimeWords.back($0, now: now) } ?? "" : "") + " · last known" }
         }
-        let updated: String? = rows.isEmpty ? nil : agoWords.map { (fresh ? "Updated " : "Last known ") + $0 }
-        let noUsageText = old ? noRecentWords : noUsageWords
+        // last known: "Last known 3 h ago", or "Reading now… · last known 3 h ago" while fresh ones are asked for (the line
+        // is there either way, so the answer replaces it live)
+        // (numbers kept before their report time was: "Last known" with no age)
+        let ago = agoWords.map { " " + $0 } ?? ""
+        let updated: String? = rows.isEmpty ? nil : fresh ? agoWords.map { "Updated " + $0 } : (reading ? readingLead : "Last known") + ago
+        let noUsageText = reading ? readingWords : noUsageWords
         return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? d?.binding?.p : nil, fullNote: note,
                              account: .inUse(address: address), rows: rows, noUsage: rows.isEmpty, updated: updated,
                              noUsageText: noUsageText, fullNoteStale: !fresh && note != nil)
@@ -292,17 +306,21 @@ final class QCMenuUsageBlock: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil, let provider else { watch = nil; return }
-        // the store says it will change before it has: read it once it has
-        watch = ProfileStore.shared.$levels.sink { [weak self] _ in
+        // the store says it will change before it has: read it once it has. A read that ends with no answer changes no
+        // numbers, only "Reading now…" back to "Last known …": the refresher says so.
+        watch = ProfileStore.shared.$levels.map { _ in () }.merge(with: QCMenuUsageRefresher.shared.changed).sink { [weak self] _ in
             DispatchQueue.main.async { guard let self else { return }; self.reload(provider()) }
         }
     }
 
     /// New numbers for the block, in place: only when its height stays (a menu doesn't take a row that changes size)
     /// and it still fits the width the menu gave it (a header note that grew would be cut).
+    /// An answer that changes the height waits for the next time the menu opens, but once the read is over the block
+    /// stops saying "Reading now…" (QCMenuProfile.notReading).
     func reload(_ m: QCMenuProfile) {
-        guard m != model, m.shape == model.shape, Self.width(m) <= frame.width else { return }
-        model = m
+        let next = m.shape == model.shape ? m : m.isReading ? model : model.notReading
+        guard next != model, Self.width(next) <= frame.width else { return }
+        model = next
         needsDisplay = true
     }
 
@@ -484,6 +502,7 @@ enum QCStatusMenu {
     /// a line between profiles and none inside a profile's group. `pick` opens the quick chat on a profile. The rows stay
     /// as built when the menu opened (it is built again on every open).
     static func items(_ infos: [Info], now: Date = Date(), live: ((Profile) -> Info)? = nil,
+                      reading: @escaping (Profile) -> Bool = { _ in false },
                       switching: (Profile) -> Bool = { _ in false }, switchTo: ((Profile, KnownAccount) -> Void)? = nil,
                       addAccount: ((Profile) -> Void)? = nil,
                       pick: @escaping (String) -> Void) -> [NSMenuItem] {
@@ -493,12 +512,13 @@ enum QCStatusMenu {
         for (n, i) in infos.enumerated() {
             if n > 0 { items.append(.separator()) }
             let p = i.profile
-            let block = QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: i.level, address: i.address, problem: i.problem, now: now),
+            let block = QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: i.level, address: i.address, problem: i.problem,
+                                                            reading: reading(p), now: now),
                                          joined: (switchTo != nil && !i.standby.isEmpty) || addAccount != nil) { pick(p.id) }
             if let live {
                 block.provider = {
                     let j = live(p)
-                    return QCMenuProfile.make(profile: j.profile, level: j.level, address: j.address, problem: j.problem)
+                    return QCMenuProfile.make(profile: j.profile, level: j.level, address: j.address, problem: j.problem, reading: reading(j.profile))
                 }
             }
             blocks.append(block)
@@ -555,6 +575,12 @@ final class QCMenuUsageRefresher {
     private var claudePath: String?
     private var lastTried: [String: Date] = [:]
 
+    /// Told when a profile starts or stops being read (an open menu's blocks say "Reading now…" meanwhile).
+    let changed = PassthroughSubject<Void, Never>()
+
+    /// Whether a profile's numbers are being asked for now, or waiting their turn.
+    func reading(_ id: String) -> Bool { running == id || queue.contains(id) }
+
     /// Whether a profile's numbers are worth asking for now.
     func needs(_ p: Profile, store: ProfileStore = .shared, now: Date = Date()) -> Bool {
         guard ClaudeFolder.account(p.path) != nil, store.signInProblem(p) == nil else { return false }
@@ -566,6 +592,7 @@ final class QCMenuUsageRefresher {
 
     /// The menu opened: ask for the numbers that are old, in the background, one profile at a time.
     func refresh(store: ProfileStore = .shared, now: Date = Date()) {
+        // (the menu's blocks are built after this and read `reading` then: nothing to tell them yet)
         for p in store.profiles where needs(p, store: store, now: now) { queue.append(p.id); lastTried[p.id] = now }
         pump(store)
     }
@@ -618,6 +645,7 @@ final class QCMenuUsageRefresher {
         running = nil
         onEnd(id)
         pump(store)
+        changed.send()
     }
 }
 
@@ -625,10 +653,11 @@ final class QCMenuUsageRefresher {
 
 /// `--render-menu OUT.png STATE [light|dark]`: the menu's profile blocks in a drawn menu, with sample names and example.com
 /// addresses. STATE: menu (three profiles: plenty left, fuller, no numbers yet), address (the pointer on the first
-/// profile's address), full (a full 5-hour limit), one (a single profile in use), signedout. With standby accounts:
+/// profile's address), full (a full 5-hour limit), one (a single profile in use), signedout, reading (3 h old numbers,
+/// grey, "Reading now… · last known 3 h ago"), lastknown (the same after a read with no answer). With standby accounts:
 /// standby (one profile and one standby row, at rest), standby-lit (the same, the row highlighted: sharp address and
 /// "Switch…"), standby-waiting (a sign-in waited for: the row dimmed further), standby2 (two profiles: Main with two
-/// standby rows, the first highlighted, and Work with none and no recent numbers). With Add an account… after the
+/// standby rows, the first highlighted, and Work with none and no numbers). With Add an account… after the
 /// standby rows: add (one profile, one standby row), add-lit (Add an account… highlighted), add-waiting (a sign-in waited
 /// for: both rows dimmed), add2 (Main with two standby rows, Work with none: Add an account… alone).
 enum QCMenuRender {
@@ -642,9 +671,11 @@ enum QCMenuRender {
             l.at = now.addingTimeInterval(-ago)
             return l
         }
-        func block(_ id: String, _ name: String, _ level: QuickChatLevel?, _ address: String?, problem: SignInProblem? = nil, joined: Bool = false) -> QCMenuUsageBlock {
+        func block(_ id: String, _ name: String, _ level: QuickChatLevel?, _ address: String?, problem: SignInProblem? = nil, joined: Bool = false,
+                   reading: Bool = false) -> QCMenuUsageBlock {
             let p = Profile(id: id, name: name, folder: "~/.claude-\(id)")
-            return QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: level, address: address, problem: problem, now: now), joined: joined) {}
+            return QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: level, address: address, problem: problem, reading: reading, now: now),
+                                    joined: joined) {}
         }
         func standby(_ address: String, waiting: Bool = false, lit: Bool = false) -> MenuAccountRowView {
             let r = MenuAccountRowView(row: QCStatusMenu.standbyRow(address: address, waiting: waiting), columns: .bar,
@@ -676,6 +707,9 @@ enum QCMenuRender {
             blocks = [block("main", "Main", level(42, 68), "alex@example.com", joined: true), block("work", "Work", level(nil, nil, ago: 2 * 3600), "kim.work@example.org")]
             standbyRows = [[standby("alex.studio@example.com", lit: true), standby("alex.old@example.org")], []]
         case "one": blocks = [block("main", "Main", level(13, 88), "ultra-1@example.com")]
+        case "reading", "lastknown":
+            // 3 h old numbers, grey: while fresh ones are read (reading), and after a read that got no answer (lastknown)
+            blocks = [block("main", "Main", level(41, 24, ago: 3 * 3600), "alex@example.com", reading: state == "reading")]
         case "full": blocks = [block("main", "Main", level(100, 64), "ultra-1@example.com"), block("work", "Work", level(31, 52, ago: 7 * 60), "ultra-2@example.com")]
         case "signedout": blocks = [block("main", "Main", level(13, 88), "ultra-1@example.com"), block("spare", "Spare", nil, nil)]
         default:

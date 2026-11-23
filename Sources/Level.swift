@@ -106,11 +106,10 @@ struct QuickChatLevel: Codable, Equatable {
     /// cl_quick's ages, by ProfileCore's rules (its Core/README): numbers count as the account's state now for 5 minutes
     /// after Claude Code gave them (fresh: they act). Older ones are only what it said last (the plan may have changed
     /// since, or another account been in use): nothing is drawn full, refused or offered elsewhere on them, and the menu
-    /// shows them grey as last known (ProfileStore.shownLevel, QCMenuProfile); past an hour not at all, except a full limit
-    /// or a refusal whose known end is still ahead, grey, until then (`datedFullStays`).
-    static let ages = Headline.Ages(freshFor: 5 * 60, hiddenAfter: 3600, datedFullStays: true)
-    /// The same, never hidden by age: Settings shows the last numbers however old (the caption says when).
-    static let settingsAges = Headline.Ages(freshFor: 5 * 60, hiddenAfter: nil, datedFullStays: true)
+    /// and Settings show them grey as last known however old (ProfileStore.shownLevel, QCMenuProfile, LimitBars), with
+    /// when they were read; a window whose reset has passed since shows no number. A full limit or a refusal whose known
+    /// end is still ahead stays, grey, until then (`datedFullStays`).
+    static let ages = Headline.Ages(freshFor: 5 * 60, hiddenAfter: nil, datedFullStays: true)
 
     /// The numbers as ProfileCore reads them (no report time: as old as can be).
     var usage: Usage {

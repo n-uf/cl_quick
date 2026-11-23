@@ -351,7 +351,7 @@ struct LimitBars: View {
 
     var body: some View {
         // numbers older than a few minutes are shown as reported (the caption says when), never as a full limit now
-        let d = level.display(now, ages: QuickChatLevel.settingsAges)
+        let d = level.display(now)
         let fresh = d.tier == .fresh
         VStack(alignment: .leading, spacing: 8) {
             if d.hasFiveHour { bar("5 hours", "5h", d, fresh: fresh) }
