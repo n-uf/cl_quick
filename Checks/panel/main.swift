@@ -1379,7 +1379,7 @@ do {
     spin(0.1)
     let field = p.firstResponder as? QCTextView
     check("mic: a click makes the panel key and the field its first responder", p.isKeyWindow && field != nil)
-    check("mic: and starts Dictation for that field", sent.count == 1 && sent[0].0 == QCDictation.start && sent[0].1 === field && m.dictating,
+    check("mic: and starts Dictation for that field", sent.count == 1 && sent[0].0 == QCDictation.start && sent[0].1 === field && m.dictation == .starting,
           "\(sent.map { "\($0.0)" })")
     // a click again: Dictation's marked text is committed (the words stay), then the field's input context ends it
     // (discard, its own stop, deactivate, activate); never the app's stopDictation: (a toggle) or the start action
@@ -1390,18 +1390,18 @@ do {
     m.dictate(false)
     check("mic: a second click commits Dictation's marked text, the words stay in the field",
           field?.hasMarkedText() == false && m.field.hasSuffix("said so far"), "\(m.field.debugDescription)")
-    check("mic: and ends Dictation in the field's input context, step by step", stopped(since: n, field: field) && !m.dictating, steps(since: n))
+    check("mic: and ends Dictation in the field's input context, step by step", stopped(since: n, field: field) && m.dictation == .off, steps(since: n))
     check("mic: the field still has the keyboard after, the panel still key", p.isKeyWindow && p.firstResponder === field && field != nil)
     // a state gone stale (Dictation ended by Esc or the Dictation key): the same steps, each harmless when it has ended;
     // nothing that could start it again
     n = sent.count
-    m.dictating = true; m.dictate(false)
-    check("mic: a stale state ends with the same steps, never a start or the app's toggle", stopped(since: n, field: field) && neverToggled() && !m.dictating,
+    m.dictation = .on; m.dictate(false)
+    check("mic: a stale state ends with the same steps, never a start or the app's toggle", stopped(since: n, field: field) && neverToggled() && m.dictation == .off,
           steps(since: n))
     // the panel not key (the keyboard elsewhere): the context ends the session but doesn't take the keyboard back
     n = sent.count
     p.quietKey = false
-    m.dictating = true; m.dictate(false)
+    m.dictation = .on; m.dictate(false)
     check("mic: not key, the context doesn't take the keyboard back (no activate)",
           sent.dropFirst(n).map(\.0) == QCDictation.stopSteps.filter { $0 != QCDictation.activate }, steps(since: n))
     p.makeKey(); spin(0.1)
@@ -1424,7 +1424,7 @@ do {
     // the panel giving up the keyboard: Dictation has ended with it
     m.dictate(true); spin(0.1)
     p.onKeyLost()
-    check("mic: the panel losing the keyboard ends the dictating state", !m.dictating)
+    check("mic: the panel losing the keyboard ends the starting state", m.dictation == .off)
     // Dictation ended by macOS (its floating mic clicked, Esc, the Dictation key, a timeout): DictationIM's exit notice
     // turns the button off, and only that (nothing sent: a wrong notice must not stop a Dictation still running)
     do {
@@ -1435,44 +1435,103 @@ do {
         m.dictate(true); spin(0.1)
         n = sent.count
         chat.dictationWatch.exited(exit)
-        check("mic: an exit notice right after the button started it is an earlier Dictation's: the state stays on",
-              m.dictating && sent.count == n)
+        check("mic: an exit notice right after the button started it is an earlier Dictation's: the state stays starting",
+              m.dictation == .starting && sent.count == n)
         QuickChat.exitGrace = 0
         chat.dictationWatch.exited(exit)
-        check("mic: Dictation ended by macOS turns the button off, sends nothing", !m.dictating && sent.count == n, steps(since: n))
+        check("mic: Dictation ended by macOS turns the button off, sends nothing", m.dictation == .off && sent.count == n, steps(since: n))
         chat.dictationWatch.exited(exit)
-        check("mic: an exit notice with the button off changes nothing", !m.dictating && sent.count == n)
+        check("mic: an exit notice with the button off changes nothing", m.dictation == .off && sent.count == n)
         var hops = 0
-        m.dictating = true
+        m.dictation = .on
         DispatchQueue.global().async { chat.dictationWatch.exited(exit) }
-        while m.dictating && hops < 50 { spin(0.02); hops += 1 }
-        check("mic: an exit notice off the main thread reaches the button on it", !m.dictating, "\(hops)")
+        while m.dictation != .off && hops < 50 { spin(0.02); hops += 1 }
+        check("mic: an exit notice off the main thread reaches the button on it", m.dictation == .off, "\(hops)")
         QuickChat.exitGrace = wasGrace
+    }
+    // the three states: starting until macOS's enter notice, on after it (a click or not), off after an exit; 3 s without
+    // an enter notice is a quiet line, and a late one still turns it on
+    do {
+        let enter = Notification(name: QCDictationWatch.enterName), exit = Notification(name: QCDictationWatch.exitName)
+        let wasGrace = QuickChat.exitGrace, wasTimeout = QuickChat.startTimeout
+        QuickChat.exitGrace = 0
+        p.makeKey(); p.focusField(); spin(0.1)
+        m.dictationNote = nil
+        check("mic: the timeout is 3 s", wasTimeout == 3)
+        m.dictate(true); spin(0.1)
+        check("mic: a start shows starting, which is not yet Dictation for Return", m.dictation == .starting && !m.isDictationActive)
+        chat.dictationWatch.entered(enter)
+        check("mic: the enter notice turns starting on", m.dictation == .on && m.isDictationActive)
+        chat.dictationWatch.exited(exit)
+        check("mic: an exit notice turns on off", m.dictation == .off && !m.isDictationActive)
+        chat.dictationWatch.entered(enter)
+        check("mic: Dictation started by macOS's shortcut or the Dictation key turns the button on, no click", m.dictation == .on)
+        chat.dictationWatch.exited(exit)
+        m.dictate(true); spin(0.1)
+        chat.dictationWatch.exited(exit)
+        check("mic: an exit notice turns starting off", m.dictation == .off)
+        p.quietKey = false
+        chat.dictationWatch.entered(enter)
+        check("mic: an enter notice while the panel is not key (Dictation elsewhere) is not counted", m.dictation == .off)
+        p.makeKey(); p.focusField(); spin(0.1)
+        // a click, or ⌘D, while starting cancels: it stops as off does
+        m.dictate(true); spin(0.1)
+        var n = sent.count
+        let cf = p.firstResponder as? QCTextView
+        m.dictate(false)
+        check("mic: a click while starting cancels, with the same steps as off", m.dictation == .off && stopped(since: n, field: cf), steps(since: n))
+        m.dictate(true); spin(0.1)
+        n = sent.count
+        m.toggleDictation()
+        check("mic: ⌘D while starting cancels too, starts nothing", m.dictation == .off && stopped(since: n, field: p.firstResponder as? QCTextView) && neverToggled(), steps(since: n))
+        // no enter notice in time: off, one quiet line; a late enter turns it on and takes the line away
+        QuickChat.startTimeout = 0.2
+        m.dictate(true); spin(0.1)
+        check("mic: before the timeout it is still starting, no line", m.dictation == .starting && m.dictationNote == nil)
+        spin(0.3)
+        check("mic: no enter notice in time: off, and \"Dictation didn't start.\"", m.dictation == .off && m.dictationNote == "Dictation didn't start.", "\(m.dictationNote ?? "nil")")
+        chat.dictationWatch.entered(enter)
+        check("mic: a late enter notice turns it on and takes the line away", m.dictation == .on && m.dictationNote == nil)
+        chat.dictationWatch.exited(exit)
+        // an enter notice in time cancels the timeout
+        m.dictate(true); spin(0.05)
+        chat.dictationWatch.entered(enter)
+        spin(0.4)
+        check("mic: an enter notice in time cancels the timeout", m.dictation == .on && m.dictationNote == nil)
+        chat.dictationWatch.exited(exit)
+        // the panel losing the keyboard cancels it too
+        m.dictate(true); spin(0.05)
+        p.onKeyLost()
+        spin(0.4)
+        check("mic: the keyboard lost cancels the timeout: off, no line", m.dictation == .off && m.dictationNote == nil)
+        QuickChat.startTimeout = wasTimeout
+        QuickChat.exitGrace = wasGrace
+        p.makeKey(); p.focusField(); spin(0.1)
     }
     // a new chat or hiding stops it too
     m.dictate(true); spin(0.1); n = sent.count
     let chatField = p.firstResponder as? QCTextView
     m.newChat(keepField: true)
-    check("mic: a new chat stops Dictation", stopped(since: n, field: chatField) && !m.dictating, steps(since: n))
+    check("mic: a new chat stops Dictation", stopped(since: n, field: chatField) && m.dictation == .off, steps(since: n))
     // the new chat swapped the chat for the bar: SwiftUI remakes the field in its next layout pass (slower on a loaded or
     // virtual machine, as a CI runner is), so wait for it before Dictation starts for it, or the field it started for goes
     spin(0.4); p.focusField(); spin(0.1)
     m.dictate(true); spin(0.1); n = sent.count
     let hidField = p.firstResponder as? QCTextView
     chat.hide(); spin(0.1)
-    check("mic: hiding stops Dictation (before the panel goes)", stopped(since: n, field: hidField) && !m.dictating && !p.isVisible, steps(since: n))
+    check("mic: hiding stops Dictation (before the panel goes)", stopped(since: n, field: hidField) && m.dictation == .off && !p.isVisible, steps(since: n))
     chat.open(); spin()
     // a start nothing takes: the button doesn't stay silent
     let wasSend = QCDictation.send
     QCDictation.send = { _, _ in false }
     m.dictate(true); spin(0.1)
-    check("mic: a start nothing takes says so", !m.dictating && m.dictationNote == QCDictation.failedWords)
+    check("mic: a start nothing takes says so", m.dictation == .off && m.dictationNote == QCDictation.failedWords)
     QCDictation.send = wasSend; m.dictationNote = nil
     // Dictation off in macOS: one line saying where to turn it on, once a run; nothing is started
     let before = sent.count
     off = true
     m.dictate(true)
-    check("mic: Dictation off says where to turn it on, starts nothing", m.dictationNote == QCDictation.offWords && !m.dictating && sent.count == before)
+    check("mic: Dictation off says where to turn it on, starts nothing", m.dictationNote == QCDictation.offWords && m.dictation == .off && sent.count == before)
     m.dictationNote = nil
     m.dictate(true)
     check("mic: and says it once a run", m.dictationNote == nil && sent.count == before)
@@ -1490,13 +1549,13 @@ do {
         var n = sent.count
         let taken = cmdD()
         spin(0.1)
-        check("⌘D: starts Dictation like the mic button (the key is taken, begin sent to the field, the button on)",
-              taken && sent.count == n + 1 && sent[n].0 == QCDictation.start && sent[n].1 is QCTextView && m.dictating, steps(since: n))
+        check("⌘D: starts Dictation like the mic button (the key is taken, begin sent to the field, the button starting)",
+              taken && sent.count == n + 1 && sent[n].0 == QCDictation.start && sent[n].1 is QCTextView && m.dictation == .starting, steps(since: n))
         n = sent.count
         let field = p.firstResponder as? QCTextView
         let takenOff = cmdD()
         check("⌘D: again stops it through the same steps, the button off, nothing toggled",
-              takenOff && stopped(since: n, field: field) && !m.dictating && neverToggled(), steps(since: n))
+              takenOff && stopped(since: n, field: field) && m.dictation == .off && neverToggled(), steps(since: n))
 
         // a Cyrillic layout: the D key gives "в", the shortcut stays on the key's place
         p.makeKey(); p.focusField(); spin(0.1)
@@ -1504,25 +1563,26 @@ do {
         let cyr = cmdD("в")
         spin(0.1)
         check("⌘D: on a Cyrillic layout (в on kVK_ANSI_D) starts Dictation",
-              cyr && sent.count == n + 1 && sent[n].0 == QCDictation.start && m.dictating, steps(since: n))
+              cyr && sent.count == n + 1 && sent[n].0 == QCDictation.start && m.dictation == .starting, steps(since: n))
         n = sent.count
         let cyrOff = cmdD("в")
-        check("⌘D: and stops it", cyrOff && stopped(since: n, field: p.firstResponder as? QCTextView) && !m.dictating, steps(since: n))
+        check("⌘D: and stops it", cyrOff && stopped(since: n, field: p.firstResponder as? QCTextView) && m.dictation == .off, steps(since: n))
 
         // not ⌘⇧D, ⌥⌘D, ⌃⌘D
         n = sent.count
         _ = cmdD("d", 2, [.command, .shift]); _ = cmdD("d", 2, [.command, .option]); _ = cmdD("d", 2, [.command, .control])
         spin(0.1)
-        check("⌘D: ⌘⇧D, ⌥⌘D and ⌃⌘D are left alone", sent.count == n && !m.dictating, steps(since: n))
+        check("⌘D: ⌘⇧D, ⌥⌘D and ⌃⌘D are left alone", sent.count == n && m.dictation == .off, steps(since: n))
 
         // Dictation started with macOS's own shortcut (an enter notice, the button off): ⌘D stops it
         p.makeKey(); p.focusField(); spin(0.1)
-        m.dictating = false
+        m.dictation = .off
         chat.dictationWatch.entered(Notification(name: QCDictationWatch.enterName))
+        check("⌘D: the enter notice turned the button on, though nobody clicked", m.dictation == .on)
         n = sent.count
         let noticed = cmdD()
         check("⌘D: with a dictation enter notice set stops it (the button was off), starts nothing",
-              noticed && stopped(since: n, field: p.firstResponder as? QCTextView) && !m.dictationNoticed && !m.dictating, steps(since: n))
+              noticed && stopped(since: n, field: p.firstResponder as? QCTextView) && m.dictation == .off, steps(since: n))
 
         // Dictation off in System Settings: the mic button's one line, nothing started
         off = true
@@ -1531,7 +1591,7 @@ do {
         let offKey = cmdD()
         spin(0.1)
         check("⌘D: with Dictation off in System Settings shows the note and starts nothing",
-              offKey && m.dictationNote == QCDictation.offWords && !m.dictating && sent.count == n, steps(since: n))
+              offKey && m.dictationNote == QCDictation.offWords && m.dictation == .off && sent.count == n, steps(since: n))
         off = true; m.dictationNote = nil; chat.dictationOffSaid = true     // as the checks after this one found it
     }
 
@@ -1551,12 +1611,17 @@ do {
         fresh(); m.field = "typed"; m.submit(marked: false)
         check("return: typing sends at once", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
 
-        fresh(); m.field = "dictated words"; m.dictating = true
+        fresh(); m.field = "dictated words"; m.dictation = .on
         let n0 = sent.count
         m.submit(marked: false)
         check("return: Dictation running, the first Return ends it and keeps the transcript in the field, nothing sent",
-              m.turns.count == 1 && m.field == "dictated words" && !m.dictating && stopped(since: n0, field: tvNow()),
-              "\(m.turns.count) \(m.field.debugDescription) \(m.dictating) \(steps(since: n0))")
+              m.turns.count == 1 && m.field == "dictated words" && m.dictation == .off && stopped(since: n0, field: tvNow()),
+              "\(m.turns.count) \(m.field.debugDescription) \(m.dictation) \(steps(since: n0))")
+        // starting is not Dictation yet: the Return sends (and cancels the start), nothing is held
+        fresh(); m.field = "typed while starting"; m.dictation = .starting
+        m.submit(marked: false)
+        check("return: while starting (no enter notice yet) Return sends at once and the button goes off",
+              m.turns.count == 2 && m.field.isEmpty && m.dictation == .off && !m.returnHeld, "\(m.turns.count) \(m.field.debugDescription)")
         m.submit(marked: false)
         check("return: the next Return sends it", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
 
@@ -1565,11 +1630,11 @@ do {
         fresh(); p.focusField(); spin(0.1)
         if let tv = tvNow() {
             tv.setMarkedText("still provisional", selectedRange: NSRange(location: 17, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
-            m.dictating = true
+            m.dictation = .on
             let n2 = sent.count
             m.submit(marked: tv.hasMarkedText())
             check("return: the first Return commits the marked words, ends Dictation step by step, sends nothing",
-                  m.turns.count == 1 && !tv.hasMarkedText() && m.field == "still provisional" && !m.dictating && stopped(since: n2, field: tv),
+                  m.turns.count == 1 && !tv.hasMarkedText() && m.field == "still provisional" && m.dictation == .off && stopped(since: n2, field: tv),
                   "\(m.turns.count) \(m.field.debugDescription) \(steps(since: n2))")
             check("return: and the field keeps the keyboard, the panel key, the caret after the words",
                   p.isKeyWindow && p.firstResponder === tv && tv.selectedRange() == NSRange(location: 17, length: 0), "\(tv.selectedRange())")
@@ -1584,19 +1649,19 @@ do {
             let enter = Notification(name: QCDictationWatch.enterName), exit = Notification(name: QCDictationWatch.exitName)
             check("return: the watch listens for DictationIM's enter notice too",
                   QCDictationWatch.enterName.rawValue == "DictationIMNotificationDidEnterDictationMode")
-            check("return: marked text alone is not Dictation", !m.isDictationActive && !m.dictating && !m.dictationNoticed)
+            check("return: marked text alone is not Dictation", !m.isDictationActive && m.dictation == .off)
             chat.dictationWatch.entered(enter)
-            check("return: an enter notice makes Dictation active, the button's state stays off", m.isDictationActive && m.dictationNoticed && !m.dictating)
+            check("return: an enter notice makes Dictation active, and the button on", m.isDictationActive && m.dictation == .on)
             chat.dictationWatch.exited(exit)
-            check("return: an exit notice ends it again", !m.isDictationActive && !m.dictationNoticed)
+            check("return: an exit notice ends it again", !m.isDictationActive && m.dictation == .off)
             chat.dictationWatch.entered(enter)
             p.onKeyLost()
-            check("return: the panel losing the keyboard forgets the notice", !m.dictationNoticed)
+            check("return: the panel losing the keyboard forgets the notice", m.dictation == .off)
             chat.dictationWatch.entered(enter)
             let n1 = sent.count
             m.submit(marked: tv.hasMarkedText())
             check("return: marked text with an enter notice (macOS's shortcut) ends Dictation and sends nothing",
-                  m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "provisional words" && !tv.hasMarkedText() && !m.dictationNoticed,
+                  m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "provisional words" && !tv.hasMarkedText() && m.dictation == .off,
                   "\(m.turns.count) \(steps(since: n1)) \(m.field.debugDescription)")
             m.submit(marked: false)
             check("return: and the next Return sends", m.turns.count == 2 && m.field.isEmpty, "\(m.turns.count) \(m.field.debugDescription)")
@@ -1609,7 +1674,7 @@ do {
             QCDictation.inputSource = { _ in QCDictation.sourceID }
             tv.setMarkedText("by source", selectedRange: NSRange(location: 9, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
             let n1 = sent.count
-            check("return: Dictation's input source (com.apple.inputmethod.ironwood) makes Dictation active", QCDictation.sourceID == "com.apple.inputmethod.ironwood" && m.isDictationActive && !m.dictating && !m.dictationNoticed)
+            check("return: Dictation's input source (com.apple.inputmethod.ironwood) makes Dictation active", QCDictation.sourceID == "com.apple.inputmethod.ironwood" && m.isDictationActive && m.dictation == .off)
             m.submit(marked: tv.hasMarkedText())
             check("return: marked text with Dictation's input source ends Dictation and sends nothing",
                   m.turns.count == 1 && stopped(since: n1, field: tv) && m.field == "by source" && !tv.hasMarkedText(), "\(m.turns.count) \(steps(since: n1))")
@@ -1627,7 +1692,7 @@ do {
                 let n1 = sent.count
                 m.submit(marked: tv.hasMarkedText())
                 check("return: marked text of \(source) is not Dictation's: committed, nothing sent, no stop step, no held Return",
-                      m.turns.count == 1 && sent.count == n1 && !m.returnHeld && !tv.hasMarkedText() && m.field == "한" && !m.dictating && !m.dictationNoticed,
+                      m.turns.count == 1 && sent.count == n1 && !m.returnHeld && !tv.hasMarkedText() && m.field == "한" && m.dictation == .off,
                       "\(m.turns.count) \(steps(since: n1)) \(m.returnHeld) \(m.field.debugDescription)")
                 m.submit(marked: false)
                 check("return: and the next Return sends (\(source))", m.turns.count == 2 && m.field.isEmpty && sent.count == n1, "\(m.turns.count) \(m.field.debugDescription)")
@@ -1650,10 +1715,10 @@ do {
         }
 
         s.dictationReturn = .sendAtOnce
-        fresh(); m.field = "dictated words"; m.dictating = true
+        fresh(); m.field = "dictated words"; m.dictation = .on
         m.submit(marked: false)
         check("return: \"sends at once\": Return ends Dictation and sends the transcript in one go",
-              m.turns.count == 2 && m.field.isEmpty && !m.dictating && sent.last?.0 == QCDictation.activate && neverToggled(),
+              m.turns.count == 2 && m.field.isEmpty && m.dictation == .off && sent.last?.0 == QCDictation.activate && neverToggled(),
               "\(m.turns.count) \(m.field.debugDescription)")
         fresh(); m.field = "typed"; m.submit(marked: false)
         check("return: \"sends at once\": typing sends at once too", m.turns.count == 2 && m.field.isEmpty)
