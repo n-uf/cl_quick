@@ -11,6 +11,7 @@ import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import Carbon.HIToolbox
+import MenuRows
 import PDFKit
 import ProfileCore
 import Runs
@@ -903,7 +904,7 @@ do {
         }
         /// t a title only, P a profile row, R a standby row, A Add an account…, - a line.
         func shape(_ m: NSMenu) -> String {
-            m.items.map { $0.isSeparatorItem ? "-" : $0.view is QCProfileMenuRow ? "P" : $0.view is QCStandbyMenuRow ? "R" : $0.view is QCAddAccountMenuRow ? "A" : "t" }.joined()
+            m.items.map { $0.isSeparatorItem ? "-" : $0.view is QCProfileMenuRow ? "P" : $0.view is MenuAccountRowView ? "R" : $0.view is QCAddAccountMenuRow ? "A" : "t" }.joined()
         }
         let acc = accounts()
         check("accounts: under each profile its standby accounts, then Add an account…; after the line Settings and Add a profile…",
@@ -914,19 +915,19 @@ do {
               acc.items.suffix(2).map(\.title) == ["Settings for Main…", "Add a profile…"] && acc.items[acc.items.count - 3].isSeparatorItem)
         let views = acc.items.compactMap(\.view)
         check("accounts: every row of the menu is as wide as the widest", Set(views.map(\.frame.width)).count == 1, "\(views.map(\.frame.width))")
-        let srows = acc.items.compactMap { $0.view as? QCStandbyMenuRow }
+        let srows = acc.items.compactMap { $0.view as? MenuAccountRowView }
         check("accounts: the standby rows are the menu bar's (address, '· standby', Switch…), in the chat's columns under the in-use row's name",
-              srows.map(\.address) == ["alex.studio@example.com", "alex.old@example.org"] && srows.allSatisfy { $0.columns == .chat }
-              && QCStandbyMenuRow.Columns.chat.addressX == QCProfileMenuRow.textX, "\(srows.map(\.address))")
+              srows.map(\.row.address) == ["alex.studio@example.com", "alex.old@example.org"] && srows.allSatisfy { $0.columns == .chat }
+              && MenuRowColumns.chat.addressX == QCProfileMenuRow.textX, "\(srows.map(\.row.address))")
         check("accounts: at rest an address is blurred and the row is not lit; the title and label hold it masked, never in full",
-              srows.allSatisfy { !$0.sharp && !$0.lit } && acc.items.filter { $0.view is QCStandbyMenuRow }.allSatisfy { !$0.title.contains("alex.") && $0.title.hasSuffix(" · standby") }
-              && srows[0].accessibilityLabel() == AddressText.mask("alex.studio@example.com") + ", standby, switch")
+              srows.allSatisfy { !$0.sharp && !$0.lit } && acc.items.filter { $0.view is MenuAccountRowView }.allSatisfy { !$0.title.contains("alex.") && $0.title.hasSuffix(" · standby") }
+              && srows[0].accessibilityLabel() == AddressText.mask("alex.studio@example.com") + " · standby")
         srows[0].highlighted = true
         check("accounts: lit by the menu (the pointer on it) the address is clear, and the other is not", srows[0].sharp && srows[0].lit && !srows[1].sharp)
         srows[0].highlighted = false
         check("accounts: unlit it is blurred again", !srows[0].sharp)
         // choosing one goes the menu bar's way: the same guard, then the switch path given
-        let items = acc.items.filter { $0.view is QCStandbyMenuRow }
+        let items = acc.items.filter { $0.view is MenuAccountRowView }
         switchedTo = []; srows[1].press(); spin(0.1)
         check("accounts: a click on a standby row starts that profile's switch to that account (once)", switchedTo == ["main:u3"], "\(switchedTo)")
         switchedTo = []
@@ -1028,10 +1029,10 @@ do {
         check("accounts: no profile, no form", st.page == .general && st.addingFor == nil)
         // while a switch is waited for on the profile its rows are off, the other profile's are on
         let wait = accounts(waiting: ["main"])
-        let wRows = wait.items.compactMap { $0.view as? QCStandbyMenuRow }, wAdds = wait.items.compactMap { $0.view as? QCAddAccountMenuRow }
+        let wRows = wait.items.compactMap { $0.view as? MenuAccountRowView }, wAdds = wait.items.compactMap { $0.view as? QCAddAccountMenuRow }
         check("accounts waiting: Main's standby rows and Add an account… are off (items too), Work's is on",
-              wRows.allSatisfy { !$0.enabled } && !wAdds[0].enabled && wAdds[1].enabled
-              && wait.items.filter { $0.view is QCStandbyMenuRow || $0.view === wAdds[0] }.allSatisfy { !$0.isEnabled } && wait.items.first { $0.view === wAdds[1] }?.isEnabled == true)
+              wRows.allSatisfy { !$0.row.enabled } && !wAdds[0].enabled && wAdds[1].enabled
+              && wait.items.filter { $0.view is MenuAccountRowView || $0.view === wAdds[0] }.allSatisfy { !$0.isEnabled } && wait.items.first { $0.view === wAdds[1] }?.isEnabled == true)
         wRows[0].highlighted = true; wAdds[0].highlighted = true
         switchedTo = []; addedFor = []
         wRows[0].press(); wAdds[0].press(); _ = wRows[0].accessibilityPerformPress(); _ = wAdds[0].accessibilityPerformPress(); spin(0.1)
