@@ -20,28 +20,9 @@ import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import Combine
+import ProfileCore
 
 // MARK: - What a profile's block says
-
-/// "in 1h 5m", "back at 15:28": the words for a reset, as cl_audit says them.
-extension TimeWords {
-    /// Whole minutes left, rounded up (30 s left is "1m"; the reset itself is 0).
-    static func minutesLeft(_ d: Date, now: Date = Date()) -> Int { max(0, Int((d.timeIntervalSince(now) / 60).rounded(.up))) }
-
-    /// "19m", "1h 42m", "19h 14m", "2d 19h", "16 days": its form changes as the reset gets closer.
-    static func countdown(_ d: Date, now: Date = Date()) -> String {
-        let m = minutesLeft(d, now: now)
-        if m < 60 { return "\(m)m" }
-        if m < 24 * 60 { return "\(m / 60)h \(m % 60)m" }
-        if m < 8 * 24 * 60 { return "\(m / 1440)d \(m % 1440 / 60)h" }
-        return "\(m / 1440) days"
-    }
-
-    /// When a full limit is back: "back at 15:28" today, else "back Thu 09:00", "back 11 Nov".
-    static func back(_ d: Date, now: Date = Date()) -> String {
-        Calendar.current.isDate(d, inSameDayAs: now) ? "back at \(when(d, now: now))" : "back \(when(d, now: now))"
-    }
-}
 
 /// One profile's block in the menu, as words and numbers (the view draws it; the checks read it).
 struct QCMenuProfile: Equatable {
@@ -63,7 +44,7 @@ struct QCMenuProfile: Equatable {
         let share: String
         /// "in 1h 5m", "back at 15:28", or "".
         let resets: String
-        /// Last known, not now (older than QuickChatLevel.freshFor): drawn grey.
+        /// Last known, not now (no longer fresh by QuickChatLevel.ages): drawn grey.
         var stale = false
         /// The level's colour (cl_audit's: green, amber from 50%, red from 80%, crimson from 95%); grey when stale.
         var colour: NSColor { Painter.color(p, stale: stale) }
@@ -91,10 +72,10 @@ struct QCMenuProfile: Equatable {
     var fullNoteStale = false
 
     static let noUsageWords = "No usage yet"
+    /// Numbers older than an hour (QuickChatLevel.ages' `hiddenAfter`) aren't shown at all, not even muted: the plan, the
+    /// account or the week may have changed since (the refresh asks for new ones as the menu opens). Except a full limit
+    /// whose reset is still ahead.
     static let noRecentWords = "No recent numbers"
-    /// Numbers older than this aren't shown at all, not even muted: the plan, the account or the week may have changed
-    /// since (the refresh asks for new ones as the menu opens). Except a full limit whose reset is still ahead.
-    static let lastKnownFor: TimeInterval = 3600
 
     /// "Claude Main"; a name that starts with Claude as it is.
     static func title(_ name: String) -> String { name.lowercased().hasPrefix("claude") ? name : "Claude " + name }
@@ -137,42 +118,45 @@ struct QCMenuProfile: Equatable {
         // how old the numbers are: fresh ones are the account now; ones over a few minutes old are what Claude Code said
         // last, drawn grey (the refresh asks again as the menu opens); over an hour old, not shown, except a saved full
         // limit whose reset is still ahead: that stays, grey and worded "last known", until the reset
-        let age = level?.at.map { now.timeIntervalSince($0) } ?? .infinity
-        let fresh = level?.isFresh(now) == true
-        let old = level != nil && age >= lastKnownFor
-        let savedFull: FullLimit? = fresh ? nil : level?.full(now, dated: true)
-        let shownLevel = old && savedFull == nil ? nil : level
-        let full = fresh ? shownLevel?.full(now) : savedFull
-        func row(_ id: String, _ label: String, _ p: Double?, _ resets: Date?) -> Row {
-            let isFull = full?.id == id
-            let shown = isFull ? 100 : p
-            let at = isFull ? full?.resets : resets
+        // (ProfileCore's display value by cl_quick's ages, QuickChatLevel.ages: fresh numbers act; older ones are drawn
+        // grey; past the hour none show but what holds the account back with a known end still ahead)
+        let d = level?.display(now)
+        let fresh = d?.tier == .fresh
+        let old = level?.age(now) == .hidden
+        // what holds the account back: while fresh, any; else a saved full limit (or refusal) whose end is still ahead
+        let full = d?.heldBack
+        let savedFull = fresh ? nil : full
+        let shown = level != nil && !(old && savedFull == nil)
+        func row(_ id: String, _ label: String) -> Row {
+            let isFull = full?.window.id == id
+            let p = isFull ? 100 : d?.number(id)
+            let at = isFull ? full?.resets : id == "5h" ? d?.usage?.fiveHourResets : d?.usage?.weeklyResets
             var words = ""
-            if let shown, let at { words = shown.rounded() >= 100 ? TimeWords.back(at, now: now) : "in " + TimeWords.countdown(at, now: now) }
-            return Row(id: id, label: label, p: shown, share: QuickChatLevel.pct(shown), resets: words, stale: !fresh)
+            if let p, let at { words = p.rounded() >= 100 ? TimeWords.back(at, now: now) : "in " + TimeWords.countdown(at, now: now) }
+            return Row(id: id, label: label, p: p, share: QuickChatLevel.pct(p), resets: words, stale: !fresh)
         }
         var rows: [Row] = []
-        if let level = shownLevel {
-            rows = [row("5h", "5-hour", level.fiveHourNow(now), level.fiveHourResets), row("wk", "Week", level.weekNow(now), level.weekResets)]
-                .filter { $0.id != "5h" || level.hasFiveHour }       // no 5-hour window on the account: the week alone
+        if shown, let d {
+            rows = [row("5h", "5-hour"), row("wk", "Week")]
+                .filter { $0.id != "5h" || d.hasFiveHour }       // no 5-hour window on the account: the week alone
             // an old saved full limit keeps both rows (so the block has the shape of a fresh one and a fresh answer
             // replaces it live), but the other window's number, over an hour old, is not shown: "–"
-            if old { rows = rows.map { $0.id == full?.id ? $0 : Row(id: $0.id, label: $0.label, p: nil, share: QuickChatLevel.pct(nil), resets: "", stale: true) } }
+            if old { rows = rows.map { $0.id == full?.window.id ? $0 : Row(id: $0.id, label: $0.label, p: nil, share: QuickChatLevel.pct(nil), resets: "", stale: true) } }
             // two "–" rows stay for a saved full that names no window, so it keeps a fresh block's shape too
             if savedFull == nil, rows.allSatisfy({ $0.p == nil }) { rows = [] }
         }
-        let agoWords = shownLevel?.at.map { AccountBook.ago($0, now: now) }
-        let name = full.map { $0.id == "5h" ? "5-hour" : $0.id == "wk" ? "Week" : "Limit" }
+        let agoWords = shown ? level?.at.map { AccountBook.ago($0, now: now) } : nil
+        let name = full.map { $0.window == .fiveHour ? "5-hour" : $0.window == .week ? "Week" : "Limit" }
         // fresh: "Week full · in 2d 3h", crimson. Saved: "Week full · last known", grey, with the age on the line under
         // the bars as for any last known number; a refusal that names no window has no row to carry its end, so its
         // note does: "Limit full · back at 15:28 · last known"
         let note: String? = full.flatMap { f in
             fresh ? name.map { $0 + " full" + (f.resets.map { " · in " + TimeWords.countdown($0, now: now) } ?? "") }
-                  : name.map { $0 + " full" + (f.id == FullLimit.any ? f.resets.map { " · " + TimeWords.back($0, now: now) } ?? "" : "") + " · last known" }
+                  : name.map { $0 + " full" + (f.window == .any ? f.resets.map { " · " + TimeWords.back($0, now: now) } ?? "" : "") + " · last known" }
         }
         let updated: String? = rows.isEmpty ? nil : agoWords.map { (fresh ? "Updated " : "Last known ") + $0 }
         let noUsageText = old ? noRecentWords : noUsageWords
-        return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? shownLevel?.binding(now)?.p : nil, fullNote: note,
+        return QCMenuProfile(id: p.id, title: title(p.name), dotP: fresh ? d?.binding?.p : nil, fullNote: note,
                              account: .inUse(address: address), rows: rows, noUsage: rows.isEmpty, updated: updated,
                              noUsageText: noUsageText, fullNoteStale: !fresh && note != nil)
     }
@@ -558,8 +542,6 @@ enum QCStatusMenu {
 /// sign-in is broken, is left alone. The answer is kept as a report after a chat answer is (ProfileStore.record).
 final class QCMenuUsageRefresher {
     static let shared = QCMenuUsageRefresher()
-    /// Numbers older than this are asked for again.
-    static let staleAfter: TimeInterval = QuickChatLevel.freshFor
     /// A profile is tried at most this often, answered or not.
     static let retryAfter: TimeInterval = 3 * 60
     /// A `claude` that hasn't answered by then is ended.
@@ -591,8 +573,8 @@ final class QCMenuUsageRefresher {
         guard ClaudeFolder.account(p.path) != nil, store.signInProblem(p) == nil else { return false }
         guard running != p.id, !queue.contains(p.id) else { return false }
         if let t = lastTried[p.id], now.timeIntervalSince(t) < Self.retryAfter { return false }
-        guard let at = store.level(of: p)?.at else { return true }
-        return now.timeIntervalSince(at) >= Self.staleAfter
+        // none yet, or no longer fresh (QuickChatLevel.ages): asked for again
+        return store.level(of: p)?.age(now) != .fresh
     }
 
     /// The menu opened: ask for the numbers that are old, in the background, one profile at a time.

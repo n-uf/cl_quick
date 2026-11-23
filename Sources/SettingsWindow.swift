@@ -10,6 +10,7 @@ import AddressPrivacy
 import AppKit
 import Carbon.HIToolbox
 import ClaudeAuth
+import ProfileCore
 import ServiceManagement
 import SwiftUI
 
@@ -347,14 +348,19 @@ struct LimitBars: View {
 
     var body: some View {
         // numbers older than a few minutes are shown as reported (the caption says when), never as a full limit now
-        let full = level.isFresh(now) ? level.full(now) : nil
+        let d = level.display(now, ages: QuickChatLevel.settingsAges)
+        let fresh = d.tier == .fresh
         VStack(alignment: .leading, spacing: 8) {
-            if level.hasFiveHour {
-                bar("5 hours", full?.id == "5h" ? 100 : level.fiveHourResets.map { $0 <= now } == true ? nil : level.fiveHour,
-                    full?.id == "5h" ? full?.resets : level.fiveHourResets, full: full?.id == "5h")
-            }
-            bar("Week", full?.id == "wk" ? 100 : level.weekNow(now), full?.id == "wk" ? full?.resets : level.weekResets, full: full?.id == "wk")
+            if d.hasFiveHour { bar("5 hours", "5h", d, fresh: fresh) }
+            bar("Week", "wk", d, fresh: fresh)
         }
+    }
+
+    /// A window's bar: what holds the account back only while the numbers are fresh, else the number as reported.
+    private func bar(_ name: String, _ id: String, _ d: ProfileDisplay, fresh: Bool) -> some View {
+        let full = fresh && d.held(id) != nil
+        let own = id == "5h" ? d.usage?.fiveHourResets : d.usage?.weeklyResets
+        return bar(name, full ? 100 : d.number(id), full ? d.resets(id) : own, full: full)
     }
 
     private func bar(_ name: String, _ p: Double?, _ resets: Date?, full: Bool) -> some View {
@@ -456,7 +462,7 @@ struct InUseBox: View {
             }
             if let level = entry.level, level.at != nil {
                 // older than a few minutes: what Claude Code said last (the caption says when), drawn without its colours
-                LimitBars(level: level).saturation(broken || !level.isFresh() ? 0 : 1).opacity(broken ? 0.6 : 1)
+                LimitBars(level: level).saturation(broken || level.age() != .fresh ? 0 : 1).opacity(broken ? 0.6 : 1)
             } else {
                 Text("No limits yet: Claude Code reports them with the first answer.").font(.system(size: 11)).foregroundStyle(face.muted)
             }

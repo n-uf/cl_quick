@@ -11,6 +11,7 @@ import AppKit
 import Carbon.HIToolbox
 import ClaudeAuth
 import Combine
+import ProfileCore
 import SwiftUI
 
 // MARK: - Settings
@@ -342,7 +343,7 @@ final class QuickChatModel: ObservableObject {
     var busy: Bool { turns.last?.busy ?? false }
     var modelTitle: String { resolvedModel.entry.map(QuickChatModels.title) ?? knownModels[choice] ?? choice.title }
     /// A limit holds the account back: nothing is sent until it resets or another profile is picked.
-    var blocked: Bool { level?.full() != nil }
+    var blocked: Bool { level?.current().heldBack != nil }
 
     // COPY: an answer goes to the pasteboard as plain text, its Markdown source (what Claude wrote: code blocks, lists and
     // links stay as written, which is what pastes well into a note, a commit or another chat). Nothing is kept anywhere else.
@@ -1241,7 +1242,7 @@ final class QuickChatModel: ObservableObject {
                 turns[i].phase = .failed
                 if turns[i].problem == nil { turns[i].problem = .refused(text: text.isEmpty ? "Claude Code couldn't answer." : text) }
                 // a full limit Claude Code refused on before it reported one: the account line says so too
-                if turns[i].problem == .limitFull, level?.full() == nil {
+                if turns[i].problem == .limitFull, level?.current().heldBack == nil {
                     var l = level ?? QuickChatLevel()
                     if l.refusedUntil == nil { l.refusedUntil = Date().addingTimeInterval(3600); l.refusedAt = Date() }
                     l.at = Date()
@@ -1601,8 +1602,9 @@ final class QuickChat {
         let others = store.profiles.filter { $0.inPicker && $0.id != id }
             .compactMap { o -> QuickChatOffer? in
                 guard let l = store.shownLevel(of: o) else { return QuickChatOffer(profileID: o.id, name: o.name, used: nil) }
-                guard l.full() == nil else { return nil }
-                return QuickChatOffer(profileID: o.id, name: o.name, used: l.binding()?.p)     // its fuller window
+                let d = l.current()
+                guard d.heldBack == nil else { return nil }
+                return QuickChatOffer(profileID: o.id, name: o.name, used: d.binding?.p)     // its fuller window
             }
             .sorted { ($0.used ?? 101) < ($1.used ?? 101) }
         // the profile's own standby account seen most recently. A standby account shows no usage (one folder holds one

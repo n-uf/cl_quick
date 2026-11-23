@@ -7,6 +7,7 @@
 
 import ClaudeAuth
 import Foundation
+import ProfileCore
 
 func expand(_ path: String) -> String { (path as NSString).expandingTildeInPath }
 
@@ -170,11 +171,11 @@ final class ProfileStore: ObservableObject {
         return AccountBook.numbersBase(for: owner, profile: id, accounts: p.accounts, levels: levels)
     }
 
-    /// The numbers the chat shows and acts on for the profile's account in use now: only fresh ones
-    /// (QuickChatLevel.freshFor). Older numbers never draw a full limit, a refusal, an "Ask on …" or a switch offer:
-    /// the bar asks Claude Code again as it opens (get_usage) and shows them once they come.
+    /// The numbers the chat shows and acts on for the profile's account in use now: only fresh ones (QuickChatLevel.ages,
+    /// ProfileCore's age rule). Older numbers never draw a full limit, a refusal, an "Ask on …" or a switch offer: the bar
+    /// asks Claude Code again as it opens (get_usage) and shows them once they come.
     func shownLevel(of p: Profile, now: Date = Date()) -> QuickChatLevel? {
-        level(of: p).flatMap { $0.isFresh(now) ? $0 : nil }
+        level(of: p).flatMap { $0.age(now) == .fresh ? $0 : nil }
     }
 
     var hasProfiles: Bool { !profiles.isEmpty }

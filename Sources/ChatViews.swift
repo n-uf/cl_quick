@@ -9,6 +9,7 @@ import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import PDFKit
+import ProfileCore
 import SwiftUI
 
 /// Claude's dark colours.
@@ -272,19 +273,18 @@ struct QCHeaderCard: View {
     /// The rows for the dropped parts of the meters the line shows (`shown`); none when the line has them all.
     static func rows(_ level: QuickChatLevel?, shown: QCHeaderDetail) -> [Row] {
         guard let l = level else { return [] }
-        let full = l.full()
-        func row(_ id: String, _ label: String, _ p: Double?, _ f: FullLimit?, _ resets: Date?) -> Row? {
-            guard f != nil || p != nil else { return nil }
-            let share = f != nil ? 100 : p
-            let when = f?.resets ?? resets
-            var r = Row(id: id, label: label)
+        let d = l.current()
+        func row(_ id: String) -> Row? {
+            let f = d.held(id)
+            guard f != nil || d.number(id) != nil else { return nil }
+            let share = d.share(id)
+            var r = Row(id: id, label: id)
             if f == nil, !shown.pct { r.share = (QuickChatLevel.pct(share), QuickChatLevel.color(share)) }
-            if shown.resets == .none, let when { r.resets = "resets \(TimeWords.when(when))" }
+            if shown.resets == .none, let when = d.resets(id) { r.resets = "resets \(TimeWords.when(when))" }
             // a label that is gone is a loss: the row says which window it is
             return r.share == nil && r.resets == nil && shown.labels ? nil : r
         }
-        return [l.hasFiveHour ? row("5h", "5h", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets) : nil,
-                row("wk", "wk", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }
+        return [d.hasFiveHour ? row("5h") : nil, row("wk")].compactMap { $0 }
     }
 
     var body: some View {
@@ -376,14 +376,12 @@ struct QCHeaderLine: View {
     var body: some View {
         HStack(spacing: 8) {
             if let l = level {
-                let full = l.full()
+                let d = l.current()
                 HStack(spacing: 12) {
-                    if l.hasFiveHour {
-                        QCLevelGroup(label: "5h", p: l.fiveHourNow(), full: full?.id == "5h" ? full : nil,
-                                     resets: l.fiveHourResets, detail: detail)
+                    if d.hasFiveHour {
+                        QCLevelGroup(label: "5h", p: d.number("5h"), full: d.held("5h"), resets: d.resets("5h"), detail: detail)
                     }
-                    QCLevelGroup(label: "wk", p: l.weekNow(), full: full?.id == "wk" ? full : nil,
-                                 resets: l.weekResets, detail: detail)
+                    QCLevelGroup(label: "wk", p: d.number("wk"), full: d.held("wk"), resets: d.resets("wk"), detail: detail)
                 }
                 .fixedSize()
                 // a drag that starts on the meters moves the panel; the card shows what the line dropped, so no tooltip
@@ -397,20 +395,21 @@ struct QCHeaderLine: View {
 
     /// Whether there is any meter to show.
     static func hasMeters(_ l: QuickChatLevel) -> Bool {
-        l.full() != nil || l.fiveHourNow() != nil || l.weekNow() != nil
+        let d = l.current()
+        return d.heldBack != nil || d.number("5h") != nil || d.number("wk") != nil
     }
 
     /// The same numbers as words, for VoiceOver: both windows with their share and reset.
     static func tooltip(_ level: QuickChatLevel?) -> String {
         guard let l = level else { return "" }
-        let full = l.full()
-        func line(_ name: String, _ p: Double?, _ f: FullLimit?, _ resets: Date?) -> String? {
+        let d = l.current()
+        func line(_ name: String, _ id: String) -> String? {
+            let f = d.held(id), p = d.number(id)
             guard f != nil || p != nil else { return nil }
-            let when = (f?.resets ?? resets).map { ", resets \(TimeWords.when($0))" } ?? ""
+            let when = d.resets(id).map { ", resets \(TimeWords.when($0))" } ?? ""
             return f != nil ? "\(name): full\(when)" : "\(name): \(QuickChatLevel.pct(p)) used\(when)"
         }
-        return [line("Session (5-hour window)", l.fiveHourNow(), full?.id == "5h" ? full : nil, l.fiveHourResets),
-                line("Week", l.weekNow(), full?.id == "wk" ? full : nil, l.weekResets)].compactMap { $0 }.joined(separator: "\n")
+        return [line("Session (5-hour window)", "5h"), line("Week", "wk")].compactMap { $0 }.joined(separator: "\n")
     }
 
     /// The header's words for VoiceOver: the meters' (no profile, no address: those are the profile key's).
@@ -425,7 +424,8 @@ struct QCLevelGroup: View {
     /// "5h" or "wk".
     let label: String
     let p: Double?
-    let full: FullLimit?
+    /// What holds the account back, when it is this window.
+    let full: HeldBack?
     let resets: Date?
     let detail: QCHeaderDetail
 
@@ -818,7 +818,7 @@ struct QCProblemView: View {
         case .noProfile: return "There's no profile to chat on yet."
         case .limitFull:
             // the window that is full, as the header shows it (never "week" by default)
-            return QuickChatLevel.fullSentence(model.level, who: model.target?.name ?? "This profile")
+            return HeldBack.sentence(model.level?.current().heldBack, who: model.target?.name ?? "This profile")
         }
     }
 
@@ -1020,7 +1020,7 @@ struct QCControls: View {
         HStack(spacing: 2) {
             if let t = model.target {
                 // the dot takes the colour of the limit closest to full, as the usage indicator and the header do
-                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.binding()?.p),
+                QCChip(title: profileWords ? t.name : "", dot: QuickChatLevel.color(model.blocked ? 100 : model.level?.current().binding?.p),
                        waiting: model.waitingHidden, help: "Profile: \(t.name). For this chat; a new chat starts on the default.") { pickProfile() }
                     .qcMark("profile")
             }
@@ -1038,7 +1038,7 @@ struct QCControls: View {
             .padding(.leading, 2)
             Spacer(minLength: 2)
             if inBar {
-                if let l = model.level, l.binding() != nil {
+                if let l = model.level, l.current().binding != nil {
                     QCUsageView(level: l, says: usage).padding(.trailing, 4)
                 } else {
                     Color.clear.frame(width: QCUsageView.width(usage), height: 4).padding(.trailing, 4)
@@ -1839,7 +1839,7 @@ enum QCMenu {
         if let s = settings { actions.append(Item(title: "Settings for \(s.name)…", detail: "", action: s.open)) }
         actions.append(Item(title: "Add a profile…", detail: "", action: add))
         return build(header: "Profile", items: list.map { p, l in
-            var it = Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.binding()?.p)),
+            var it = Item(title: p.name, detail: weekWords(l), dot: NSColor(QuickChatLevel.color(l?.current().binding?.p)),
                           on: p.id == on, profileRow: true, address: address(p)) { pick(p.id) }
             let waiting = switching(p)
             if let switchTo {
@@ -1852,10 +1852,10 @@ enum QCMenu {
 
     /// "week 67%, resets Sun 13:00", "week full until Thu 09:00", "no numbers yet".
     static func weekWords(_ l: QuickChatLevel?) -> String {
-        guard let l else { return "no numbers yet" }
-        if let f = l.full() { return "\(f.name) full" + (f.resets.map { " until \(TimeWords.when($0))" } ?? "") }
-        guard let w = l.weekNow() else { return "no numbers yet" }
-        return "week \(Int(w.rounded()))%" + (l.weekResets.map { ", resets \(TimeWords.when($0))" } ?? "")
+        guard let d = l?.current() else { return "no numbers yet" }
+        if let f = d.heldBack { return "\(f.name) full" + (f.resets.map { " until \(TimeWords.when($0))" } ?? "") }
+        guard let w = d.number("wk") else { return "no numbers yet" }
+        return "week \(Int(w.rounded()))%" + (d.usage?.weeklyResets.map { ", resets \(TimeWords.when($0))" } ?? "")
     }
 
     static func build(header: String, items: [Item], actions: [Item]) -> NSMenu {

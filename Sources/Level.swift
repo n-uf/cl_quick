@@ -1,45 +1,88 @@
-// Level: a profile's week (and 5-hour limit) as Claude Code reported it after the last answer on it, its colour, and
-// whether a limit holds the account back. Colours as in cl_audit: green, amber from 50%, red from 80%, crimson from 95%.
+// Level: a profile's week (and 5-hour limit) as Claude Code reported it after the last answer on it (what is kept, and
+// how a report changes it), and how it shows: by ProfileCore's rules (cl_kit), the same as cl_audit's. Its time words,
+// its colour level (green, amber from 50%, red from 80%, crimson from 95%), its ages (fresh, last known, not shown), what
+// holds the account back and the week-only rule are the kit's (ProfileDisplay); only the colours themselves and the
+// words around them are cl_quick's.
 
 import AppKit
+import ProfileCore
 import SwiftUI
 
-/// Short times, the same everywhere: "11:38" today, "Thu 09:00" within 6 days, "11 Nov" further.
-enum TimeWords {
-    static func when(_ d: Date, now: Date = Date()) -> String {
-        let cal = Calendar.current
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        let days = abs(cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: now)).day ?? 0)
-        f.dateFormat = days == 0 ? "HH:mm" : (1...6).contains(days) ? "EEE HH:mm"
-            : cal.component(.year, from: d) == cal.component(.year, from: now) ? "d MMM" : "d MMM yyyy"
-        return f.string(from: d)
-    }
-}
-
-/// The level colours under cl_audit's names, which Faces.swift uses as it is.
+/// The level colours under cl_audit's names, which Faces.swift uses as it is. Which one a share takes is ProfileCore's
+/// one level rule (Level.of).
 enum Painter {
     static let green = NSColor(srgbRed: 0x22 / 255, green: 0xc5 / 255, blue: 0x5e / 255, alpha: 1)
     static let amber = NSColor(srgbRed: 0xf5 / 255, green: 0x9e / 255, blue: 0x0b / 255, alpha: 1)
     static let red = NSColor(srgbRed: 0xef / 255, green: 0x44 / 255, blue: 0x44 / 255, alpha: 1)
     static let crimson = NSColor(displayP3Red: 0xeb / 255, green: 0x44 / 255, blue: 0x5b / 255, alpha: 1)
     static let grey = NSColor(srgbRed: 0x6b / 255, green: 0x72 / 255, blue: 0x80 / 255, alpha: 1)
-    static func color(_ p: Double?, stale: Bool) -> NSColor {
-        guard let p, !stale else { return grey }
-        return p.rounded() >= 95 ? crimson : p >= 80 ? red : p >= 50 ? amber : green
+    /// A level's colour: grey for none (no number, or old numbers).
+    static func color(_ level: Level) -> NSColor {
+        switch level {
+        case .none: return grey
+        case .green: return green
+        case .amber: return amber
+        case .red: return red
+        case .crimson: return crimson
+        }
     }
+    static func color(_ p: Double?, stale: Bool) -> NSColor { color(Level.of(p, stale: stale)) }
     /// One of twelve segments (0 = first): six green, three amber, two red, the last crimson.
     static func segment(_ i: Int) -> NSColor { i < 6 ? green : i < 9 ? amber : i < 11 ? red : crimson }
 }
 
-/// The limit that holds an account back, and when it resets.
-struct FullLimit: Equatable {
-    /// "5h" or "wk"; "any" when Claude Code refused but neither window is known to be the full one (both reported
-    /// below 100%, or no numbers): then no window is drawn full, only the account is held back.
-    let id: String
-    let resets: Date?
-    var name: String { id == "5h" ? "5-hour limit" : id == "wk" ? "week" : "limit" }
-    static let any = "any"
+extension HeldBack.Window {
+    /// The window's id as the views and their marks name it: "5h", "wk"; "any" when Claude Code refused but neither
+    /// window is known to be the full one (both reported below 100%, or no numbers): then no window is drawn full, only
+    /// the account is held back.
+    var id: String {
+        switch self {
+        case .fiveHour: return "5h"
+        case .week: return "wk"
+        case .any: return "any"
+        }
+    }
+}
+
+extension HeldBack {
+    /// "5-hour limit", "week", or "limit" when no window is known to be the one.
+    var name: String { window == .fiveHour ? "5-hour limit" : window == .week ? "week" : "limit" }
+
+    /// The notice for a full limit, naming the window that is full as the header shows it, and when it resets:
+    /// "Main's 5-hour limit is full, resets 23:20." / "Main's week is full, resets Thu 19:00.". When no window can be
+    /// named it names none: "Main's limit is full, resets 23:20." (the refusal's end), or "Main's limit is full."
+    static func sentence(_ held: HeldBack?, who: String, now: Date = Date()) -> String {
+        guard let h = held else { return "\(who)'s limit is full." }
+        return "\(who)'s \(h.name) is full" + (h.resets.map { ", resets " + TimeWords.when($0, now: now) } ?? "") + "."
+    }
+}
+
+extension ProfileDisplay {
+    /// A window's number as it shows now ("5h", "wk"; nil: not known, or not shown).
+    func number(_ id: String) -> Double? { id == "5h" ? usage?.fiveHour : usage?.weekly }
+
+    /// What holds the account back, when it is this window.
+    func held(_ id: String) -> HeldBack? { heldBack.flatMap { $0.window.id == id ? $0 : nil } }
+
+    /// A window's share as drawn: 100 for the one that holds the account back, else its number.
+    func share(_ id: String) -> Double? { held(id) != nil ? 100 : number(id) }
+
+    /// When a window resets: the end of what holds it back, else its number's reset.
+    func resets(_ id: String) -> Date? { held(id)?.resets ?? (id == "5h" ? usage?.fiveHourResets : usage?.weeklyResets) }
+
+    /// The window closest to full: the one that holds the account back, else the higher share, the 5-hour window on a
+    /// tie; nil while neither is known. What the bar's indicator and the profile's dot show, so neither reads as "plenty
+    /// left" while the other window is nearly full. A refusal that names no window marks none full (the fuller share
+    /// shows as it is).
+    var binding: (id: String, p: Double)? {
+        if let h = heldBack, h.window != .any { return (h.window.id, 100) }
+        switch (usage?.fiveHour, usage?.weekly) {
+        case let (a?, b?): return a >= b ? ("5h", a) : ("wk", b)
+        case let (a?, nil): return ("5h", a)
+        case let (nil, b?): return ("wk", b)
+        default: return nil
+        }
+    }
 }
 
 struct QuickChatLevel: Codable, Equatable {
@@ -59,12 +102,44 @@ struct QuickChatLevel: Codable, Equatable {
 
     init() {}
 
-    /// Numbers count as the account's state now for this long after Claude Code gave them. Older ones are only what it
-    /// said last (the plan may have changed since, or another account been in use): nothing is drawn full, refused or
-    /// offered elsewhere on them, and the menu shows them muted as last known (ProfileStore.shownLevel, QCMenuProfile),
-    /// a full limit whose reset is still ahead even when old.
-    static let freshFor: TimeInterval = 5 * 60
-    func isFresh(_ now: Date = Date()) -> Bool { at.map { now.timeIntervalSince($0) < Self.freshFor } ?? false }
+    /// cl_quick's ages, by ProfileCore's rules (its Core/README): numbers count as the account's state now for 5 minutes
+    /// after Claude Code gave them (fresh: they act). Older ones are only what it said last (the plan may have changed
+    /// since, or another account been in use): nothing is drawn full, refused or offered elsewhere on them, and the menu
+    /// shows them grey as last known (ProfileStore.shownLevel, QCMenuProfile); past an hour not at all, except a full limit
+    /// or a refusal whose known end is still ahead, grey, until then (`datedFullStays`).
+    static let ages = Headline.Ages(freshFor: 5 * 60, hiddenAfter: 3600, datedFullStays: true)
+    /// The same, never hidden by age: Settings shows the last numbers however old (the caption says when).
+    static let settingsAges = Headline.Ages(freshFor: 5 * 60, hiddenAfter: nil, datedFullStays: true)
+
+    /// The numbers as ProfileCore reads them (no report time: as old as can be).
+    var usage: Usage {
+        Usage(fiveHour: fiveHour, fiveHourResets: fiveHourResets, weekly: week, weeklyResets: weekResets,
+              fetchedAt: at ?? .distantPast, source: "claude")
+    }
+
+    /// A refusal standing on the account, as ProfileCore takes it.
+    var refusal: Refusal? {
+        refusedUntil.map { Refusal(until: $0, at: refusedAt ?? .distantPast, on: refusedOn == "5h" ? .fiveHour : refusedOn == "wk" ? .week : .unknown) }
+    }
+
+    /// How old the numbers are now. No report time (a levels.json from before it was kept) is as old as can be, never
+    /// fresh.
+    func age(_ now: Date = Date(), ages: Headline.Ages = QuickChatLevel.ages) -> Headline.Age {
+        Headline.age(at ?? .distantPast, now: now, ages: ages)
+    }
+
+    /// The one display value (ProfileCore's ProfileDisplay): the numbers as they may show, how old they are (`tier`),
+    /// what holds the account back (`heldBack`: while fresh any, else only one whose known end is still ahead) and the
+    /// week-only rule (`hasFiveHour`). Judged by `at` and `ages`, or by the age the caller already judged (`age`).
+    func display(_ now: Date = Date(), ages: Headline.Ages = QuickChatLevel.ages, age given: Headline.Age? = nil) -> ProfileDisplay {
+        var answer = Headline.of(Headline.Owner(), signedIn: true, readAt: at ?? .distantPast, now: now, ages: ages)
+        if let given { answer.age = given }
+        return ProfileDisplay.make(answer, read: usage, sign: .ok, inUse: true, ages: ages, refusal: refusal, now: now)
+    }
+
+    /// What the chat draws and acts on: numbers it already took as the account's now (ProfileStore.shownLevel, or the
+    /// answer just given), so they act however long the chat stays open.
+    func current(_ now: Date = Date()) -> ProfileDisplay { display(now, age: .fresh) }
 
     /// What Claude Code said after an answer (rate_limit_event): "seven_day" or "five_hour", the share used as a fraction
     /// (0…1, as Claude Code 2.1.318 takes it from the API's headers; `get_usage` gives percent), refusing or not. Only
@@ -108,7 +183,7 @@ struct QuickChatLevel: Codable, Equatable {
             refusedOn = lockedIds.count == 1 && (was == nil || was == lockedIds[0]) ? lockedIds[0] : nil
             refusedUntil = max(refusedUntil ?? .distantPast, locked.compactMap(\.resets).max() ?? now.addingTimeInterval(3600))
             refusedAt = now
-        } else if refusedUntil != nil, now.timeIntervalSince(refusedAt ?? .distantPast) >= Self.freshFor,
+        } else if refusedUntil != nil, now.timeIntervalSince(refusedAt ?? .distantPast) >= Self.ages.freshFor,
                   [u.fiveHour?.used, u.week?.used].compactMap({ $0 }).allSatisfy({ $0.rounded() < 100 }),
                   // the answer must speak for the window that refused: both given, or that one among them (get_usage can
                   // give a single window, and the absent one may be the refuser)
@@ -123,81 +198,9 @@ struct QuickChatLevel: Codable, Equatable {
         return true
     }
 
-    private static func holding(_ p: Double?, _ resets: Date?, _ now: Date, dated: Bool) -> Bool {
-        (p.map { $0.rounded() >= 100 } ?? false) && (resets.map { $0 > now } ?? !dated)
-    }
-
-    /// The full limit that holds the account back now, if any: of the full ones, the one that resets last. With `dated`,
-    /// only a limit whose reset is known and still ahead counts (what the menu keeps from old numbers: a 100% with no
-    /// reset date says nothing about when it ends, and never hides one that has a date).
-    func full(_ now: Date = Date(), dated: Bool = false) -> FullLimit? {
-        let five = Self.holding(fiveHour, fiveHourResets, now, dated: dated), wk = Self.holding(week, weekResets, now, dated: dated)
-        if five && wk { return (fiveHourResets ?? .distantFuture) > (weekResets ?? .distantFuture) ? FullLimit(id: "5h", resets: fiveHourResets) : FullLimit(id: "wk", resets: weekResets) }
-        if wk { return FullLimit(id: "wk", resets: weekResets) }
-        if five { return FullLimit(id: "5h", resets: fiveHourResets) }
-        if let until = refusedUntil, until > now {
-            // refused with neither window reported full: name a window only when it is the one that can be. A window
-            // known to have room never is (a week at 53% isn't full), so with one window known below 100% it's the
-            // other, unknown one; with both known below 100% (get_usage refilled them while the refusal lasts) or
-            // none known, neither is named: the account is held back, no window is drawn full. (The old guess
-            // compared shares, an unknown one as 0, and named a window with room.)
-            let five = fiveHourNow(now).map { $0.rounded() < 100 }, wk = weekNow(now).map { $0.rounded() < 100 }
-            let id: String
-            switch (five, wk) {
-            case (true?, false?), (true?, nil): id = "wk"
-            case (false?, true?), (nil, true?): id = "5h"
-            default: id = FullLimit.any
-            }
-            return FullLimit(id: id, resets: until)
-        }
-        return nil
-    }
-
-    /// The notice for a full limit, naming the window that is full as the header shows it, and when it resets:
-    /// "Main's 5-hour limit is full, resets 23:20." / "Main's week is full, resets Thu 19:00.". When no window can be
-    /// named it names none: "Main's limit is full, resets 23:20." (the refusal's end), or "Main's limit is full."
-    static func fullSentence(_ level: QuickChatLevel?, who: String, now: Date = Date()) -> String {
-        guard let f = level?.full(now) else { return "\(who)'s limit is full." }
-        return "\(who)'s \(f.name) is full" + (f.resets.map { ", resets " + TimeWords.when($0) } ?? "") + "."
-    }
-
-    /// The week as last reported, unless it has reset since (then unknown until the next answer).
-    func weekNow(_ now: Date = Date()) -> Double? {
-        if let r = weekResets, r <= now { return nil }
-        return week
-    }
-
-    /// The 5-hour session window as last reported, unless it has reset since.
-    func fiveHourNow(_ now: Date = Date()) -> Double? {
-        if let r = fiveHourResets, r <= now { return nil }
-        return fiveHour
-    }
-
-    /// The 5-hour window applies to the account: it has had a number (kept after its reset, so an idle 5-hour account, whose
-    /// window not started reads as none, keeps its row), it holds the account back, or nothing is known yet. An account
-    /// that has a week and has never had a 5-hour number (a plan without one) shows the week alone, everywhere: no "5h"
-    /// row, track or "no numbers yet".
-    var hasFiveHour: Bool { fiveHour != nil || week == nil || refusedOn == "5h" || full()?.id == "5h" }
-
-    /// Room for a question: not held back, and the week known.
-    func room(_ now: Date = Date()) -> Bool { full(now) == nil && weekNow(now) != nil }
-
+    /// A share's colour (never grey: the chat draws only numbers that are the account's now).
     static func color(_ p: Double?) -> Color { Color(nsColor: Painter.color(p, stale: false)) }
     static func pct(_ p: Double?) -> String { p.map { "\(Int($0.rounded()))%" } ?? "–" }
-
-    /// The window closest to full now: a full one (it holds the account back), else the higher share, the 5-hour
-    /// window on a tie; nil while neither is known. What the bar's indicator and the profile's dot show, so neither reads
-    /// as "plenty left" while the other window is nearly full.
-    func binding(_ now: Date = Date()) -> (id: String, p: Double)? {
-        // a full window; a refusal that names no window marks none full (the fuller share shows as it is)
-        if let f = full(now), f.id != FullLimit.any { return (f.id, 100) }
-        switch (fiveHourNow(now), weekNow(now)) {
-        case let (a?, b?): return a >= b ? ("5h", a) : ("wk", b)
-        case let (a?, nil): return ("5h", a)
-        case let (nil, b?): return ("wk", b)
-        default: return nil
-        }
-    }
 }
 
 /// The account's limits in the bar's row, small: two thin bars, the 5-hour window over the week, each in its level's
@@ -232,20 +235,20 @@ struct QCUsageView: View {
     }
 
     var body: some View {
-        let b = level.binding()
-        let full = level.full()
-        let p5 = full?.id == "5h" ? 100 : level.fiveHourNow(), pw = full?.id == "wk" ? 100 : level.weekNow()
+        let d = level.current()
+        let b = d.binding
+        let full = d.heldBack
         // three columns (label, tracks, share), each two cells as tall as a track: a word sits exactly level with the
         // track it describes, and the tracks stay one tight pair whatever is known
         HStack(spacing: Self.gap) {
             if says != .bars {
-                column { id in
+                column(d) { id in
                     slot(b?.id == id ? id : nil, width: Self.labelWidth, align: .trailing, colour: b?.p, mark: "usage-label")
                 }
             }
-            column { id in track(id, id == "5h" ? p5 : pw) }
+            column(d) { id in track(id, d.share(id)) }
             if says == .all {
-                column { id in
+                column(d) { id in
                     slot(b.flatMap { $0.id == id ? ($0.p.rounded() >= 100 && full != nil ? "full" : QuickChatLevel.pct($0.p)) : nil },
                          width: Self.shareWidth, align: .leading, colour: b?.p, mark: "usage-share")
                 }
@@ -272,10 +275,10 @@ struct QCUsageView: View {
     }
 
     /// A column's two cells, the 5-hour window's over the week's, each a track tall; the week's alone, centred, for an
-    /// account with no 5-hour window (hasFiveHour).
-    private func column<V: View>(@ViewBuilder _ cell: @escaping (String) -> V) -> some View {
+    /// account with no 5-hour window (ProfileDisplay.hasFiveHour, the week-only rule).
+    private func column<V: View>(_ d: ProfileDisplay, @ViewBuilder _ cell: @escaping (String) -> V) -> some View {
         VStack(spacing: Self.trackGap) {
-            if level.hasFiveHour { cell("5h").frame(height: Self.track) }
+            if d.hasFiveHour { cell("5h").frame(height: Self.track) }
             cell("wk").frame(height: Self.track)
         }
     }
@@ -313,15 +316,15 @@ struct QCUsageCard: View {
     let level: QuickChatLevel
     var rowShowsShare = true
     /// The window whose share the row already shows, left out of the card: none when the row has the bars alone.
-    static func leftOut(_ level: QuickChatLevel, rowShowsShare: Bool) -> String? { rowShowsShare ? level.binding()?.id : nil }
+    static func leftOut(_ level: QuickChatLevel, rowShowsShare: Bool) -> String? { rowShowsShare ? level.current().binding?.id : nil }
     var body: some View {
         let b = Self.leftOut(level, rowShowsShare: rowShowsShare)
-        let full = level.full()
+        let d = level.current()
         Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 5) {
-            if level.hasFiveHour {
-                line("5h", full?.id == "5h" ? 100 : level.fiveHourNow(), full?.id == "5h" ? full?.resets : level.fiveHourResets, shown: b == "5h")
+            if d.hasFiveHour {
+                line("5h", d.share("5h"), d.resets("5h"), shown: b == "5h")
             }
-            line("wk", full?.id == "wk" ? 100 : level.weekNow(), full?.id == "wk" ? full?.resets : level.weekResets, shown: b == "wk")
+            line("wk", d.share("wk"), d.resets("wk"), shown: b == "wk")
         }
         .font(.system(size: 12)).foregroundColor(QCColor.muted)
         .padding(.horizontal, 10).padding(.vertical, 8)
