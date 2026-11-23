@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings strip width</title>
+<style>
+  :root {
+    --page: #e9e8e4; --ink: #1d1d1b; --muted: #6b6a66; --card: #fbfaf7; --line: #d9d7d0;
+    --chassis: #2b2b2a; --chassis-hi: #333332; --strip: #1f1f1e; --strip-edge: #121211;
+    --key: #5d5d59; --key-hi: #6d6d68; --key-lo: #4a4a47; --legend: #f1f1f0; --sub: rgba(241,241,240,.62);
+    --clay: #d97757; --ok: #3fbf5a; --tag-bg: #efe6df; --tag-ink: #8a4a33;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --page: #171716; --ink: #ecebe7; --muted: #9b9a95; --card: #20201f; --line: #34332f;
+      --tag-bg: #3a2a23; --tag-ink: #f0b49c; }
+  }
+  :root[data-theme="dark"] { --page: #171716; --ink: #ecebe7; --muted: #9b9a95; --card: #20201f; --line: #34332f;
+    --tag-bg: #3a2a23; --tag-ink: #f0b49c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 1000px; margin: 0 auto; padding: 28px 16px 56px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  p { margin: 0 0 10px; }
+  .lede { color: var(--muted); max-width: 70ch; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 22px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    padding: 1px 7px; border-radius: 999px; background: var(--tag-bg); color: var(--tag-ink); margin-left: 6px;
+    vertical-align: 2px; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  ul.points { margin: 8px 0 0; padding-left: 18px; }
+  ul.points li { margin: 3px 0; }
+
+  /* the drawn window */
+  .scroll { overflow-x: auto; margin-top: 12px; }
+  .win { background: var(--chassis); border-radius: 10px; color: var(--legend); box-shadow: 0 8px 26px rgba(0,0,0,.28);
+    border: 1px solid #000; overflow: hidden; }
+  .titlebar { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    background: linear-gradient(#383837, #2e2e2d); border-bottom: 1px solid #1a1a19;
+    font: 600 13px -apple-system, BlinkMacSystemFont, sans-serif; color: #c9c9c5; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .dot.r { background: #ec6a5e; } .dot.y { background: #5a5a58; } .dot.g { background: #61c554; }
+  .titlebar span.t { margin-left: 10px; }
+  .body { padding: 18px; }
+
+  .strip { background: var(--strip); border: 1px solid var(--strip-edge); border-radius: 8px; padding: 9px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.05); }
+  .strip.hug { display: inline-block; }        /* today: as wide as its tiles */
+  .strip.full { display: block; }              /* proposed: to the window's right edge */
+  .tiles { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .tile { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border-radius: 4px;
+    background: linear-gradient(var(--key-hi), var(--key) 45%, var(--key-lo)); flex: 0 0 auto;
+    box-shadow: 0 1px 0 rgba(255,255,255,.14) inset, 0 2px 3px rgba(0,0,0,.6); position: relative; }
+  .tile.sel { box-shadow: 0 2px 0 var(--clay) inset, 0 1px 0 rgba(255,255,255,.14) inset, 0 2px 3px rgba(0,0,0,.6); }
+  .tile b { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+  .tile .sub { display: block; font-size: 10.5px; color: var(--sub); white-space: nowrap; }
+  .tile.plus { font-size: 20px; font-weight: 300; padding: 0 14px; justify-content: center; }
+  .led { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 4px rgba(63,191,90,.7); flex: none; }
+  .track { display: inline-flex; gap: 0; margin-top: 8px; padding: 3px; border-radius: 6px; background: #181817;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
+  .seg { width: 64px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 4px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 1px; color: rgba(241,241,240,.45); }
+  .seg.on { background: linear-gradient(var(--key-hi), var(--key)); color: var(--legend);
+    box-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .slot { height: 26px; margin-top: 8px; }     /* a profile's page: the row's room is kept */
+
+  .page { margin-top: 14px; background: #262625; border: 1px solid #1a1a19; border-radius: 8px; padding: 14px 16px;
+    color: #c9c9c5; font-size: 13px; }
+  .page .row { display: flex; align-items: center; gap: 18px; margin-top: 10px; }
+  .page .row label { width: 120px; color: var(--legend); }
+  .pills { display: inline-flex; background: #1c1c1b; border-radius: 6px; padding: 3px; gap: 2px; }
+  .pills span { padding: 3px 10px; border-radius: 4px; color: rgba(241,241,240,.55); font-size: 12.5px; }
+  .pills span.on { background: linear-gradient(var(--key-hi), var(--key)); color: var(--legend); }
+
+  /* a measure under the window */
+  .measure { position: relative; height: 18px; margin-top: 6px; }
+  .measure .bar { position: absolute; top: 8px; height: 1px; background: var(--clay); }
+  .measure .lbl { position: absolute; top: -1px; font-size: 11px; color: var(--clay); background: var(--card); padding: 0 4px; }
+
+  .pair { display: grid; grid-template-columns: 1fr; gap: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Settings strip width</h1>
+  <p class="lede">The dark strip at the top of cl_quick's Settings, with the General and profile tiles and the APP / CHAT
+  switch, reaches the window's right edge, as cl_audit's does. The tiles keep their own width and stay on the left: only
+  the strip grows. Sample profiles and addresses only.</p>
+
+  <section class="card">
+    <h2>Today <span class="tag">as built</span></h2>
+    <p>The strip is only as wide as its tiles, so it stops in the middle of the window, and the page below is wider than it.</p>
+    <div class="scroll">
+      <div class="win" style="width:760px">
+        <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">cl_quick Settings</span></div>
+        <div class="body">
+          <div class="strip hug">
+            <div class="tiles">
+              <div class="tile sel"><div><b>General</b><span class="sub">shortcut · new chats</span></div></div>
+              <div class="tile"><span class="led"></span><div><b>Main</b><span class="sub">default · alex@example.com</span></div></div>
+              <div class="tile plus">+</div>
+            </div>
+            <div class="track"><span class="seg">APP</span><span class="seg on">CHAT</span></div>
+          </div>
+          <div class="page">What new chats start with. Changes apply to new chats; open chats keep theirs.
+            <div class="row"><label>Model</label><span class="pills"><span>Haiku 5.5</span><span>Sonnet 5.5</span><span class="on">Opus 5.5</span><span>Fable 5.2</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Proposed <span class="tag">to build</span></h2>
+    <p>The strip spans the window, the same width as the page under it. The tiles and the APP / CHAT switch are unchanged in
+    size and stay left-aligned; the room to their right is empty strip.</p>
+    <div class="scroll">
+      <div class="win" style="width:760px">
+        <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">cl_quick Settings</span></div>
+        <div class="body">
+          <div class="strip full">
+            <div class="tiles">
+              <div class="tile sel"><div><b>General</b><span class="sub">shortcut · new chats</span></div></div>
+              <div class="tile"><span class="led"></span><div><b>Main</b><span class="sub">default · alex@example.com</span></div></div>
+              <div class="tile plus">+</div>
+            </div>
+            <div class="track"><span class="seg">APP</span><span class="seg on">CHAT</span></div>
+          </div>
+          <div class="page">What new chats start with. Changes apply to new chats; open chats keep theirs.
+            <div class="row"><label>Model</label><span class="pills"><span>Haiku 5.5</span><span>Sonnet 5.5</span><span class="on">Opus 5.5</span><span>Fable 5.2</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Proposed, more profiles and a narrow window</h2>
+    <p>With more tiles than fit, they wrap to a second row as today; the strip stays full width and grows taller. On a
+    profile's page the APP / CHAT row isn't drawn but keeps its room, so the strip never jumps in height.</p>
+    <div class="scroll">
+      <div class="win" style="width:620px">
+        <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">cl_quick Settings</span></div>
+        <div class="body">
+          <div class="strip full">
+            <div class="tiles">
+              <div class="tile"><div><b>General</b><span class="sub">shortcut · new chats</span></div></div>
+              <div class="tile sel"><span class="led"></span><div><b>Main</b><span class="sub">default · alex@example.com</span></div></div>
+              <div class="tile"><span class="led"></span><div><b>Work</b><span class="sub">sam@work.example</span></div></div>
+              <div class="tile"><span class="led"></span><div><b>Studio</b><span class="sub">jo@studio.example</span></div></div>
+              <div class="tile plus">+</div>
+            </div>
+            <div class="slot"></div>
+          </div>
+          <div class="page">Main: the folder ~/.claude, signed in as alex@example.com.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>What changes</h2>
+    <ul class="points">
+      <li>The strip's background fills the width of the Settings page (18 pt from each window edge, as the page below).</li>
+      <li>The tiles, the + key and the APP / CHAT track keep their size and order, aligned to the left. Nothing stretches.</li>
+      <li>Wrapping, the selected tile's clay line, the lamps and the kept room for the sub-row are as today.</li>
+      <li>No info button or anything else is added at the right end; that room stays empty.</li>
+    </ul>
+    <p class="note">One line in the app: the strip takes the full width (a frame with maximum width, aligned leading) before its
+    background is drawn.</p>
+  </section>
+</main>
+</body>
+</html>

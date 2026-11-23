@@ -7,6 +7,9 @@ A sketch shows what was proposed at the time. The app and the CHANGELOG say what
 
 ## Current
 
+- [settings-strip-width-sketch.html](settings-strip-width-sketch.html): the Settings strip (General, profile tiles,
+  APP / CHAT) reaches the window's right edge as cl_audit's does; tiles keep their width, left-aligned; today vs
+  proposed, plus wrapping in a narrow window. Proposed 2026-11-22, not approved yet.
 - [chat-tools-sketch.html](chat-tools-sketch.html): four chat tools and two helpers, six states at real size: find in
   chat (⌘F, a slim bar with "2 of 5" and ▲ ▼), quick actions (Explain, Shorter, Ask about this) floating above a
   selection, the quoted selection in the field, read aloud in an answer's footer, ↑ to recall the last message, and
