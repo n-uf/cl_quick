@@ -137,18 +137,12 @@ final class ProfileStore: ObservableObject {
     /// The files this run has backed up (or found backed up) before its first rewrite of them.
     private var backedUp: Set<URL> = []
 
-    /// Writes one of the store's files (profiles.json, levels.json); before this run's first rewrite of it, the file as
-    /// it was is kept once beside it (StoredKeys.keepBackup: profiles.json.pre-26.11.4), never over a backup already there.
-    /// Nothing while only checking or drawing (Files.readOnly).
+    /// Writes one of the store's files (profiles.json, levels.json) through StoredKeys.rewrite: before this run's first
+    /// rewrite of it, the file as it was is kept once beside it (profiles.json.pre-26.11.4), never over a backup already
+    /// there; a backup that can't be made stops the rewrite. Nothing while only checking or drawing (Files.readOnly).
     @discardableResult
     private func write<T: Encodable>(_ value: T, _ url: URL) -> Bool {
-        guard !Files.readOnly else { return false }
-        if !backedUp.contains(url) {
-            try? FileManager.default.createDirectory(at: Files.folder, withIntermediateDirectories: true)
-            StoredKeys.keepBackup(of: url)
-            backedUp.insert(url)
-        }
-        return Files.write(value, url)
+        StoredKeys.rewrite(url, readOnly: Files.readOnly, backedUp: &backedUp) { Files.write(value, url) }
     }
 
     static func levelKey(_ profile: String, _ key: AccountKey) -> String { AccountBook.levelKey(profile, key) }

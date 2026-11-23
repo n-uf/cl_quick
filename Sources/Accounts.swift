@@ -423,4 +423,18 @@ enum StoredKeys {
         guard files.fileExists(atPath: file.path) else { return false }
         return (try? files.copyItem(at: file, to: b)) != nil       // copyItem never replaces a file already there
     }
+
+    /// A rewrite of `file` by `write`: nothing while only checking or drawing (`readOnly`); before this run's first rewrite
+    /// of it (`backedUp` holds the files done), its backup (keepBackup). The file counts as done only when the backup is
+    /// there or there is no file yet; a backup that can't be made stops the rewrite (tried again at the next one).
+    @discardableResult
+    static func rewrite(_ file: URL, readOnly: Bool, backedUp: inout Set<URL>, files: FileManager = .default,
+                        write: () -> Bool) -> Bool {
+        guard !readOnly else { return false }
+        if !backedUp.contains(file) {
+            guard keepBackup(of: file, files: files) || !files.fileExists(atPath: file.path) else { return false }
+            backedUp.insert(file)
+        }
+        return write()
+    }
 }

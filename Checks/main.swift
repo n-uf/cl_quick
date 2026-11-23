@@ -1055,6 +1055,30 @@ do {
         try? #"{"main|u1|org-1":{"week":41}}"#.write(to: file, atomically: true, encoding: .utf8)
         check("backup: a second one never overwrites the first", StoredKeys.keepBackup(of: file)
               && (try? String(contentsOf: StoredKeys.backup(of: file), encoding: .utf8)) == #"{"main|u1":{"week":40}}"#)
+        // the store's writes go through StoredKeys.rewrite: the backup before this run's first rewrite, none while read-only,
+        // and a backup that can't be made stops the rewrite
+        let other = dir.appendingPathComponent("profiles.json")
+        try? #"[{"id":"main"}]"#.write(to: other, atomically: true, encoding: .utf8)
+        var done: Set<URL> = []
+        var wrote = 0
+        func rewrite(_ fm: FileManager = .default, readOnly: Bool = false) -> Bool {
+            StoredKeys.rewrite(other, readOnly: readOnly, backedUp: &done, files: fm) {
+                wrote += 1; return (try? "[]".write(to: other, atomically: true, encoding: .utf8)) != nil
+            }
+        }
+        check("rewrite: read-only writes nothing and keeps no backup", !rewrite(readOnly: true) && wrote == 0
+              && !FileManager.default.fileExists(atPath: StoredKeys.backup(of: other).path))
+        final class NoCopy: FileManager { override func copyItem(at srcURL: URL, to dstURL: URL) throws { throw CocoaError(.fileWriteNoPermission) } }
+        check("rewrite: a backup that can't be made stops the rewrite, and is tried again", !rewrite(NoCopy()) && wrote == 0 && done.isEmpty
+              && (try? String(contentsOf: other, encoding: .utf8)) == #"[{"id":"main"}]"#)
+        check("rewrite: the first rewrite keeps the file as it was, then writes", rewrite() && wrote == 1
+              && (try? String(contentsOf: StoredKeys.backup(of: other), encoding: .utf8)) == #"[{"id":"main"}]"#)
+        check("rewrite: later rewrites in the run write without another backup step", rewrite() && wrote == 2 && done == [other])
+        var fresh: Set<URL> = []
+        let none = dir.appendingPathComponent("models-none.json")
+        check("rewrite: no file yet, the rewrite goes on (nothing to keep) and the file counts as done",
+              StoredKeys.rewrite(none, readOnly: false, backedUp: &fresh) { true } && fresh == [none]
+              && !FileManager.default.fileExists(atPath: StoredKeys.backup(of: none).path))
         try? FileManager.default.removeItem(at: dir)
     }
 
