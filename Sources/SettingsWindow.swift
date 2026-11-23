@@ -264,7 +264,9 @@ struct SettingsTiles: View {
     }
 
     var body: some View {
+        // the strip spans the page's width (as cl_audit's does); the tiles keep their own width, on the left
         VStack(alignment: .leading, spacing: 8) { tiles; subPages }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(9)
             .background(SurfaceShape(surface: face.strip, radius: 8))
     }
