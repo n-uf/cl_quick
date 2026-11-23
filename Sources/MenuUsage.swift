@@ -22,6 +22,7 @@ import AddressPrivacy
 import AppKit
 import ClaudeAuth
 import Combine
+import MenuRows
 import ProfileCore
 import Runs
 
@@ -317,24 +318,17 @@ final class QCMenuUsageBlock: NSView {
         text(s, font, color, x: right - Self.w(s, font), midY: midY)
     }
 
-    /// A lamp in the lamp column (a standby row draws its hollow one here too).
-    static func drawLamp(_ color: NSColor, glow: Bool = false, hollow: Bool = false, x: CGFloat = padX, midY: CGFloat) {
-        let r = NSRect(x: x, y: midY - dotSize / 2, width: dotSize, height: dotSize)
+    /// The account in use's lamp in the lamp column (a standby row's hollow one is MenuRows': `.hollowLamp`).
+    static func drawLamp(_ color: NSColor, glow: Bool = false, midY: CGFloat) {
+        let r = NSRect(x: padX, y: midY - dotSize / 2, width: dotSize, height: dotSize)
         NSGraphicsContext.saveGraphicsState()
         if glow {
             let s = NSShadow()
             s.shadowColor = color.withAlphaComponent(0.7); s.shadowBlurRadius = 3; s.shadowOffset = .zero
             s.set()
         }
-        if hollow {
-            color.setStroke()
-            let ring = NSBezierPath(ovalIn: r.insetBy(dx: 0.6, dy: 0.6))
-            ring.lineWidth = 1.2
-            ring.stroke()
-        } else {
-            color.setFill()
-            NSBezierPath(ovalIn: r).fill()
-        }
+        color.setFill()
+        NSBezierPath(ovalIn: r).fill()
         NSGraphicsContext.restoreGraphicsState()
     }
     private func lamp(_ color: NSColor, glow: Bool, midY: CGFloat) { Self.drawLamp(color, glow: glow, midY: midY) }
@@ -440,22 +434,22 @@ enum QCStatusMenu {
     /// The rule a click is held to (a seam: the checks replace it).
     static var allowSwitch: (Profile, KnownAccount) -> Bool = { mayStartSwitch($0, $1) }
 
-    /// A standby account's row (QCStandbyMenuRow), in its profile's group: a click anywhere on it asks the switch question
-    /// (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing new happens
+    /// A standby account as cl_kit's MenuRows says it: dimmed, a hollow lamp, "<address> · standby" and a quiet "Switch…" at
+    /// the right while it is lit. It shows no usage. Off (`waiting`) while a sign-in for the profile is waited for: never lit,
+    /// does nothing. The address is MenuRows': its stand-in blurred until the pointer is on the row (never the real text).
+    static func standbyRow(address: String, waiting: Bool) -> MenuAccountRow {
+        MenuAccountRow(address: address, inUse: false, tag: " · standby", hint: "Switch…", enabled: !waiting, dimmed: true, marker: .hollowLamp)
+    }
+
+    /// A standby account's row (MenuRows' MenuAccountRowView), in its profile's group: a click anywhere on it asks the switch
+    /// question (AccountSwitcher.confirmAndSwitch: what it moves, then Claude Code's sign-in in Terminal). Nothing new happens
     /// here: it is the path the chat's and Settings' Switch… take. Off while a sign-in for the profile is waited for.
     /// The item's title and action stay for VoiceOver, the menu's type-ahead and Return (the title has the address masked).
-    static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, columns: QCStandbyMenuRow.Columns = .bar,
-                            switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, QCStandbyMenuRow) {
+    static func standbyItem(_ p: Profile, _ a: KnownAccount, waiting: Bool, columns: MenuRowColumns = .bar,
+                            switchTo: @escaping (Profile, KnownAccount) -> Void) -> (NSMenuItem, MenuAccountRowView) {
         // the menu was built some time ago: the question is asked only if the account is still on standby
-        let run = { if allowSwitch(p, a) { switchTo(p, a) } }
-        let h = Handler(enabled: !waiting, run)
-        let item = NSMenuItem(title: QCStandbyMenuRow.title(a.email), action: #selector(Handler.fire), keyEquivalent: "")
-        item.target = h
-        item.representedObject = h          // the menu item keeps its handler alive
-        item.isEnabled = !waiting
-        let row = QCStandbyMenuRow(address: a.email, enabled: !waiting, columns: columns, pick: run)
-        item.view = row
-        return (item, row)
+        let item = MenuAccountRowView.item(standbyRow(address: a.email, waiting: waiting), columns: columns) { if allowSwitch(p, a) { switchTo(p, a) } }
+        return (item, item.view as! MenuAccountRowView)
     }
 
     /// Whether a click on Add an account… may open it now: the profile is still there (it may have been removed since the
@@ -470,7 +464,7 @@ enum QCStatusMenu {
     /// Add an account… (QCAddAccountMenuRow), last in its profile's group: opens Settings on the profile with its Add an
     /// account… form open (`add`). Nothing new is begun here: the form is Settings' own. Off while a sign-in for the profile
     /// is waited for, as Settings' own key is. Both menus build it here.
-    static func addAccountItem(_ p: Profile, waiting: Bool, columns: QCStandbyMenuRow.Columns = .bar,
+    static func addAccountItem(_ p: Profile, waiting: Bool, columns: MenuRowColumns = .bar,
                                add: @escaping (Profile) -> Void) -> (NSMenuItem, QCAddAccountMenuRow) {
         let run = { if allowAddAccount(p) { add(p) } }
         let h = Handler(enabled: !waiting, run)
@@ -657,8 +651,8 @@ enum QCMenuRender {
             let p = Profile(id: id, name: name, folder: "~/.claude-\(id)")
             return QCMenuUsageBlock(QCMenuProfile.make(profile: p, level: level, address: address, problem: problem, now: now), joined: joined) {}
         }
-        func standby(_ address: String, waiting: Bool = false, lit: Bool = false) -> QCStandbyMenuRow {
-            let r = QCStandbyMenuRow(address: address, enabled: !waiting) {}
+        func standby(_ address: String, waiting: Bool = false, lit: Bool = false) -> MenuAccountRowView {
+            let r = MenuAccountRowView(row: QCStatusMenu.standbyRow(address: address, waiting: waiting), columns: .bar) {}
             r.highlighted = lit
             return r
         }

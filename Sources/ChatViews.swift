@@ -8,6 +8,7 @@
 import AddressPrivacy
 import AppKit
 import ClaudeAuth
+import MenuRows
 import PDFKit
 import ProfileCore
 import SwiftUI
@@ -1802,7 +1803,7 @@ struct QCChip: View {
 
 /// The profile menu: macOS's own, at the pointer. A heading, the profiles (a dot in the level's colour, the week and its
 /// reset in grey under the name, and the address of its account in use, blurred until the pointer is on it: a row of
-/// its own, QCProfileMenuRow), under each its standby accounts (QCStandbyMenuRow, "<address> · standby", Switch… at the
+/// its own, QCProfileMenuRow), under each its standby accounts (cl_kit's MenuAccountRowView, "<address> · standby", Switch… at the
 /// right) and Add an account… (QCAddAccountMenuRow), the same rows and flow as the menu bar's menu (QCStatusMenu); then a
 /// line and Settings for the chat's profile, Add a profile…. No footer: what it used to say is the picker's tooltip.
 enum QCMenu {
@@ -2607,18 +2608,18 @@ enum QuickChatRender {
                 l.sizeToFit()
                 l.frame.origin = NSPoint(x: x, y: y + (22 - l.frame.height) / 2); box.addSubview(l); y += 22
             }
-            var standbyRows: [QCStandbyMenuRow] = []
+            var standbyRows: [MenuAccountRowView] = []
             for it in menu.items {
                 if it.view is QCProfileMenuRow, let r = nextRow.next() {
                     r.frame = NSRect(x: 0, y: y, width: w, height: QCProfileMenuRow.height); box.addSubview(r); y += QCProfileMenuRow.height
-                } else if let s = it.view as? QCStandbyMenuRow {
+                } else if let s = it.view as? MenuAccountRowView {
                     // a standby row, fresh like the profile rows (a view an item holds is kept in place by the item)
-                    let c = QCStandbyMenuRow(address: s.address, enabled: s.enabled, columns: s.columns, pick: {})
-                    c.frame = NSRect(x: 0, y: y, width: w, height: QCStandbyMenuRow.height); box.addSubview(c); y += QCStandbyMenuRow.height
+                    let c = MenuAccountRowView(row: s.row, columns: s.columns, pick: {})
+                    c.frame = NSRect(x: 0, y: y, width: w, height: c.height); box.addSubview(c); y += c.height
                     standbyRows.append(c)
                 } else if let a = it.view as? QCAddAccountMenuRow {
                     let c = QCAddAccountMenuRow(enabled: a.enabled, columns: a.columns, pick: {})
-                    c.frame = NSRect(x: 0, y: y, width: w, height: QCStandbyMenuRow.height); box.addSubview(c); y += QCStandbyMenuRow.height
+                    c.frame = NSRect(x: 0, y: y, width: w, height: QCAddAccountMenuRow.height); box.addSubview(c); y += QCAddAccountMenuRow.height
                 } else if it.isSeparatorItem {
                     let line = NSBox(frame: NSRect(x: 14, y: y + 5, width: w - 28, height: 1)); line.boxType = .separator; box.addSubview(line); y += 11
                 } else if !it.isEnabled || it.title == "Profile" {

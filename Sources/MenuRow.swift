@@ -4,12 +4,21 @@
 // rest to the menu: the arrow keys highlight it, Return picks it (the item's action), a click picks it.
 //
 // The rule for addresses: blurred on screen everywhere, masked only as words (VoiceOver, an item's title, the checks).
-// This file draws them blurred in the menus (QCProfileMenuRow, QCStandbyMenuRow). What is blurred is a fixed stand-in, never
+// This file draws them blurred in the chat's profile menu (QCProfileMenuRow); the menu bar menu's standby rows are cl_kit's
+// MenuRows (MenuAccountRowView, built in QCStatusMenu.standbyItem). What is blurred is a fixed stand-in, never
 // the address (the AddressPrivacy module: AddressInk draws it, AddressLabel is the one in an alert's accessory view); the
 // chat's views do it in AddressViews.swift.
 
 import AddressPrivacy
 import AppKit
+import MenuRows
+
+extension MenuRowColumns {
+    /// Where a standby row's lamp and address sit in the menu bar's menu: the usage block's lamp column and address x (27).
+    static let bar = MenuRowColumns(markerX: QCMenuUsageBlock.padX, addressX: QCMenuUsageBlock.padX + QCMenuUsageBlock.textGap)
+    /// And in the chat's profile menu, under the in-use row's dot and name.
+    static let chat = MenuRowColumns(markerX: QCProfileMenuRow.dotX, addressX: QCProfileMenuRow.textX)
+}
 
 final class QCProfileMenuRow: NSView {
     let title: String
@@ -215,146 +224,26 @@ extension NSView {
     func releasedOn(_ e: NSEvent) -> Bool { bounds.contains(convert(e.locationInWindow, from: nil)) }
 }
 
-/// A profile's standby account as a row of its group in the menu: under the block of the profile (its account in use
-/// and the bars), dimmed, a hollow lamp, the address and "· standby", laid out as the block's account line is (the same
-/// lamp column, address x and fonts). It shows no usage. Drawn by hand like the block and QCProfileMenuRow: the
-/// address is blurred at rest and sharp while the row is highlighted (the menu's highlight follows the pointer and the
-/// arrow keys), and a quiet "Switch…" shows at the right then. A click anywhere on it closes the menu and asks the
-/// switch question (the item's action does the same for Return). While a sign-in for the profile is waited for the
-/// row is dimmed further, never lit, and does nothing.
-final class QCStandbyMenuRow: NSView {
-    /// The whole address, for drawing only; the words and the accessibility label hold it masked.
-    let address: String
-    let enabled: Bool
-    let pick: () -> Void
-    /// For pictures: drawn as if the menu highlighted it.
-    var highlighted = false
-
-    static let tag = " · standby", hint = "Switch…"
-    /// As the block's account line: the lamp's column, the address's x, the fonts.
-    static let lampX = QCMenuUsageBlock.padX, addressX = QCMenuUsageBlock.padX + QCMenuUsageBlock.textGap
-    static let addressFont = QCProfileMenuRow.addressFont, tagFont = QCMenuUsageBlock.accountFont
-    static let hintGap: CGFloat = 18
-
-    /// Where the lamp and the address sit: the menu bar's block's (`bar`), or the chat's profile menu's, under the
-    /// in-use row's dot and name (`chat`).
-    struct Columns: Equatable {
-        let lampX: CGFloat, addressX: CGFloat
-        static let bar = Columns(lampX: QCStandbyMenuRow.lampX, addressX: QCStandbyMenuRow.addressX)
-        static let chat = Columns(lampX: QCProfileMenuRow.dotX, addressX: QCProfileMenuRow.textX)
-    }
-    let columns: Columns
-    /// As tall as the blurred address's picture (the text's height and the blur's reach above and below), so the blur
-    /// is never cut; the highlight is a native item's height, centred.
-    static let height: CGFloat = ceil(("Ag" as NSString).size(withAttributes: [.font: addressFont]).height) + 2 * AddressInk.blurPad
-    static let highlightH: CGFloat = 22
-
-    /// The item's title (type-ahead, Return): the address masked, and that it stands by.
-    static func title(_ address: String) -> String { AddressPrivacy.words(address) + tag }
-    /// What VoiceOver reads: the address masked, "standby", "switch" (the action).
-    static func spoken(_ address: String) -> String { AddressPrivacy.words(address) + ", standby, switch" }
-
-    init(address: String, enabled: Bool, columns: Columns = .bar, pick: @escaping () -> Void) {
-        self.address = address; self.enabled = enabled; self.columns = columns; self.pick = pick
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(address, columns: columns), height: Self.height))
-        autoresizingMask = [.width]
-        setAccessibilityElement(true)
-        setAccessibilityRole(.menuItem)
-        setAccessibilityEnabled(enabled)
-    }
-    required init?(coder: NSCoder) { fatalError("not from a nib") }
-
-    /// What VoiceOver reads, worked out on each call (so a change of the Blur addresses setting reaches it).
-    override func accessibilityLabel() -> String? { Self.spoken(address) }
-
-    override var isFlipped: Bool { true }
-
-    private static func w(_ s: String, _ f: NSFont) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: f]).width) }
-    /// Measures the room an address is given, and draws it (AddressInk).
-    private static let sizer = AddressInk(font: addressFont)
-    private let ink = AddressInk(font: QCStandbyMenuRow.addressFont)
-    /// The room of the address: the stand-in's while the blur is on, whatever the address, so the tag after it never moves.
-    static func room(_ address: String) -> CGFloat { sizer.room(for: address, blur: AddressPrivacy.shared.blur) }
-    /// The least width that shows it all (nothing is cut): the address's room, its tag and "Switch…".
-    static func width(_ address: String, columns: Columns = .bar) -> CGFloat {
-        columns.addressX + room(address) + w(tag, tagFont) + hintGap + w(hint, tagFont) + QCMenuUsageBlock.padX
-    }
-    /// The text drawn for the address now: its own while the row is lit (or addresses are not blurred), else the stand-in.
-    var drawnAddress: String { AddressText.drawn(address: address, revealed: sharp, blur: true) }
-
-    /// Whether the row is lit by the menu (the address is sharp then); a dimmed row never is.
-    var lit: Bool { enabled && (highlighted || enclosingMenuItem?.isHighlighted == true) }
-    /// The pointer is on the row (a keyboard highlight or type-ahead lights the row too, but never reveals the address).
-    private(set) var pointerOn = false
-    /// The address is drawn readable: the row is lit with the pointer on it (or lit for a picture), or addresses are not
-    /// blurred (AddressPrivacy).
-    var sharp: Bool { (lit && (pointerOn || highlighted)) || !AddressPrivacy.shared.blur }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
-    }
-    override func mouseEntered(with e: NSEvent) { pointerOn = true; needsDisplay = true }
-    override func mouseExited(with e: NSEvent) { pointerOn = false; needsDisplay = true }
-    override func mouseUp(with e: NSEvent) { if releasedOn(e) { press() } }
-
-    /// A click anywhere on the row: closes the menu, then runs the switch question. Nothing while dimmed.
-    func press() {
-        guard enabled else { return }
-        closeMenuThen(pick)
-    }
-
-    /// VoiceOver's press does the same.
-    override func accessibilityPerformPress() -> Bool {
-        guard enabled else { return false }
-        press()
-        return true
-    }
-
-    override func draw(_ dirty: NSRect) {
-        let on = lit
-        if on {
-            NSColor.selectedContentBackgroundColor.setFill()
-            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - Self.highlightH / 2, width: bounds.width - 10, height: Self.highlightH), xRadius: 4, yRadius: 4).fill()
-        }
-        // dimmed (a step below the account in use), dimmed further while a sign-in is waited for, light on the highlight
-        let fg: NSColor = on ? .selectedMenuItemTextColor : enabled ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.14)
-        let sub: NSColor = on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.75) : fg
-        let mid = bounds.midY
-        QCMenuUsageBlock.drawLamp(on ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.85) : fg, hollow: true, x: columns.lampX, midY: mid)
-        ink.draw(address: address, readable: sharp, color: on ? sub : fg, x: columns.addressX, midY: mid, blur: AddressPrivacy.shared.blur)
-        QCMenuUsageBlock.drawText(Self.tag, Self.tagFont, sub, x: columns.addressX + Self.room(address), midY: mid)
-        if on {
-            let hintW = Self.w(Self.hint, Self.tagFont)
-            QCMenuUsageBlock.drawText(Self.hint, Self.tagFont, sub, x: bounds.maxX - QCMenuUsageBlock.padX - hintW, midY: mid)
-        }
-    }
-
-    // (the blurred stand-in is made once per colour by `ink`, and made again if the appearance changes)
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        ink.reset()
-        needsDisplay = true
-    }
-}
-
-/// "Add an account…" as the last row of a profile's group in a menu, after its standby rows: a small plus in the lamp
-/// column and the words in the address column, dimmed like a standby row and lit by the menu's highlight. A click
+/// "Add an account…" as the last row of a profile's group in a menu, after its standby rows (cl_kit's MenuRows,
+/// MenuAccountRowView: they have an address to draw, this one has none): a small plus in the marker column and the words in
+/// the address column, in the standby rows' size and dimmed like them, lit by the menu's highlight. A click
 /// anywhere on it closes the menu and runs `pick` (the item's action does the same for Return). While a sign-in for the
 /// profile is waited for it is dimmed further, never lit, and does nothing.
 final class QCAddAccountMenuRow: NSView {
     let enabled: Bool
-    let columns: QCStandbyMenuRow.Columns
+    let columns: MenuRowColumns
     let pick: () -> Void
     /// For pictures: drawn as if the menu highlighted it.
     var highlighted = false
 
     static let title = "Add an account…"
+    /// As tall as a standby row (MenuRows': the blurred address's picture), the highlight a native item's height.
+    static let height = MenuAccountRowView.addressLineH, highlightH = MenuAccountRowView.highlightH
+    static let font = MenuAccountRowView.font
 
-    init(enabled: Bool, columns: QCStandbyMenuRow.Columns = .bar, pick: @escaping () -> Void) {
+    init(enabled: Bool, columns: MenuRowColumns = .bar, pick: @escaping () -> Void) {
         self.enabled = enabled; self.columns = columns; self.pick = pick
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(columns: columns), height: QCStandbyMenuRow.height))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width(columns: columns), height: Self.height))
         autoresizingMask = [.width]
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
@@ -366,8 +255,8 @@ final class QCAddAccountMenuRow: NSView {
     override var isFlipped: Bool { true }
 
     /// The least width that shows it all.
-    static func width(columns: QCStandbyMenuRow.Columns = .bar) -> CGFloat {
-        columns.addressX + ceil((title as NSString).size(withAttributes: [.font: QCStandbyMenuRow.addressFont]).width) + QCMenuUsageBlock.padX
+    static func width(columns: MenuRowColumns = .bar) -> CGFloat {
+        columns.addressX + ceil((title as NSString).size(withAttributes: [.font: font]).width) + QCMenuUsageBlock.padX
     }
 
     /// Whether the row is lit by the menu; a dimmed row never is.
@@ -397,17 +286,18 @@ final class QCAddAccountMenuRow: NSView {
         let on = lit
         if on {
             NSColor.selectedContentBackgroundColor.setFill()
-            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - QCStandbyMenuRow.highlightH / 2, width: bounds.width - 10, height: QCStandbyMenuRow.highlightH), xRadius: 4, yRadius: 4).fill()
+            NSBezierPath(roundedRect: NSRect(x: 5, y: bounds.midY - Self.highlightH / 2, width: bounds.width - 10, height: Self.highlightH), xRadius: 4, yRadius: 4).fill()
         }
+        // a step below the account in use (as a standby row's), dimmed further while a sign-in is waited for
         let fg: NSColor = on ? .selectedMenuItemTextColor : enabled ? .tertiaryLabelColor : NSColor.labelColor.withAlphaComponent(0.14)
         let mid = bounds.midY
         // the plus, as wide as the lamps are
-        let c = columns.lampX + QCMenuUsageBlock.dotSize / 2, r = QCMenuUsageBlock.dotSize / 2 - 0.6
+        let c = columns.markerX + QCMenuUsageBlock.dotSize / 2, r = QCMenuUsageBlock.dotSize / 2 - 0.6
         let plus = NSBezierPath()
         plus.move(to: NSPoint(x: c - r, y: mid)); plus.line(to: NSPoint(x: c + r, y: mid))
         plus.move(to: NSPoint(x: c, y: mid - r)); plus.line(to: NSPoint(x: c, y: mid + r))
         plus.lineWidth = 1.2; plus.lineCapStyle = .round
         fg.setStroke(); plus.stroke()
-        QCMenuUsageBlock.drawText(Self.title, QCStandbyMenuRow.addressFont, fg, x: columns.addressX, midY: mid)
+        QCMenuUsageBlock.drawText(Self.title, Self.font, fg, x: columns.addressX, midY: mid)
     }
 }
