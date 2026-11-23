@@ -111,6 +111,8 @@ func chatCopyChecks() {
     // an empty chat: the key is taken, nothing is copied
     m.newChat(); spin(0.2)
     board.clearContents(); board.setString("kept", forType: .string)
+    // (the menu item's "Copied" above stays on its turn for 1.4 s, past newChat: this check is about what the key does now)
+    m.copied = nil
     let emptyTaken = key([.command, .option, .shift], "Ç")
     check("chat copy: with no chat the key is taken and the pasteboard untouched", emptyTaken && board.string(forType: .string) == "kept" && m.copied == nil,
           "taken \(emptyTaken) board \(board.string(forType: .string) ?? "nil") copied \(String(describing: m.copied)) key window \(p.isKeyWindow)")
