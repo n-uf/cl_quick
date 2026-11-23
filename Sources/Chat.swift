@@ -144,6 +144,8 @@ struct QuickChatTurn: Identifiable, Equatable {
     /// The files (PDFs, text) that went with it, the same.
     var files: [QCFile] = []
     var answer = ""
+    /// The message has text of its own to copy (pictures or files alone have none).
+    var hasQuestionText: Bool { !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var thinking = ""
     /// The model that answered ("Haiku 5.5"), from Claude Code.
     var model = ""
@@ -370,6 +372,28 @@ final class QuickChatModel: ObservableObject {
         pasteboard.clearContents()
         guard pasteboard.setString(s, forType: .string) else { return false }
         showCopied(turn.id)
+        scroll.lightAnswer(turn.id)          // the copied answer is lit for a moment, as a landing is (QCChatScroll.flashFor)
+        return true
+    }
+
+    /// The turn whose message of the user's was copied a moment ago: its edge Copy shows the tick, and its bubble is lit.
+    @Published var copiedQuestion: UUID?
+    private var copiedQuestionReset: DispatchWorkItem?
+
+    /// Puts a message of the user's own (its text, as typed) on the pasteboard (cleared first) and lights its bubble. False when
+    /// it has no text (pictures or files alone).
+    @discardableResult
+    func copyQuestion(of turn: QuickChatTurn) -> Bool {
+        let s = turn.question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return false }
+        pasteboard.clearContents()
+        guard pasteboard.setString(s, forType: .string) else { return false }
+        copiedQuestion = turn.id
+        copiedQuestionReset?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.copiedQuestion = nil }
+        copiedQuestionReset = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.copiedFor, execute: w)
+        scroll.lightPrompt(turn.id)
         return true
     }
 
@@ -2125,11 +2149,21 @@ final class QuickChatPanel: NSPanel {
         // ⌘[ and ⌘] (exactly ⌘): the previous and next message of the user's, matched by KEY CODE, so they work on any layout (the
         // Ukrainian х and ї are on those keys, and ї and ґ keep typing: shortcutLetter, which the Edit keys use, is left alone)
         // (only while the panel is the key window: ⌘[ typed in Settings or another app is never the chat's)
-        if isKeyWindow, flags.intersection([.command, .option, .control, .shift]) == [.command] {
-            switch Int(e.keyCode) {
-            case kVK_ANSI_LeftBracket: if onNavigate(.previousPrompt) { return true }
-            case kVK_ANSI_RightBracket: if onNavigate(.nextPrompt) { return true }
-            default: break
+        // (⌥⌘[ and ⌥⌘]: the previous and next answer, the same way)
+        if isKeyWindow {
+            let mods = flags.intersection([.command, .option, .control, .shift])
+            if mods == [.command] {
+                switch Int(e.keyCode) {
+                case kVK_ANSI_LeftBracket: if onNavigate(.previousPrompt) { return true }
+                case kVK_ANSI_RightBracket: if onNavigate(.nextPrompt) { return true }
+                default: break
+                }
+            } else if mods == [.command, .option] {
+                switch Int(e.keyCode) {
+                case kVK_ANSI_LeftBracket: if onNavigate(.previousAnswer) { return true }
+                case kVK_ANSI_RightBracket: if onNavigate(.nextAnswer) { return true }
+                default: break
+                }
             }
         }
         // ⌥⇧⌘C (exactly those), matched by the letter the way the Edit keys are (shortcutLetter: on a layout without Latin
@@ -2152,7 +2186,7 @@ final class QuickChatPanel: NSPanel {
         case "a": action = #selector(NSText.selectAll(_:))
         case "z": action = shift ? Selector(("redo:")) : Selector(("undo:"))
         case "d" where !shift: onDictate(); return true
-        // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view; ⌘[ ⌘] are above, by key code): taken only
+        // moving in the chat (⌘J the latest, ⇧⌘J the start of the answer in view; ⌘[ ⌘] and ⌥⌘[ ⌥⌘] are above, by key code): taken only
         // when the chat window has something to scroll, and never a text edit, so the field keeps its keys
         case "j" where isKeyWindow: if onNavigate(shift ? .answerStart : .latest) { return true }
         // find in chat: ⌘F opens it (the field, an answer and a page all send it here first), ⌘G and ⇧⌘G step through the matches

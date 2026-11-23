@@ -5,15 +5,24 @@
 // text, or this code. The rules:
 //   - FOLLOWING: while the view is at the bottom (within a few points) when text arrives, it goes on following the end.
 //     The only thing that changes it is the view's own position, as the user moves it: scrolling up (by any means) stops
-//     following; coming back to the bottom (by hand, or the jump-to-latest button) resumes it. New text while not
+//     following; coming back to the bottom (by hand, or a click on the right pill) resumes it. New text while not
 //     following never moves the view (the document just grows below).
 //   - No timers and no animation: nothing moves the view by itself, and nothing here fights a scroll. It reacts to the
 //     position it is told about, and every move it makes is a jump, final when the call returns.
 //   - Sending a message (QuickChatModel.followTick) jumps to the bottom and follows.
-//   - The jump-to-latest button jumps to the bottom.
-//   - ▲ ▼ scroll to the previous or the next message of the user's own, found from where the view is (never from a stored
-//     index, so scrolling by hand and the buttons agree); the message lands near the view's top and its bubble flashes.
-//     They stop following, like any scroll up (unless the move ends at the bottom).
+//   - The edge pills are buttons themselves (hovering one still opens its stack). A click on the RIGHT pill (and ⌘J) jumps
+//     to the bottom and follows again; at the bottom it changes nothing. A click on the LEFT pill goes to the end of the
+//     answer in view, its last line near the view's bottom (the footer with it); when that answer is the chat's last, it
+//     is the bottom, and the view follows again.
+//   - The right stack's ▲ ▼ scroll to the previous or the next message of the user's own, the left stack's to the previous
+//     or the next answer, both found from where the view is (never from a stored index, so scrolling by hand and the
+//     buttons agree); the message or the answer lands near the view's top and flashes. An answer whose start is above the
+//     view's top is "the previous" one for ▲ (it goes to its start). They stop following, like any scroll up (unless the
+//     move ends at the bottom).
+//   - Copy acts on ONE message and shows only while that message is on screen: on the left, the answer in view (the
+//     answer the left handle belongs to: its first line is in view, so it always is); on the right, the topmost message of
+//     the user's with text of which at least `peek` points (or all of it, when shorter) are in the view. The copied
+//     message is lit for `flashFor`, the same flash as a landing, then plain again (no fade).
 //
 // Positions are measured as an OFFSET from the document's top (0 = the top, `maxOffset` = the bottom), so the code reads
 // the same whichever way the document is flipped. Anchors (QCAnchor) are empty views behind a message, which say where it
@@ -23,9 +32,9 @@ import AppKit
 import SwiftUI
 
 /// The keys that move in the chat (the panel's performKeyEquivalent, exact modifiers): ⌘J the latest, ⇧⌘J the start of the answer
-/// in view, ⌘[ ⌘] the previous and next message of the user's; ⇧fn↑ and ⇧fn↓ (⇧Page Up, ⇧Page Down, in the panel's sendEvent)
-/// scroll a page.
-enum QCNav: Equatable { case latest, answerStart, previousPrompt, nextPrompt, pageUp, pageDown }
+/// in view, ⌘[ ⌘] the previous and next message of the user's, ⌥⌘[ ⌥⌘] the previous and next answer; ⇧fn↑ and ⇧fn↓ (⇧Page Up,
+/// ⇧Page Down, in the panel's sendEvent) scroll a page.
+enum QCNav: Equatable { case latest, answerStart, previousPrompt, nextPrompt, previousAnswer, nextAnswer, pageUp, pageDown }
 
 final class QCChatScroll: ObservableObject {
     /// "At the bottom" is within this many points of it.
@@ -40,19 +49,27 @@ final class QCChatScroll: ObservableObject {
 
     // MARK: What the views read (published only when they change)
 
-    /// The view is at the bottom (the jump-to-latest button hides).
+    /// The view is at the bottom (the right pill's click changes nothing).
     @Published private(set) var atBottom = true
-    /// Text arrived below while the view was not at the bottom (a dot on the jump-to-latest button).
+    /// Text arrived below while the view was not at the bottom (the right pill takes the accent colour).
     @Published private(set) var newBelow = false
     /// ▲ and ▼ have a message of the user's to go to from where the view is.
     @Published private(set) var canPrevious = false
     @Published private(set) var canNext = false
-    /// The message just scrolled to (its bubble flashes), for about a second.
+    /// The same for the answers (the left stack's ▲ ▼).
+    @Published private(set) var canPreviousAnswer = false
+    @Published private(set) var canNextAnswer = false
+    /// The messages of the user's that are on screen (see `promptsInView`), top first: the right stack's Copy acts on the first
+    /// with text.
+    @Published private(set) var promptsShown: [UUID] = []
+    /// The message just scrolled to or copied (its bubble flashes), for about a second.
     @Published private(set) var flash: UUID?
+    /// The answer just scrolled to or copied (it is lit), for about a second.
+    @Published private(set) var flashAnswer: UUID?
     /// The answers whose top edge (first line) is above the visible area: their "go to the start" shows.
     @Published private(set) var answersAbove: Set<UUID> = []
     /// The answer at the view's bottom edge whose footer is out of sight (taller than the view, its first line above the
-    /// view's bottom, its end below it): the left handle's answer, whose ⤒ and copy float. Nil: no left handle.
+    /// view's bottom, its end below it): the left handle's answer, whose Copy floats (with ▲ ▼ over the answers). Nil: no left handle.
     @Published private(set) var pair: UUID?
 
     /// The answers' scroller: its style (the user's "Show scroll bars" setting, or the view's own) and what it takes out of the
@@ -262,15 +279,17 @@ final class QCChatScroll: ObservableObject {
             scrollerStyle = style; scrollerInset = inset
         }
         let at = isAtBottom
-        if atBottom != at {
-            atBottom = at
-            // the ↓ button hides at the bottom: a focus that was on it goes with it (the stack must not stay held open by it)
-            if at { right.focus(false, QCEdgeLayout.latestButton) }
-        }
+        if atBottom != at { atBottom = at }
         if at, newBelow { newBelow = false }
+        // (a button that hides while it has keyboard focus takes the focus with it: QCIconButton's onDisappear)
         let p = previousTarget() != nil, n = nextTarget() != nil
         if canPrevious != p { canPrevious = p }
         if canNext != n { canNext = n }
+        let pa = previousAnswerTarget() != nil, na = nextAnswerTarget() != nil
+        if canPreviousAnswer != pa { canPreviousAnswer = pa }
+        if canNextAnswer != na { canNextAnswer = na }
+        let shown = promptsInView()
+        if promptsShown != shown { promptsShown = shown }
         let o = offset()
         let above = Set(answers.compactMap { id, w -> UUID? in
             guard let v = attached(w.view), top(of: v) < o - 0.5 else { return nil }
@@ -417,10 +436,70 @@ final class QCChatScroll: ObservableObject {
         go(to: t.offset, follow: false, flashing: t.id)
     }
 
+    /// The messages of the user's that are on screen, top first: each has at least `peek` points of its row (or all of it, when
+    /// it is shorter) inside the view. Copy on the right acts on the first of them that has text.
+    func promptsInView() -> [UUID] {
+        guard let g = geometry else { return [] }
+        let o = offset(), bottom = o + g.clip.bounds.height
+        return questions.compactMap { id, w -> (UUID, CGFloat)? in
+            guard let v = attached(w.view) else { return nil }
+            let t = top(of: v), h = v.frame.height
+            let shown = min(t + h, bottom) - max(t, o)
+            return shown >= min(h, Self.peek) && shown > 0 ? (id, t) : nil
+        }.sorted { $0.1 < $1.1 }.map(\.0)
+    }
+
+    // MARK: Answers
+
+    /// Where each answer would put the view (its first line near the view's top, cut to what can be scrolled to), in order.
+    private func answerOffsets() -> [(id: UUID, top: CGFloat, offset: CGFloat)] {
+        answers.compactMap { id, w in
+            guard let v = attached(w.view) else { return nil }
+            let t = top(of: v)
+            return (id, t, clamped(t - Self.inset))
+        }.sorted { $0.top < $1.top }
+    }
+
+    /// The nearest answer start above where the view is: the start of the answer in view when it is above the view's top
+    /// (it is the nearest one), else the start of the answer before. Nil when going there would not move the view.
+    func previousAnswerTarget() -> (id: UUID, offset: CGFloat)? {
+        let o = offset()
+        return answerOffsets().last { $0.offset < o - 1 }.map { ($0.id, $0.offset) }
+    }
+
+    /// The nearest answer start below (nil at the last answer, or when the end of the chat is as far as the view goes).
+    func nextAnswerTarget() -> (id: UUID, offset: CGFloat)? {
+        let o = offset()
+        return answerOffsets().first { $0.offset > o + 1 }.map { ($0.id, $0.offset) }
+    }
+
+    /// The left ▲: the start of the answer in view if it is above the view's top, else of the one before. Stops following.
+    func previousAnswer() {
+        guard let t = previousAnswerTarget() else { return }
+        go(to: t.offset, follow: false, flashingAnswer: t.id)
+    }
+
+    /// The left ▼: the start of the next answer.
+    func nextAnswer() {
+        guard let t = nextAnswerTarget() else { return }
+        go(to: t.offset, follow: false, flashingAnswer: t.id)
+    }
+
     /// An answer's "go to the start": its first line near the view's top. Stops following, like any scroll up.
     func goToStart(ofAnswer id: UUID) {
         guard let v = attached(answers[id]?.view) else { return }
         go(to: top(of: v) - Self.inset, follow: false)
+    }
+
+    /// The left pill: the end of an answer (its footer row with it, else its last line) near the view's bottom. When nothing
+    /// follows it in the chat, that is the chat's end: the bottom, and the view follows again, as at the bottom.
+    func goToEnd(ofAnswer id: UUID) {
+        guard let g = geometry, let v = attached(answers[id]?.view) else { return }
+        let t = top(of: v)
+        let end = attached(footers[id]?.view).map { top(of: $0) + $0.frame.height } ?? t + v.frame.height
+        func below(_ m: [UUID: Weak]) -> Bool { m.values.contains { w in attached(w.view).map { top(of: $0) > t + 0.5 } == true } }
+        let lastOne = !below(answers) && !below(questions)
+        if lastOne { go(to: maxOffset(), follow: true) } else { go(to: end - g.clip.bounds.height + Self.inset, follow: false) }
     }
 
     /// The answer ⇧⌘J and ⇧⌘C act on: at the bottom the last answer; otherwise the floating pair's answer when there is one,
@@ -448,6 +527,8 @@ final class QCChatScroll: ObservableObject {
         case .answerStart: if let id = answerAtBottomEdge() { goToStart(ofAnswer: id) }
         case .previousPrompt: previousPrompt()
         case .nextPrompt: nextPrompt()
+        case .previousAnswer: previousAnswer()
+        case .nextAnswer: nextAnswer()
         case .pageUp: go(to: offset() - page(), follow: false)
         case .pageDown: go(to: offset() + page(), follow: false)
         }
@@ -465,23 +546,34 @@ final class QCChatScroll: ObservableObject {
         turns >= 2 || (turns == 1 && (canPrevious || canNext || !atBottom))
     }
 
-    private func clearFlash(_ id: UUID) {
+    /// Lights a message of the user's (its bubble) for `flashFor`, then plain again: no fade.
+    func lightPrompt(_ id: UUID) {
+        flash = id
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor) { [weak self] in
             if self?.flash == id { self?.flash = nil }
         }
     }
 
+    /// Lights an answer the same way.
+    func lightAnswer(_ id: UUID) {
+        flashAnswer = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor) { [weak self] in
+            if self?.flashAnswer == id { self?.flashAnswer = nil }
+        }
+    }
+
     // MARK: Jumping to the latest
 
-    /// The jump-to-latest button, and a message sent: the bottom, and following again.
+    /// A click on the right pill, ⌘J and a message sent: the bottom, and following again.
     func jumpToLatest() { go(to: maxOffset(), follow: true) }
 
     // MARK: Moving
 
     /// Every move is a jump: the view is at its target, and everything the views show is final, when this returns.
-    private func go(to target: CGFloat, follow: Bool, flashing: UUID? = nil) {
+    private func go(to target: CGFloat, follow: Bool, flashing: UUID? = nil, flashingAnswer: UUID? = nil) {
         guard geometry != nil else { return }
-        if let flashing { flash = flashing; clearFlash(flashing) }
+        if let flashing { lightPrompt(flashing) }
+        if let flashingAnswer { lightAnswer(flashingAnswer) }
         place(target)
         // following again if it ended at the bottom
         following = follow || isAtBottom
@@ -491,9 +583,11 @@ final class QCChatScroll: ObservableObject {
     // MARK: For pictures (a render can't draw a scroll view)
 
     func showForPicture(atBottom: Bool, newBelow: Bool, canPrevious: Bool = true, canNext: Bool = true, flash: UUID? = nil,
-                        answersAbove: Set<UUID> = [], pair: UUID? = nil) {
+                        answersAbove: Set<UUID> = [], pair: UUID? = nil, promptsShown: [UUID] = []) {
         self.atBottom = atBottom; self.newBelow = newBelow
         self.canPrevious = canPrevious; self.canNext = canNext; self.flash = flash
+        self.canPreviousAnswer = pair != nil; self.canNextAnswer = pair != nil
+        self.promptsShown = promptsShown
         self.answersAbove = answersAbove; self.pair = pair
     }
 }
@@ -564,8 +658,16 @@ struct QCAnchor: NSViewRepresentable {
 enum QCNavHelp {
     static let previous = "Previous message of mine ⌘["
     static let next = "Next message of mine ⌘]"
+    /// The right pill's click.
     static let latest = "Jump to latest ⌘J"
+    /// An answer's own footer button.
     static let start = "Go to the start of this answer ⇧⌘J"
+    static let previousAnswer = "Previous answer ⌥⌘["
+    static let nextAnswer = "Next answer ⌥⌘]"
+    /// The left pill's click (no key).
+    static let end = "Go to the end of this answer"
+    static let copyMine = "Copy my message"
+    static let copyAnswer = "Copy this answer ⇧⌘C"
 }
 
 // MARK: - Edge handles
@@ -603,11 +705,11 @@ enum QCEdgeLayout {
     static func rightGutter(_ style: NSScroller.Style, inset: CGFloat) -> CGFloat { max(0, scroller(style) + stripWidth - inset) }
     /// From the answers area's bottom (the field box is under it) to the tallest box's bottom.
     static let bottomGap: CGFloat = 8
-    /// A box is at most this tall (three buttons in a stack and its padding), so a handle stays in line at any content.
+    /// A box is at most this tall (▲ ▼ and Copy in a stack, and its padding), so a handle stays in line at any content.
     static let boxMaxHeight: CGFloat = 3 * QCSpace.small + 2 * boxPadding
     static let boxPadding: CGFloat = 2
-    /// The right stack's ↓ button's focus id (it hides at the bottom, with focus possibly on it).
-    static let latestButton = 3
+    /// Each stack's Copy button's focus id (▲ is 1, ▼ is 2): it hides when its message leaves the view, with focus possibly on it.
+    static let copyButton = 3
 
     // MARK: How a stack opens (the operator is finalising this: change it here)
     /// The pointer rests on a handle this long before its stack opens (a pass over it opens nothing).
@@ -652,15 +754,16 @@ final class QCEdgeState: ObservableObject {
     /// Keyboard focus (Full Keyboard Access) came to the handle or a button in its stack, or left them: it opens the stack at once
     /// and keeps it open while focus is inside; moving between the handle and the buttons (focus off, then on) closes nothing.
     /// Each control that can hold focus has its own id (the handle 0, the stack's buttons 1, 2, ...), so one going away with focus
-    /// on it (the ↓ button hides at the bottom) clears only its own, and the stack is not held open by a focus that is gone.
+    /// on it (Copy hides when its message leaves the view) clears only its own, and the stack is not held open by a focus that is gone.
     func focus(_ f: Bool, _ id: Int = 0) {
         if f { focusedIDs.insert(id) } else { focusedIDs.remove(id) }
         if f { open() }
         settle()
     }
 
-    /// Pressing the handle (VoiceOver's press, the keyboard's Space on it): opens the stack at once and PINS it open, with no
-    /// timer, so it never closes under a VoiceOver cursor on ▲ or ▼; pressing the handle again, or the panel hiding, closes it.
+    /// VoiceOver's "Show buttons" action on the handle (a click on the pill is the jump, not this): opens the stack at once and
+    /// PINS it open, with no timer, so it never closes under a VoiceOver cursor on ▲ or ▼; doing it again, or the panel hiding,
+    /// closes it.
     func activate() {
         if onStrip { open(); return }          // a click with the pointer on it: the pointer holds it, nothing to pin
         if pinned { pinned = false; reset(); return }
@@ -734,6 +837,10 @@ struct QCEdgeHandle<Box: View>: View {
     /// What VoiceOver calls the handle, and its value ("New text below").
     let label: String
     var value = ""
+    /// A click on the pill itself: its tooltip, the VoiceOver action that does it ("Jump to latest") and the jump.
+    let help: String
+    let clickLabel: String
+    let click: () -> Void
     /// The pill is in the accent colour (new text below).
     var accent = false
     @ViewBuilder let box: () -> Box
@@ -744,7 +851,7 @@ struct QCEdgeHandle<Box: View>: View {
         let left = side == .left
         ZStack(alignment: left ? .leading : .trailing) {
             // the hit strip, with the pill on its outer side
-            Button { state.activate() } label: {
+            Button(action: click) {
                 ZStack(alignment: left ? .leading : .trailing) {
                     Color.clear
                     Capsule().fill(accent ? QCColor.accent : state.lit ? QCColor.text : QCColor.muted)
@@ -758,8 +865,13 @@ struct QCEdgeHandle<Box: View>: View {
             .onHover { state.strip($0) }
             .focused($stripFocus)
             .onChange(of: stripFocus) { state.focus($0) }
+            .help(help)
             .accessibilityLabel(Text(label))
             .accessibilityValue(Text(value))
+            // the press is the jump; VoiceOver also gets it by name, and a way to open the stack (which a pointer or keyboard
+            // focus opens by itself)
+            .accessibilityAction(named: Text(clickLabel), click)
+            .accessibilityAction(named: Text("Show buttons")) { state.activate() }
             .report(scroll, "\(name).strip")
             .padding(left ? .leading : .trailing, left ? QCEdgeLayout.clear : QCEdgeLayout.scroller(scrollerStyle))
             if state.expanded {
@@ -793,39 +905,43 @@ private extension View {
     }
 }
 
-/// What floats over the answers, in two handles: the left one's stack is this answer's ⤒ and copy (while its footer is out
-/// of sight); the right one's is ▲ ▼ (once there are two messages of the user's, or with one whenever the handle shows) and
-/// jump to latest (while not at the bottom).
+/// What floats over the answers, in two handles. Each pill is a button (a click: the right one jumps to the latest, the left one
+/// to the end of the answer in view) and opens a stack of three. Left: ▲ ▼ over the answers and Copy for the answer in view
+/// (while its footer is out of sight). Right: ▲ ▼ over the messages of the user's (once there are two, or with one whenever
+/// the handle shows) and Copy for the user's message in view, which shows only while such a message is on screen.
 struct QCEdgeHandles: View {
     @ObservedObject var scroll: QCChatScroll
     @ObservedObject var model: QuickChatModel
 
     var body: some View {
         ZStack {
+            // (the answer in view is the one the handle belongs to: its first line is in view, so its Copy is always on screen)
             if let id = scroll.pair, let turn = model.turns.first(where: { $0.id == id }) {
-                QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "This answer") {
-                    if scroll.answersAbove.contains(id) {
-                        QCIconButton(symbol: "arrow.up.to.line", help: QCNavHelp.start, small: true,
-                                     label: "Go to the start of this answer", onFocus: { scroll.left.focus($0, 1) }) { scroll.goToStart(ofAnswer: id) }
-                    }
-                    QCIconButton(symbol: model.copied == id ? "checkmark" : "doc.on.doc", help: "Copy this answer ⇧⌘C", small: true,
-                                 label: "Copy this answer", onFocus: { scroll.left.focus($0, 2) }) { _ = model.copyAnswer(of: turn) }
+                QCEdgeHandle(side: .left, state: scroll.left, name: "left", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "This answer",
+                             help: QCNavHelp.end, clickLabel: "Go to the end of this answer", click: { scroll.goToEnd(ofAnswer: id) }) {
+                    QCIconButton(symbol: "chevron.up", help: QCNavHelp.previousAnswer, small: true, label: "Previous answer",
+                                 enabled: scroll.canPreviousAnswer, onFocus: { scroll.left.focus($0, 1) }) { scroll.previousAnswer() }
+                    QCIconButton(symbol: "chevron.down", help: QCNavHelp.nextAnswer, small: true, label: "Next answer",
+                                 enabled: scroll.canNextAnswer, onFocus: { scroll.left.focus($0, 2) }) { scroll.nextAnswer() }
+                    QCIconButton(symbol: model.copied == id ? "checkmark" : "doc.on.doc", help: QCNavHelp.copyAnswer, small: true,
+                                 label: "Copy this answer", onFocus: { scroll.left.focus($0, QCEdgeLayout.copyButton) }) { _ = model.copyAnswer(of: turn) }
                 }
             }
             let prompts = QCChatScroll.showsPrompts(turns: model.turns.count, canPrevious: scroll.canPrevious, canNext: scroll.canNext,
                                                   atBottom: scroll.atBottom)
             if prompts || !scroll.atBottom {
+                // the message of the user's in view: the topmost one on screen that has text to copy
+                let mine = scroll.promptsShown.lazy.compactMap { id in model.turns.first { $0.id == id && $0.hasQuestionText } }.first
                 QCEdgeHandle(side: .right, state: scroll.right, name: "right", scroll: scroll, scrollerStyle: scroll.scrollerStyle, label: "Message navigation",
-                             value: scroll.newBelow ? "New text below" : "", accent: scroll.newBelow) {
-                    if prompts {
-                        QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
-                                     enabled: scroll.canPrevious, onFocus: { scroll.right.focus($0, 1) }) { scroll.previousPrompt() }
-                        QCIconButton(symbol: "chevron.down", help: QCNavHelp.next, small: true, label: "Next message of mine",
-                                     enabled: scroll.canNext, onFocus: { scroll.right.focus($0, 2) }) { scroll.nextPrompt() }
-                    }
-                    if !scroll.atBottom {
-                        QCIconButton(symbol: "arrow.down.to.line", help: QCNavHelp.latest, small: true, label: "Jump to latest",
-                                     onFocus: { scroll.right.focus($0, QCEdgeLayout.latestButton) }) { scroll.jumpToLatest() }
+                             value: scroll.newBelow ? "New text below" : "",
+                             help: QCNavHelp.latest, clickLabel: "Jump to latest", click: { scroll.jumpToLatest() }, accent: scroll.newBelow) {
+                    QCIconButton(symbol: "chevron.up", help: QCNavHelp.previous, small: true, label: "Previous message of mine",
+                                 enabled: scroll.canPrevious, onFocus: { scroll.right.focus($0, 1) }) { scroll.previousPrompt() }
+                    QCIconButton(symbol: "chevron.down", help: QCNavHelp.next, small: true, label: "Next message of mine",
+                                 enabled: scroll.canNext, onFocus: { scroll.right.focus($0, 2) }) { scroll.nextPrompt() }
+                    if let turn = mine {
+                        QCIconButton(symbol: model.copiedQuestion == turn.id ? "checkmark" : "doc.on.doc", help: QCNavHelp.copyMine, small: true,
+                                     label: "Copy my message", onFocus: { scroll.right.focus($0, QCEdgeLayout.copyButton) }) { _ = model.copyQuestion(of: turn) }
                     }
                 }
             }

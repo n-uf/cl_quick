@@ -203,7 +203,8 @@ struct QCWindow: View {
         if let note = model.accountNote { QCNote(words: note).padding(.top, 14) }
         ForEach(Array(model.turns.enumerated()), id: \.element.id) { i, t in
             QCTurnView(turn: t, first: i == 0 && model.accountNote == nil, last: i == model.turns.count - 1, model: model,
-                       scroll: rendering ? nil : scroll, flashing: scroll.flash == t.id, above: scroll.answersAbove.contains(t.id),
+                       scroll: rendering ? nil : scroll, flashing: scroll.flash == t.id, answerFlashing: scroll.flashAnswer == t.id,
+                       above: scroll.answersAbove.contains(t.id),
                        marks: find.marks[t.id] ?? QCFindMarks())
         }
         // the chat ended (idle, a crash, Stop that didn't stop): said once, under the turns that are left to read
@@ -473,6 +474,9 @@ struct QCTurnView: View {
     var scroll: QCChatScroll? = nil
     /// The message was just scrolled to: its bubble flashes.
     var flashing = false
+    /// The answer was just scrolled to or copied: it is lit the same way (a lighter ground behind the text, a few points
+    /// wider than the column, so the text never moves).
+    var answerFlashing = false
     /// This answer's first line is above the visible area: its footer has "Go to the start".
     var above = false
     /// Find in chat: where this turn's message and answer have matches (none when the bar is closed).
@@ -508,7 +512,9 @@ struct QCTurnView: View {
             .padding(.top, first ? 0 : 4)
             if turn.thinkingTitle != nil { QCThought(turn: turn).padding(.top, 12) }
             if !turn.answer.isEmpty {
-                QCAnswer(text: turn.answer, marks: marks).equatable().background(anchor(.answer)).padding(.top, turn.thinkingTitle != nil ? 4 : 10)            }
+                QCAnswer(text: turn.answer, marks: marks).equatable().background(anchor(.answer))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(answerFlashing ? QCColor.lit : .clear).padding(-6))
+                    .padding(.top, turn.thinkingTitle != nil ? 4 : 10)            }
             if turn.phase == .waiting || turn.phase == .streaming {
                 // while a web tool runs, the dot has a muted line beside it: "Reading example.com…"
                 HStack(spacing: 8) {
@@ -1581,6 +1587,7 @@ struct QCKeysView: View {
          (.move, [("⌘J", "Jump to latest, and follow"),
                   ("⇧⌘J", "Start of the answer in view"),
                   ("⌘[  ⌘]", "Previous, next message of mine"),
+                  ("⌥⌘[  ⌥⌘]", "Previous, next answer"),
                   ("⇧fn↑  ⇧fn↓", "Scroll the answers"),    // a Mac keyboard's ⇧Page Up and ⇧Page Down
                   ("⌘F", "Find in chat"),
                   ("⌘G  ⇧⌘G", "Next, previous match")]),
