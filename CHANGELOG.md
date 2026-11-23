@@ -4,6 +4,12 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+- **The menu bar icon shows the usage.** The bubble fills with the default profile's fuller limit, in the menu bar's
+  own colour; amber from 80%, crimson and full with the time to the reset beside it while a limit holds the account
+  back, and a dashed outline with no numbers.
+- **The menu always shows the numbers.** Numbers over an hour old are no longer hidden ("No recent numbers" is gone):
+  they stay grey as "Last known 3 h ago", and while fresh ones are read as the menu opens the line says "Reading now… ·
+  last known 3 h ago". A window that has reset since shows "–". Settings shows old numbers as before.
 - Menu bar account rows from cl_kit 26.11.9 (MenuRows). The look is as before, but the "+" of Add an account… is the
   text's own plus sign, the text on a lit row is a little less see-through, and VoiceOver reads a standby row as
   "<address> · standby" with "Switch…" as its help (and "waiting" while a sign-in is waited for).

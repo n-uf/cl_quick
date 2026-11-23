@@ -32,7 +32,8 @@ A sketch shows what was proposed at the time. The app and the CHANGELOG say what
 
 - [menubar-usage-sketch.html](menubar-usage-sketch.html): the account in use's usage in the menu every time it
   opens (M1–M3: grey last known, read again at once), and in the menu bar icon itself (I1–I5: colour only, the
-  bubble filling up, two bars, a number, a ring). Proposed 2026-11-21, not picked yet.
+  bubble filling up, two bars, a number, a ring). Proposed 2026-11-21; M2 and I2 picked 2026-11-23 and built (the icon
+  shows the fuller limit; no setting for the plain bubble).
 
 - [menu-accounts-sketch.html](menu-accounts-sketch.html): the menu showing which accounts a profile holds (standby
   rows, Add an account…).

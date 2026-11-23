@@ -125,10 +125,12 @@ Besides Quick chat, Settings… and Quit, the menu bar icon's menu has a block f
 draws it: the profile's name with a dot in the colour of its fuller limit, the account in use with a green lamp
 (`<address> · in use`, the address blurred until the pointer is on it), two bars, **5-hour** and **Week**, in green,
 amber and red by level, each with its share and the time to its reset ("13% in 1h 5m"), and how old the numbers are
-("Updated just now"). Numbers count as the account's state for 5 minutes: older ones are grey, as "Last known 12 min
-ago", with no full limit, and ones over an hour old aren't shown ("No recent numbers"); the chat acts only on fresh
-ones (no full-limit notice, Ask on … or switch offer on old numbers). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
-a profile with no numbers yet says "No usage yet". A profile's standby accounts are rows in its group, under the
+("Updated just now"). Numbers count as the account's state for 5 minutes: older ones are grey however old, as "Last
+known 3 h ago", with no full limit (but one whose reset is still ahead), and a window that has reset since shows "–".
+As the menu opens, cl_quick asks Claude Code for fresh ones (its `get_usage`; nothing goes to a model), and meanwhile
+the line says "Reading now… · last known 3 h ago"; the answer replaces the grey bars while the menu is open. The chat
+acts only on fresh ones (no full-limit notice, Ask on … or switch offer on old numbers). A click on a block opens the quick chat on that profile. Only the account in use shows usage;
+a profile with no numbers yet says "No usage yet" ("Reading now…" while they are asked for). A profile's standby accounts are rows in its group, under the
 account in use and its bars: dimmed, with a hollow lamp, the address (blurred until the row is highlighted) and
 "· standby", and no usage. Point at one and it is highlighted, the address turns sharp and a quiet **Switch…** shows at
 the right; a click anywhere on the row asks the same question as Switch… in Settings. While a sign-in for the profile is
@@ -146,6 +148,13 @@ line come Settings for the chat's profile and Add a profile…, as before. The n
 once; when they are over 5 minutes old, opening the menu asks again in the background: one short-lived `claude` at a
 time is sent `get_usage` and nothing else (no message to a model, no Keychain, no token), at most once every 3
 minutes for a profile.
+
+The menu bar icon carries the usage too: the chat bubble fills from the bottom with the fuller limit (the 5-hour window
+or the week, whichever is closer to full) of the account in use on the default profile (the first one if none is the
+default), in the menu bar's own colour, so the amount reads from its height. It turns amber from 80%, and crimson and
+full while a limit holds the account back, with the time to its reset beside it ("1h 42m"). With no numbers (none yet,
+signed out, or every window reset since) it is a dashed outline. It shows the same numbers as the menu, last known ones
+too, and reads nothing of its own.
 
 ## The chat
 
