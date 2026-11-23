@@ -621,7 +621,7 @@ do {
     check("pointer: the pointer on a row the menu does not light reveals nothing (the stand-in, never the address)",
           !pointerRow.lit && !pointerRow.sharp && pointerRow.drawnAddress == AddressText.standIn && pointerRow.pointerStandIn == true)
     pointerRow.highlighted = true
-    check("pointer: lit with the pointer on it, the address shows", pointerRow.sharp && pointerRow.drawnAddress == one)
+    check("pointer: highlighted for a picture (the kit's override: lit with the pointer on it), the address shows", pointerRow.sharp && pointerRow.drawnAddress == one)
     pointerRow.highlighted = false
     check("pointer: when the light goes it is the stand-in at once (worked out at draw time, nothing kept)", !pointerRow.sharp && pointerRow.drawnAddress == AddressText.standIn)
     NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: NSMenu()); spin(0.05)
