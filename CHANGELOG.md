@@ -4,7 +4,10 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
-- Menu bar account rows from cl_kit 26.11.8 (MenuRows)
+- Menu bar account rows from cl_kit 26.11.8 (MenuRows). What can look different: a standby row's address is in the menu's
+  own 13-pt font (was 11.5), so the rows are a little taller and the menu a little wider; a standby row waiting for a
+  sign-in is in the system's disabled colour (about as faint as at rest); VoiceOver reads "<address> · standby" with
+  "Switch…" as its help.
 - Edge pills click: right to the latest, left to the end of the answer; ▲ ▼ step through answers too; copy your own messages; the copied message lights up
 - The mic button follows macOS's Dictation: Starting… until it really listens, on when Dictation was started by the Dictation key or shortcut too, and a quiet line if it never starts
 - Settings' strip of tiles reaches the window's right edge, as in cl_audit; the tiles keep their width
