@@ -838,10 +838,16 @@ do {
           "\(String(describing: bAfter))")
     // a process that says it is another account than the folder's: its numbers are that account's, never B's
     signIn("gamma-b@example.com", "ug-b")
+    // (B's numbers were just made fresh by the ask above, and the menu asks only for numbers that are not fresh: they are
+    // aged again, as before that ask, so this one is made)
+    var agedB = bAfter!; agedB.at = Date().addingTimeInterval(-10 * 60)
+    store.record("gamma", account: owner("ug-b", "gamma-b@example.com"), agedB)
     let askedOther = ask("mode=ok\naccount=someone-else@example.com\n")
-    check("switched: a process that says it is someone else never puts its numbers on B", askedOther && store.levels[lk("gamma", "ug-b")] == bAfter)
+    check("switched: a process that says it is someone else never puts its numbers on B", askedOther && store.levels[lk("gamma", "ug-b")] == agedB,
+          "asked \(askedOther) B \(String(describing: store.levels[lk("gamma", "ug-b")])) was \(String(describing: agedB)) keys \(store.levels.keys.sorted())")
     check("switched: …they are kept for that account, under its address until its id is known",
-          store.levels[ProfileStore.levelKey("gamma", AccountKey(account: "email:someone-else@example.com"))]?.week == 12)
+          store.levels[ProfileStore.levelKey("gamma", AccountKey(account: "email:someone-else@example.com"))]?.week == 12,
+          "keys \(store.levels.keys.sorted())")
     // rate_limits null (Claude Code's usage endpoint gave nothing): nothing kept, the numbers stay as old as they were
     var staleB = bAfter!; staleB.at = Date().addingTimeInterval(-10 * 60)
     store.record("gamma", account: owner("ug-b", "gamma-b@example.com"), staleB)
