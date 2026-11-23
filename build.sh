@@ -2,8 +2,9 @@
 # Build cl_quick and install it into /Applications.
 #   ./build.sh               build, install, open it
 #   ./build.sh --no-install  build into ./build only
-# One small program: a menu bar app (no Dock icon), signed ad hoc, as released too
-# (scripts/release.sh packages the app this builds; there is no Developer ID or notarization yet).
+#   ./build.sh --check-signing  the code signing plan (identity, notary profile, what it would sign), nothing is built
+# One small program: a menu bar app (no Dock icon), signed ad hoc, as released too (scripts/release.sh packages the app
+# this builds), unless CL_SIGN_ID names a Developer ID identity (scripts/signing.sh, docs/signing.md).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -12,6 +13,9 @@ name="cl_quick"
 dest="/Applications"
 install=1
 [ "${1:-}" = "--no-install" ] && install=0
+if [ "${1:-}" = "--check-signing" ]; then . "$here/scripts/signing.sh"; check_signing; exit 0; fi
+# sign(): ad hoc, or the Developer ID with the hardened runtime when CL_SIGN_ID is set; inside out, in sign_plan's order
+. "$here/scripts/signing.sh"
 # YY.M.R from VERSION; the build number counts commits, so it only grows.
 version="$(tr -d '[:space:]' < "$here/VERSION")"
 build="$(git -C "$here" rev-list --count HEAD 2>/dev/null || echo 1)"
@@ -67,7 +71,9 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-codesign --force --sign - "$app" 2>/dev/null
+# The app is the one thing to sign (no helper, plug-in, framework or dylib inside it: the shared modules are static
+# libraries linked into the program), so sign_plan in scripts/signing.sh has one line. Ad hoc: the command this file always ran.
+sign "$app"
 echo "built $name $version ($build), $(du -sh "$app" | cut -f1)"
 
 if [ "$install" = 1 ]; then
