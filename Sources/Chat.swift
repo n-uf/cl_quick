@@ -1828,6 +1828,8 @@ final class QuickChat {
             return self?.closeTopLayer() ?? false
         }
         model.quick.attach(p)
+        // the find bar lies over the top of the answers while it is open: what is under it is not "in view" (QCChatScroll.promptsInView)
+        model.scroll.topCover = { [weak m = model] in m?.find.isOpen == true ? QCFindBar.height : 0 }
         // the answers' right-click menu: a group after the selection's actions, with the key the panel already handles (display only)
         model.quick.chatItems = { [weak self] in
             let i = QCMenuAction.item("Copy chat as Markdown", enabled: self?.model.turns.isEmpty == false) { _ = self?.model.copyChat() }

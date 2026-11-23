@@ -21,8 +21,11 @@
 //     move ends at the bottom).
 //   - Copy acts on ONE message and shows only while that message is on screen: on the left, the answer in view (the
 //     answer the left handle belongs to: its first line is in view, so it always is); on the right, the topmost message of
-//     the user's with text of which at least `peek` points (or all of it, when shorter) are in the view. The copied
-//     message is lit for `flashFor`, the same flash as a landing, then plain again (no fade).
+//     the user's with text of which at least `peek` points (or all of it, when shorter) are in the view, not counting what
+//     the find bar covers at the top while it is open. The right stack keeps Copy's slot (an empty one) while no message
+//     is in view, so it never changes size under the pointer. The copied message is lit for `flashFor`, the same flash as a
+//     landing, then plain again (no fade); a second light restarts the time.
+//   - ▲ never lands within the bottom slack (that would be the bottom, and follow): such a target is skipped.
 //
 // Positions are measured as an OFFSET from the document's top (0 = the top, `maxOffset` = the bottom), so the code reads
 // the same whichever way the document is flipped. Anchors (QCAnchor) are empty views behind a message, which say where it
@@ -89,6 +92,8 @@ final class QCChatScroll: ObservableObject {
 
     /// Told whenever the view's position changes, whoever moved it (the selection's quick actions go when the text moves).
     var moved: () -> Void = {}
+    /// How much of the view's top something else covers (the find bar's height while it is open): what is under it is not in view.
+    var topCover: () -> CGFloat = { 0 }
 
     /// Whether new text moves the view to the end. True at the start.
     private(set) var following = true
@@ -415,7 +420,9 @@ final class QCChatScroll: ObservableObject {
     /// the view (at the first message; the first message already at the top).
     func previousTarget() -> (id: UUID, offset: CGFloat)? {
         let o = offset()
-        return promptOffsets().last { $0.offset < o - 1 }.map { ($0.id, $0.offset) }
+        // (never one that lands within the bottom slack: that would be at the bottom, and follow)
+        let limit = min(o - 1, maxOffset() - Self.slack)
+        return promptOffsets().last { $0.offset < limit }.map { ($0.id, $0.offset) }
     }
 
     /// The nearest one below (nil at the last, or when the end of the chat is as far as the view goes).
@@ -440,7 +447,7 @@ final class QCChatScroll: ObservableObject {
     /// it is shorter) inside the view. Copy on the right acts on the first of them that has text.
     func promptsInView() -> [UUID] {
         guard let g = geometry else { return [] }
-        let o = offset(), bottom = o + g.clip.bounds.height
+        let o = offset() + topCover(), bottom = offset() + g.clip.bounds.height
         return questions.compactMap { id, w -> (UUID, CGFloat)? in
             guard let v = attached(w.view) else { return nil }
             let t = top(of: v), h = v.frame.height
@@ -464,7 +471,8 @@ final class QCChatScroll: ObservableObject {
     /// (it is the nearest one), else the start of the answer before. Nil when going there would not move the view.
     func previousAnswerTarget() -> (id: UUID, offset: CGFloat)? {
         let o = offset()
-        return answerOffsets().last { $0.offset < o - 1 }.map { ($0.id, $0.offset) }
+        let limit = min(o - 1, maxOffset() - Self.slack)      // (never one within the bottom slack: it would follow)
+        return answerOffsets().last { $0.offset < limit }.map { ($0.id, $0.offset) }
     }
 
     /// The nearest answer start below (nil at the last answer, or when the end of the chat is as far as the view goes).
@@ -547,20 +555,26 @@ final class QCChatScroll: ObservableObject {
     }
 
     /// Lights a message of the user's (its bubble) for `flashFor`, then plain again: no fade.
+    /// A new light cancels the earlier one's end, so a repeated one keeps its full time.
     func lightPrompt(_ id: UUID) {
         flash = id
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor) { [weak self] in
-            if self?.flash == id { self?.flash = nil }
-        }
+        promptLightEnd?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.flash = nil }
+        promptLightEnd = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor, execute: w)
     }
 
     /// Lights an answer the same way.
     func lightAnswer(_ id: UUID) {
         flashAnswer = id
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor) { [weak self] in
-            if self?.flashAnswer == id { self?.flashAnswer = nil }
-        }
+        answerLightEnd?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.flashAnswer = nil }
+        answerLightEnd = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashFor, execute: w)
     }
+
+    private var promptLightEnd: DispatchWorkItem?
+    private var answerLightEnd: DispatchWorkItem?
 
     // MARK: Jumping to the latest
 
@@ -765,7 +779,6 @@ final class QCEdgeState: ObservableObject {
     /// PINS it open, with no timer, so it never closes under a VoiceOver cursor on ▲ or ▼; doing it again, or the panel hiding,
     /// closes it.
     func activate() {
-        if onStrip { open(); return }          // a click with the pointer on it: the pointer holds it, nothing to pin
         if pinned { pinned = false; reset(); return }
         pinned = true
         open()
@@ -942,6 +955,10 @@ struct QCEdgeHandles: View {
                     if let turn = mine {
                         QCIconButton(symbol: model.copiedQuestion == turn.id ? "checkmark" : "doc.on.doc", help: QCNavHelp.copyMine, small: true,
                                      label: "Copy my message", onFocus: { scroll.right.focus($0, QCEdgeLayout.copyButton) }) { _ = model.copyQuestion(of: turn) }
+                    } else {
+                        // Copy's slot is kept (a button's size, empty, unseen by VoiceOver): the stack stays three buttons tall, so it
+                        // never changes size under the pointer as a message comes into view or leaves it
+                        Color.clear.frame(width: QCSpace.small, height: QCSpace.small).accessibilityHidden(true)
                     }
                 }
             }

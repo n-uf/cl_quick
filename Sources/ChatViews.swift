@@ -154,7 +154,8 @@ struct QCWindow: View {
                 .overlay { floating }
                 // ⌘F: the find bar lies over the top of the answers (the window keeps its size)
                 .overlay(alignment: .top) { if find.isOpen { QCFindBar(find: find) } }
-                .frame(minHeight: 44)         // a line of chat stays, whatever the window
+                .onChange(of: find.isOpen) { _ in scroll.refresh() }          // the bar covers the top: Copy's message in view changes
+                .frame(minHeight: 44)        // a line of chat stays, whatever the window
             }
             // Dictation off in macOS: its one line, over the field box
             if let note = model.dictationNote { QCNote(text: note).padding(.horizontal, QCSpace.gap).padding(.bottom, 6) }
