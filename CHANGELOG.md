@@ -4,6 +4,10 @@ All notable changes to cl_quick are listed here, newest first. Calendar versions
 
 ## Unreleased
 
+Nothing pending.
+
+## 26.11.1 — 2026-11-22
+
 - Shared usage rules and claude finder from cl_kit 26.11.5. What can look different:
   - a refusal Claude Code said on one window before any number came now names that window ("Main's 5-hour limit is
     full"), where it said "limit"; so can a standing refusal beside an old 100% with no reset date ("5-hour full" or
